@@ -3,7 +3,7 @@
 Each test:
   1. Defines a kernel using the croqtile-python DSL
   2. Feeds numpy arrays as input data
-  3. Executes on GPU via execute()
+  3. Executes on GPU via prog.run()
   4. Verifies output against expected numpy result
 
 These tests prove the full round-trip: Python DSL -> GPU execution -> correct results.
@@ -12,7 +12,6 @@ These tests prove the full round-trip: Python DSL -> GPU execution -> correct re
 import pytest
 import numpy as np
 import croq
-from croqtile.runtime import execute
 
 
 # ===================================================================
@@ -33,12 +32,9 @@ class TestBasicOps:
                 output[p, q] = lhs[p, q] + rhs[p, q]
             return output
 
-        prog = croq.Program()
-        prog.add(ele_add)
-
         a = np.random.randint(-10, 10, (6, 64), dtype=np.int32)
         b = np.random.randint(-10, 10, (6, 64), dtype=np.int32)
-        result = execute(prog, {"lhs": a, "rhs": b})
+        result = ele_add(lhs=a, rhs=b)
         np.testing.assert_array_equal(result, a + b)
 
     @pytest.mark.e2e
@@ -53,12 +49,9 @@ class TestBasicOps:
                     output[p, m, q] = lhs[p, m, q] + rhs[p, m, q]
             return output
 
-        prog = croq.Program()
-        prog.add(ele_add)
-
         a = np.random.randint(-10, 10, (6, 17, 64), dtype=np.int32)
         b = np.random.randint(-10, 10, (6, 17, 64), dtype=np.int32)
-        result = execute(prog, {"lhs": a, "rhs": b})
+        result = ele_add(lhs=a, rhs=b)
         np.testing.assert_array_equal(result, a + b)
 
     @pytest.mark.e2e
@@ -76,12 +69,9 @@ class TestBasicOps:
                         rhs_s.data[p, m, q]
             return output
 
-        prog = croq.Program()
-        prog.add(ele_add)
-
         a = np.random.randint(-10, 10, (6, 16, 64), dtype=np.int32)
         b = np.random.randint(-10, 10, (6, 16, 64), dtype=np.int32)
-        result = execute(prog, {"lhs": a, "rhs": b})
+        result = ele_add(lhs=a, rhs=b)
         np.testing.assert_array_equal(result, a + b)
 
 
@@ -104,11 +94,8 @@ class TestDMACopy:
                 croq.dma.copy(f.data, to=output, name="g")
             return output
 
-        prog = croq.Program()
-        prog.add(dma_copy_sync)
-
         a = np.random.randint(-10, 10, (6, 17, 64), dtype=np.int32)
-        result = execute(prog, {"input": a})
+        result = dma_copy_sync(input=a)
         np.testing.assert_array_equal(result, a)
 
     @pytest.mark.e2e
@@ -124,11 +111,8 @@ class TestDMACopy:
                 croq.dma.copy(f.data, to=output, name="g")
             return output
 
-        prog = croq.Program()
-        prog.add(dma_copy_async)
-
         a = np.random.randint(-10, 10, (6, 17, 64), dtype=np.int32)
-        result = execute(prog, {"input": a})
+        result = dma_copy_async(input=a)
         np.testing.assert_array_equal(result, a)
 
     @pytest.mark.e2e
@@ -143,11 +127,8 @@ class TestDMACopy:
                 croq.dma.copy(f.data, to=output, name="g")
             return output
 
-        prog = croq.Program()
-        prog.add(dma_copy_sync)
-
         a = np.random.randint(0, 127, (6, 17, 64), dtype=np.uint8)
-        result = execute(prog, {"input": (a, "f8_e4m3")})
+        result = dma_copy_sync(input=(a, "f8_e4m3"))
         np.testing.assert_array_equal(result, a)
 
 
@@ -171,12 +152,9 @@ class TestMatmul:
                                             + lhs[p @ m, k] * rhs[k, q @ n])
             return output
 
-        prog = croq.Program()
-        prog.add(matmul)
-
         a = np.random.randint(-5, 5, (128, 256), dtype=np.int32)
         b = np.random.randint(-5, 5, (256, 256), dtype=np.int32)
-        result = execute(prog, {"lhs": a, "rhs": b})
+        result = matmul(lhs=a, rhs=b)
         expected = a @ b
         np.testing.assert_array_equal(result, expected)
 
@@ -203,12 +181,9 @@ class TestMatmul:
                                 * rhs_load.data[k, qy])
             return output
 
-        prog = croq.Program()
-        prog.add(matmul)
-
         a = np.random.randint(-5, 5, (128, 256), dtype=np.int32)
         b = np.random.randint(-5, 5, (256, 256), dtype=np.int32)
-        result = execute(prog, {"lhs": a, "rhs": b})
+        result = matmul(lhs=a, rhs=b)
         expected = a @ b
         np.testing.assert_array_equal(result, expected)
 
@@ -253,7 +228,7 @@ class TestMMA:
 
         a = np.random.uniform(1, 10, (128, 64)).astype(np.float16)
         b = np.random.uniform(1, 10, (64, 256)).astype(np.float16)
-        result = execute(prog, {"lhs": a, "rhs": b})
+        result = prog.run(lhs=a, rhs=b)
         expected = (a.astype(np.float32) @ b.astype(np.float32))
         np.testing.assert_allclose(
             result.astype(np.float32), expected,
@@ -291,7 +266,7 @@ class TestMMA:
 
         a = np.random.uniform(1, 10, (128, 256)).astype(np.float16)
         b = np.random.uniform(1, 10, (256, 256)).astype(np.float16)
-        result = execute(prog, {"lhs": a, "rhs": b})
+        result = prog.run(lhs=a, rhs=b)
         expected = (a.astype(np.float32) @ b.astype(np.float32))
         np.testing.assert_allclose(
             result.astype(np.float32), expected,
@@ -320,11 +295,8 @@ class TestTMA:
                 croq.tma.copy(f.data, to=output, name="g")
             return output
 
-        prog = croq.Program()
-        prog.add(tma_copy_async)
-
         a = np.random.uniform(-10, 10, (6, 16, 64)).astype(np.float32)
-        result = execute(prog, {"input": a}, arch="sm_90a")
+        result = tma_copy_async(input=a, arch="sm_90a")
         np.testing.assert_array_equal(result, a)
 
 
@@ -348,11 +320,8 @@ class TestTranspose:
                     output[j, i, k] = f.data[i, j, k]
             return output
 
-        prog = croq.Program()
-        prog.add(transpose)
-
         a = np.random.randint(-10, 10, (3, 4, 5), dtype=np.int32)
-        result = execute(prog, {"a": a})
+        result = transpose(a=a)
         expected = a.transpose(1, 0, 2)
         np.testing.assert_array_equal(result, expected)
 
@@ -374,11 +343,8 @@ class TestNil:
         def nil(input: croq.s32[1]) -> croq.s32[1]:
             return input
 
-        prog = croq.Program()
-        prog.add(nil)
-
         x = np.array([42], dtype=np.int32)
-        result = execute(prog, {"input": x})
+        result = nil(input=x)
         np.testing.assert_array_equal(result, x)
 
 
@@ -402,11 +368,8 @@ class TestAsyncCopy:
                 croq.dma.copy(f.data, to=output, name="g")
             return output
 
-        prog = croq.Program()
-        prog.add(dma_copy)
-
         a = np.random.randint(-10, 10, (6, 17, 32), dtype=np.int32)
-        result = execute(prog, {"input": a})
+        result = dma_copy(input=a)
         np.testing.assert_array_equal(result, a)
 
 
@@ -427,12 +390,9 @@ class TestFloatTypes:
                 output[p, q] = lhs[p, q] + rhs[p, q]
             return output
 
-        prog = croq.Program()
-        prog.add(ele_add_f32)
-
         a = np.random.uniform(-10, 10, (6, 64)).astype(np.float32)
         b = np.random.uniform(-10, 10, (6, 64)).astype(np.float32)
-        result = execute(prog, {"lhs": a, "rhs": b})
+        result = ele_add_f32(lhs=a, rhs=b)
         np.testing.assert_allclose(result, a + b, rtol=1e-6)
 
     @pytest.mark.e2e
@@ -445,12 +405,9 @@ class TestFloatTypes:
                 output[p, q] = lhs[p, q] + rhs[p, q]
             return output
 
-        prog = croq.Program()
-        prog.add(ele_add_f16)
-
         a = np.random.uniform(-10, 10, (6, 64)).astype(np.float16)
         b = np.random.uniform(-10, 10, (6, 64)).astype(np.float16)
-        result = execute(prog, {"lhs": a, "rhs": b})
+        result = ele_add_f16(lhs=a, rhs=b)
         np.testing.assert_allclose(
             result.astype(np.float32),
             (a + b).astype(np.float32), rtol=1e-3)
@@ -466,9 +423,6 @@ class TestFloatTypes:
                 output[p, q] = lhs[p, q] + rhs[p, q]
             return output
 
-        prog = croq.Program()
-        prog.add(ele_add_bf16)
-
         # bf16: use float32 values quantized to bf16 range via truncation
         a_f32 = np.random.uniform(-5, 5, (6, 64)).astype(np.float32)
         b_f32 = np.random.uniform(-5, 5, (6, 64)).astype(np.float32)
@@ -479,8 +433,7 @@ class TestFloatTypes:
         a_u16 = (a_bf16.view(np.uint32) >> 16).astype(np.uint16)
         b_u16 = (b_bf16.view(np.uint32) >> 16).astype(np.uint16)
 
-        result = execute(
-            prog, {"lhs": (a_u16, "bf16"), "rhs": (b_u16, "bf16")})
+        result = ele_add_bf16(lhs=(a_u16, "bf16"), rhs=(b_u16, "bf16"))
 
         # Convert result back to float32 for comparison
         result_f32 = (result.astype(np.uint32) << 16).view(np.float32)
@@ -513,12 +466,9 @@ class TestIntegralTypes:
                 output[p, q] = lhs[p, q] + rhs[p, q]
             return output
 
-        prog = croq.Program()
-        prog.add(ele_add)
-
         a = np.random.randint(-3, 3, (6, 64)).astype(np_dtype)
         b = np.random.randint(-3, 3, (6, 64)).astype(np_dtype)
-        result = execute(prog, {"lhs": a, "rhs": b})
+        result = ele_add(lhs=a, rhs=b)
         np.testing.assert_array_equal(result, (a + b).astype(np_dtype))
 
 
@@ -563,8 +513,7 @@ class TestMMAFusion:
         a = np.random.uniform(1, 5, (128, 256)).astype(np.float16)
         b = np.random.uniform(1, 5, (256, 256)).astype(np.float16)
         bias_val = np.float16(3.0)
-        result = execute(
-            prog, {"lhs": a, "rhs": b, "bias": bias_val})
+        result = prog.run(lhs=a, rhs=b, bias=bias_val)
         expected = (a.astype(np.float32) @ b.astype(np.float32)
                     + float(bias_val))
         np.testing.assert_allclose(
@@ -633,7 +582,7 @@ class TestMMALoadC:
         # Use small deterministic values to reduce f16 accumulation errors
         a = np.random.uniform(0, 0.5, (256, 256)).astype(np.float16)
         b = np.random.uniform(0, 0.5, (256, 256)).astype(np.float16)
-        result = execute(prog, {"lhs": a, "rhs": b})
+        result = prog.run(lhs=a, rhs=b)
         expected = a.astype(np.float32) @ b.astype(np.float32)
         np.testing.assert_allclose(
             result.astype(np.float32), expected,
@@ -678,7 +627,7 @@ class TestWMMA:
         # rhs is N x K (transposed), so matmul is lhs @ rhs.T
         a = np.random.uniform(0, 1, (128, 256)).astype(np.float16)
         b = np.random.uniform(0, 1, (256, 256)).astype(np.float16)
-        result = execute(prog, {"lhs": a, "rhs": b})
+        result = prog.run(lhs=a, rhs=b)
         expected = a.astype(np.float32) @ b.astype(np.float32).T
         np.testing.assert_allclose(
             result.astype(np.float32), expected,
@@ -706,11 +655,8 @@ class TestNumerics:
                              + croq.cos(x) + croq.cosh(x * 0.25))
             return output
 
-        prog = croq.Program()
-        prog.add(numerics_core6)
-
         x = np.random.uniform(-0.5, 1.0, (512,)).astype(np.float32)
-        result = execute(prog, {"input": x})
+        result = numerics_core6(input=x)
         expected = (np.sqrt(x + 2.0) + 1.0 / np.sqrt(x + 2.0)
                     + np.sin(x) + np.sinh(x * 0.25)
                     + np.cos(x) + np.cosh(x * 0.25))
@@ -778,7 +724,7 @@ class TestPipelined:
 
         a = np.random.randint(-5, 5, (128, 256), dtype=np.int32)
         b = np.random.randint(-5, 5, (256, 256), dtype=np.int32)
-        result = execute(prog, {"lhs": a, "rhs": b})
+        result = prog.run(lhs=a, rhs=b)
         expected = a @ b
         np.testing.assert_array_equal(result, expected)
 
@@ -831,14 +777,10 @@ class TestFP8:
                 output[p, q] = lhs[p, q] + rhs[p, q]
             return output
 
-        prog = croq.Program()
-        prog.add(ele_add_fp8)
-
         a = np.random.randint(0, 127, (6, 64), dtype=np.uint8)
         b = np.random.randint(0, 127, (6, 64), dtype=np.uint8)
-        result = execute(
-            prog, {"lhs": (a, "f8_e4m3"), "rhs": (b, "f8_e4m3")},
-            arch="sm_90a")
+        result = ele_add_fp8(
+            lhs=(a, "f8_e4m3"), rhs=(b, "f8_e4m3"), arch="sm_90a")
         assert result.shape == (6, 64)
 
 
@@ -903,7 +845,7 @@ class TestMMAv2:
 
         a = np.random.uniform(1, 10, (64, 16)).astype(np.float16)
         b = np.random.uniform(1, 10, (16, 32)).astype(np.float16)
-        result = execute(prog, {"lhs": a, "rhs": b})
+        result = prog.run(lhs=a, rhs=b)
         expected = a.astype(np.float32) @ b.astype(np.float32)
         np.testing.assert_allclose(
             result.astype(np.float32), expected,
@@ -973,9 +915,8 @@ class TestMMAFP8:
 
         a = np.random.randint(0, 127, (64, 32), dtype=np.uint8)
         b = np.random.randint(0, 127, (32, 32), dtype=np.uint8)
-        result = execute(
-            prog, {"lhs": (a, "f8_e4m3"), "rhs": (b, "f8_e4m3")},
-            arch="sm_90a")
+        result = prog.run(
+            lhs=(a, "f8_e4m3"), rhs=(b, "f8_e4m3"), arch="sm_90a")
         assert result.shape == (64, 32)
 
 
@@ -1017,9 +958,8 @@ class TestWMMAFP8:
 
         a = np.random.randint(0, 127, (64, 64), dtype=np.uint8)
         b = np.random.randint(0, 127, (64, 64), dtype=np.uint8)
-        result = execute(
-            prog, {"lhs": (a, "f8_e4m3"), "rhs": (b, "f8_e4m3")},
-            arch="sm_90a")
+        result = prog.run(
+            lhs=(a, "f8_e4m3"), rhs=(b, "f8_e4m3"), arch="sm_90a")
         assert result.shape == (64, 64)
 
 
@@ -1070,8 +1010,7 @@ class TestMemreuse:
 
         a = np.random.randint(0, 10, (8, 256), dtype=np.uint8)
         b = np.random.randint(0, 10, (8, 256), dtype=np.uint8)
-        result = execute(
-            prog, {"i0": a, "i1": b})
+        result = prog.run(i0=a, i1=b)
         expected = (a.astype(np.uint16) + b.astype(np.uint16)).astype(np.uint8)
         np.testing.assert_array_equal(result, expected)
 
@@ -1105,13 +1044,9 @@ class TestMemreuse:
                               name="g")
             return output
 
-        prog = croq.Program()
-        prog.add(mem_reuse0)
-
         a = np.random.randint(0, 10, (8, 256), dtype=np.uint8)
         b = np.random.randint(0, 10, (8, 256), dtype=np.uint8)
-        result = execute(
-            prog, {"i0": a, "i1": b})
+        result = mem_reuse0(i0=a, i1=b)
         expected = (a.astype(np.uint16) + b.astype(np.uint16)).astype(np.uint8)
         np.testing.assert_array_equal(result, expected)
 
@@ -1141,11 +1076,8 @@ class TestNumericsTranscendental:
                              + croq.tan(x * 0.25) + croq.tanh(x))
             return output
 
-        prog = croq.Program()
-        prog.add(unary_mix)
-
         x = np.random.uniform(-0.5, 1.0, (512,)).astype(np.float32)
-        result = execute(prog, {"input": x})
+        result = unary_mix(input=x)
         expected = (np.arccos(x * 0.5) + np.arcsin(x * 0.5) + np.arctan(x)
                     + np.sin(x) + np.cos(x) + np.cosh(x * 0.25)
                     + np.sinh(x * 0.25) + np.exp(x * 0.25)
@@ -1170,13 +1102,9 @@ class TestNumericsTranscendental:
                 output[p] = croq.pow(x + 1.5, y + 1.5) + croq.atan2(x, y)
             return output
 
-        prog = croq.Program()
-        prog.add(binary_mix)
-
         x = np.random.uniform(-0.5, 1.0, (512,)).astype(np.float32)
         y = np.random.uniform(-0.5, 1.0, (512,)).astype(np.float32)
-        result = execute(
-            prog, {"lhs": x, "rhs": y})
+        result = binary_mix(lhs=x, rhs=y)
         expected = (np.power(x + 1.5, y + 1.5) + np.arctan2(x, y))
         np.testing.assert_allclose(
             result, expected.astype(np.float32),
@@ -1209,11 +1137,8 @@ class TestTMAv1:
                         croq.FULL, croq.FULL, p), name="g")
             return output
 
-        prog = croq.Program()
-        prog.add(tma_copy_tiled)
-
         a = np.random.uniform(-10, 10, (6, 16, 128)).astype(np.float32)
-        result = execute(prog, {"input": a}, arch="sm_90a")
+        result = tma_copy_tiled(input=a, arch="sm_90a")
         np.testing.assert_array_equal(result, a)
 
 
@@ -1266,13 +1191,10 @@ class TestTMAv2:
                         name="out_w2")
             return output
 
-        prog = croq.Program()
-        prog.add(tma_ab_buffer)
-
         a = np.random.uniform(-10, 10, (6, 16, 128)).astype(np.float32)
         b = np.random.uniform(-10, 10, (6, 16, 128)).astype(np.float32)
-        result = execute(
-            prog, {"l": a, "r": b}, arch="sm_90a")
+        result = tma_ab_buffer(
+            l=a, r=b, arch="sm_90a")
         np.testing.assert_allclose(result, a + b, rtol=1e-6)
 
 
@@ -1338,8 +1260,8 @@ class TestTMAGlobalRef:
 
         a = np.random.uniform(0, 1, (64, 64)).astype(np.float16)
         b = np.random.uniform(0, 1, (64, 64)).astype(np.float16)
-        result = execute(
-            prog, {"lhs": a, "rhs": b}, arch="sm_90a")
+        result = prog.run(
+            lhs=a, rhs=b, arch="sm_90a")
         assert result.shape == (64, 64)
 
 
@@ -1391,7 +1313,7 @@ class TestCopyIfG2S:
         prog.add(copy_tail_m)
 
         a = np.random.uniform(-10, 10, (70, 64)).astype(np.float16)
-        result = execute(prog, {"inp": a}, arch="sm_90a")
+        result = prog.run(inp=a, arch="sm_90a")
         np.testing.assert_allclose(
             result.astype(np.float32), a.astype(np.float32), rtol=1e-3)
 
@@ -1416,14 +1338,10 @@ class TestFP8E5M2:
                 output[p, q] = lhs[p, q] + rhs[p, q]
             return output
 
-        prog = croq.Program()
-        prog.add(ele_add_fp8)
-
         a = np.random.randint(0, 127, (6, 64), dtype=np.uint8)
         b = np.random.randint(0, 127, (6, 64), dtype=np.uint8)
-        result = execute(
-            prog, {"lhs": (a, "f8_e5m2"), "rhs": (b, "f8_e5m2")},
-            arch="sm_90a")
+        result = ele_add_fp8(
+            lhs=(a, "f8_e5m2"), rhs=(b, "f8_e5m2"), arch="sm_90a")
         assert result.shape == (6, 64)
 
 
@@ -1496,8 +1414,8 @@ class TestMatmulDynamic:
 
         a = np.random.uniform(0, 1, (768, 512)).astype(np.float16)
         b = np.random.uniform(0, 1, (512, 512)).astype(np.float16)
-        result = execute(
-            prog, {"lhs": a, "rhs": b}, arch="sm_90a")
+        result = prog.run(
+            lhs=a, rhs=b, arch="sm_90a")
         assert result.shape == (768, 512)
 
 
@@ -1562,7 +1480,7 @@ class TestMMALoadCInit:
 
         a = np.random.uniform(0, 0.5, (256, 256)).astype(np.float16)
         b = np.random.uniform(0, 0.5, (256, 256)).astype(np.float16)
-        result = execute(prog, {"lhs": a, "rhs": b})
+        result = prog.run(lhs=a, rhs=b)
         expected = a.astype(np.float32) @ b.astype(np.float32)
         np.testing.assert_allclose(
             result.astype(np.float32), expected,

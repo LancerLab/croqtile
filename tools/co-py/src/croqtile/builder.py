@@ -1359,12 +1359,13 @@ wi = with_in
 class _FunctionBuilder:
     def __init__(self, func_node: _core.ChoreoFunction, name: str,
                  *, source_lines: list = None, ret_co: str = "auto",
-                 params_co: list = None):
+                 params_co: list = None, param_names: list = None):
         self._func = func_node
         self.name = name
         self._source_lines = source_lines or []
         self._ret_co = ret_co
         self._params_co = params_co or []
+        self._param_names = param_names or []
 
     def build(self) -> _core.ChoreoFunction:
         return self._func
@@ -1380,6 +1381,35 @@ class _FunctionBuilder:
             if isinstance(last, str) and last.startswith("return "):
                 pass
         return f"{header} {{\n{body_text}\n}}"
+
+    def __call__(self, *args, **kwargs):
+        """Execute the kernel directly on GPU with numpy data.
+
+        Supports both positional and keyword arguments::
+
+            result = ele_add(a, b)
+            result = ele_add(lhs=a, rhs=b)
+
+        Output shape/dtype inferred from return type. GPU arch auto-detected.
+        """
+        exec_kwargs = {}
+        for key in ("arch", "target", "timeout"):
+            if key in kwargs:
+                exec_kwargs[key] = kwargs.pop(key)
+
+        inputs = {}
+        for i, val in enumerate(args):
+            if i >= len(self._param_names):
+                raise TypeError(
+                    f"{self.name}() takes {len(self._param_names)} "
+                    f"positional arguments but {len(args)} were given")
+            inputs[self._param_names[i]] = val
+        inputs.update(kwargs)
+
+        prog = Program()
+        prog.add(self)
+        from croqtile.runtime import execute
+        return execute(prog, inputs, **exec_kwargs)
 
 
 def co(fn=None, *, ret=None):
@@ -1453,7 +1483,8 @@ def _trace_function(func, *, ret_override=None):
     return _FunctionBuilder(func_node, func.__name__,
                             source_lines=source_lines,
                             ret_co=ret_co,
-                            params_co=params_co)
+                            params_co=params_co,
+                            param_names=list(sig.parameters.keys()))
 
 
 # =========================================================================== #
@@ -1498,6 +1529,30 @@ class Program:
 
     def dump_ast(self) -> str:
         return _core.dump_ast(self.build())
+
+    def run(self, inputs=None, /, **kwargs):
+        """Execute the kernel on GPU and return output as numpy array.
+
+        Accepts inputs as a dict or as keyword arguments:
+            prog.run({"lhs": a, "rhs": b})
+            prog.run(lhs=a, rhs=b)
+
+        Output shape/dtype is inferred from the kernel return type.
+        GPU architecture is auto-detected.
+
+        Additional keyword arguments (arch, target, timeout) are forwarded
+        to execute().
+        """
+        from croqtile.runtime import execute
+        exec_kwargs = {}
+        for key in ("arch", "target", "timeout"):
+            if key in kwargs:
+                exec_kwargs[key] = kwargs.pop(key)
+        if inputs is None:
+            inputs = kwargs
+        elif kwargs:
+            inputs = {**inputs, **kwargs}
+        return execute(self, inputs, **exec_kwargs)
 
     def to_co(self, *, run_directive: str = "",
               check_lines: Optional[List[str]] = None) -> str:
