@@ -377,7 +377,15 @@ private:
     std::string accName = getName(op.getAccumulator());
     valueNames[op.getResult()] = accName;
 
-    os() << getIndent() << "choreo::cc::mma_exec_row_col<" << accElem
+    const char *layoutFn = "mma_exec_row_col";
+    switch (op.getLayout()) {
+    case coir::MMALayout::RowCol: layoutFn = "mma_exec_row_col"; break;
+    case coir::MMALayout::RowRow: layoutFn = "mma_exec_row_row"; break;
+    case coir::MMALayout::ColRow: layoutFn = "mma_exec_col_row"; break;
+    case coir::MMALayout::ColCol: layoutFn = "mma_exec_col_col"; break;
+    }
+
+    os() << getIndent() << "choreo::cc::" << layoutFn << "<" << accElem
          << ", " << lhsElem << ", " << rhsElem << ", " << accElem << ">("
          << accName << ", " << getName(op.getLhs()) << ", "
          << getName(op.getRhs()) << ", " << accName << ", "

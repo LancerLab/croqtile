@@ -1,0 +1,16 @@
+// RUN: cocc -t cc -es %s -o - | FileCheck %s
+//
+// Verify MMA layout dispatches to correct choreo::cc::mma_exec_* variant.
+
+__co__ f32 [16, 16] test_mma(f16 [16, 16] A, f16 [16, 16] B) {
+  f32 [16, 16] out;
+  mc = mma.fill 0;
+  ma = mma.load A;
+  mb = mma.load B;
+  mma.row.col mc, ma, mb;
+  mma.store mc, out;
+  return out;
+}
+
+// CHECK: choreo::cc::mma_exec_row_col
+// CHECK: std::memcpy
