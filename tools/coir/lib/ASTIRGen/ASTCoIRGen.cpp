@@ -697,6 +697,53 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
   if (!dimCheckAttrs.empty())
     kernelOp->setAttr("coir.dim_checks",
                        mlir::ArrayAttr::get(&IRContext(), dimCheckAttrs));
+
+  // Dynamic memory reuse: add mr_offset_* and spm_size kernel args.
+  for (auto &[dfName, mri] : FCtx(cf.name).GetAllDynMemReuseInfos()) {
+    if (!mri) continue;
+    for (auto &[sto, ie] : mri->infos) {
+      llvm::SmallVector<mlir::Attribute> mrArgNames;
+      for (auto &offArg : ie.offset_args) {
+        std::string sanitized = offArg;
+        for (size_t pos = 0; (pos = sanitized.find("::", pos)) !=
+             std::string::npos; )
+          sanitized.replace(pos, 2, "_");
+        argTypes.push_back(mlir::IndexType::get(&IRContext()));
+        auto arg = entryBlock->addArgument(
+            mlir::IndexType::get(&IRContext()), loc);
+        MapValue(sanitized, arg);
+        mrArgNames.push_back(
+            mlir::StringAttr::get(&IRContext(), sanitized));
+      }
+      // spm_size arg
+      argTypes.push_back(mlir::IndexType::get(&IRContext()));
+      auto spmSizeArg = entryBlock->addArgument(
+          mlir::IndexType::get(&IRContext()), loc);
+      MapValue(ie.spm_size, spmSizeArg);
+
+      // Store metadata for emitter
+      kernelOp->setAttr("coir.mr_offset_args",
+                         mlir::ArrayAttr::get(&IRContext(), mrArgNames));
+      kernelOp->setAttr("coir.mr_spm_size_arg",
+                         mlir::StringAttr::get(&IRContext(), ie.spm_size));
+      // Store chunks info for host-side HeapSimulator emission
+      llvm::SmallVector<mlir::Attribute> chunkAttrs;
+      for (auto &c : ie.chunks)
+        chunkAttrs.push_back(mlir::StringAttr::get(&IRContext(), c));
+      kernelOp->setAttr("coir.mr_chunks",
+                         mlir::ArrayAttr::get(&IRContext(), chunkAttrs));
+      kernelOp->setAttr("coir.mr_chunks_name",
+                         mlir::StringAttr::get(&IRContext(), ie.chunks_name));
+      kernelOp->setAttr("coir.mr_result_name",
+                         mlir::StringAttr::get(&IRContext(), ie.result));
+      kernelOp->setAttr("coir.mr_offsets_name",
+                         mlir::StringAttr::get(&IRContext(), ie.offsets_name));
+    }
+    // Update function type with the new args
+    auto mlirFnType3 =
+        mlir::FunctionType::get(&IRContext(), argTypes, resultTypes);
+    kernelOp.setFunctionTypeAttr(mlir::TypeAttr::get(mlirFnType3));
+  }
 }
 
 bool ASTCoIRGen::Visit(AST::ChoreoFunction &) { return true; }
@@ -1732,19 +1779,32 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
     }
     mlir::StringAttr reuseSpm;
     mlir::IntegerAttr reuseOffset;
+    bool isDynReuse = false;
+    std::string dynOffsetName;
     if (nvd.HasNote("reuse")) {
-      int64_t off = 0;
       if (nvd.HasNote("offset")) {
-        try { off = std::stoll(nvd.GetNote("offset")); }
-        catch (...) {}
+        auto offStr = nvd.GetNote("offset");
+        if (offStr.find("mr_offset") == 0) {
+          isDynReuse = true;
+          dynOffsetName = offStr;
+          reuseOffset = builder.getI64IntegerAttr(-1);
+        } else {
+          int64_t off = 0;
+          try { off = std::stoll(offStr); }
+          catch (...) {}
+          reuseOffset = builder.getI64IntegerAttr(off);
+        }
       }
-      reuseOffset = builder.getI64IntegerAttr(off);
     }
     auto allocOp = builder.create<coir::TensorAllocOp>(
         loc, tty, dynDimVals, initAttr, reuseSpm, reuseOffset);
     if (reuseOffset && pendingSpmSize > 0) {
       allocOp->setAttr("spm_size",
                        builder.getI64IntegerAttr(pendingSpmSize));
+    }
+    if (isDynReuse) {
+      allocOp->setAttr("dyn_offset_arg",
+                       builder.getStringAttr(dynOffsetName));
     }
     MapValue(nvd.GetName(), allocOp.getResult());
   } else {

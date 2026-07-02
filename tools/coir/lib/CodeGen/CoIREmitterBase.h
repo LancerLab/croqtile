@@ -60,6 +60,7 @@ protected:
   llvm::DenseSet<mlir::Value> returnValues;
   unsigned nextId = 0;
   std::string lastSpmName;
+  bool dynSpmEmitted = false;
 
   llvm::raw_ostream &os() { return *os_; }
 

@@ -292,6 +292,10 @@ public:
     if (!dyn_mr_infos.count(dev_func)) return nullptr;
     return dyn_mr_infos.at(dev_func);
   }
+  const std::map<std::string, ptr<DynMemReuseInfo>>&
+  GetAllDynMemReuseInfos() const {
+    return dyn_mr_infos;
+  }
   ptr<DynMemReuseInfo> SetDynMemReuseInfo(const std::string& dev_func) {
     if (dyn_mr_infos.count(dev_func)) return dyn_mr_infos.at(dev_func);
     auto info = std::make_shared<DynMemReuseInfo>();
@@ -515,7 +519,7 @@ private:
   AssertionCost rtc_cost_threshold =
       AssertionCost::ENTRY; // Runtime check assertion level
   bool disable_cuda_runtime_env_check =
-      false; // Do not emit cuda runtime env check.
+      false;                 // Do not emit cuda runtime env check.
   bool device_only = false;  // Suppress user main() in generated code
                              // (set by --lib / --suppress-main).
   bool fast_compile = false; // Use precompiled CuTe runtime for faster nvcc

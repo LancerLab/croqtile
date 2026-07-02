@@ -461,6 +461,7 @@ private:
   void emitKernel(KernelOp kernel) {
     entryAssertions.clear();
     lastSpmName.clear();
+    dynSpmEmitted = false;
     prescanMMAFragRoles(kernel);
     prescanDescriptors(kernel);
 
@@ -487,9 +488,15 @@ private:
 
     auto &body = kernel.getBody();
     unsigned paramIdx = 0;
+    // Determine how many trailing args are memreuse params.
+    unsigned mrTailCount = 0;
+    if (auto mrA = kernel->getAttrOfType<mlir::ArrayAttr>(
+            "coir.mr_offset_args"))
+      mrTailCount = mrA.size() + 1; // offset args + spm_size
     if (!body.empty()) {
       auto args = body.getArguments();
-      for (unsigned i = 0; i < args.size(); ++i) {
+      unsigned regularArgCount = args.size() - mrTailCount;
+      for (unsigned i = 0; i < regularArgCount; ++i) {
         if (paramIdx > 0)
           os() << ", ";
         std::string name = "arg" + std::to_string(paramIdx);
@@ -516,6 +523,28 @@ private:
          << tmaParamCount << "_tensor_map";
       paramIdx++;
       tmaParamCount++;
+    }
+    // Memory reuse offset and spm_size parameters
+    if (auto mrArgsAttr = kernel->getAttrOfType<mlir::ArrayAttr>(
+            "coir.mr_offset_args")) {
+      auto args = body.getArguments();
+      unsigned mrArgStart = args.size() - mrArgsAttr.size() - 1;
+      for (unsigned i = 0; i < mrArgsAttr.size(); ++i) {
+        if (paramIdx > 0) os() << ", ";
+        auto argName =
+            mlir::cast<mlir::StringAttr>(mrArgsAttr[i]).getValue().str();
+        os() << "unsigned long " << argName;
+        valueNames[args[mrArgStart + i]] = argName;
+        paramIdx++;
+      }
+      // spm_size arg
+      if (paramIdx > 0) os() << ", ";
+      auto spmSizeName =
+          kernel->getAttrOfType<mlir::StringAttr>("coir.mr_spm_size_arg")
+              .getValue().str();
+      os() << "unsigned " << spmSizeName;
+      valueNames[args[mrArgStart + mrArgsAttr.size()]] = spmSizeName;
+      paramIdx++;
     }
     os() << ") {\n";
     incIndent();
@@ -881,7 +910,12 @@ private:
     unsigned numResults = fnType.getNumResults();
     unsigned numTMA = countTMADescs();
     auto dimArgMeta = getDimArgs(kernel);
-    unsigned numOrigInputs = fnType.getNumInputs() - dimArgMeta.size();
+    unsigned numMrArgs = 0;
+    if (auto mrA = kernel->getAttrOfType<mlir::ArrayAttr>(
+            "coir.mr_offset_args"))
+      numMrArgs = mrA.size() + 1;
+    unsigned numOrigInputs =
+        fnType.getNumInputs() - dimArgMeta.size() - numMrArgs;
 
     auto streamName = getStreamName(kernel);
 
@@ -944,6 +978,58 @@ private:
       auto streamName = getStreamName(kernel);
       bool asyncLaunch = isAsyncLaunch(kernel);
 
+      // Emit runtime HeapSimulator for dynamic memreuse.
+      auto mrChunksAttr = kernel->getAttrOfType<mlir::ArrayAttr>(
+          "coir.mr_chunks");
+      std::string mrSpmSizeName;
+      std::string mrOffsetsName;
+      unsigned mrArgCount = 0;
+      if (mrChunksAttr) {
+        // Emit dimension aliases so chunk size exprs can reference them.
+        for (auto &da : dimArgMeta) {
+          os() << "  unsigned " << da.name << " = (int)p" << da.paramIdx
+               << ".shape()[" << da.dimIdx << "];\n";
+        }
+        auto chunksName =
+            kernel->getAttrOfType<mlir::StringAttr>("coir.mr_chunks_name")
+                .getValue().str();
+        auto resultName =
+            kernel->getAttrOfType<mlir::StringAttr>("coir.mr_result_name")
+                .getValue().str();
+        mrOffsetsName =
+            kernel->getAttrOfType<mlir::StringAttr>("coir.mr_offsets_name")
+                .getValue().str();
+        mrSpmSizeName =
+            kernel->getAttrOfType<mlir::StringAttr>("coir.mr_spm_size_arg")
+                .getValue().str();
+        auto mrArgsAttr = kernel->getAttrOfType<mlir::ArrayAttr>(
+            "coir.mr_offset_args");
+        mrArgCount = mrArgsAttr ? mrArgsAttr.size() : 0;
+
+        os() << "  // JIT memory reuse\n";
+        os() << "  HeapSimulator::Chunks " << chunksName << ";\n";
+        for (auto chunkAttr : mrChunksAttr)
+          os() << "  " << chunksName << ".push_back("
+               << mlir::cast<mlir::StringAttr>(chunkAttr).getValue().str()
+               << ");\n";
+        os() << "  HeapSimulator __mr_sim;\n";
+        os() << "  HeapSimulator::Result " << resultName
+             << " = __mr_sim.Allocate(" << chunksName << ", 512);\n";
+        os() << "  unsigned " << mrSpmSizeName << " = " << resultName
+             << ".heap_size;\n";
+        os() << "  unsigned long " << mrOffsetsName << "["
+             << mrArgCount << "];\n";
+        os() << "  { size_t __idx = 0;\n";
+        os() << "    for (const auto& [id, off] : " << resultName
+             << ".chunk_offsets)\n";
+        os() << "      " << mrOffsetsName << "[__idx++] = off; }\n";
+        // Override dynShmem with spm_size
+        dynShmem = mrSpmSizeName;
+        os() << "  cudaFuncSetAttribute(" << devName
+             << ", cudaFuncAttributeMaxDynamicSharedMemorySize, "
+             << mrSpmSizeName << ");\n";
+      }
+
       os() << "  " << devName << "<<<" << dims.gridStr() << ", "
          << dims.blockStr();
       if (!dynShmem.empty() || !streamName.empty())
@@ -951,7 +1037,7 @@ private:
       if (!streamName.empty())
         os() << ", " << streamName;
       // Launch order must match kernel signature:
-      //   [input ptrs/scalars] [dim args] [TMA maps]
+      //   [input ptrs/scalars] [dim args] [TMA maps] [mr_offsets] [spm_size]
       os() << ">>>(";
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os() << ", ";
@@ -965,6 +1051,12 @@ private:
       }
       for (unsigned i = 0; i < numTMA; ++i) {
         os() << ", __choreo_tma_" << i << "_tensor_map";
+      }
+      for (unsigned i = 0; i < mrArgCount; ++i) {
+        os() << ", " << mrOffsetsName << "[" << i << "]";
+      }
+      if (mrChunksAttr) {
+        os() << ", " << mrSpmSizeName;
       }
       os() << ");\n";
       if (!asyncLaunch) {
@@ -1105,6 +1197,57 @@ private:
     auto dynShmem = getDynShmemExpr(kernel, dimArgMeta);
     bool asyncLaunch = isAsyncLaunch(kernel);
 
+    // Emit runtime HeapSimulator for dynamic memreuse (returning kernel).
+    auto mrChunksAttr2 = kernel->getAttrOfType<mlir::ArrayAttr>(
+        "coir.mr_chunks");
+    std::string mrSpmSizeName2;
+    std::string mrOffsetsName2;
+    unsigned mrArgCount2 = 0;
+    if (mrChunksAttr2) {
+      // Emit dimension aliases so chunk size exprs can reference them.
+      for (auto &da : dimArgMeta) {
+        os() << "  unsigned " << da.name << " = (int)p" << da.paramIdx
+             << ".shape()[" << da.dimIdx << "];\n";
+      }
+      auto chunksName =
+          kernel->getAttrOfType<mlir::StringAttr>("coir.mr_chunks_name")
+              .getValue().str();
+      auto resultName =
+          kernel->getAttrOfType<mlir::StringAttr>("coir.mr_result_name")
+              .getValue().str();
+      mrOffsetsName2 =
+          kernel->getAttrOfType<mlir::StringAttr>("coir.mr_offsets_name")
+              .getValue().str();
+      mrSpmSizeName2 =
+          kernel->getAttrOfType<mlir::StringAttr>("coir.mr_spm_size_arg")
+              .getValue().str();
+      auto mrArgsAttr = kernel->getAttrOfType<mlir::ArrayAttr>(
+          "coir.mr_offset_args");
+      mrArgCount2 = mrArgsAttr ? mrArgsAttr.size() : 0;
+
+      os() << "  // JIT memory reuse\n";
+      os() << "  HeapSimulator::Chunks " << chunksName << ";\n";
+      for (auto chunkAttr : mrChunksAttr2)
+        os() << "  " << chunksName << ".push_back("
+             << mlir::cast<mlir::StringAttr>(chunkAttr).getValue().str()
+             << ");\n";
+      os() << "  HeapSimulator __mr_sim;\n";
+      os() << "  HeapSimulator::Result " << resultName
+           << " = __mr_sim.Allocate(" << chunksName << ", 512);\n";
+      os() << "  unsigned " << mrSpmSizeName2 << " = " << resultName
+           << ".heap_size;\n";
+      os() << "  unsigned long " << mrOffsetsName2 << "["
+           << mrArgCount2 << "];\n";
+      os() << "  { size_t __idx = 0;\n";
+      os() << "    for (const auto& [id, off] : " << resultName
+           << ".chunk_offsets)\n";
+      os() << "      " << mrOffsetsName2 << "[__idx++] = off; }\n";
+      dynShmem = mrSpmSizeName2;
+      os() << "  cudaFuncSetAttribute(" << devName
+           << ", cudaFuncAttributeMaxDynamicSharedMemorySize, "
+           << mrSpmSizeName2 << ");\n";
+    }
+
     os() << "  " << devName << "<<<" << dims.gridStr() << ", "
        << dims.blockStr();
     if (!dynShmem.empty() || !streamName.empty())
@@ -1112,7 +1255,7 @@ private:
     if (!streamName.empty())
       os() << ", " << streamName;
     // Launch order must match kernel signature:
-    //   [input ptrs/scalars] [dim args] [output ptrs] [TMA maps]
+    //   [input ptrs/scalars] [dim args] [output ptrs] [TMA maps] [mr] [spm_size]
     os() << ">>>(";
     for (unsigned i = 0; i < numOrigInputs; ++i) {
       if (i > 0) os() << ", ";
@@ -1127,6 +1270,12 @@ private:
     os() << ", __result__device";
     for (unsigned i = 0; i < numTMA; ++i) {
       os() << ", __choreo_tma_" << i << "_tensor_map";
+    }
+    for (unsigned i = 0; i < mrArgCount2; ++i) {
+      os() << ", " << mrOffsetsName2 << "[" << i << "]";
+    }
+    if (mrChunksAttr2) {
+      os() << ", " << mrSpmSizeName2;
     }
     os() << ");\n";
     if (!asyncLaunch) {
