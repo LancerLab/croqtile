@@ -102,6 +102,9 @@ static HoistTarget computeHoistTarget(AssertOp assertOp, KernelOp kernel) {
       bestInsertBefore = current;
       bestBlock = current->getBlock();
       hoistedPastSomething = true;
+    } else if (isa<InThreadsOp>(current)) {
+      stoppedEarly = true;
+      break;
     } else if (auto foreachOp = dyn_cast<ForeachOp>(current)) {
       Region &loopRegion = foreachOp.getBody();
       if (allDepsMovableOutOfRegion(cond, &loopRegion)) {

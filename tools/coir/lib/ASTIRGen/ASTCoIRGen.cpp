@@ -348,6 +348,24 @@ bool ASTCoIRGen::InMidVisitImpl(AST::Node &n) {
 
 bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
   if (isa<AST::Program>(&n)) {
+    IRModule()->walk([](coir::KernelOp kernel) {
+      kernel.walk([](mlir::Block *block) {
+        bool seenReturn = false;
+        llvm::SmallVector<mlir::Operation *> dead;
+        for (auto &op : *block) {
+          if (seenReturn) {
+            if (!op.hasTrait<mlir::OpTrait::IsTerminator>())
+              dead.push_back(&op);
+          } else if (mlir::isa<coir::KernelReturnOp>(op))
+            seenReturn = true;
+        }
+        for (auto *op : llvm::reverse(dead)) {
+          op->dropAllDefinedValueUses();
+          op->dropAllReferences();
+          op->erase();
+        }
+      });
+    });
     PopScope();
     if (!suppress_output) {
       mlir::OpPrintingFlags flags;
@@ -356,9 +374,17 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
     }
   } else if (isa<AST::ChoreoFunction>(&n)) {
     auto *block = builder.getInsertionBlock();
-    if (block && (block->empty() || !block->back().hasTrait<mlir::OpTrait::IsTerminator>()))
-      builder.create<coir::KernelReturnOp>(
-          builder.getUnknownLoc(), mlir::ValueRange{});
+    if (block) {
+      bool insideKernel = false;
+      if (auto *parentOp = block->getParentOp())
+        for (auto *op = parentOp; op; op = op->getParentOp())
+          if (mlir::isa<coir::KernelOp>(op)) { insideKernel = true; break; }
+      if (insideKernel &&
+          (block->empty() ||
+           !block->back().hasTrait<mlir::OpTrait::IsTerminator>()))
+        builder.create<coir::KernelReturnOp>(builder.getUnknownLoc(),
+                                             mlir::ValueRange{});
+    }
     PopScope();
   } else if (isa<AST::ParallelBy>(&n)) {
     auto *block = builder.getInsertionBlock();
@@ -1018,6 +1044,9 @@ mlir::Value ASTCoIRGen::resolveRangeUBValue(AST::LoopRange *lr, int64_t bound) {
   }
   if (!ubValue)
     ubValue = builder.create<mlir::arith::ConstantIndexOp>(loc, bound);
+  if (ubValue && !mlir::isa<mlir::IndexType>(ubValue.getType()))
+    ubValue = builder.create<mlir::arith::IndexCastOp>(
+        loc, mlir::IndexType::get(&IRContext()), ubValue);
   return ubValue;
 }
 
@@ -1651,6 +1680,16 @@ bool ASTCoIRGen::Visit(AST::Assignment &asgn) {
 
 bool ASTCoIRGen::Visit(AST::Return &ret) {
   auto loc = Loc(ret);
+
+  auto *block = builder.getInsertionBlock();
+  if (block) {
+    bool insideKernel = false;
+    if (auto *parentOp = block->getParentOp())
+      for (auto *op = parentOp; op; op = op->getParentOp())
+        if (mlir::isa<coir::KernelOp>(op)) { insideKernel = true; break; }
+    if (!insideKernel) return true;
+  }
+
   llvm::SmallVector<mlir::Value> retVals;
   if (ret.value) {
     auto val = EmitExpr(*ret.value);
@@ -3012,11 +3051,11 @@ bool ASTCoIRGen::Visit(AST::CppSourceCode &n) {
 
 bool ASTCoIRGen::Visit(AST::InThreadsBlock &n) {
   auto loc = Loc(n);
-
   if (!n.pred) return true;
 
   mlir::Value predVal = EmitExpr(*n.pred);
-  if (!predVal) return true;
+  if (!predVal)
+    predVal = builder.create<mlir::arith::ConstantIntOp>(loc, 1, 1);
 
   if (!predVal.getType().isInteger(1)) {
     mlir::Value zero;
