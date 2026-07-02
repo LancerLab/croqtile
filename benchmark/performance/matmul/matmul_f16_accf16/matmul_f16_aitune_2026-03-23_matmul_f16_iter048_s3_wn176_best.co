@@ -1,5 +1,5 @@
 // Build & Run:
-//   ./choreo -gs -t cute -arch=sm_90a --use-warpspec --stmatrix --hoist-offset --hoist-scale --ptx-barrier --tma-cluster-aware benchmark/performance/matmul/matmul_f16_aitune_2026-03-23_matmul_f16_iter048_s3_wn176_best.co -o /tmp/iter048.cute.result && bash /tmp/iter048.cute.result --execute
+//   ./choreo -gs -t cute -arch=sm_90a benchmark/performance/matmul/matmul_f16_accf16/matmul_f16_aitune_2026-03-23_matmul_f16_iter048_s3_wn176_best.co -o /tmp/iter048.cute.result && bash /tmp/iter048.cute.result --execute
 #include <cstring>
 #include <cstdlib>
 

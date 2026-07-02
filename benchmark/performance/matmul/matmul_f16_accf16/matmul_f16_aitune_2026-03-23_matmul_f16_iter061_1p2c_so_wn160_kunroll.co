@@ -1,5 +1,5 @@
 // Build & Run:
-//   ./choreo -gs -t cute -arch=sm_90a --use-warpspec --stmatrix --hoist-offset --hoist-scale --ptx-barrier --tma-cluster-aware benchmark/performance/matmul/matmul_f16_aitune_2026-03-23_matmul_f16_iter061_1p2c_so_wn160_kunroll.co -o /tmp/iter061.cute.result && bash /tmp/iter061.cute.result --execute
+//   ./choreo -gs -t cute -arch=sm_90a benchmark/performance/matmul/matmul_f16_accf16/matmul_f16_aitune_2026-03-23_matmul_f16_iter061_1p2c_so_wn160_kunroll.co -o /tmp/iter061.cute.result && bash /tmp/iter061.cute.result --execute
 #include <cstring>
 #include <cstdlib>
 
@@ -42,11 +42,7 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
         foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
           stage = iv_k % MATMUL_STAGES;
           wait full[stage];
-          foreach {iv_warp} in [cdiv(MATMUL_TILE_K, MATMUL_WARP_K)] {
-            ma = mma.load.swiz<MATMUL_SWIZ> lhs_load_s[stage].subspan(MATMUL_WARP_M, MATMUL_WARP_K).at(p1 - 1, iv_warp);
-            mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s[stage].chunkat(_, iv_warp);
-            mma.row.row mc, ma, mb;
-          }
+          mma.row.row mc, lhs_load_s[stage].subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(p1 - 1, 0), rhs_load_s[stage];
           trigger empty[stage];
         }
         mma.store mc, output_s[p1 - 1];

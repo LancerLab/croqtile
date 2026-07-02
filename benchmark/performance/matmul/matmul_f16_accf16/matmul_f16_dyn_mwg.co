@@ -52,13 +52,13 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
     shared f16 [MATMUL_TILE_M, MATMUL_WARP_N] output_s;
 
     mc = mma.fill.f16 0.0f;
-    foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
-      tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_TILE_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
-      tma.copy.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s;
-      parallel p1 by 2 : group-4 {
+    parallel p1 by 2 : group-4 {
+      foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
+        tma.copy.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_TILE_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s;
+        tma.copy.swiz<MATMUL_SWIZ> rhs.chunkat(block_n, iv_k) => rhs_load_s;
         mma.row.row mc, lhs_load_s.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(p1, 0), rhs_load_s;
-        if (iv_k == cdiv(K, MATMUL_TILE_K) - 1) mma.store mc, output_s.chunkat(p1, _);
       }
+      mma.store mc, output_s.chunkat(p1, _);
     }
     tma.copy output_s => output.subspan(MATMUL_TILE_M, MATMUL_WARP_N).at(block_m, block_n);
 
