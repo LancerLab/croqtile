@@ -173,6 +173,23 @@ void CollectSemaStats() {
   }
 }
 
+/// Count cross-parameter symbolic dimension consistency checks recorded as
+/// coir.dim_checks attributes on KernelOps.  Each check becomes a host-side
+/// runtime_check with ShapeCompatibility / ENTRY classification.
+void CollectDimCheckStats(mlir::ModuleOp module) {
+  auto &stats = CCtx().GetAssessmentStats();
+  module->walk([&](coir::KernelOp kernel) {
+    auto attr = kernel->getAttrOfType<mlir::ArrayAttr>("coir.dim_checks");
+    if (!attr) return;
+    unsigned n = attr.size();
+    stats.total += n;
+    stats.shape_compat_total += n;
+    stats.runtime_total += n;
+    stats.shape_compat_runtime += n;
+    stats.runtime_entry += n;
+  });
+}
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -232,6 +249,10 @@ int main(int argc, char *argv[]) {
   }
 
   auto &session = CoIR::IRSession::Get();
+
+  // Count cross-parameter dimension consistency checks emitted as
+  // coir.dim_checks on KernelOps during IR generation.
+  CollectDimCheckStats(session.Module());
   int coirThreshold = static_cast<int>(CCtx().RuntimeCheckCostThreshold());
   CoIR::Pipeline pipeline(session.Module(), session.Context(),
                            coirThreshold, CCtx().PrintStats());
