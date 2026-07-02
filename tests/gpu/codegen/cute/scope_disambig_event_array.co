@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-SM_90A
-// RUN: choreo -n -es --use-warpspec -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s
+// RUN: choreo -n -es -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s
 //
 // Test: EventArrayType disambiguation - nested parallel blocks with
 // same-named event arrays get distinct emitted names.

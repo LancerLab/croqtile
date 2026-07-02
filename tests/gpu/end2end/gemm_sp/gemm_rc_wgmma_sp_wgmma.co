@@ -1,7 +1,7 @@
 // REQUIRES: TARGET-SM_90A
 // RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 
-// Merged WGMMA sparse tests (base flags, no --use-prepack or --use-warpspec).
+// Merged WGMMA sparse tests (base flags, no --use-prepack).
 // Covers: f16 (N=8/16/32, K=32/64), fp8 e4m3 (N=8/32/64, K=64), bf16 (N=8, K=64).
 
 template <typename T>

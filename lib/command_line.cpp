@@ -249,24 +249,6 @@ Option<size_t> shared_mem_alignment(OptionKind::Hidden,
                                     "--shared-mem-alignment", "-fsmem-align",
                                     true,
                                     "Set the alignment of shared memory.");
-Option<bool> use_warpspec(OptionKind::Hidden, "--use-warpspec", "", false,
-                          "Enable warp-specialized synchronization for shared "
-                          "event/full-empty pipelines.");
-Option<bool> hoist_wgmma_arrive(
-    OptionKind::User, "--hoist-wgmma-arrive", "", false,
-    "Hoist warpgroup_arrive() before unrolled foreach loops containing "
-    "WGMMA exec without commit, enabling batched arrive for the entire "
-    "unrolled loop body.");
-Option<bool> single_thread_producer(
-    OptionKind::User, "--single-thread-producer", "", true,
-    "When used with --use-warpspec, keep the producer inthreads scope single-"
-    "threaded. Set to false to instead single-guard producer TMA/event "
-    "operations individually.");
-Option<bool> skip_epilogue_group_sync(
-    OptionKind::User, "--skip-epilogue-group-sync", "", false,
-    "Skip wg_barrier.sync() before shared-to-global TMA copies in warpspec "
-    "mode. Safe when the writing warpgroup exclusively owns the shared buffer "
-    "and fence_proxy_async_shared_cta() provides sufficient ordering.");
 Option<bool>
     use_target_lib(OptionKind::User, "--use-target-lib", "-utl", false,
                    "Lower __lib_* builtins to target-specific library calls. "
@@ -487,10 +469,6 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetLoopNorm(loop_norm.GetValue());
   CCtx().SetMaxLocalMemCapacityPerThread(max_local_mem_capacity.GetValue());
   CCtx().SetSharedMemAlignment(shared_mem_alignment.GetValue());
-  CCtx().SetUseWarpSpec(use_warpspec.GetValue());
-  CCtx().SetHoistWGMMAArrive(hoist_wgmma_arrive.GetValue());
-  CCtx().SetSingleThreadProducer(single_thread_producer.GetValue());
-  CCtx().SetSkipEpilogueGroupSync(skip_epilogue_group_sync.GetValue());
   if (use_target_lib.WasExplicitlySet())
     CCtx().SetUseTargetLib(use_target_lib.GetValue());
   else

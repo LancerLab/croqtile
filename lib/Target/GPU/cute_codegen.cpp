@@ -4411,7 +4411,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
       // For async tma.copy.async, trigger the future
       // For sync tma.copy, default behavior is immediate wait.
-      // Under --use-warpspec, defer this wait to event barrier protocol
+      // In warpspec mode, defer this wait to event barrier protocol
       // so producer-consumer pipelining remains asynchronous like ref kernels.
       if (fty->IsAsync()) {
         if (has_future) ds << d_indent << future_name << ".trigger();\n";
@@ -4434,7 +4434,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                fsto == Storage::SHARED) {
 
       ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
-      if (!CCtx().SkipEpilogueGroupSync()) {
+      {
         if (tma_sync_level == ParallelLevel::GROUP)
           ds << d_indent << "__syncwarp();\n";
         else if (tma_sync_level == ParallelLevel::GROUPx4 ||

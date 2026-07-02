@@ -1,6 +1,5 @@
 // REQUIRES: TARGET-SM_90A
-// RUN: choreo -es --use-warpspec -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s
-// RUN: choreo -es -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s --check-prefix=CHECK-OFF
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s
 
 __co__ void foo(f32 [128, 128] input) {
   
@@ -20,7 +19,5 @@ __co__ void foo(f32 [128, 128] input) {
   }
 }
 
-// CHECK-OFF: error: forbid to associated async dma without a named future or a named event.
-// CHECK-OFF: warning: Be careful to wait event outside inthreads block
-
-// CHECK: warning: Be careful to wait event outside inthreads block, which may lead to parallelism issues.
+// CHECK: error: forbid to associated async dma without a named future or a named event.
+// CHECK: warning: Be careful to wait event outside inthreads block
