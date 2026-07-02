@@ -403,6 +403,12 @@ private:
             mmaTileDims[yieldVals[i]] = tile;
             mmaTileDims[foreach.getResult(i)] = tile;
           }
+          if (mmaFragRoles.count(v)) {
+            auto role = mmaFragRoles[v];
+            mmaFragRoles[iterArgs[i]] = role;
+            mmaFragRoles[bodyBlock->getArgument(i + 1)] = role;
+            mmaFragRoles[foreach.getResult(i)] = role;
+          }
         }
       }
     });
@@ -1552,11 +1558,16 @@ private:
     if (isValueCTMMA(op.getResult())) {
       auto exec = findCTMMAExec(op->getParentOfType<KernelOp>());
       int64_t regNum = (exec && exec.getRegNumDAttr()) ? exec.getRegNumDAttr().getInt() : 4;
-      std::string elemTy = fragTy.getElementType().isF32() ? "float" : "int32_t";
+      auto eTy = fragTy.getElementType();
+      std::string elemTy = eTy.isF32() ? "float"
+                         : eTy.isF64() ? "double"
+                         : "uint32_t";
       os() << getIndent() << elemTy << " " << name << "[" << regNum << "];\n";
+      std::string initVal = getName(op.getValue());
+      if (elemTy == "uint32_t")
+        initVal = "static_cast<uint32_t>(" + initVal + ")";
       os() << getIndent() << "for (int __i = 0; __i < " << regNum
-           << "; ++__i) " << name << "[__i] = " << getName(op.getValue())
-           << ";\n";
+           << "; ++__i) " << name << "[__i] = " << initVal << ";\n";
       return;
     }
 
@@ -1612,12 +1623,24 @@ private:
         std::string atomName = exec.getMmaAtomNameAttr().getValue().str();
         auto roleIt = mmaFragRoles.find(op.getResult());
         std::string role = roleIt != mmaFragRoles.end() ? roleIt->second : "matrix_a";
-        std::string suffix = (role == "matrix_a") ? "a" : "b";
 
         std::string srcTensor = emitCuteTensor(op.getSource(),
                                                "_mma_ld_" + std::to_string(nextId++));
-        os() << getIndent() << "auto " << name << " = load_fragment_" << suffix
-             << "<" << atomName << ">(" << srcTensor << ");\n";
+        if (role == "accumulator") {
+          int64_t regNum = exec.getRegNumDAttr().getInt();
+          auto eTy = fragTy.getElementType();
+          std::string regType = eTy.isF32() ? "float"
+                              : eTy.isF64() ? "double"
+                              : "uint32_t";
+          std::string castTy = emitElementType(fragTy.getElementType());
+          os() << getIndent() << regType << " " << name << "[" << regNum << "];\n";
+          os() << getIndent() << "load_fragment_d<" << atomName << ">("
+               << srcTensor << ", reinterpret_cast<" << castTy << "*>(" << name << "));\n";
+        } else {
+          std::string suffix = (role == "matrix_a") ? "a" : "b";
+          os() << getIndent() << "auto " << name << " = load_fragment_" << suffix
+               << "<" << atomName << ">(" << srcTensor << ");\n";
+        }
         return;
       }
     }
@@ -1785,8 +1808,15 @@ private:
         else
           os() << "((" << elemTy << "*)" << ptrName << ")";
         os() << ", " << layoutName << ");\n";
+        auto fragTy = mlir::cast<coir::MMAFragType>(fragVal.getType());
+        auto accumElemTy = fragTy.getElementType();
+        std::string fragPtr = getName(fragVal);
+        // uint32_t accum arrays need reinterpret_cast to the actual element type
+        if (!accumElemTy.isF32() && !accumElemTy.isF64()) {
+          fragPtr = "reinterpret_cast<" + elemTy + "*>(" + fragPtr + ")";
+        }
         os() << getIndent() << "store_fragment_d<" << atomName << ">("
-             << tensorName << ", " << getName(fragVal) << ");\n";
+             << tensorName << ", " << fragPtr << ");\n";
         return;
       }
     }
