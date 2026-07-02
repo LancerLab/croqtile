@@ -42,6 +42,7 @@ public:
     hasMMAOps = false;
     hasLibCalls = false;
     hasPrintCalls = false;
+    hasAsyncOps = false;
     scanFeatures(module);
     emitHeader();
     for (auto &op : module.getBody()->getOperations()) {
@@ -137,11 +138,14 @@ private:
   bool hasMMAOps = false;
   bool hasLibCalls = false;
   bool hasPrintCalls = false;
+  bool hasAsyncOps = false;
 
   void scanFeatures(ModuleOp module) {
     module.walk([&](Operation *op) {
       if (isa<MMAFillOp, MMALoadOp, MMAExecOp, MMAStoreOp>(op))
         hasMMAOps = true;
+      if (isa<DmaCopyOp, AsyncUndefOp, FutureRotateOp>(op))
+        hasAsyncOps = true;
       if (auto call = dyn_cast<CallOp>(op)) {
         auto callee = call.getCallee();
         if (callee.starts_with("__lib_") || callee.starts_with("__sqrt") ||
@@ -168,6 +172,8 @@ private:
       os() << "#include <cmath>\n";
     if (hasPrintCalls)
       os() << "#include <iostream>\n";
+    if (hasAsyncOps)
+      os() << "#include <future>\n";
     os() << "\n";
   }
 
@@ -656,43 +662,31 @@ private:
     auto operands = op.getOperands_();
     if (operands.empty() || !op.getResult()) return false;
 
-    using llvm::StringSwitch;
-    // Unary math BIFs
-    std::string mapped = StringSwitch<std::string>(callee)
-      .Case("__sqrt", "std::sqrt")
-      .Case("__rsqrt", "")
-      .Case("__exp", "std::exp")
-      .Case("__expm1", "std::expm1")
-      .Case("__log", "std::log")
-      .Case("__log1p", "std::log1p")
-      .Case("__log2", "std::log2")
-      .Case("__abs", "std::abs")
-      .Case("__fabs", "std::fabs")
-      .Case("__ceil", "std::ceil")
-      .Case("__floor", "std::floor")
-      .Case("__round", "std::round")
-      .Case("__sin", "std::sin")
-      .Case("__cos", "std::cos")
-      .Case("__tan", "std::tan")
-      .Case("__asin", "std::asin")
-      .Case("__acos", "std::acos")
-      .Case("__atan", "std::atan")
-      .Case("__sinh", "std::sinh")
-      .Case("__cosh", "std::cosh")
-      .Case("__tanh", "std::tanh")
-      .Case("__erf", "std::erf")
-      .Case("__erfc", "std::erfc")
-      .Case("__cbrt", "std::cbrt")
-      .Default("");
+    static const std::pair<llvm::StringRef, const char *> unary_map[] = {
+      {"__sqrt", "std::sqrt"}, {"__exp", "std::exp"},
+      {"__expm1", "std::expm1"}, {"__log", "std::log"},
+      {"__log1p", "std::log1p"}, {"__log2", "std::log2"},
+      {"__abs", "std::abs"}, {"__fabs", "std::fabs"},
+      {"__ceil", "std::ceil"}, {"__floor", "std::floor"},
+      {"__round", "std::round"}, {"__sin", "std::sin"},
+      {"__cos", "std::cos"}, {"__tan", "std::tan"},
+      {"__asin", "std::asin"}, {"__acos", "std::acos"},
+      {"__atan", "std::atan"}, {"__sinh", "std::sinh"},
+      {"__cosh", "std::cosh"}, {"__tanh", "std::tanh"},
+      {"__erf", "std::erf"}, {"__erfc", "std::erfc"},
+      {"__cbrt", "std::cbrt"}, {"__signbit", "std::signbit"},
+    };
 
     std::string a0 = getName(operands[0]);
     std::string resName = getName(op.getResult());
     auto resTy = op.getResult().getType();
 
-    if (!mapped.empty()) {
-      os() << getIndent() << emitType(resTy) << " " << resName << " = "
-           << mapped << "(" << a0 << ");\n";
-      return true;
+    for (auto &[name, fn] : unary_map) {
+      if (callee == name) {
+        os() << getIndent() << emitType(resTy) << " " << resName << " = "
+             << fn << "(" << a0 << ");\n";
+        return true;
+      }
     }
     if (callee == "__rsqrt") {
       os() << getIndent() << emitType(resTy) << " " << resName
@@ -705,25 +699,20 @@ private:
            << " * 0.7071067811865476)));\n";
       return true;
     }
-    if (callee == "__signbit") {
-      os() << getIndent() << emitType(resTy) << " " << resName
-           << " = std::signbit(" << a0 << ");\n";
-      return true;
-    }
     // Binary arith BIFs
     if (operands.size() >= 2) {
       std::string a1 = getName(operands[1]);
-      std::string binOp = StringSwitch<std::string>(callee)
-        .Case("__max", "std::max")
-        .Case("__min", "std::min")
-        .Case("__pow", "std::pow")
-        .Case("__fmod", "std::fmod")
-        .Case("__atan2", "std::atan2")
-        .Default("");
-      if (!binOp.empty()) {
-        os() << getIndent() << emitType(resTy) << " " << resName << " = "
-             << binOp << "(" << a0 << ", " << a1 << ");\n";
-        return true;
+      static const std::pair<llvm::StringRef, const char *> bin_map[] = {
+        {"__max", "std::max"}, {"__min", "std::min"},
+        {"__pow", "std::pow"}, {"__fmod", "std::fmod"},
+        {"__atan2", "std::atan2"},
+      };
+      for (auto &[name, fn] : bin_map) {
+        if (callee == name) {
+          os() << getIndent() << emitType(resTy) << " " << resName << " = "
+               << fn << "(" << a0 << ", " << a1 << ");\n";
+          return true;
+        }
       }
     }
     return false;
@@ -1013,18 +1002,35 @@ private:
       return;
     }
     auto kind = op.getKind();
+    std::string tokName = getName(op.getToken());
+
     if (kind == DMAKind::Pad) {
       emitCopyWithPad(op);
+      valueNames[op.getToken()] = "0";
     } else if (kind == DMAKind::Transpose) {
       emitCopyWithTranspose(op);
+      valueNames[op.getToken()] = "0";
     } else {
       int64_t bytes = getTensorBytes(srcTy);
       if (bytes > 0) {
-        os() << getIndent() << "std::memcpy(" << getName(op.getDest())
-             << ", " << getName(op.getSource()) << ", " << bytes << ");\n";
+        bool tokenUsed = !op.getToken().use_empty();
+        if (tokenUsed) {
+          std::string dst = getName(op.getDest());
+          std::string src = getName(op.getSource());
+          os() << getIndent() << "auto " << tokName
+               << " = std::async(std::launch::async, [&]() {\n";
+          incIndent();
+          os() << getIndent() << "std::memcpy(" << dst << ", " << src
+               << ", " << bytes << ");\n";
+          decIndent();
+          os() << getIndent() << "});\n";
+        } else {
+          os() << getIndent() << "std::memcpy(" << getName(op.getDest())
+               << ", " << getName(op.getSource()) << ", " << bytes << ");\n";
+          valueNames[op.getToken()] = "0";
+        }
       }
     }
-    valueNames[op.getToken()] = "0";
   }
 
   void emitCopyWithPad(DmaCopyOp op) {
@@ -1171,7 +1177,40 @@ private:
 
   void emitBarrier(BarrierOp /*op*/) override {}
 
-  void emitWait(WaitOp /*op*/) override {}
+  void emitWait(WaitOp op) override {
+    std::string tok = getName(op.getToken());
+    if (tok != "0")
+      os() << getIndent() << tok << ".get();\n";
+  }
+
+  void emitFutureRotate(FutureRotateOp op) override {
+    auto futures = op.getFutures();
+    auto results = op.getResults();
+    if (futures.size() == 2) {
+      std::string a = getName(futures[0]);
+      std::string b = getName(futures[1]);
+      os() << getIndent() << "std::swap(" << a << ", " << b << ");\n";
+      valueNames[results[0]] = a;
+      valueNames[results[1]] = b;
+    } else if (futures.size() > 2) {
+      std::string tmp = "__rot_tmp_" + std::to_string(nextId++);
+      os() << getIndent() << "auto " << tmp << " = std::move("
+           << getName(futures[0]) << ");\n";
+      for (unsigned i = 0; i + 1 < futures.size(); ++i) {
+        os() << getIndent() << getName(futures[i]) << " = std::move("
+             << getName(futures[i + 1]) << ");\n";
+      }
+      os() << getIndent() << getName(futures.back()) << " = std::move("
+           << tmp << ");\n";
+      for (unsigned i = 0; i < results.size(); ++i)
+        valueNames[results[i]] = getName(futures[i]);
+    }
+  }
+
+  void emitAsyncUndef(AsyncUndefOp op) override {
+    std::string name = getName(op.getResult());
+    os() << getIndent() << "std::future<void> " << name << ";\n";
+  }
 
   void emitTensorTile(TensorTileOp op) override {
     std::string name = getName(op.getResult());
