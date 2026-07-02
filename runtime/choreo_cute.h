@@ -3458,8 +3458,8 @@ store_fragment_d_stmatrix_trans_f32_bf16(Tensor& D, float* const d) {
   static_assert(
       std::is_same<typename Tensor::value_type, bf16>::value,
       "transposed stmatrix f32->bf16 store requires bf16 output tensor");
-  static_assert((N % 8) == 0, "transposed stmatrix f32->bf16 store currently "
-                              "requires N to be divisible by 8");
+  static_assert((N % 16) == 0, "transposed stmatrix f32->bf16 store "
+                               "requires N to be divisible by 16");
 
   int tid = threadIdx.x % 128;
   int lane = tid % 32;
@@ -3532,7 +3532,7 @@ __device__ static inline void store_fragment_d_stmatrix(Tensor& D,
   static_assert(sizeof(AccumT) == 2,
                 "stmatrix store requires 16-bit accumulator type, f16 or bf16");
   static_assert((N % 8) == 0,
-                "stmatrix store currently requires N to be divisible by 8");
+                "stmatrix store requires N to be divisible by 8");
 
   int tid = threadIdx.x % 128;
   int lane = tid % 32;
@@ -3543,6 +3543,8 @@ __device__ static inline void store_fragment_d_stmatrix(Tensor& D,
       static_cast<uint32_t>(__cvta_generic_to_shared(d_base_ptr));
 
   constexpr int w_iters = N / 16;
+  constexpr int tail_cols = N % 16;
+  constexpr int full_cols = w_iters * 16;
   constexpr uint32_t kStepBytes = static_cast<uint32_t>(16 * sizeof(AccumT));
 
   uint32_t lane_offset =
@@ -3565,6 +3567,22 @@ __device__ static inline void store_fragment_d_stmatrix(Tensor& D,
                  : "r"(addr), "r"(r0), "r"(r1), "r"(r2), "r"(r3));
     addr += kStepBytes;
   }
+
+  if constexpr (tail_cols != 0) {
+    static_assert(
+        tail_cols == 8,
+        "stmatrix store tail path only supports one 8-column remainder");
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col0 = full_cols + (lane % 4) * 2;
+    int col1 = col0 + 1;
+    constexpr int base = w_iters * 4;
+    auto d_acc = reinterpret_cast<AccumT const*>(d);
+    D(row0, col0) = d_acc[base * 2 + 0];
+    D(row0, col1) = d_acc[base * 2 + 1];
+    D(row1, col0) = d_acc[base * 2 + 2];
+    D(row1, col1) = d_acc[base * 2 + 3];
+  }
 }
 
 template <class MMA, int N, class Tensor, class AccumT>
@@ -3573,7 +3591,7 @@ __device__ static inline void store_fragment_d_stmatrix_trans(Tensor& D,
   static_assert(sizeof(AccumT) == 2,
                 "stmatrix store requires 16-bit accumulator type, f16 or bf16");
   static_assert((N % 8) == 0,
-                "stmatrix store currently requires N to be divisible by 8");
+                "stmatrix store requires N to be divisible by 8");
 
   int tid = threadIdx.x % 128;
   int lane = tid % 32;
@@ -3585,6 +3603,8 @@ __device__ static inline void store_fragment_d_stmatrix_trans(Tensor& D,
 
   const uint32_t ld = static_cast<uint32_t>(&D(1, 0) - &D(0, 0));
   constexpr int w_iters = N / 16;
+  constexpr int tail_cols = N % 16;
+  constexpr int full_cols = w_iters * 16;
   const uint32_t kStepBytes = static_cast<uint32_t>(16 * ld * sizeof(AccumT));
 
   uint32_t lane_offset = static_cast<uint32_t>(warp * 16) +
@@ -3606,6 +3626,22 @@ __device__ static inline void store_fragment_d_stmatrix_trans(Tensor& D,
                  :
                  : "r"(addr), "r"(r0), "r"(r1), "r"(r2), "r"(r3));
     addr += kStepBytes;
+  }
+
+  if constexpr (tail_cols != 0) {
+    static_assert(
+        tail_cols == 8,
+        "stmatrix store tail path only supports one 8-column remainder");
+    int row0 = warp * 16 + lane / 4;
+    int row1 = row0 + 8;
+    int col0 = full_cols + (lane % 4) * 2;
+    int col1 = col0 + 1;
+    constexpr int base = w_iters * 4;
+    auto d_acc = reinterpret_cast<AccumT const*>(d);
+    D(row0, col0) = d_acc[base * 2 + 0];
+    D(row0, col1) = d_acc[base * 2 + 1];
+    D(row1, col0) = d_acc[base * 2 + 2];
+    D(row1, col1) = d_acc[base * 2 + 3];
   }
 }
 

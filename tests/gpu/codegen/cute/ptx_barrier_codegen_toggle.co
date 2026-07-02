@@ -1,5 +1,4 @@
 // REQUIRES: TARGET-SM_90A
-// RUN: choreo -es -t cute -arch=sm_90a --ptx-barrier %s -o - | FileCheck %s --check-prefix=CHECK-ON0
 // RUN: choreo -es -t cute -arch=sm_90a --tma-cluster-aware %s -o - | FileCheck %s --check-prefix=CHECK-ON1
 // RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=CHECK-OFF
 
@@ -34,13 +33,6 @@ __co__ void ptx_barrier_toggle_case(global f16 [M, K] lhs,
 }
 
 // All paths now use PTX mbarrier (unified barrier backend)
-
-// CHECK-ON0: {{^[[:space:]]*__shared__[[:space:]]+__align__\(8\)[[:space:]]+uint64_t[[:space:]]+choreo_copy_atom_t_0_barrier;}}
-// CHECK-ON0: {{^[[:space:]]*choreo::tma_mbarrier_init\(&choreo_copy_atom_t_0_barrier,[[:space:]]*1\);}}
-// CHECK-ON0: {{^[[:space:]]*TMAAtom[[:space:]]+choreo_copy_atom_t_0\{&choreo_copy_atom_t_0_barrier\};}}
-// CHECK-ON0: {{^[[:space:]]*choreo::tma_mbarrier_expect_tx\(}}
-// CHECK-ON0: {{^[[:space:]]*choreo::tma_load_2d_shared_cta_global_mbarrier\(}}
-// CHECK-ON0: {{^[[:space:]]*choreo::tma_mbarrier_wait_parity\(}}
 
 // CHECK-ON1: {{^[[:space:]]*__shared__[[:space:]]+__align__\(8\)[[:space:]]+uint64_t[[:space:]]+choreo_copy_atom_t_0_barrier;}}
 // CHECK-ON1: {{^[[:space:]]*choreo::tma_mbarrier_init\(&choreo_copy_atom_t_0_barrier,[[:space:]]*1\);}}

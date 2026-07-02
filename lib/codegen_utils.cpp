@@ -12,28 +12,20 @@ Option<bool> no_decay_spanview(OptionKind::Hidden, "--no-decay-spanview",
                                " decay spanview to be pointers.");
 Option<bool> dma_opt(OptionKind::Hidden, "-fopt-dma", "", true,
                      "optimize dma to linear copy.");
+// WARNING: --tma-cluster-aware emits cluster-scoped PTX mbarrier TMA loads
+// that require a matching cluster launch configuration.  Incorrect cluster
+// dimensions silently produce wrong results or hangs.  Only enable when the
+// kernel launch guarantees the expected cluster geometry.
 Option<bool> tma_cluster_aware(
     OptionKind::User, "--tma-cluster-aware", "", false,
-    "Enable cluster-aware PTX mbarrier TMA codegen for global->shared copy.");
-Option<bool> ptx_barrier(
-    OptionKind::User, "--ptx-barrier", "", false,
-    "Enable PTX mbarrier-style synchronization for TMA cluster-aware path.");
-Option<bool> use_stmatrix(OptionKind::User, "--stmatrix", "", false,
+    "Enable cluster-aware PTX mbarrier TMA codegen for global->shared copy. "
+    "DANGEROUS: requires matching cluster launch geometry.");
+Option<bool> use_stmatrix(OptionKind::User, "--stmatrix", "", true,
                           "Use stmatrix PTX instruction for WGMMA accumulator "
-                          "store to shared memory.");
-Option<bool> hoist_offset(
-    OptionKind::User, "--hoist-offset", "", false,
-    "Hoist loop-invariant offset/address calculations in GPU codegen.");
-Option<bool>
-    hoist_scale(OptionKind::User, "--hoist-scale", "", false,
-                "Hoist loop-invariant scale calculations in GPU codegen.");
+                          "store to shared memory (default: on).");
 Option<bool> assume_aligned_global(
     OptionKind::User, "--assume-aligned-global", "", false,
     "Assume global memory pointers are 128-bit aligned for DMA.");
-Option<bool> event_arrive_tx(
-    OptionKind::User, "--event-arrive-tx", "", false,
-    "Enable barrier_arrive_tx for shared event triggers in non-warpspec TMA "
-    "paths.");
 
 void PrintSubscriptions(std::ostream& os, const std::string& prefix,
                         const std::string& suffix, const ValueList& dims,
