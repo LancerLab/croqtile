@@ -1,0 +1,46 @@
+// REQUIRES: TARGET-CPU
+// RUN: choreo -gs %target %s -o %s.cc.result && bash %s.cc.result --execute | FileCheck --match-full-lines %s && rm -f %s.cc.result
+
+// Regression test for 2D .at() with expression indices.
+// The cc codegen was missing the row stride multiplication when
+// the index was an arbitrary expression (not a simple identifier
+// or integer literal).
+
+__co__ void expr_index_test(s32 [4, 4] M, s32 [4] out) {
+  // Init: M[i][j] = i*4+j+1
+  foreach i in 4
+    foreach j in 4
+      M.at(i, j) = i * 4 + j + 1;
+
+  // Access with expression indices: M.at(i+1, j+1) for i,j in [0,2)
+  // Expected: M[1][1]=6, M[1][2]=7, M[2][1]=10, M[2][2]=11
+  out.at(0) = M.at(0 + 1, 0 + 1);
+  out.at(1) = M.at(0 + 1, 1 + 1);
+  out.at(2) = M.at(1 + 1, 0 + 1);
+  out.at(3) = M.at(1 + 1, 1 + 1);
+}
+
+int main() {
+  auto M = choreo::make_spandata<choreo::s32>(4, 4);
+  auto out = choreo::make_spandata<choreo::s32>(4);
+
+  expr_index_test(M.view(), out.view());
+
+  std::cout << "out[0]=" << out[0] << std::endl;
+  std::cout << "out[1]=" << out[1] << std::endl;
+  std::cout << "out[2]=" << out[2] << std::endl;
+  std::cout << "out[3]=" << out[3] << std::endl;
+
+  choreo::choreo_assert(out[0] == 6, "M.at(1,1) should be 6");
+  choreo::choreo_assert(out[1] == 7, "M.at(1,2) should be 7");
+  choreo::choreo_assert(out[2] == 10, "M.at(2,1) should be 10");
+  choreo::choreo_assert(out[3] == 11, "M.at(2,2) should be 11");
+
+  std::cout << "Test expr_index_2d Passed" << std::endl;
+}
+
+// CHECK: out[0]=6
+// CHECK: out[1]=7
+// CHECK: out[2]=10
+// CHECK: out[3]=11
+// CHECK: Test expr_index_2d Passed
