@@ -134,17 +134,30 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
           llvm::dyn_cast<coir::TensorType>(op.getDest().getType());
       if (srcTy && dstTy &&
           (srcTy.hasDynamicShape() || dstTy.hasDynamicShape())) {
-        auto shapeRef = srcTy.hasDynamicShape() ? srcTy.getShape()
-                                                 : dstTy.getShape();
+        // Use the tile shape (the more constrained type from the tiled
+        // operand). For loads, source is tiled; for stores, dest is tiled.
+        auto srcTileOp =
+            op.getSource().template getDefiningOp<TensorTileOp>();
+        auto dstTileOp =
+            op.getDest().template getDefiningOp<TensorTileOp>();
+        llvm::ArrayRef<int64_t> shapeRef;
+        TensorTileOp activeTileOp = nullptr;
+        if (srcTileOp) {
+          shapeRef = srcTy.getShape();
+          activeTileOp = srcTileOp;
+        } else if (dstTileOp) {
+          shapeRef = dstTy.getShape();
+          activeTileOp = dstTileOp;
+        } else {
+          shapeRef = srcTy.hasDynamicShape() ? srcTy.getShape()
+                                              : dstTy.getShape();
+        }
         copyShapeVec.assign(shapeRef.begin(), shapeRef.end());
         unsigned numDyn = 0;
         for (auto d : shapeRef)
           if (mlir::ShapedType::isDynamic(d)) numDyn++;
-        auto tileOp = srcTy.hasDynamicShape()
-            ? op.getSource().template getDefiningOp<TensorTileOp>()
-            : op.getDest().template getDefiningOp<TensorTileOp>();
-        if (tileOp && numDyn > 0) {
-          auto indices = tileOp.getIndices();
+        if (activeTileOp && numDyn > 0) {
+          auto indices = activeTileOp.getIndices();
           unsigned rank = shapeRef.size();
           if (indices.size() >= rank + numDyn) {
             for (unsigned i = rank; i < rank + numDyn; ++i)
