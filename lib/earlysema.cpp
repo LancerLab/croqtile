@@ -1933,7 +1933,7 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   if (isa<AST::ChunkAt>(n.from) && isa<AST::ChunkAt>(n.to))
     if (cast<AST::ChunkAt>(n.from)->HasTilingOperation() &&
         cast<AST::ChunkAt>(n.to)->HasTilingOperation() &&
-        (CCtx().HasFeature(ChoreoFeature::DSDMA))) {
+        !CCtx().HasFeature(ChoreoFeature::DSDMA, CCtx().GetArch())) {
       Error1(n.LOC(),
              "slice and deslice in single DMA statement is not supported yet.");
     }
