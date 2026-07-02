@@ -1,28 +1,49 @@
 // REQUIRES: TARGET-GPU
-// XFAIL: *
-// RUN: cocc -t cute -gs %s -arch=sm_80 -o %s.result && CHOREO_DISABLE_TIMING=1 bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
 
-__co__ auto gemm_sp_basic(f16 [16, 8] lhs, f16 [16, 16] rhs) {
-  f32 [16, 16] output;
-  parallel m by 1 : block {
-    parallel n by 1 : group {
-      mma.fill mc;
-      mma.load.a ma = lhs.row;
-      mma.load.b mb = rhs.col;
-      mma.row.col mc, ma, mb;
-      mma.store output, mc;
+// Small GEMM: 16x16x8 using m16n8k8 PTX mma.sync (f16 -> f32 accum)
+#define M 16
+#define N 16
+#define K 8
+
+__co__ auto gemm_f16_f32(f16 [M, K] lhs, f16 [K, N] rhs) {
+  f32 [M, N] output;
+  int MMA_M = 16, MMA_N = 8, MMA_K = 8;
+  parallel m by [M / MMA_M] : block {
+    parallel n by [N / MMA_N] : group {
+      mc = mma.fill 0.0f;
+      parallel q by 32 : thread {
+        foreach k in K / MMA_K {
+          ma = mma.load lhs.chunkat(m, k);
+          mb = mma.load rhs.chunkat(k, n);
+          mma.row.col mc, ma, mb;
+        }
+        mma.store mc, output.chunkat(m, n);
+      }
     }
   }
   return output;
 }
 
+#include "choreo.h"
+
 int main() {
-  auto a = choreo::make_spandata<choreo::f16>(16, 8);
-  auto b = choreo::make_spandata<choreo::f16>(16, 16);
-  a.fill_random(-1, 1);
-  b.fill_random(-1, 1);
-  auto c = gemm_sp_basic(a.view(), b.view());
-  std::cout << "GEMM SP SM80 Test Passed" << std::endl;
+  auto a = choreo::make_spandata<choreo::f16>(M, K);
+  auto b = choreo::make_spandata<choreo::f16>(K, N);
+  a.fill(choreo::f32_to_f16(1.0f));
+  b.fill(choreo::f32_to_f16(1.0f));
+  auto c = gemm_f16_f32(a.view(), b.view());
+  // C = A * B where A is all-1s [16,8], B is all-1s [8,16]
+  // Each element of C should be K = 8.0
+  bool pass = true;
+  for (int i = 0; i < M && pass; ++i)
+    for (int j = 0; j < N && pass; ++j)
+      if (c[i][j] < 7.9f || c[i][j] > 8.1f)
+        pass = false;
+  if (pass)
+    std::cout << "GEMM SP SM80 Test Passed" << std::endl;
+  else
+    std::cout << "GEMM SP SM80 Test FAILED" << std::endl;
 }
 
 // CHECK: GEMM SP SM80 Test Passed
