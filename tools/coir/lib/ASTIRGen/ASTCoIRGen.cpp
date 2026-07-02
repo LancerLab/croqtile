@@ -588,6 +588,14 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
   llvm::SmallVector<DimArgInfo> dimArgs;
   llvm::StringSet<> seenDimSymbols;
 
+  // Track all (param, dim) occurrences per symbol for cross-parameter
+  // consistency checks (e.g. foo(f32[M,N] a, f32[N,K] b) => a.shape()[1]==b.shape()[0]).
+  struct DimOccurrence {
+    unsigned paramIdx;
+    unsigned dimIdx;
+  };
+  llvm::StringMap<llvm::SmallVector<DimOccurrence>> allDimOccurrences;
+
   if (cf.f_decl.params) {
     unsigned pIdx = 0;
     for (auto &inTy : fty->in_tys) {
@@ -601,6 +609,7 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
             if (v && !v->IsNumeric()) {
               if (auto *sv = dyn_cast<sbe::SymbolicValue>(v.get())) {
                 auto name = UnScopedName(sv->Value());
+                allDimOccurrences[name].push_back({pIdx, dIdx});
                 if (!seenDimSymbols.count(name)) {
                   seenDimSymbols.insert(name);
                   dimArgs.push_back({pIdx, dIdx, name});
@@ -661,6 +670,33 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
   if (!dimArgAttrs.empty())
     kernelOp->setAttr("coir.dim_args",
                        mlir::ArrayAttr::get(&IRContext(), dimArgAttrs));
+
+  // Emit cross-parameter symbolic dimension consistency checks.
+  // For each symbolic dim appearing in 2+ parameters, record pair-wise
+  // equality checks so EmitCUDA/EmitHIP can emit host-side runtime_check.
+  llvm::SmallVector<mlir::Attribute> dimCheckAttrs;
+  for (auto &entry : allDimOccurrences) {
+    auto &occs = entry.second;
+    if (occs.size() < 2) continue;
+    for (size_t i = 1; i < occs.size(); ++i) {
+      auto dict = mlir::DictionaryAttr::get(&IRContext(), {
+        mlir::NamedAttribute(mlir::StringAttr::get(&IRContext(), "name"),
+                             mlir::StringAttr::get(&IRContext(), entry.first())),
+        mlir::NamedAttribute(mlir::StringAttr::get(&IRContext(), "param0"),
+                             builder.getI64IntegerAttr(occs[i - 1].paramIdx)),
+        mlir::NamedAttribute(mlir::StringAttr::get(&IRContext(), "dim0"),
+                             builder.getI64IntegerAttr(occs[i - 1].dimIdx)),
+        mlir::NamedAttribute(mlir::StringAttr::get(&IRContext(), "param1"),
+                             builder.getI64IntegerAttr(occs[i].paramIdx)),
+        mlir::NamedAttribute(mlir::StringAttr::get(&IRContext(), "dim1"),
+                             builder.getI64IntegerAttr(occs[i].dimIdx)),
+      });
+      dimCheckAttrs.push_back(dict);
+    }
+  }
+  if (!dimCheckAttrs.empty())
+    kernelOp->setAttr("coir.dim_checks",
+                       mlir::ArrayAttr::get(&IRContext(), dimCheckAttrs));
 }
 
 bool ASTCoIRGen::Visit(AST::ChoreoFunction &) { return true; }

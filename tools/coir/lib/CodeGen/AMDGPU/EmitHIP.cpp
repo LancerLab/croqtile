@@ -563,6 +563,7 @@ private:
       auto dims = getLaunchDims(kernel);
       auto dynShmem = getDynShmemExpr(kernel, dimArgMeta);
       emitEntryAssertions(kernel, numOrigInputs, dimArgMeta);
+      emitDimChecks(kernel);
       bool asyncLaunch = isAsyncLaunch(kernel);
 
       os << "  " << devName << "<<<" << dims.gridStr() << ", "
@@ -678,6 +679,7 @@ private:
     auto dims = getLaunchDims(kernel);
     auto dynShmem = getDynShmemExpr(kernel, dimArgMeta);
     emitEntryAssertions(kernel, numOrigInputs, dimArgMeta);
+    emitDimChecks(kernel);
     bool asyncLaunch = isAsyncLaunch(kernel);
 
     os << "  " << devName << "<<<" << dims.gridStr() << ", "
@@ -931,6 +933,52 @@ private:
                                       numOrigInputs, dimArgMeta);
       os << "  choreo::runtime_check(" << cond << ", \""
          << ea.op.getMessage() << "\");\n";
+    }
+  }
+
+  struct DimCheckMeta {
+    std::string name;
+    int64_t param0, dim0;
+    int64_t param1, dim1;
+  };
+
+  llvm::SmallVector<DimCheckMeta> getDimChecks(KernelOp kernel) {
+    llvm::SmallVector<DimCheckMeta> result;
+    auto attr = kernel->getAttrOfType<ArrayAttr>("coir.dim_checks");
+    if (!attr) return result;
+    for (auto a : attr) {
+      auto dict = dyn_cast<DictionaryAttr>(a);
+      if (!dict) continue;
+      DimCheckMeta m;
+      m.name = dict.getAs<StringAttr>("name").getValue().str();
+      m.param0 = dict.getAs<IntegerAttr>("param0").getInt();
+      m.dim0 = dict.getAs<IntegerAttr>("dim0").getInt();
+      m.param1 = dict.getAs<IntegerAttr>("param1").getInt();
+      m.dim1 = dict.getAs<IntegerAttr>("dim1").getInt();
+      result.push_back(m);
+    }
+    return result;
+  }
+
+  static std::string ordinal(int n) {
+    static const char *suffixes[] = {"th", "st", "nd", "rd", "th"};
+    int v = n % 100;
+    int idx = (v >= 11 && v <= 13) ? 0 : std::min(v % 10, 4);
+    return std::to_string(n) + suffixes[idx];
+  }
+
+  void emitDimChecks(KernelOp kernel) {
+    auto checks = getDimChecks(kernel);
+    for (auto &c : checks) {
+      os() << "  choreo::runtime_check("
+           << "p" << c.param0 << ".shape()[" << c.dim0 << "]"
+           << " == "
+           << "p" << c.param1 << ".shape()[" << c.dim1 << "]"
+           << ", \"The shapes of the " << ordinal(c.param0 + 1)
+           << " parameter (dim: " << c.dim0 << ") and the "
+           << ordinal(c.param1 + 1)
+           << " parameter (dim: " << c.dim1
+           << ") are inconsistent.\");\n";
     }
   }
 
