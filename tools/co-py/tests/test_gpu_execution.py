@@ -21,7 +21,7 @@ class TestGPUExecution:
     def test_add_execute(self):
         """Element-wise add: numpy in -> GPU kernel -> numpy verify."""
         import numpy as np
-        from croqtile.runtime import run_with_numpy
+        from croqtile.runtime import execute
 
         @croq.co
         def ele_add(lhs: croq.s32[6, 64],
@@ -36,14 +36,14 @@ class TestGPUExecution:
 
         a = np.random.randint(-10, 10, (6, 64), dtype=np.int32)
         b = np.random.randint(-10, 10, (6, 64), dtype=np.int32)
-        result = run_with_numpy(prog, {"lhs": a, "rhs": b}, arch="sm_86")
+        result = execute(prog, {"lhs": a, "rhs": b})
         np.testing.assert_array_equal(result, a + b)
 
     @pytest.mark.gpu
     def test_add_shared_execute(self):
         """Element-wise add with shared memory staging."""
         import numpy as np
-        from croqtile.runtime import run_with_numpy
+        from croqtile.runtime import execute
 
         @croq.co
         def ele_add(lhs: croq.s32[6, 64],
@@ -59,14 +59,14 @@ class TestGPUExecution:
 
         a = np.random.randint(-10, 10, (6, 64), dtype=np.int32)
         b = np.random.randint(-10, 10, (6, 64), dtype=np.int32)
-        result = run_with_numpy(prog, {"lhs": a, "rhs": b}, arch="sm_86")
+        result = execute(prog, {"lhs": a, "rhs": b})
         np.testing.assert_array_equal(result, a + b)
 
     @pytest.mark.gpu
     def test_dma_copy_execute(self):
         """DMA copy: global -> shared -> global, verified with numpy."""
         import numpy as np
-        from croqtile.runtime import run_with_numpy
+        from croqtile.runtime import execute
 
         @croq.co
         def copy_kernel(src: croq.s32[4, 8]) -> croq.s32[4, 8]:
@@ -80,14 +80,14 @@ class TestGPUExecution:
         prog.add(copy_kernel)
 
         a = np.random.randint(1, 100, (4, 8), dtype=np.int32)
-        result = run_with_numpy(prog, {"src": a}, arch="sm_86")
+        result = execute(prog, {"src": a})
         np.testing.assert_array_equal(result, a)
 
     @pytest.mark.gpu
     def test_mma_matmul_execute(self):
         """WMMA matmul f16: numpy in -> GPU -> numpy verify on SM86."""
         import numpy as np
-        from croqtile.runtime import run_with_numpy
+        from croqtile.runtime import execute
 
         M, N, K = 128, 256, 256
 
@@ -116,10 +116,7 @@ class TestGPUExecution:
 
         lhs = np.random.uniform(1, 10, (M, K)).astype(np.float16)
         rhs = np.random.uniform(1, 10, (K, N)).astype(np.float16)
-        result = run_with_numpy(
-            prog, {"lhs": lhs, "rhs": rhs},
-            output_shape=(M, N), output_dtype=np.float16,
-            arch="sm_86")
+        result = execute(prog, {"lhs": lhs, "rhs": rhs})
         ref = lhs.astype(np.float32) @ rhs.astype(np.float32)
         np.testing.assert_allclose(
             result.astype(np.float32), ref, rtol=0.01)
@@ -128,7 +125,7 @@ class TestGPUExecution:
     def test_gemm_rc_mma_sync_execute(self):
         """GEMM with DMA to shared: numpy in -> GPU -> numpy verify."""
         import numpy as np
-        from croqtile.runtime import run_with_numpy
+        from croqtile.runtime import execute
 
         M, N, K = 256, 256, 256
         TILE_M, TILE_N, TILE_K = 32, 32, 16
@@ -177,10 +174,7 @@ class TestGPUExecution:
 
         lhs = np.random.uniform(1, 10, (M, K)).astype(np.float16)
         rhs = np.random.uniform(1, 10, (N, K)).astype(np.float16)
-        result = run_with_numpy(
-            prog, {"lhs": lhs, "rhs": rhs},
-            output_shape=(M, N), output_dtype=np.float16,
-            arch="sm_86")
+        result = execute(prog, {"lhs": lhs, "rhs": rhs})
         ref = lhs.astype(np.float32) @ rhs.T.astype(np.float32)
         np.testing.assert_allclose(
             result.astype(np.float32), ref, rtol=0.01)
@@ -222,7 +216,7 @@ class TestNumpyScalar:
     def test_scale_f32(self):
         """Scale f32 array by constant, verify with numpy."""
         import numpy as np
-        from croqtile.runtime import run_with_numpy
+        from croqtile.runtime import execute
 
         @croq.co
         def scale(src: croq.f32[4, 32]) -> croq.f32[4, 32]:
@@ -235,8 +229,5 @@ class TestNumpyScalar:
         prog.add(scale)
 
         a = np.random.randn(4, 32).astype(np.float32)
-        result = run_with_numpy(
-            prog, {"src": a},
-            output_shape=(4, 32), output_dtype=np.float32,
-            arch="sm_86")
+        result = execute(prog, {"src": a})
         np.testing.assert_allclose(result, a * 2, rtol=1e-5)
