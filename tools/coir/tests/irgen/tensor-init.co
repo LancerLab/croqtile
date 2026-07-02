@@ -3,8 +3,8 @@
 // IRGen test: tensor brace-initializer {val} lowers to
 // coir.tensor.alloc with init attribute.
 
-// CHECK: coir.tensor.alloc init -5 : i32 : !coir.tensor<32x4xi32, local>
-// CHECK: coir.tensor.alloc : !coir.tensor<32x4xi32, shared>
+// CHECK: coir.tensor.alloc init -5 : i32 {{.*}}: !coir.tensor<32x4xi32, local>
+// CHECK: coir.tensor.alloc {{.*}}: !coir.tensor<32x4xi32, shared>
 
 __co__ void test_init(s32[32, 4] out) {
   parallel by 1 {
