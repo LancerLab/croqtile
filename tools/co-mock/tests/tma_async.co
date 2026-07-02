@@ -1,0 +1,36 @@
+// RUN: co-mock -t cute %s 2>&1 | FileCheck %s
+// Test async TMA copy with wait.
+
+__co__ void test_tma_async() {
+  s32[8] src;
+  s32[8] dst;
+
+  foreach i in 8
+    src.at(i) = (i + 1) * 5;
+
+  f = tma.copy.async src => dst;
+  wait f;
+
+  println(dst.at(0), dst.at(3), dst.at(7));
+}
+// CHECK: 5 20 40
+
+__co__ void test_tma_pipeline() {
+  s32[4] A;
+  s32[4] B;
+  s32[4] C;
+
+  foreach i in 4
+    A.at(i) = i * 100;
+
+  f = tma.copy.async A => B;
+  wait f;
+
+  foreach i in 4
+    B.at(i) = B.at(i) + 1;
+
+  g = tma.copy B => C;
+
+  println(C.at(0), C.at(1), C.at(2), C.at(3));
+}
+// CHECK: 1 101 201 301
