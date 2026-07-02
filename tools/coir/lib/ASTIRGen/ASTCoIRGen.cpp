@@ -2772,8 +2772,10 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
     return true;
   }
 
-  // Skip non-lib BIFs that we don't yet lower (assert, print, arith)
-  if (call.IsBIF() && !call.IsLibCall()) return true;
+  // Allow print/println BIFs through; skip other non-lib BIFs (assert, arith)
+  if (call.IsBIF() && !call.IsLibCall() &&
+      fname != "print" && fname != "println")
+    return true;
 
   // Emit arguments as operands
   llvm::SmallVector<mlir::Value> operands;

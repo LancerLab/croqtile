@@ -1,0 +1,11 @@
+// RUN: cocc -t cc -es %s -o - | FileCheck %s
+//
+// Verify print and println emit std::cout on CC target.
+
+__co__ void test_print(s32 x) {
+  println(x);
+  print(x);
+}
+
+// CHECK: std::cout << {{.*}} << "\n"
+// CHECK: std::cout << {{.*}};

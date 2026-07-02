@@ -1,0 +1,16 @@
+// RUN: cocc -t cc -es %s -o - | FileCheck %s
+//
+// Verify __lib_* calls are lowered to C++ loops and std:: functions.
+
+__co__ void test_lib_unary(f32 [64] src) {
+  f32 [64] dst;
+  __lib_sqrt(dst, src, 64);
+  __lib_exp(dst, src, 64);
+  __lib_abs(dst, src, 64);
+  __lib_add(dst, src, src, 64);
+}
+
+// CHECK: for (int __i = 0; __i < {{.*}}; ++__i) {{.*}}std::sqrt
+// CHECK: for (int __i = 0; __i < {{.*}}; ++__i) {{.*}}std::exp
+// CHECK: for (int __i = 0; __i < {{.*}}; ++__i) {{.*}}std::abs
+// CHECK: for (int __i = 0; __i < {{.*}}; ++__i) {{.*}}+
