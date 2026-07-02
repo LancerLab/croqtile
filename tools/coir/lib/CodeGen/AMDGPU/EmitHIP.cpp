@@ -970,15 +970,15 @@ private:
   void emitDimChecks(KernelOp kernel) {
     auto checks = getDimChecks(kernel);
     for (auto &c : checks) {
-      os() << "  choreo::runtime_check("
-           << "p" << c.param0 << ".shape()[" << c.dim0 << "]"
-           << " == "
-           << "p" << c.param1 << ".shape()[" << c.dim1 << "]"
-           << ", \"The shapes of the " << ordinal(c.param0 + 1)
-           << " parameter (dim: " << c.dim0 << ") and the "
-           << ordinal(c.param1 + 1)
-           << " parameter (dim: " << c.dim1
-           << ") are inconsistent.\");\n";
+      os << "  choreo::runtime_check("
+         << "p" << c.param0 << ".shape()[" << c.dim0 << "]"
+         << " == "
+         << "p" << c.param1 << ".shape()[" << c.dim1 << "]"
+         << ", \"The shapes of the " << ordinal(c.param0 + 1)
+         << " parameter (dim: " << c.dim0 << ") and the "
+         << ordinal(c.param1 + 1)
+         << " parameter (dim: " << c.dim1
+         << ") are inconsistent.\");\n";
     }
   }
 
