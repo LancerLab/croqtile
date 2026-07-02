@@ -1953,37 +1953,6 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
 
 bool LivenessAnalyzer::Visit(AST::MMA& n) {
   TraceEachVisit(n);
-  auto op = n.GetOperation();
-  switch (op->Tag()) {
-  case AST::MMAOperation::Fill: break;
-  case AST::MMAOperation::Load: break;
-  case AST::MMAOperation::Exec: {
-    for (int i = 1; i <= 2; i++) {
-      auto operand = op->ExecOperand(i);
-      if (!operand) continue;
-      if (auto expr = dyn_cast<AST::Expr>(operand.get())) {
-        if (expr->op == Op::ElemOf) {
-          auto base = AST::GetArrayBaseSymbol(*expr);
-          if (base) RecordHBBufferAccess(InScopeName(base->name), "MMA-exec");
-        } else if (auto sym = expr->GetSymbol()) {
-          RecordHBBufferAccess(InScopeName(sym->name), "MMA-exec");
-        }
-      }
-    }
-    break;
-  }
-  case AST::MMAOperation::Store: {
-    auto store_to = op->StoreTo();
-    if (store_to)
-      RecordHBBufferAccess(InScopeName(store_to->RefSymbol()), "MMA-store");
-    break;
-  }
-  case AST::MMAOperation::Commit: break;
-  case AST::MMAOperation::Scale: break;
-  case AST::MMAOperation::Wait: break;
-  case AST::MMAOperation::LoadR: break;
-  }
-
   stmt_linfo[current_stmt].buffer_related = true;
   auto op = n.GetOperation();
   switch (op->Tag()) {

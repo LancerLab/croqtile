@@ -348,7 +348,6 @@ public:
     void DumpDot(std::ostream& os, const std::string& scope) const;
   };
 
-  std::map<std::string, HBGraph> hb_graphs;
   const std::map<std::string, HBGraph>& HBGraphs() const { return hb_graphs; }
 
 private:
