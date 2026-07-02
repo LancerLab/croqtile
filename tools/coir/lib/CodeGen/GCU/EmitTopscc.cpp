@@ -146,6 +146,23 @@ private:
     return "/* unknown */";
   }
 
+  std::string emitElementType(Type ty) override {
+    if (ty.isF16()) return "__fp16";
+    if (ty.isBF16()) return "__bf16";
+    if (ty.isF32()) return "float";
+    if (ty.isF64()) return "double";
+    if (isa<mlir::Float8E4M3FNType>(ty) || isa<mlir::Float8E5M2Type>(ty)) {
+      if (!supportsFP8()) return "/* unsupported_f8 */";
+      if (isa<mlir::Float8E4M3FNType>(ty)) return "tops::float_e4m3";
+      return "tops::float_e5m2";
+    }
+    if (ty.isInteger(8)) return "int8_t";
+    if (ty.isInteger(16)) return "int16_t";
+    if (ty.isInteger(32)) return "int";
+    if (ty.isInteger(64)) return "int64_t";
+    return "/* unknown */";
+  }
+
   std::string choreoType(Type ty) {
     if (ty.isF16()) return "choreo::f16";
     if (ty.isBF16()) return "choreo::bf16";
@@ -440,11 +457,8 @@ private:
                      ? dyn_cast<coir::TensorType>(fnType.getResult(0))
                      : nullptr;
 
-    // __global__ trampoline -- only when device offload is needed and
-    // the result is a tensor requiring D2H copy.
-    if (needsDevice && resTy) {
-      int retInputIdx = getReturnInputArgIdx(kernel, 0);
-      std::string eType = emitType(resTy.getElementType());
+    // __global__ trampoline -- when device offload is needed.
+    if (needsDevice) {
       bool isMultiDevice = hasDeviceParallel(kernel);
 
       if (hasGroupLevel()) {
@@ -460,8 +474,12 @@ private:
         if (i > 0) os() << ", ";
         os() << emitType(fnType.getInput(i)) << " g_in" << i;
       }
-      if (retInputIdx < 0)
-        os() << ", " << eType << "* g_out, int N";
+      if (resTy) {
+        int retInputIdx = getReturnInputArgIdx(kernel, 0);
+        std::string eType = emitType(resTy.getElementType());
+        if (retInputIdx < 0)
+          os() << ", " << eType << "* g_out, int N";
+      }
       if (isMultiDevice)
         os() << ", int __device_id";
       os() << ") {\n";
@@ -470,7 +488,7 @@ private:
         if (i > 0) os() << ", ";
         os() << "g_in" << i;
       }
-      if (retInputIdx < 0)
+      if (resTy && getReturnInputArgIdx(kernel, 0) < 0)
         os() << ", g_out";
       if (isMultiDevice)
         os() << ", __device_id";
@@ -496,12 +514,11 @@ private:
     emitDimChecks(kernel);
 
     if (needsDevice && resTy) {
-      for (auto &ea : entryAssertions) {
-        os() << "  choreo::runtime_check("
-           << getName(ea.op.getCondition()) << ", \""
-           << ea.op.getMessage().str() << "\");\n";
-      }
+      emitEntryAssertions(kernel);
       emitDeviceOffloadBody(kernel, resTy);
+    } else if (needsDevice && !resTy) {
+      emitEntryAssertions(kernel);
+      emitVoidDeviceOffloadBody(kernel);
     } else {
       // No device offload: emit the body directly (the function IS the
       // host function, just like how the AST codegen handles __co__
@@ -513,11 +530,7 @@ private:
           emitOp(&op);
         decIndent();
       }
-      for (auto &ea : entryAssertions) {
-        os() << "  choreo::runtime_check("
-           << getName(ea.op.getCondition()) << ", \""
-           << ea.op.getMessage().str() << "\");\n";
-      }
+      emitEntryAssertions(kernel);
     }
 
     os() << "}\n\n";
@@ -622,6 +635,55 @@ private:
       }
       os() << "  topsFree(__result__device);\n";
       os() << "  return __result;\n";
+    }
+  }
+
+  void emitVoidDeviceOffloadBody(KernelOp kernel) {
+    auto fnType = kernel.getFunctionType();
+    auto name = kernel.getSymName();
+    unsigned numInputs = fnType.getNumInputs();
+    auto lc = collectLaunchConfig(kernel);
+    std::string gdims = emitDim3(lc.blockDims);
+    std::string bdims = hasGroupLevel()
+                            ? emitDim3(lc.groupDims)
+                            : emitDim3(lc.threadDims);
+
+    for (unsigned i = 0; i < numInputs; ++i) {
+      auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+      if (!tty) continue;
+      if (isDeviceGlobal(tty)) {
+        std::string inEType = emitType(tty.getElementType());
+        os() << "  " << inEType << "* p" << i
+           << "__device = const_cast<" << inEType << "*>(p" << i
+           << ".data());\n";
+      } else {
+        std::string inEType = emitType(tty.getElementType());
+        int64_t bytes = getTensorBytes(tty);
+        os() << "  " << inEType << "* p" << i << "__device = nullptr;\n";
+        os() << "  topsMalloc((void**)&p" << i << "__device, "
+           << bytes << "ULL);\n";
+        os() << "  topsMemcpy(p" << i << "__device, p" << i << ".data(), "
+           << bytes << "ULL, topsMemcpyHostToDevice);\n";
+      }
+    }
+
+    os() << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
+       << bdims << ">>>(";
+    for (unsigned i = 0; i < numInputs; ++i) {
+      if (i > 0) os() << ", ";
+      auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+      if (tty)
+        os() << "p" << i << "__device";
+      else
+        os() << "p" << i;
+    }
+    os() << ");\n";
+    os() << "  topsDeviceSynchronize();\n";
+
+    for (unsigned i = 0; i < numInputs; ++i) {
+      auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+      if (!tty || isDeviceGlobal(tty)) continue;
+      os() << "  topsFree(p" << i << "__device);\n";
     }
   }
 
@@ -1638,10 +1700,12 @@ private:
 
 
   std::string getAllocQualifier(coir::TensorType tty) override {
-    return tty.getMemorySpace() ==
-                   static_cast<int32_t>(coir::TensorMemorySpace::Local)
-               ? "__local__ "
-               : "";
+    auto ms = tty.getMemorySpace();
+    if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Local))
+      return "__local__ ";
+    if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Shared))
+      return "__shared__ ";
+    return "";
   }
 
   void emitTensorAlloc(TensorAllocOp op) override {
@@ -1708,6 +1772,82 @@ private:
     default:
       os() << getIndent() << "__syncthreads();\n";
       break;
+    }
+  }
+
+  std::string emitExprInHostScope(
+      Value v, KernelOp kernel,
+      DenseMap<Value, std::string> &hostNames) {
+    auto it = hostNames.find(v);
+    if (it != hostNames.end()) return it->second;
+
+    if (auto arg = dyn_cast<BlockArgument>(v)) {
+      if (arg.getOwner()->getParentOp() == kernel.getOperation()) {
+        unsigned idx = arg.getArgNumber();
+        std::string name = "p" + std::to_string(idx);
+        hostNames[v] = name;
+        return name;
+      }
+    }
+
+    auto *defOp = v.getDefiningOp();
+    if (!defOp) return "/* unknown */";
+
+    if (auto constOp = dyn_cast<arith::ConstantOp>(defOp)) {
+      if (auto intAttr = dyn_cast<IntegerAttr>(constOp.getValue())) {
+        std::string r = std::to_string(intAttr.getInt());
+        hostNames[v] = r;
+        return r;
+      }
+    }
+    if (auto castOp = dyn_cast<arith::IndexCastOp>(defOp))
+      return emitExprInHostScope(castOp.getIn(), kernel, hostNames);
+
+    if (auto cmpOp = dyn_cast<arith::CmpIOp>(defOp)) {
+      auto lhs = emitExprInHostScope(cmpOp.getLhs(), kernel, hostNames);
+      auto rhs = emitExprInHostScope(cmpOp.getRhs(), kernel, hostNames);
+      const char *pred = "==";
+      switch (cmpOp.getPredicate()) {
+      case arith::CmpIPredicate::eq: pred = "=="; break;
+      case arith::CmpIPredicate::ne: pred = "!="; break;
+      case arith::CmpIPredicate::slt:
+      case arith::CmpIPredicate::ult: pred = "<"; break;
+      case arith::CmpIPredicate::sle:
+      case arith::CmpIPredicate::ule: pred = "<="; break;
+      case arith::CmpIPredicate::sgt:
+      case arith::CmpIPredicate::ugt: pred = ">"; break;
+      case arith::CmpIPredicate::sge:
+      case arith::CmpIPredicate::uge: pred = ">="; break;
+      }
+      std::string result = "(" + lhs + " " + pred + " " + rhs + ")";
+      hostNames[v] = result;
+      return result;
+    }
+
+    if (auto addOp = dyn_cast<arith::AddIOp>(defOp)) {
+      auto lhs = emitExprInHostScope(addOp.getLhs(), kernel, hostNames);
+      auto rhs = emitExprInHostScope(addOp.getRhs(), kernel, hostNames);
+      std::string result = "(" + lhs + " + " + rhs + ")";
+      hostNames[v] = result;
+      return result;
+    }
+    if (auto mulOp = dyn_cast<arith::MulIOp>(defOp)) {
+      auto lhs = emitExprInHostScope(mulOp.getLhs(), kernel, hostNames);
+      auto rhs = emitExprInHostScope(mulOp.getRhs(), kernel, hostNames);
+      std::string result = "(" + lhs + " * " + rhs + ")";
+      hostNames[v] = result;
+      return result;
+    }
+
+    return "/* unknown */";
+  }
+
+  void emitEntryAssertions(KernelOp kernel) {
+    DenseMap<Value, std::string> hostNames;
+    for (auto &ea : entryAssertions) {
+      auto cond = emitExprInHostScope(ea.op.getCondition(), kernel, hostNames);
+      os() << "  choreo::runtime_check(" << cond << ", \""
+         << ea.op.getMessage().str() << "\");\n";
     }
   }
 
@@ -1901,24 +2041,15 @@ private:
   void emitTensorReduceElem(TensorReduceElemOp op) override {
     std::string dst = getName(op.getDest());
     std::string val = getName(op.getValue());
+    auto destTy = cast<coir::TensorType>(op.getDest().getType());
     bool isAtomic = op->hasAttr("atomic");
     if (isAtomic) {
       os() << getIndent() << "atomicAdd(&" << dst << "[";
-      bool first = true;
-      for (auto idx : op.getIndices()) {
-        if (!first) os() << " + ";
-        first = false;
-        os() << getName(idx);
-      }
+      emitLinearIndex(op.getIndices(), destTy);
       os() << "], " << val << ");\n";
     } else {
       os() << getIndent() << dst << "[";
-      bool first = true;
-      for (auto idx : op.getIndices()) {
-        if (!first) os() << " + ";
-        first = false;
-        os() << getName(idx);
-      }
+      emitLinearIndex(op.getIndices(), destTy);
       os() << "] += " << val << ";\n";
     }
   }
@@ -1939,12 +2070,8 @@ private:
     }
 
     os() << getIndent() << fnName << "(&" << getName(op.getDest()) << "[";
-    bool first = true;
-    for (auto idx : op.getIndices()) {
-      if (!first) os() << " + ";
-      first = false;
-      os() << getName(idx);
-    }
+    auto destTy = cast<coir::TensorType>(op.getDest().getType());
+    emitLinearIndex(op.getIndices(), destTy);
     os() << "], " << getName(op.getValue());
     if (op.getKind() == AK::CAS && op.getCompare()) {
       auto cmpAttr = *op.getCompare();
