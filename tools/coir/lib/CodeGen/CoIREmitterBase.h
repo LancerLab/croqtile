@@ -136,6 +136,14 @@ protected:
   // -- Alloc qualifier hook --
   virtual std::string getAllocQualifier(coir::TensorType tty);
   virtual bool needsTMAAlignment(coir::TensorType tty);
+
+  // -- Target capability queries (override per target/arch) --
+  virtual bool hasGroupLevel() const { return false; }
+  virtual bool supportsFP8() const { return false; }
+  virtual bool supportsFP6() const { return false; }
+  virtual bool supportsFP4() const { return false; }
+  virtual bool supportsLaunchBounds() const { return false; }
+  virtual bool supportsMaxNreg() const { return false; }
 };
 
 } // namespace coir
