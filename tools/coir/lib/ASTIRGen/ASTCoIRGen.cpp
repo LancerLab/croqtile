@@ -2074,30 +2074,8 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
 
   if (!srcVal || !dstVal) return true;
 
-  auto srcTensor = mlir::dyn_cast<coir::TensorType>(srcVal.getType());
-  auto dstTensor = mlir::dyn_cast<coir::TensorType>(dstVal.getType());
-  if (srcTensor && dstTensor) {
-    auto srcShape = srcTensor.getShape();
-    auto dstShape = dstTensor.getShape();
-    int64_t srcElems = 1, dstElems = 1;
-    bool srcStatic = true, dstStatic = true;
-    for (auto s : srcShape) {
-      if (s < 0) { srcStatic = false; break; }
-      srcElems *= s;
-    }
-    for (auto s : dstShape) {
-      if (s < 0) { dstStatic = false; break; }
-      dstElems *= s;
-    }
-    if (srcStatic && dstStatic && srcElems > dstElems) {
-      auto srcC = builder.create<mlir::arith::ConstantIndexOp>(loc, srcElems);
-      auto dstC = builder.create<mlir::arith::ConstantIndexOp>(loc, dstElems);
-      auto cmp = builder.create<mlir::arith::CmpIOp>(
-          loc, mlir::arith::CmpIPredicate::sle, srcC, dstC);
-      EmitAssert(loc, cmp, "DMA copy: src elements exceed dst capacity",
-                 coir::AssertSite::USE, coir::AssertUsage::SHAPE_COMPAT);
-    }
-  }
+  // DMA shape-compatibility is already assessed by SemaChecker and
+  // materialized via EmitNodeAssertions; no ad-hoc IR-level check needed.
 
   bool isAsync = dma.IsAsync();
 

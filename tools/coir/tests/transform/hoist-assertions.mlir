@@ -1,19 +1,19 @@
 // RUN: coir-opt --coir-hoist-assertions %s | FileCheck %s
 
-// Test 1: Assert whose condition only depends on constants (kernel-arg
+// Test 1: Assert whose condition only depends on kernel args (kernel-arg
 // invariant) -> hoisted to ENTRY with its def-chain, moved before the loop.
 // CHECK-LABEL: coir.kernel @test_hoist_to_entry
 coir.kernel @test_hoist_to_entry(
     %src: !coir.tensor<128x64xf32, global>,
-    %dst: !coir.tensor<128x64xf32, shared>) {
+    %dst: !coir.tensor<?x64xf32, shared>,
+    %dim: index) {
   %c16 = arith.constant 16 : index
   // CHECK: arith.cmpi sle
   // CHECK-NEXT: coir.assert {{.*}} <entry>
   // CHECK: coir.foreach
   coir.foreach %k in %c16 {
     %c8192 = arith.constant 8192 : index
-    %c8192_0 = arith.constant 8192 : index
-    %cmp = arith.cmpi sle, %c8192, %c8192_0 : index
+    %cmp = arith.cmpi sle, %c8192, %dim : index
     coir.assert %cmp, "shape check" <use> <shape_compat>
     coir.yield
   }
@@ -37,11 +37,11 @@ coir.kernel @test_stay_at_use(
 // Test 3: Assert already at ENTRY -> left in place.
 // CHECK-LABEL: coir.kernel @test_already_entry
 coir.kernel @test_already_entry(
-    %src: !coir.tensor<128x64xf32, global>) {
+    %src: !coir.tensor<128x64xf32, global>,
+    %dim: index) {
   // CHECK: coir.assert {{.*}} <entry>
-  %c128 = arith.constant 128 : index
   %c0 = arith.constant 0 : index
-  %cmp = arith.cmpi sgt, %c128, %c0 : index
+  %cmp = arith.cmpi sgt, %dim, %c0 : index
   coir.assert %cmp, "positive dim" <entry> <hw_constraint>
 }
 
@@ -73,7 +73,8 @@ coir.kernel @test_if_with_loop_iv(
 // -> can hoist to ENTRY.
 // CHECK-LABEL: coir.kernel @test_independent_in_if
 coir.kernel @test_independent_in_if(
-    %arg0: !coir.tensor<128xf32, global>) {
+    %arg0: !coir.tensor<128xf32, global>,
+    %limit: index) {
   %c16 = arith.constant 16 : index
   // CHECK: coir.assert {{.*}} <entry>
   // CHECK: coir.foreach
@@ -81,9 +82,8 @@ coir.kernel @test_independent_in_if(
     %c64 = arith.constant 64 : index
     %guard = arith.cmpi slt, %k, %c64 : index
     scf.if %guard {
-      %c100 = arith.constant 100 : index
       %c0 = arith.constant 0 : index
-      %check = arith.cmpi sgt, %c100, %c0 : index
+      %check = arith.cmpi sgt, %limit, %c0 : index
       coir.assert %check, "independent check" <use> <hw_constraint>
       scf.yield
     }
@@ -120,7 +120,8 @@ coir.kernel @test_if_result_pin(
 // Test 7: Assert inside scf.while body -> conservative, stays in while.
 // CHECK-LABEL: coir.kernel @test_scf_while_conservative
 coir.kernel @test_scf_while_conservative(
-    %arg0: !coir.tensor<128xf32, global>) {
+    %arg0: !coir.tensor<128xf32, global>,
+    %limit: index) {
   %c0 = arith.constant 0 : i32
   %c128 = arith.constant 128 : i32
   %res = scf.while (%i = %c0) : (i32) -> i32 {
@@ -128,9 +129,8 @@ coir.kernel @test_scf_while_conservative(
     scf.condition(%cond) %i : i32
   } do {
   ^bb0(%iv: i32):
-    %c100 = arith.constant 100 : index
     %c0_1 = arith.constant 0 : index
-    %check = arith.cmpi sgt, %c100, %c0_1 : index
+    %check = arith.cmpi sgt, %limit, %c0_1 : index
     // CHECK: scf.while
     // CHECK: coir.assert {{.*}} <use>
     coir.assert %check, "inside scf.while" <use> <hw_constraint>
@@ -144,7 +144,8 @@ coir.kernel @test_scf_while_conservative(
 // Test 8: Assert inside coir.while body -> conservative, stays in while.
 // CHECK-LABEL: coir.kernel @test_coir_while_conservative
 coir.kernel @test_coir_while_conservative(
-    %arg0: !coir.tensor<128xf32, global>) {
+    %arg0: !coir.tensor<128xf32, global>,
+    %limit: index) {
   %c0 = arith.constant 0 : i32
   %c128 = arith.constant 128 : i32
   %res = coir.while (%i = %c0) : (i32) -> (i32) {
@@ -152,9 +153,8 @@ coir.kernel @test_coir_while_conservative(
     coir.while.cond(%cond) %i : i32
   } {
   ^bb0(%ib: i32):
-    %c100 = arith.constant 100 : index
     %c0_1 = arith.constant 0 : index
-    %check = arith.cmpi sgt, %c100, %c0_1 : index
+    %check = arith.cmpi sgt, %limit, %c0_1 : index
     // CHECK: coir.while
     // CHECK: coir.assert {{.*}} <use>
     coir.assert %check, "inside coir.while" <use> <hw_constraint>
@@ -166,22 +166,22 @@ coir.kernel @test_coir_while_conservative(
 }
 
 // Test 9: Assert inside nested foreach + scf.if.
-// Condition uses only outer foreach args -> hoists past inner foreach
-// and scf.if to outer foreach level.
+// Condition uses only kernel args -> hoists past inner foreach
+// and scf.if to ENTRY.
 // CHECK-LABEL: coir.kernel @test_nested_hoist
 coir.kernel @test_nested_hoist(
-    %arg0: !coir.tensor<128xf32, global>) {
+    %arg0: !coir.tensor<128xf32, global>,
+    %limit: index) {
   %c8 = arith.constant 8 : index
+  // CHECK: coir.assert {{.*}} <entry>
+  // CHECK: coir.foreach
   coir.foreach %i in %c8 {
     %c4 = arith.constant 4 : index
     coir.foreach %j in %c4 {
       %guard = arith.cmpi slt, %j, %c4 : index
       scf.if %guard {
-        %c100 = arith.constant 100 : index
         %c0 = arith.constant 0 : index
-        %check = arith.cmpi sgt, %c100, %c0 : index
-        // Deps are all constants -> should hoist to ENTRY
-        // CHECK: coir.assert {{.*}} <entry>
+        %check = arith.cmpi sgt, %limit, %c0 : index
         coir.assert %check, "nested independent" <use> <hw_constraint>
         scf.yield
       }
@@ -189,4 +189,15 @@ coir.kernel @test_nested_hoist(
     }
     coir.yield
   }
+}
+
+// Test 10: Assert with constant-true predicate is eliminated entirely.
+// CHECK-LABEL: coir.kernel @test_const_true_elim
+// CHECK-NOT: coir.assert
+coir.kernel @test_const_true_elim(
+    %arg0: !coir.tensor<128xf32, global>) {
+  %c128 = arith.constant 128 : index
+  %c0 = arith.constant 0 : index
+  %cmp = arith.cmpi sgt, %c128, %c0 : index
+  coir.assert %cmp, "trivially true" <use> <shape_compat>
 }
