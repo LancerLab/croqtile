@@ -256,6 +256,8 @@ private:
     SmallVector<int64_t> groupDims;  // GROUP bounds -> blockDim (gcu400+)
     SmallVector<int64_t> threadDims; // THREAD bounds -> blockDim (gcu300) or
                                      // __thread_dims__ (gcu400+)
+    std::string streamName;
+    bool isAsync = false;
   };
 
   LaunchConfig collectLaunchConfig(KernelOp kernel) {
@@ -265,9 +267,16 @@ private:
       switch (p.getLevel()) {
       case ParallelLevel::BLOCK:
         for (auto b : bounds) lc.blockDims.push_back(b);
+        if (p.getStreamAttr())
+          lc.streamName = p.getStreamAttr().getValue().str();
+        if (p.getIsAsyncAttr() && p.getIsAsyncAttr().getValue())
+          lc.isAsync = true;
         break;
       case ParallelLevel::GROUP:
         for (auto b : bounds) lc.groupDims.push_back(b);
+        break;
+      case ParallelLevel::GROUPx4:
+        for (auto b : bounds) lc.groupDims.push_back(b * 4);
         break;
       case ParallelLevel::THREAD:
         for (auto b : bounds) lc.threadDims.push_back(b);
@@ -407,6 +416,28 @@ private:
     int64_t param1, dim1;
   };
 
+  struct DimArgMeta {
+    int64_t paramIdx;
+    int64_t dimIdx;
+    std::string name;
+  };
+
+  llvm::SmallVector<DimArgMeta> getDimArgs(KernelOp kernel) {
+    llvm::SmallVector<DimArgMeta> result;
+    auto attr = kernel->getAttrOfType<ArrayAttr>("coir.dim_args");
+    if (!attr) return result;
+    for (auto a : attr) {
+      auto dict = dyn_cast<DictionaryAttr>(a);
+      if (!dict) continue;
+      DimArgMeta m;
+      m.paramIdx = dict.getAs<IntegerAttr>("param").getInt();
+      m.dimIdx = dict.getAs<IntegerAttr>("dim").getInt();
+      m.name = dict.getAs<StringAttr>("name").getValue().str();
+      result.push_back(m);
+    }
+    return result;
+  }
+
   llvm::SmallVector<DimCheckMeta> getDimChecks(KernelOp kernel) {
     llvm::SmallVector<DimCheckMeta> result;
     auto attr = kernel->getAttrOfType<ArrayAttr>("coir.dim_checks");
@@ -497,19 +528,31 @@ private:
     }
 
     // Host function signature.
+    auto dimArgMeta = getDimArgs(kernel);
+    unsigned numOrigInputs = numInputs - dimArgMeta.size();
+    llvm::SmallVector<llvm::StringRef> hostElemHints;
+    if (auto attr = kernel->getAttrOfType<ArrayAttr>("coir.host_elem_types"))
+      for (auto a : attr)
+        hostElemHints.push_back(cast<StringAttr>(a).getValue());
     os() << hostReturnType(fnType) << " " << name.str() << "(";
-    for (unsigned i = 0; i < numInputs; ++i) {
+    for (unsigned i = 0; i < numOrigInputs; ++i) {
       if (i > 0) os() << ", ";
       auto inTy = fnType.getInput(i);
       if (auto tensorTy = dyn_cast<coir::TensorType>(inTy)) {
         unsigned inDim = tensorTy.getShape().size();
+        std::string elemStr = (i < hostElemHints.size() && !hostElemHints[i].empty())
+            ? ("choreo::" + hostElemHints[i].str())
+            : choreoType(tensorTy.getElementType());
         os() << "const choreo::spanned_view<"
-           << choreoType(tensorTy.getElementType()) << ", "
-           << inDim << "> & p" << i;
+           << elemStr << ", " << inDim << "> & p" << i;
       } else {
         os() << emitType(inTy) << " p" << i;
       }
     }
+    // Add stream parameter if kernel uses a named stream
+    auto lcForHost = collectLaunchConfig(kernel);
+    if (!lcForHost.streamName.empty())
+      os() << ", topsStream_t " << lcForHost.streamName;
     os() << ") {\n";
     emitDimChecks(kernel);
 
@@ -545,6 +588,8 @@ private:
     auto fnType = kernel.getFunctionType();
     auto name = kernel.getSymName();
     unsigned numInputs = fnType.getNumInputs();
+    auto dimArgMeta = getDimArgs(kernel);
+    unsigned numOrigInputs = numInputs - dimArgMeta.size();
     int retInputIdx = getReturnInputArgIdx(kernel, 0);
     std::string eType = emitType(resTy.getElementType());
     std::string choreoElem = choreoType(resTy.getElementType());
@@ -564,16 +609,16 @@ private:
       return;
     }
 
-    for (unsigned i = 0; i < numInputs; ++i) {
+    for (unsigned i = 0; i < numOrigInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (tty && isDeviceGlobal(tty)) {
         std::string inEType = emitType(tty.getElementType());
         os() << "  " << inEType << "* p" << i
            << "__device = const_cast<" << inEType << "*>(p" << i
            << ".data());\n";
-      } else {
-        int64_t bytes = tty ? getTensorBytes(tty) : resBytes;
-        std::string inEType = tty ? emitType(tty.getElementType()) : eType;
+      } else if (tty) {
+        int64_t bytes = getTensorBytes(tty);
+        std::string inEType = emitType(tty.getElementType());
         os() << "  " << inEType << "* p" << i << "__device = nullptr;\n";
         os() << "  topsMalloc((void**)&p" << i << "__device, "
            << bytes << "ULL);\n";
@@ -596,16 +641,18 @@ private:
     if (retInputIdx >= 0) {
       os() << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
          << bdims << ">>>(";
-      for (unsigned i = 0; i < numInputs; ++i) {
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os() << ", ";
         os() << "p" << i << "__device";
       }
+      for (auto &da : dimArgMeta)
+        os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
       os() << ");\n";
       os() << "  topsDeviceSynchronize();\n";
       os() << "  topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
          << ".data()), p" << retInputIdx << "__device, "
          << resBytes << "ULL, topsMemcpyDeviceToHost);\n";
-      for (unsigned i = 0; i < numInputs; ++i) {
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
         auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
         if (tty && isDeviceGlobal(tty)) continue;
         os() << "  topsFree(p" << i << "__device);\n";
@@ -620,15 +667,17 @@ private:
          << "ULL);\n";
       os() << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
          << bdims << ">>>(";
-      for (unsigned i = 0; i < numInputs; ++i) {
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os() << ", ";
         os() << "p" << i << "__device";
       }
+      for (auto &da : dimArgMeta)
+        os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
       os() << ", __result__device, " << resN << ");\n";
       os() << "  topsDeviceSynchronize();\n";
       os() << "  topsMemcpy(__result.data(), __result__device, "
          << resBytes << "ULL, topsMemcpyDeviceToHost);\n";
-      for (unsigned i = 0; i < numInputs; ++i) {
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
         auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
         if (tty && isDeviceGlobal(tty)) continue;
         os() << "  topsFree(p" << i << "__device);\n";
@@ -642,13 +691,15 @@ private:
     auto fnType = kernel.getFunctionType();
     auto name = kernel.getSymName();
     unsigned numInputs = fnType.getNumInputs();
+    auto dimArgMeta = getDimArgs(kernel);
+    unsigned numOrigInputs = numInputs - dimArgMeta.size();
     auto lc = collectLaunchConfig(kernel);
     std::string gdims = emitDim3(lc.blockDims);
     std::string bdims = hasGroupLevel()
                             ? emitDim3(lc.groupDims)
                             : emitDim3(lc.threadDims);
 
-    for (unsigned i = 0; i < numInputs; ++i) {
+    for (unsigned i = 0; i < numOrigInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (!tty) continue;
       if (isDeviceGlobal(tty)) {
@@ -669,18 +720,22 @@ private:
 
     os() << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
        << bdims << ">>>(";
-    for (unsigned i = 0; i < numInputs; ++i) {
-      if (i > 0) os() << ", ";
+    bool first = true;
+    for (unsigned i = 0; i < numOrigInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+      if (!first) os() << ", ";
+      first = false;
       if (tty)
         os() << "p" << i << "__device";
       else
         os() << "p" << i;
     }
+    for (auto &da : dimArgMeta)
+      os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
     os() << ");\n";
     os() << "  topsDeviceSynchronize();\n";
 
-    for (unsigned i = 0; i < numInputs; ++i) {
+    for (unsigned i = 0; i < numOrigInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (!tty || isDeviceGlobal(tty)) continue;
       os() << "  topsFree(p" << i << "__device);\n";
@@ -836,6 +891,8 @@ private:
       emitElementCopy(elemCopy);
     else if (auto storeTile = dyn_cast<TensorStoreTileOp>(op))
       emitTensorStoreTile(storeTile);
+    else if (auto tmaCopy = dyn_cast<TmaCopyOp>(op))
+      emitTmaCopyDiagnostic(tmaCopy);
     else
       CoIREmitterBase::emitOpFallback(op);
   }
@@ -868,6 +925,7 @@ private:
       idPrefix = "__tops_bid_";
       break;
     case ParallelLevel::GROUP:
+    case ParallelLevel::GROUPx4:
       useHwId = true;
       idPrefix = "__tops_tid_";
       break;
@@ -974,22 +1032,50 @@ private:
       return;
     }
 
-    os() << getIndent() << "auto " << name << " = " << getName(op.getSource());
-    if (srcTy && !indices.empty()) {
-      os() << " + (";
-      auto srcShape = srcTy.getShape();
-      auto tileShape = tileTy ? tileTy.getShape() : llvm::ArrayRef<int64_t>{};
-      for (unsigned i = 0; i < indices.size(); ++i) {
-        if (i > 0) os() << " + ";
-        os() << getName(indices[i]);
-        int64_t tileDim = (i < tileShape.size()) ? tileShape[i] : 1;
-        os() << " * " << tileDim;
-        for (unsigned j = i + 1; j < srcShape.size(); ++j)
-          os() << " * " << srcShape[j];
+    auto srcShape = srcTy.getShape();
+    auto tileShape = tileTy ? tileTy.getShape() : llvm::ArrayRef<int64_t>{};
+
+    // Compute row-major source strides
+    llvm::SmallVector<int64_t> srcStrides(srcShape.size());
+    {
+      int64_t s = 1;
+      for (int i = (int)srcShape.size() - 1; i >= 0; --i) {
+        srcStrides[i] = s;
+        s *= srcShape[i];
       }
-      os() << ")";
     }
-    os() << ";\n";
+
+    // Determine per-index tile size, detecting wildcards (const-0 on large dim)
+    llvm::SmallVector<int64_t> perIdxTileSize(indices.size(), 1);
+    if (indices.size() == srcShape.size() &&
+        tileShape.size() == srcShape.size()) {
+      for (unsigned i = 0; i < indices.size(); ++i)
+        perIdxTileSize[i] = tileShape[i];
+    } else {
+      for (unsigned i = 0; i < indices.size() && i < srcShape.size(); ++i) {
+        bool isConst0 = false;
+        if (auto constOp = indices[i].getDefiningOp<arith::ConstantOp>())
+          if (auto intAttr = dyn_cast<IntegerAttr>(constOp.getValue()))
+            if (intAttr.getInt() == 0)
+              isConst0 = true;
+        if (isConst0 && srcShape[i] > 1)
+          perIdxTileSize[i] = srcShape[i];
+        else
+          perIdxTileSize[i] = 1;
+      }
+    }
+
+    os() << getIndent() << "auto " << name << " = " << getName(op.getSource())
+         << " + (";
+    for (unsigned i = 0; i < indices.size(); ++i) {
+      if (i > 0) os() << " + ";
+      os() << getName(indices[i]);
+      int64_t stride = perIdxTileSize[i];
+      for (unsigned j = i + 1; j < srcShape.size(); ++j)
+        stride *= srcShape[j];
+      os() << " * " << stride;
+    }
+    os() << ");\n";
   }
 
   // -- MMA emission for GCU (acore::matmul micro-kernel backend) -----------
@@ -1766,6 +1852,7 @@ private:
       os() << getIndent() << "__syncthreads();\n";
       break;
     case coir::ParallelLevel::GROUP:
+    case coir::ParallelLevel::GROUPx4:
       os() << getIndent() << "__syncsubthreads();\n";
       break;
     case coir::ParallelLevel::DEVICE:
@@ -1873,10 +1960,12 @@ private:
     std::string src = getName(op.getSource());
     std::string dst = getName(op.getDest());
     std::string idx = "i" + std::to_string(nextId++);
-    os() << getIndent() << "for (int " << idx << " = 0; " << idx << " < "
-       << totalElems << "; ++" << idx << ")\n";
+    // Cooperative block-parallel copy: each thread handles a stride
+    os() << getIndent() << "for (int " << idx << " = __tops_tid_x(); " << idx
+       << " < " << totalElems << "; " << idx << " += __tops_num_threads())\n";
     os() << getIndent() << "  " << dst << "[" << idx << "] = " << src
        << "[" << idx << "];\n";
+    os() << getIndent() << "__syncthreads();\n";
   }
 
   void emitTensorStoreTile(TensorStoreTileOp op) {
@@ -1916,6 +2005,12 @@ private:
          << tileElems << "; ++" << idx << ")\n";
     os() << getIndent() << "  " << dest << "[" << offset << " + " << idx
          << "] = " << tile << "[" << idx << "];\n";
+  }
+
+  void emitTmaCopyDiagnostic(TmaCopyOp op) {
+    op.emitError("topscc target does not support coir.tma.copy; "
+                 "use coir.dma.copy or lower via ConvertToGCU pass");
+    os() << getIndent() << "#error \"coir.tma.copy unsupported on topscc\"\n";
   }
 
   void emitEventTrigger(EventTriggerOp op) {
@@ -2034,7 +2129,23 @@ private:
 
   void emitCall(CallOp op) {
     auto callee = op.getCallee().str();
-    os() << getIndent() << callee;
+    bool isExpr = op.getIsExpr() && *op.getIsExpr() && op.getResult();
+    bool isBif = op.getIsBif() && *op.getIsBif();
+
+    std::string funcName = callee;
+    if (isBif) {
+      llvm::StringRef ref(callee);
+      if (ref.starts_with("__")) ref = ref.drop_front(2);
+      funcName = ref.str();
+    }
+
+    os() << getIndent();
+    if (isExpr) {
+      auto resTy = op.getResult().getType();
+      os() << emitType(resTy) << " " << getName(op.getResult()) << " = ";
+    }
+
+    os() << funcName;
 
     // Template arguments
     if (auto tplArgs = op.getTemplateArgs()) {
