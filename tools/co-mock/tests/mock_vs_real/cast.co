@@ -1,0 +1,15 @@
+// Mock-vs-Real comparison: explicit type cast.
+
+__co__ void test() {
+  f32 pi = 3.14;
+  s32 rounded = __to<s32>(pi);
+  println(rounded);
+
+  f32 neg = -2.7;
+  s32 neg_i = __to<s32>(neg);
+  println(neg_i);
+
+  s32 x = 42;
+  f32 fx = __to<f32>(x);
+  println(fx);
+}

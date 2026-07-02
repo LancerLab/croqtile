@@ -1,0 +1,19 @@
+// Mock-vs-Real comparison: 2D array operations.
+
+__co__ void test() {
+  s32[3, 3] mat;
+  foreach i in 3
+    foreach j in 3
+      mat.at(i, j) = i * 3 + j + 1;
+
+  // Print each element on its own line
+  foreach i in 3
+    foreach j in 3
+      println(mat.at(i, j));
+
+  // Sum of diagonal
+  mutable s32 trace = 0;
+  foreach i in 3
+    trace = trace + mat.at(i, i);
+  println(trace);
+}
