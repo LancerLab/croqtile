@@ -962,24 +962,12 @@ private:
       }
       os() << ") {\n";
 
-      std::string eType = "int8_t";
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
         if (!tty) continue;
-        eType = emitElementType(tty.getElementType());
-        int64_t bytes = getTensorBytes(tty);
-        os() << "  " << eType << "* p" << i << "__device = nullptr;\n";
-        if (bytes < 0) {
-          os() << "  cudaMalloc(&p" << i << "__device, p" << i
-             << ".element_count() * sizeof(" << eType << "));\n";
-          os() << "  cudaMemcpy(p" << i << "__device, p" << i << ".data(), p"
-             << i << ".element_count() * sizeof(" << eType
-             << "), cudaMemcpyHostToDevice);\n";
-        } else {
-          os() << "  cudaMalloc(&p" << i << "__device, " << bytes << "ULL);\n";
-          os() << "  cudaMemcpy(p" << i << "__device, p" << i << ".data(), "
-             << bytes << "ULL, cudaMemcpyHostToDevice);\n";
-        }
+        std::string eType = emitElementType(tty.getElementType());
+        os() << "  " << eType << "* p" << i << "__device = (" << eType
+             << "*)p" << i << ".data();\n";
       }
 
       // TMA descriptor setup
@@ -1093,10 +1081,6 @@ private:
           os() << "  cudaDeviceSynchronize();\n";
       }
 
-      for (unsigned i = 0; i < numOrigInputs; ++i) {
-        if (isa<coir::TensorType>(fnType.getInput(i)))
-          os() << "  cudaFree(p" << i << "__device);\n";
-      }
       os() << "}\n\n";
       return;
     }
@@ -2923,24 +2907,54 @@ private:
     int64_t wildcardStride = 1;
 
     llvm::SmallVector<int64_t> perIdxTileSize(indices.size(), 1);
+    // Map each index to its corresponding source dimension.
+    // When indices.size() < srcShape.size(), indices correspond to the tiled
+    // dimensions (those where srcShape[d] != tileShape[d]).
+    llvm::SmallVector<unsigned> idxToDim(indices.size(), 0);
+
     if (indices.size() == srcShape.size() &&
         tileShape.size() == srcShape.size()) {
-      for (unsigned i = 0; i < indices.size(); ++i)
+      for (unsigned i = 0; i < indices.size(); ++i) {
         perIdxTileSize[i] = tileShape[i];
+        idxToDim[i] = i;
+      }
     } else {
-      for (unsigned i = 0; i < indices.size() && i < srcShape.size(); ++i) {
-        bool isConst0 = false;
-        if (auto constOp = indices[i].getDefiningOp<arith::ConstantOp>())
-          if (auto intAttr = dyn_cast<IntegerAttr>(constOp.getValue()))
-            if (intAttr.getInt() == 0)
-              isConst0 = true;
+      // Find tiled dimensions (where tile size < src size)
+      llvm::SmallVector<unsigned> tiledDims;
+      llvm::SmallVector<unsigned> wildcardDims;
+      for (unsigned d = 0; d < srcShape.size(); ++d) {
+        if (d < tileShape.size() && tileShape[d] < srcShape[d])
+          tiledDims.push_back(d);
+        else
+          wildcardDims.push_back(d);
+      }
 
-        if (isConst0 && srcShape[i] > 1) {
-          perIdxTileSize[i] = srcShape[i];
+      // Match indices to tiled dims; if mismatch, fall back to positional
+      if (tiledDims.size() == indices.size()) {
+        for (unsigned i = 0; i < indices.size(); ++i) {
+          idxToDim[i] = tiledDims[i];
+          perIdxTileSize[i] = tileShape[tiledDims[i]];
+        }
+      } else {
+        for (unsigned i = 0; i < indices.size() && i < srcShape.size(); ++i) {
+          idxToDim[i] = i;
+          bool isConst0 = false;
+          if (auto constOp = indices[i].getDefiningOp<arith::ConstantOp>())
+            if (auto intAttr = dyn_cast<IntegerAttr>(constOp.getValue()))
+              if (intAttr.getInt() == 0)
+                isConst0 = true;
+          if (isConst0 && srcShape[i] > 1)
+            perIdxTileSize[i] = srcShape[i];
+          else
+            perIdxTileSize[i] = 1;
+        }
+      }
+
+      // Mark wildcard dimensions for stride tracking
+      for (unsigned d : wildcardDims) {
+        if (d < srcShape.size() && srcShape[d] > 1) {
           hasWildcard = true;
-          wildcardStride = srcStrides[i];
-        } else {
-          perIdxTileSize[i] = 1;
+          wildcardStride = srcStrides[d];
         }
       }
     }
@@ -2958,8 +2972,9 @@ private:
     for (unsigned i = 0; i < indices.size(); ++i) {
       if (i > 0) os() << " + ";
       os() << getName(indices[i]);
+      unsigned dim = idxToDim[i];
       int64_t stride = perIdxTileSize[i];
-      for (unsigned j = i + 1; j < srcShape.size(); ++j)
+      for (unsigned j = dim + 1; j < srcShape.size(); ++j)
         stride *= srcShape[j];
       os() << " * " << stride;
     }
