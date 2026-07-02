@@ -2913,9 +2913,10 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
       live_chunk_aliases.erase(scoped_name);
     }
 
-    // Propagate swizzle for ElemOf-based aliases (e.g., `ma = lhs_load_s[stage]`).
-    // When the RHS is an array element access into a swizzled shared buffer,
-    // record the swizzle for the alias name so direct WGMMA can find it.
+    // Propagate swizzle for ElemOf-based aliases (e.g., `ma =
+    // lhs_load_s[stage]`). When the RHS is an array element access into a
+    // swizzled shared buffer, record the swizzle for the alias name so direct
+    // WGMMA can find it.
     if (sty && sty->GetStorage() == Storage::SHARED) {
       auto rhs_expr = dyn_cast<AST::Expr>(n.value.get());
       if (rhs_expr && rhs_expr->GetOp() == Op::ElemOf) {
@@ -5895,11 +5896,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       bool stmatrix_ok = use_stmatrix && f_sty->GetStorage() == Storage::SHARED;
       if (stmatrix_ok) {
         auto n_val = VIInt(ssmi.shape.at(1));
-        if (!n_val || *n_val % 8 != 0)
-          stmatrix_ok = false;
+        if (!n_val || *n_val % 8 != 0) stmatrix_ok = false;
       }
-      if (stmatrix_ok && (need_m_mask || need_n_mask))
-        stmatrix_ok = false;
+      if (stmatrix_ok && (need_m_mask || need_n_mask)) stmatrix_ok = false;
       if (stmatrix_ok) {
         bool is_f32_acc = (accum_type == BaseType::F32);
         bool is_f32_dest = (f_sty->ElementType() == BaseType::F32);
@@ -7781,8 +7780,7 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
         }
       }
 
-      if (hoisted_scale_accum_scopes.back().has_value() &&
-          invariant_to_loop &&
+      if (hoisted_scale_accum_scopes.back().has_value() && invariant_to_loop &&
           !active_hoisted_scale_decls.count(scale_a_name)) {
         ds << d_indent << "float* " << scale_a_name << " = (float*)("
            << scale_a_expr << ");\n";
@@ -8834,8 +8832,24 @@ void CuteCodeGen::EmitMemReuse(const std::string& df_name) {
   }
   for (const auto& [sto, ie] : mri->infos) {
     hs << h_indent << "HeapSimulator " << ie.simulator << ";\n";
-    hs << h_indent << "HeapSimulator::Result " << ie.result << " = "
-       << ie.simulator << ".Allocate(" << ie.chunks_name << ", 512);\n";
+    size_t align = ie.alignment ? ie.alignment : 512;
+    if (ie.n_buffers > 0 && !ie.interference.empty()) {
+      // Emit pre-computed interference matrix (incorporates SALA HB analysis)
+      std::string imat_name = ie.chunks_name + "_imat";
+      hs << h_indent << "std::vector<bool> " << imat_name << " = {";
+      for (size_t k = 0; k < ie.interference.size(); ++k) {
+        if (k) hs << ",";
+        hs << (ie.interference[k] ? "true" : "false");
+      }
+      hs << "};\n";
+      hs << h_indent << "HeapSimulator::Result " << ie.result << " = "
+         << ie.simulator << ".Allocate(" << ie.chunks_name << ", " << align
+         << ", " << imat_name << ");\n";
+    } else {
+      hs << h_indent << "HeapSimulator::Result " << ie.result << " = "
+         << ie.simulator << ".Allocate(" << ie.chunks_name << ", " << align
+         << ");\n";
+    }
     hs << h_indent << "unsigned " << ie.spm_size << " = " << ie.result
        << ".heap_size;\n";
     // special host runtime check

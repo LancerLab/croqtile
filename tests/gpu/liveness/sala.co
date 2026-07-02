@@ -663,12 +663,14 @@ __co__ void pos_foreach_and_at() {
 // CHECK: y = (f16*)(anon_{{[0-9]+}} + 0)
 
 // ------------------------------------------------------------
-// NEGATIVE: Pipeline with bidirectional signals (cyclic)
+// POSITIVE: Pipeline with bidirectional signals (cyclic)
 // WG0: trigger empty; foreach { wait sig; use(x); trigger empty; }
 // WG1: foreach { wait empty; use(y); trigger sig; }
-// Expected: x and y do NOT overlap
-// (sig + empty form a cycle -> acyclic constraint rejects back-edge)
-// Same behavior as FA K/V pipeline - conservative but correct.
+// Expected: x and y DO overlap (128 bytes total)
+// Reasoning: back-edge (phase 5 -> phase 2 via sig) is skipped to
+// prevent cycles, but the forward edge (phase 2 -> phase 5 via empty)
+// proves ordering within one iteration. The signals enforce mutual
+// exclusion across iterations too (ping-pong pattern).
 // ------------------------------------------------------------
 __co__ void neg_pipeline_cyclic() {
   parallel p by 1 : block {
