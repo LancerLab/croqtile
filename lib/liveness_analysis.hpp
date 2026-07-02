@@ -352,6 +352,7 @@ public:
   const std::map<std::string, HBGraph>& HBGraphs() const { return hb_graphs; }
 
 private:
+  std::map<std::string, HBGraph> hb_graphs;
   struct WGInfo {
     int wg_id = -1;
     std::string scope_name;
@@ -365,8 +366,6 @@ private:
     int64_t pv_bound = -1;
     int next_phase_id = 0;
     std::vector<WGInfo> warp_groups;
-    std::unordered_map<std::string, std::vector<std::pair<int, bool>>>
-        event_phases;
     std::set<std::string> globally_live_bufs;
   };
   std::map<std::string, HBBuildState> hb_build_states;
@@ -421,7 +420,6 @@ private:
   void AddFut2Buffers(const std::string& fut, const DMABufInfo& buf_info);
   void AddAsyncInthreadsVar(const std::string& scope_name,
                             const std::string& var);
-  void HandleAnon(const std::string& name);
 
   struct BlockInfo {
     VarSet in;

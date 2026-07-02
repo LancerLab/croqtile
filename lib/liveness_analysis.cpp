@@ -280,24 +280,9 @@ void LivenessAnalyzer::AddUse(const Stmt* s, const std::string& var,
       */
       break;
     } else {
-      // TODO: the case is invalid?
-      assert(false);
-      /*
-      {
-        def x
-        loop {
-          def x;                          (event.second)
-          {
-            use x;
-            ...
-          }
-        }
-        use x;                            (SSTab().ScopeName())
-      }
-      then res is 1, which means that
-      the current scope !>= the scope of the definition point
-      just ignore it.
-      */
+      // res > 0: def is in a narrower scope than the use site.
+      // This can happen with inner-loop re-definitions shadowing an
+      // outer def.  No extra use needed at loop end - skip.
       continue;
     }
   }

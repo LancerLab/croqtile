@@ -3210,8 +3210,23 @@ void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
   }
   for (const auto& [sto, ie] : mri->infos) {
     hs << h_indent << "HeapSimulator " << ie.simulator << ";\n";
-    hs << h_indent << "HeapSimulator::Result " << ie.result << " = "
-       << ie.simulator << ".Allocate(" << ie.chunks_name << ", 512);\n";
+    size_t align = ie.alignment ? ie.alignment : 512;
+    if (ie.n_buffers > 0 && !ie.interference.empty()) {
+      std::string imat_name = ie.chunks_name + "_imat";
+      hs << h_indent << "std::vector<bool> " << imat_name << " = {";
+      for (size_t k = 0; k < ie.interference.size(); ++k) {
+        if (k) hs << ",";
+        hs << (ie.interference[k] ? "true" : "false");
+      }
+      hs << "};\n";
+      hs << h_indent << "HeapSimulator::Result " << ie.result << " = "
+         << ie.simulator << ".Allocate(" << ie.chunks_name << ", " << align
+         << ", " << imat_name << ");\n";
+    } else {
+      hs << h_indent << "HeapSimulator::Result " << ie.result << " = "
+         << ie.simulator << ".Allocate(" << ie.chunks_name << ", " << align
+         << ");\n";
+    }
     hs << h_indent << "unsigned " << ie.spm_size << " = " << ie.result
        << ".heap_size;\n";
     // special host runtime check

@@ -500,10 +500,19 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
 
         const LivenessAnalyzer::HBGraph* hb_graph = nullptr;
         if (sto == Storage::SHARED) {
-          for (const auto& [scope, graph] : la.HBGraphs()) {
-            if (scope.find(df_name) == 0) {
-              hb_graph = &graph;
-              break;
+          auto it = la.HBGraphs().find(df_name);
+          if (it != la.HBGraphs().end()) {
+            hb_graph = &it->second;
+          } else {
+            // Find the most specific HB graph whose scope is a child
+            // of df_name (scope starts with df_name). Use longest match
+            // to avoid prefix-collision.
+            size_t best_len = 0;
+            for (const auto& [scope, graph] : la.HBGraphs()) {
+              if (scope.find(df_name) == 0 && scope.size() > best_len) {
+                best_len = scope.size();
+                hb_graph = &graph;
+              }
             }
           }
         }
@@ -568,22 +577,32 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
     std::vector<std::pair<std::string, std::string>> hb_overlapped_pairs;
     if (sto == Storage::SHARED) {
       const auto& hb_graphs = la.HBGraphs();
-      for (const auto& [scope, graph] : hb_graphs) {
-        if (scope.find(df_name) == 0) {
-          hb_override = [&graph, &hb_overlapped_pairs](const std::string& a,
-                                                       const std::string& b) {
-            if (graph.CanOverlap(a, b)) {
-              hb_overlapped_pairs.emplace_back(a, b);
-              return true;
-            }
-            return false;
-          };
-          hb_must_interfere = [&graph](const std::string& a,
-                                       const std::string& b) {
-            return graph.IsUnsafeMultiInstanceOverlap(a, b);
-          };
-          break;
+      const LivenessAnalyzer::HBGraph* hb_graph_ptr = nullptr;
+      auto it = hb_graphs.find(df_name);
+      if (it != hb_graphs.end()) {
+        hb_graph_ptr = &it->second;
+      } else {
+        size_t best_len = 0;
+        for (const auto& [scope, graph] : hb_graphs) {
+          if (scope.find(df_name) == 0 && scope.size() > best_len) {
+            best_len = scope.size();
+            hb_graph_ptr = &graph;
+          }
         }
+      }
+      if (hb_graph_ptr) {
+        hb_override = [hb_graph_ptr, &hb_overlapped_pairs](
+                          const std::string& a, const std::string& b) {
+          if (hb_graph_ptr->CanOverlap(a, b)) {
+            hb_overlapped_pairs.emplace_back(a, b);
+            return true;
+          }
+          return false;
+        };
+        hb_must_interfere = [hb_graph_ptr](const std::string& a,
+                                           const std::string& b) {
+          return hb_graph_ptr->IsUnsafeMultiInstanceOverlap(a, b);
+        };
       }
     }
 
@@ -593,7 +612,10 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
       size_t baseline_size = simulator.Allocate(chunks, alignment).heap_size;
       HeapSimulator::Result result =
           simulator.Allocate(chunks, alignment, hb_override, hb_must_interfere);
-      assert(ValidateResult(result, chunks, hb_override, hb_must_interfere));
+      if (!ValidateResult(result, chunks, hb_override, hb_must_interfere)) {
+        errs() << "  in device function: " << df_name << "\n";
+        assert(false && "memory reuse validation failed");
+      }
       auto& ctx_spm_size =
           (sto == Storage::LOCAL ? ctx.local_spm_size : ctx.shared_spm_size);
       ctx_spm_size = result.heap_size;

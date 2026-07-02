@@ -57,7 +57,8 @@ __co__ void foo(int n, int m) {
 // CHECK{LITERAL}:   __co__shared_chunks0.push_back({static_cast<size_t>((m * n)), {{2,4}}, "_foo_paraby_0_s"});
 // CHECK{LITERAL}:   __co__shared_chunks0.push_back({static_cast<size_t>((m * n)), {{3,4}}, "_foo_paraby_0_ss"});
 // CHECK:   HeapSimulator __co_shared_heap_simulator0;
-// CHECK:   HeapSimulator::Result __co__shared_result0 = __co_shared_heap_simulator0.Allocate(__co__shared_chunks0, 512);
+// CHECK:   std::vector<bool> __co__shared_chunks0_imat = {false,true,true,false};
+// CHECK:   HeapSimulator::Result __co__shared_result0 = __co_shared_heap_simulator0.Allocate(__co__shared_chunks0, 16, __co__shared_chunks0_imat);
 // CHECK:   unsigned __co__shared_spm_size0 = __co__shared_result0.heap_size;
 // CHECK:   choreo::runtime_check(__co__shared_spm_size0 <= (size_t)102400, "In the memory reuse of dynamic shapes, the size of the initial shared spm should not exceed the memory usage limit 102400 bytes.");
 // CHECK:   unsigned long __co__shared_chunk_offsets0[2];
@@ -78,7 +79,8 @@ __co__ void foo(int n, int m) {
 // CHECK{LITERAL}:   __co__shared_chunks1.push_back({static_cast<size_t>((m * n)), {{14,16}}, "_foo_paraby_3_s"});
 // CHECK{LITERAL}:   __co__shared_chunks1.push_back({static_cast<size_t>((m * n)), {{15,16}}, "_foo_paraby_3_ss"});
 // CHECK:   HeapSimulator __co_local_heap_simulator1;
-// CHECK:   HeapSimulator::Result __co__local_result1 = __co_local_heap_simulator1.Allocate(__co__local_chunks1, 512);
+// CHECK:   std::vector<bool> __co__local_chunks1_imat = {false,true,true,false};
+// CHECK:   HeapSimulator::Result __co__local_result1 = __co_local_heap_simulator1.Allocate(__co__local_chunks1, 16, __co__local_chunks1_imat);
 // CHECK:   unsigned __co__local_spm_size1 = __co__local_result1.heap_size;
 // CHECK:   choreo::runtime_check(__co__local_spm_size1 <= (size_t)2048, "In the memory reuse of dynamic shapes, the size of the initial local spm should not exceed the memory usage limit 2048 bytes.");
 // CHECK:   unsigned long __co__local_chunk_offsets1[2];
@@ -86,7 +88,8 @@ __co__ void foo(int n, int m) {
 // CHECK:   for (const auto& [buffer_id, offset] : __co__local_result1.chunk_offsets)
 // CHECK:     __co__local_chunk_offsets1[__co__local_chunks1_idx++] = offset;
 // CHECK:   HeapSimulator __co_shared_heap_simulator1;
-// CHECK:   HeapSimulator::Result __co__shared_result1 = __co_shared_heap_simulator1.Allocate(__co__shared_chunks1, 512);
+// CHECK:   std::vector<bool> __co__shared_chunks1_imat = {false,true,true,false};
+// CHECK:   HeapSimulator::Result __co__shared_result1 = __co_shared_heap_simulator1.Allocate(__co__shared_chunks1, 16, __co__shared_chunks1_imat);
 // CHECK:   unsigned __co__shared_spm_size1 = __co__shared_result1.heap_size;
 // CHECK:   choreo::runtime_check(__co__shared_spm_size1 <= (size_t)102400, "In the memory reuse of dynamic shapes, the size of the initial shared spm should not exceed the memory usage limit 102400 bytes.");
 // CHECK:   unsigned long __co__shared_chunk_offsets1[2];

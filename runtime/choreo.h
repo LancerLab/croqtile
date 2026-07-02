@@ -1836,6 +1836,101 @@ struct HeapSimulator {
   Result Allocate(const std::vector<Chunk>& chunks, int64_t alignment = 0) {
     return GlobalDecreasingSizeBestFitAllocate(chunks, alignment);
   }
+
+  // Overload accepting a pre-computed interference matrix (flat NxN, row-major,
+  // indexed in the same order as `chunks`). When provided, the matrix replaces
+  // the liveness-range-based interference computation, allowing compile-time
+  // HB analysis to be applied at runtime.
+  Result Allocate(const std::vector<Chunk>& chunks, int64_t alignment,
+                  const std::vector<bool>& interference_matrix) {
+    Result result;
+    result.heap_size = 0;
+
+    size_t length = chunks.size();
+
+    auto AlignUp = [alignment](size_t x) -> size_t {
+      if (alignment == 0) return x;
+      return (x + alignment - 1) / alignment * alignment;
+    };
+
+    // Build index mapping: sorted_idx -> original_idx
+    std::vector<size_t> order(length);
+    for (size_t i = 0; i < length; ++i) order[i] = i;
+    std::sort(order.begin(), order.end(), [&chunks](size_t a, size_t b) {
+      return chunks[a].size > chunks[b].size;
+    });
+
+    // Remap interference matrix to sorted order
+    std::vector<std::vector<bool>> interference_graph(
+        length, std::vector<bool>(length, false));
+    for (size_t si = 0; si < length; ++si)
+      for (size_t sj = si + 1; sj < length; ++sj) {
+        size_t oi = order[si], oj = order[sj];
+        bool val = interference_matrix[oi * length + oj];
+        interference_graph[si][sj] = val;
+        interference_graph[sj][si] = val;
+      }
+
+    std::map<size_t, size_t> assigned_offsets;
+    using Range = std::pair<size_t, size_t>;
+
+    for (size_t i = 0; i < length; ++i) {
+      const Chunk& chunk = chunks[order[i]];
+
+      std::vector<Range> forbidden_ranges;
+      for (size_t j = 0; j < i; ++j) {
+        if (interference_graph[i][j] && assigned_offsets.count(j)) {
+          forbidden_ranges.push_back(
+              {assigned_offsets[j],
+               assigned_offsets[j] + chunks[order[j]].size});
+        }
+      }
+
+      std::sort(forbidden_ranges.begin(), forbidden_ranges.end());
+
+      if (!forbidden_ranges.empty()) {
+        std::vector<Range> merged_ranges;
+        merged_ranges.push_back(forbidden_ranges[0]);
+        for (size_t j = 1; j < forbidden_ranges.size(); ++j) {
+          auto& last = merged_ranges.back();
+          const auto& current = forbidden_ranges[j];
+          if (current.first <= last.second)
+            last.second = std::max(last.second, current.second);
+          else
+            merged_ranges.push_back(current);
+        }
+        forbidden_ranges = std::move(merged_ranges);
+      }
+
+      size_t pos = AlignUp(0);
+      bool found_valid_position = false;
+      for (size_t j = 0; j <= forbidden_ranges.size(); ++j) {
+        if (j == forbidden_ranges.size() ||
+            pos + chunk.size <= forbidden_ranges[j].first) {
+          found_valid_position = true;
+          break;
+        }
+        pos = forbidden_ranges[j].second;
+        pos = AlignUp(pos);
+      }
+
+      if (!found_valid_position) {
+        std::cerr << "Error: Could not find valid position for buffer "
+                  << chunk.buffer_id << std::endl;
+        result.chunk_offsets[chunk.buffer_id] = (size_t)-1;
+        continue;
+      }
+
+      size_t aligned_offset = pos;
+      assigned_offsets.emplace(i, aligned_offset);
+      result.chunk_offsets[chunk.buffer_id] = aligned_offset;
+      result.heap_size =
+          std::max(result.heap_size, aligned_offset + chunk.size);
+    }
+
+    result.heap_size = AlignUp(result.heap_size);
+    return result;
+  }
 };
 
 // For API check: abend on failures
