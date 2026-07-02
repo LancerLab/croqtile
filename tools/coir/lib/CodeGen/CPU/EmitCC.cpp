@@ -38,6 +38,8 @@ public:
   void emitModule(ModuleOp module, llvm::raw_ostream &os) override {
     os_ = &os;
     resetState();
+    hasMMAOps = false;
+    scanForMMA(module);
     emitHeader();
     for (auto &op : module.getBody()->getOperations()) {
       if (auto kernel = dyn_cast<KernelOp>(op))
@@ -63,10 +65,10 @@ public:
 
     os << "\n__COCC_CC_SOURCE__\n\n";
     if (has_embedded) {
-      os << "g++ -std=c++17 -O2 -pthread "
+      os << "g++ -std=c++17 -O2 -pthread -fopenmp-simd "
             "-I\"$TMPDIR\" -o \"$BINFILE\" \"$TMPFILE\" 2>&1\n";
     } else {
-      os << "g++ -std=c++17 -O2 -pthread "
+      os << "g++ -std=c++17 -O2 -pthread -fopenmp-simd "
             "-I\"$CHOREO_INC\" -I\"$TMPDIR\" "
             "-o \"$BINFILE\" \"$TMPFILE\" 2>&1\n";
     }
@@ -95,6 +97,10 @@ private:
       return "float";
     if (ty.isF64())
       return "double";
+    if (auto fty = dyn_cast<FloatType>(ty)) {
+      if (fty.getWidth() == 8) return "uint8_t";
+      if (fty.getWidth() == 19) return "float"; // TF32
+    }
     if (ty.isInteger(1))
       return "bool";
     if (ty.isInteger(8))
@@ -113,6 +119,11 @@ private:
     if (ty.isF16()) return "choreo::f16";
     if (ty.isF32()) return "float";
     if (ty.isF64()) return "double";
+    if (auto fty = dyn_cast<FloatType>(ty)) {
+      if (fty.getWidth() == 8) return "uint8_t";
+      if (fty.getWidth() == 19) return "float"; // TF32
+    }
+    if (ty.isInteger(1)) return "bool";
     if (ty.isInteger(8)) return "uint8_t";
     if (ty.isInteger(16)) return "int16_t";
     if (ty.isInteger(32)) return "int32_t";
@@ -120,9 +131,20 @@ private:
     return CoIREmitterBase::emitElementType(ty);
   }
 
+  bool hasMMAOps = false;
+
+  void scanForMMA(ModuleOp module) {
+    module.walk([&](Operation *op) {
+      if (isa<MMAFillOp, MMALoadOp, MMAExecOp, MMAStoreOp>(op))
+        hasMMAOps = true;
+    });
+  }
+
   void emitHeader() {
     os() << "#define __CHOREO_TARGET_CPU__ 1\n";
     os() << "#include \"choreo.h\"\n";
+    if (hasMMAOps)
+      os() << "#include \"choreo_cc.h\"\n";
     os() << "#include <cstring>\n";
     os() << "#include <cstdlib>\n\n";
   }
@@ -172,18 +194,160 @@ private:
       CoIREmitterBase::emitOpFallback(op);
   }
 
-  // -- MMA: software fallback (not supported on CPU) --
-  void emitMMAFill(MMAFillOp /*op*/) override {
-    os() << getIndent() << "// MMA not supported on CPU target\n";
+  void emitTensorAlloc(TensorAllocOp op) override {
+    if (returnValues.count(op.getResult()))
+      return;
+
+    auto tensorTy = cast<coir::TensorType>(op.getResult().getType());
+    std::string name = getName(op.getResult());
+
+    if (op.getReuseOffsetAttr()) {
+      if (lastSpmName.empty()) {
+        if (auto spmSizeAttr =
+                op->getAttrOfType<mlir::IntegerAttr>("spm_size")) {
+          int64_t spmBytes = spmSizeAttr.getInt();
+          lastSpmName = "__spm_" + std::to_string(nextId++);
+          os() << getIndent() << "alignas(64) unsigned char "
+               << lastSpmName << "[" << spmBytes << "];\n";
+        }
+      }
+      int64_t offset = op.getReuseOffset().value_or(0);
+      std::string eType = emitElementType(tensorTy.getElementType());
+      os() << getIndent() << eType << "* " << name << " = (" << eType
+           << "*)((unsigned char*)" << lastSpmName << " + " << offset
+           << ");\n";
+      return;
+    }
+
+    if (op->hasAttr("spm")) {
+      int64_t totalBytes = 1;
+      for (auto d : tensorTy.getShape()) totalBytes *= d;
+      int64_t elemBits = tensorTy.getElementType().getIntOrFloatBitWidth();
+      totalBytes *= (elemBits / 8);
+      lastSpmName = name;
+      os() << getIndent() << "alignas(64) unsigned char " << name << "["
+           << totalBytes << "];\n";
+      return;
+    }
+
+    int64_t totalElems = 1;
+    for (auto d : tensorTy.getShape()) totalElems *= d;
+    os() << getIndent() << "alignas(64) "
+         << emitElementType(tensorTy.getElementType()) << " " << name
+         << "[" << totalElems << "];\n";
   }
-  void emitMMALoad(MMALoadOp /*op*/) override {
-    os() << getIndent() << "// MMA not supported on CPU target\n";
+
+  void emitForeach(ForeachOp op) override {
+    auto &body = op.getBody();
+    auto args = body.front().getArguments();
+    std::string iv = getName(args[0]);
+    std::string ub = getName(op.getUpperBound());
+
+    auto iterArgs = op.getIterArgs();
+    for (unsigned i = 0; i < iterArgs.size(); ++i) {
+      std::string iterName = getName(args[i + 1]);
+      os() << getIndent() << "auto " << iterName << " = "
+           << getName(iterArgs[i]) << ";\n";
+    }
+
+    if (iterArgs.empty())
+      os() << getIndent() << "#pragma omp simd\n";
+    os() << getIndent() << "for (int " << iv << " = 0; " << iv << " < "
+         << ub << "; ++" << iv << ") {\n";
+    incIndent();
+    for (auto &bodyOp : body.front().getOperations())
+      emitOp(&bodyOp);
+    decIndent();
+    os() << getIndent() << "}\n";
+
+    if (auto yieldOp = dyn_cast<YieldOp>(body.front().getTerminator())) {
+      auto results = yieldOp.getOperands();
+      auto opResults = op.getResults();
+      for (unsigned i = 0; i < results.size(); ++i)
+        valueNames[opResults[i]] = getName(results[i]);
+    }
   }
-  void emitMMAExec(MMAExecOp /*op*/) override {
-    os() << getIndent() << "// MMA not supported on CPU target\n";
+
+  void emitKernelReturn(KernelReturnOp op) override {
+    auto operands = op.getOperands();
+    for (unsigned i = 0; i < operands.size(); ++i) {
+      auto it = returnParamNames.find(i);
+      if (it != returnParamNames.end()) {
+        auto ty = operands[i].getType();
+        if (auto tty = dyn_cast<coir::TensorType>(ty)) {
+          int64_t bytes = getTensorBytes(tty);
+          if (bytes > 0)
+            os() << getIndent() << "std::memcpy(" << it->second << ", "
+                 << getName(operands[i]) << ", " << bytes << ");\n";
+        } else {
+          os() << getIndent() << "*" << it->second << " = "
+               << getName(operands[i]) << ";\n";
+        }
+      }
+    }
   }
-  void emitMMAStore(MMAStoreOp /*op*/) override {
-    os() << getIndent() << "// MMA not supported on CPU target\n";
+
+  // -- MMA: software reference via choreo_cc.h --
+  void emitMMAFill(MMAFillOp op) override {
+    auto resTy = cast<coir::MMAFragType>(op.getResult().getType());
+    int64_t count = 1;
+    for (auto d : resTy.getShape()) count *= d;
+    std::string name = getName(op.getResult());
+    std::string eType = emitElementType(resTy.getElementType());
+    os() << getIndent() << "alignas(64) " << eType << " " << name << "["
+         << count << "];\n";
+    os() << getIndent() << "choreo::cc::mma_fill(" << name << ", ("
+         << eType << ")" << getName(op.getValue()) << ", " << count
+         << ");\n";
+  }
+  void emitMMALoad(MMALoadOp op) override {
+    auto srcTy = cast<coir::TensorType>(op.getSource().getType());
+    auto resTy = cast<coir::MMAFragType>(op.getResult().getType());
+    int64_t count = 1;
+    for (auto d : resTy.getShape()) count *= d;
+    std::string eType = emitElementType(resTy.getElementType());
+    std::string name = getName(op.getResult());
+    os() << getIndent() << "alignas(64) " << eType << " " << name << "["
+         << count << "];\n";
+    int64_t bytes = getTensorBytes(srcTy);
+    if (bytes > 0) {
+      os() << getIndent() << "std::memcpy(" << name << ", "
+           << getName(op.getSource()) << ", " << bytes << ");\n";
+    }
+  }
+  void emitMMAExec(MMAExecOp op) override {
+    auto accTy = cast<coir::MMAFragType>(op.getAccumulator().getType());
+    auto lhsTy = cast<coir::MMAFragType>(op.getLhs().getType());
+    auto rhsTy = cast<coir::MMAFragType>(op.getRhs().getType());
+    auto accShape = accTy.getShape();
+    auto lhsShape = lhsTy.getShape();
+
+    int64_t M = accShape.size() >= 2 ? accShape[0] : 1;
+    int64_t N = accShape.size() >= 2 ? accShape[1] : accShape[0];
+    int64_t K = lhsShape.size() >= 2 ? lhsShape[1] : lhsShape[0];
+
+    std::string accElem = emitElementType(accTy.getElementType());
+    std::string lhsElem = emitElementType(lhsTy.getElementType());
+    std::string rhsElem = emitElementType(rhsTy.getElementType());
+
+    std::string accName = getName(op.getAccumulator());
+    valueNames[op.getResult()] = accName;
+
+    os() << getIndent() << "choreo::cc::mma_exec_row_col<" << accElem
+         << ", " << lhsElem << ", " << rhsElem << ", " << accElem << ">("
+         << accName << ", " << getName(op.getLhs()) << ", "
+         << getName(op.getRhs()) << ", " << accName << ", "
+         << M << ", " << N << ", " << K << ");\n";
+  }
+  void emitMMAStore(MMAStoreOp op) override {
+    auto fragTy = cast<coir::MMAFragType>(op.getFragment().getType());
+    int64_t elems = 1;
+    for (auto d : fragTy.getShape()) elems *= d;
+    int64_t bytes = elems * (fragTy.getElementType().getIntOrFloatBitWidth() / 8);
+    if (bytes > 0) {
+      os() << getIndent() << "std::memcpy(" << getName(op.getDest())
+           << ", " << getName(op.getFragment()) << ", " << bytes << ");\n";
+    }
   }
 
   // -- DMA descriptor pipeline: no-op on CPU --

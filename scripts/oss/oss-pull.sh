@@ -97,8 +97,9 @@ while [[ $# -gt 0 ]]; do
   --show-baseline) SHOW_BASELINE=1; shift ;;
   -n)              DRY_RUN=1; SCAN_ONLY=1; shift ;;
   --range)
+    range_commits=()
     mapfile -t range_commits < <(git -C "$REPO_ROOT" rev-list --reverse "$2")
-    COMMITS+=("${range_commits[@]}")
+    COMMITS+=(${range_commits[@]+"${range_commits[@]}"})
     shift 2 ;;
   -h)              usage; exit 0 ;;
   -*)              echo "Error: unknown option $1" >&2; usage; exit 2 ;;
@@ -462,11 +463,13 @@ for commit in "${COMMITS[@]}"; do
   # Unstage/revert every change (add, modify, delete, conflict) on
   # excluded paths.  Deletions of excluded files come from oss/main
   # housekeeping and must never propagate to main.
+  staged_files=()
+  conflict_files=()
   mapfile -t staged_files   < <(git diff --cached --name-only HEAD 2>/dev/null)
   mapfile -t conflict_files < <(git diff --name-only --diff-filter=U 2>/dev/null)
 
   declare -A seen_excl=()
-  for f in "${staged_files[@]}" "${conflict_files[@]}"; do
+  for f in ${staged_files[@]+"${staged_files[@]}"} ${conflict_files[@]+"${conflict_files[@]}"}; do
   [[ -z "$f" ]] && continue
   if is_private "$f" || is_conflict_file "$f"; then
     seen_excl["$f"]=1
@@ -485,9 +488,10 @@ for commit in "${COMMITS[@]}"; do
   # Fail if any conflicts remain on included (public) files.
   # Binary conflicts (e.g. *.co test artifacts) cannot be merged by git;
   # auto-resolve them by taking the incoming oss/main version (--theirs).
+  remaining_conflicts=()
   mapfile -t remaining_conflicts < <(git diff --name-only --diff-filter=U 2>/dev/null)
   text_conflicts=()
-  for f in "${remaining_conflicts[@]}"; do
+  for f in ${remaining_conflicts[@]+"${remaining_conflicts[@]}"}; do
   [[ -z "$f" ]] && continue
   # git outputs "Binary files ... differ" for binary conflicts between stages 2 and 3
   if git diff ":2:$f" ":3:$f" 2>/dev/null | head -1 | grep -q '^Binary files'; then

@@ -75,8 +75,9 @@ while [[ $# -gt 0 ]]; do
     fi
     shift ;;
   --range)
+    range_commits=()
     mapfile -t range_commits < <(git -C "$REPO_ROOT" rev-list --reverse "$2")
-    COMMITS+=("${range_commits[@]}")
+    COMMITS+=(${range_commits[@]+"${range_commits[@]}"})
     shift 2 ;;
   -h)        usage; exit 0 ;;
   -*)        echo "Error: unknown option $1" >&2; usage; exit 2 ;;
@@ -235,11 +236,12 @@ if [[ $CATCHUP -eq 1 ]]; then
 
   echo "Catchup mode: scanning main since $(git rev-parse --short "$LATEST_SYNCED_SHA")..."
 
+  catchup_commits=()
   mapfile -t catchup_commits < <(git rev-list --reverse "$LATEST_SYNCED_SHA..main")
 
   # Filter out already-synced ones (there may be a few between sync point
   # and HEAD that were synced via different paths)
-  for sha in "${catchup_commits[@]}"; do
+  for sha in ${catchup_commits[@]+"${catchup_commits[@]}"}; do
   if [[ -z "${SYNCED_SHAS[$sha]:-}" ]]; then
     COMMITS+=("$sha")
   fi
@@ -278,11 +280,12 @@ for commit in "${COMMITS[@]}"; do
   orig_date="$(git -C "$REPO_ROOT" log -1 --format='%ai' "$commit")"
   parent="${commit}^"
 
+  all_files=()
   mapfile -t all_files < <(git diff-tree --no-commit-id -r --name-only "$commit")
 
   included=()
   excluded=()
-  for f in "${all_files[@]}"; do
+  for f in ${all_files[@]+"${all_files[@]}"}; do
   [[ -z "$f" ]] && continue
   if is_excluded "$f"; then
     excluded+=("$f")
@@ -334,12 +337,14 @@ for commit in "${COMMITS[@]}"; do
 
   # Regardless of cherry-pick exit code (conflicts are expected for excluded
   # files), unstage all excluded files and resolve their conflicts.
+  staged_files=()
+  conflict_files=()
   mapfile -t staged_files < <(git diff --cached --name-only HEAD 2>/dev/null)
   mapfile -t conflict_files < <(git diff --name-only --diff-filter=U 2>/dev/null)
 
   # Combine both lists for exclusion processing
   declare -A seen_excl=()
-  for f in "${staged_files[@]}" "${conflict_files[@]}"; do
+  for f in ${staged_files[@]+"${staged_files[@]}"} ${conflict_files[@]+"${conflict_files[@]}"}; do
   [[ -z "$f" ]] && continue
   if is_excluded "$f"; then
     seen_excl["$f"]=1
@@ -355,6 +360,7 @@ for commit in "${COMMITS[@]}"; do
   fi
 
   # Check for remaining conflicts on INCLUDED files
+  remaining_conflicts=()
   mapfile -t remaining_conflicts < <(git diff --name-only --diff-filter=U 2>/dev/null)
   if [[ ${#remaining_conflicts[@]} -gt 0 && -n "${remaining_conflicts[0]}" ]]; then
   echo "ERROR $short: merge conflicts in included files:"
