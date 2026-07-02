@@ -1,0 +1,31 @@
+// Mock-vs-Real comparison: matrix diagonal and submatrix (foreach).
+
+__co__ void test() {
+  s32[4, 4] M;
+  s32[4] diag;
+
+  foreach i in 4
+    foreach j in 4
+      M.at(i, j) = i * 4 + j + 1;
+
+  // Diagonal
+  foreach i in 4
+    diag.at(i) = M.at(i, i);
+
+  println(diag.at(0));
+  println(diag.at(1));
+  println(diag.at(2));
+  println(diag.at(3));
+
+  // Trace (sum of diagonal)
+  mutable s32 trace = 0;
+  foreach i in 4
+    trace = trace + diag.at(i);
+  println(trace);
+
+  // Anti-diagonal: M.at(i, 3-i)
+  println(M.at(0, 3));
+  println(M.at(1, 2));
+  println(M.at(2, 1));
+  println(M.at(3, 0));
+}

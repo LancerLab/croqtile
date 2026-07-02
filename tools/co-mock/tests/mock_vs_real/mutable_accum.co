@@ -1,0 +1,27 @@
+// Mock-vs-Real comparison: mutable variables and sequential accumulation.
+
+__co__ void test() {
+  s32[4] data;
+  foreach i in 4
+    data.at(i) = (i + 1) * 3;
+
+  // Sum
+  mutable s32 total = 0;
+  foreach i in 4
+    total = total + data.at(i);
+  println(total);
+
+  // Find max via sequential scan
+  mutable s32 max_val = data.at(0);
+  foreach i in 3 {
+    if (data.at(i + 1) > max_val)
+      max_val = data.at(i + 1);
+  }
+  println(max_val);
+
+  // Running product
+  mutable s32 prod = 1;
+  foreach i in 4
+    prod = prod * data.at(i);
+  println(prod);
+}
