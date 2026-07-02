@@ -1,0 +1,189 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+// Gated Delta Network chunk state-update using WGMMA with apply blocks
+// reading global/shared memory via __frag_iv_* iterator variables.
+
+#define DK 64
+#define DV 64
+#define CHUNK 64
+
+__co__ void gdn_chunk_state(
+  global bf16[BH, SEQ, DK] K,
+  global bf16[BH, SEQ, DK] W,
+  global bf16[BH, SEQ, DV] U,
+  global f32[BH, SEQ] G,
+  global bf16[BH, DV, DK] State,
+  global bf16[BH, SEQ, DV] V_new_out,
+  global bf16[BH, DV, SEQ] V_new_T
+) {
+  num_chunks = cdiv(SEQ, CHUNK);
+
+  parallel {bh} by [BH] : block {
+    K_head = K.subspan(1, SEQ, DK).at(bh, 0, 0).sqz();
+    W_head = W.subspan(1, SEQ, DK).at(bh, 0, 0).sqz();
+    U_head = U.subspan(1, SEQ, DV).at(bh, 0, 0).sqz();
+    Vn_head = V_new_out.subspan(1, SEQ, DV).at(bh, 0, 0).sqz();
+    VnT_head = V_new_T.subspan(1, DV, SEQ).at(bh, 0, 0).sqz();
+    State_head = State.subspan(1, DV, DK).at(bh, 0, 0).sqz();
+
+    G_head = G.subspan(1, SEQ).at(bh, 0).sqz();
+    shared f32[CHUNK] g_s;
+
+    parallel wg by [1] : group-4 {
+      foreach {ic} in [num_chunks] {
+        dma.copy G_head.subspan(CHUNK).at(ic) => g_s;
+
+        acc_ws = mma.fill.f32 0.0f;
+        w_s = dma.copy.swiz<128>
+          W_head.subspan(CHUNK, DK).at(ic, 0) => shared;
+        state_s = dma.copy.swiz<128>
+          State_head.subspan(DV, DK).at(0, 0) => shared;
+        mma.row.row acc_ws, w_s, state_s;
+
+        apply {i, j} in acc_ws.span
+          acc_ws.at(i, j) = __to<f32>(U.at(bh, ic * CHUNK + i, j)) - acc_ws.at(i, j);
+
+        g_last = g_s.at(CHUNK - 1);
+        apply {i, j} in acc_ws.span {
+          g_t = g_s.at(i);
+          gate = __exp2f((g_last - g_t) * 1.442695f);
+          acc_ws.at(i, j) = acc_ws.at(i, j) * gate;
+        }
+
+        mma.store acc_ws, Vn_head.subspan(CHUNK, DV).at(ic, 0);
+
+        decay = __exp2f(g_last * 1.442695f);
+        frag f32[DV, DK] state_frag;
+        apply {dv, dk} in state_frag.span
+          state_frag.at(dv, dk) = __to<f32>(State.at(bh, dv, dk)) * decay;
+
+        vnewT_s = dma.copy.swiz<128>
+          VnT_head.subspan(DV, CHUNK).at(0, ic) => shared;
+        k_s = dma.copy.swiz<128>
+          K_head.subspan(CHUNK, DK).at(ic, 0) => shared;
+
+        acc_state = mma.fill.f32 0.0f;
+        mma.row.col acc_state, vnewT_s, k_s;
+
+        apply {dv, dk} in acc_state.span
+          acc_state.at(dv, dk) = acc_state.at(dv, dk) + state_frag.at(dv, dk);
+
+        mma.store acc_state, State_head.subspan(DV, DK).at(0, 0);
+      }
+    }
+  }
+}
+
+#include <cstdio>
+#include <cstdlib>
+#include <cmath>
+#include <vector>
+#include <cuda_bf16.h>
+#include <cuda_runtime.h>
+
+using bf16t = __nv_bfloat16;
+
+static void reference_gdn(
+    const bf16t* K, const bf16t* W, const bf16t* U,
+    const float* G, bf16t* State, bf16t* Vout, bf16t* VoutT,
+    int BH, int SEQ, int dk, int dv, int chunk) {
+  int nc = (SEQ + chunk - 1) / chunk;
+  std::vector<float> S(dk * dv);
+  for (int bh = 0; bh < BH; bh++) {
+    for (int j = 0; j < dv; j++)
+      for (int k = 0; k < dk; k++)
+        S[k * dv + j] = __bfloat162float(State[(size_t)bh * dv * dk + j * dk + k]);
+    for (int ic = 0; ic < nc; ic++) {
+      int t0 = ic * chunk, t1 = (t0 + chunk < SEQ ? t0 + chunk : SEQ), C = t1 - t0;
+      std::vector<float> vn(C * dv, 0.0f);
+      for (int t = 0; t < C; t++)
+        for (int j = 0; j < dv; j++) {
+          float ws = 0.0f;
+          for (int k = 0; k < dk; k++)
+            ws += __bfloat162float(W[((size_t)bh * SEQ + t0 + t) * dk + k]) * S[k * dv + j];
+          vn[t * dv + j] = __bfloat162float(U[((size_t)bh * SEQ + t0 + t) * dv + j]) - ws;
+        }
+      float gl = G[bh * SEQ + t1 - 1];
+      for (int t = 0; t < C; t++) {
+        float gate = exp2f((gl - G[bh * SEQ + t0 + t]) * 1.442695f);
+        for (int j = 0; j < dv; j++) vn[t * dv + j] *= gate;
+      }
+      float dec = exp2f(gl * 1.442695f);
+      for (int i = 0; i < dk * dv; i++) S[i] *= dec;
+      for (int t = 0; t < C; t++)
+        for (int j = 0; j < dv; j++) {
+          Vout[((size_t)bh * SEQ + t0 + t) * dv + j] = __float2bfloat16(vn[t * dv + j]);
+          VoutT[(size_t)bh * dv * SEQ + j * SEQ + t0 + t] = __float2bfloat16(vn[t * dv + j]);
+          for (int k = 0; k < dk; k++)
+            S[k * dv + j] += __bfloat162float(K[((size_t)bh * SEQ + t0 + t) * dk + k]) * vn[t * dv + j];
+        }
+    }
+    for (int j = 0; j < dv; j++)
+      for (int k = 0; k < dk; k++)
+        State[(size_t)bh * dv * dk + j * dk + k] = __float2bfloat16(S[k * dv + j]);
+  }
+}
+
+// CHECK: PASS
+int main() {
+  int BH = 2, SEQ = 128, dk = DK, dv = DV, chunk = CHUNK;
+  size_t k_sz = (size_t)BH * SEQ * dk, v_sz = (size_t)BH * SEQ * dv;
+  size_t g_sz = (size_t)BH * SEQ, s_sz = (size_t)BH * dv * dk;
+  size_t vt_sz = (size_t)BH * dv * SEQ;
+
+  bf16t *d_K, *d_W, *d_U, *d_Vn, *d_S, *d_VnT; float *d_G;
+  cudaMalloc(&d_K, k_sz*2); cudaMalloc(&d_W, k_sz*2);
+  cudaMalloc(&d_U, v_sz*2); cudaMalloc(&d_G, g_sz*4);
+  cudaMalloc(&d_S, s_sz*2); cudaMalloc(&d_Vn, v_sz*2);
+  cudaMalloc(&d_VnT, vt_sz*2);
+
+  std::vector<bf16t> hK(k_sz), hW(k_sz), hU(v_sz), hS(s_sz);
+  std::vector<float> hG(g_sz);
+  srand(42);
+  auto rf = []() { return ((float)rand() / RAND_MAX - 0.5f) * 0.1f; };
+  for (size_t i = 0; i < k_sz; i++) { hK[i] = __float2bfloat16(rf()); hW[i] = __float2bfloat16(rf()); }
+  for (size_t i = 0; i < v_sz; i++) hU[i] = __float2bfloat16(rf());
+  for (size_t i = 0; i < g_sz; i++) hG[i] = -0.01f * ((float)rand() / RAND_MAX);
+  for (size_t i = 0; i < s_sz; i++) hS[i] = __float2bfloat16(0.0f);
+
+  cudaMemcpy(d_K, hK.data(), k_sz*2, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_W, hW.data(), k_sz*2, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_U, hU.data(), v_sz*2, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_G, hG.data(), g_sz*4, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_S, hS.data(), s_sz*2, cudaMemcpyHostToDevice);
+
+  std::vector<bf16t> hSr(hS), hVr(v_sz), hVTr(vt_sz, __float2bfloat16(0.0f));
+  reference_gdn(hK.data(), hW.data(), hU.data(), hG.data(),
+                hSr.data(), hVr.data(), hVTr.data(), BH, SEQ, dk, dv, chunk);
+
+  cudaMemcpy(d_VnT, hVTr.data(), vt_sz*2, cudaMemcpyHostToDevice);
+  cudaMemcpy(d_S, hS.data(), s_sz*2, cudaMemcpyHostToDevice);
+
+  auto Kv = choreo::make_spanview<choreo::bf16, 3>(d_K, {(size_t)BH, (size_t)SEQ, (size_t)dk});
+  auto Wv = choreo::make_spanview<choreo::bf16, 3>(d_W, {(size_t)BH, (size_t)SEQ, (size_t)dk});
+  auto Uv = choreo::make_spanview<choreo::bf16, 3>(d_U, {(size_t)BH, (size_t)SEQ, (size_t)dv});
+  auto Gv = choreo::make_spanview<choreo::f32, 2>(d_G, {(size_t)BH, (size_t)SEQ});
+  auto Sv = choreo::make_spanview<choreo::bf16, 3>(d_S, {(size_t)BH, (size_t)dv, (size_t)dk});
+  auto Vnv = choreo::make_spanview<choreo::bf16, 3>(d_Vn, {(size_t)BH, (size_t)SEQ, (size_t)dv});
+  auto VnTv = choreo::make_spanview<choreo::bf16, 3>(d_VnT, {(size_t)BH, (size_t)dv, (size_t)SEQ});
+
+  gdn_chunk_state(Kv, Wv, Uv, Gv, Sv, Vnv, VnTv);
+  cudaDeviceSynchronize();
+  if (cudaGetLastError() != cudaSuccess) { printf("FAIL\n"); return 1; }
+
+  std::vector<bf16t> hSg(s_sz);
+  cudaMemcpy(hSg.data(), d_S, s_sz*2, cudaMemcpyDeviceToHost);
+
+  float atol = 5e-3f;
+  int mm = 0;
+  for (int i = 0; i < (int)s_sz; i++) {
+    float r = __bfloat162float(hSr[i]), g = __bfloat162float(hSg[i]);
+    if (fabsf(r - g) > atol) mm++;
+  }
+
+  printf("%s\n", mm == 0 ? "PASS" : "FAIL");
+  cudaFree(d_K); cudaFree(d_W); cudaFree(d_U);
+  cudaFree(d_G); cudaFree(d_S); cudaFree(d_Vn); cudaFree(d_VnT);
+  return mm > 0 ? 1 : 0;
+}

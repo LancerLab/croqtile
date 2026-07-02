@@ -1,0 +1,45 @@
+// RUN: choreo -gs -t cute -arch=sm_90a %s 2>&1 | bash 2>&1 | FileCheck %s
+// Test: apply on MMA acc reading global memory inside group-4
+// Regression test for __frag_iv_* undefined bug when iterators
+// appear only inside NamedVariableDecl init expressions.
+
+#define DK 64
+#define DV 64
+#define CHUNK 64
+
+__co__ void test_frag_iv(
+  global bf16[BH, SEQ, DK] W,
+  global bf16[BH, SEQ, DV] U,
+  global f32[BH, SEQ] G,
+  global bf16[BH, DV, DK] State
+) {
+  parallel {bh} by [BH] : block {
+    W_head = W.subspan(1, SEQ, DK).at(bh, 0, 0).sqz();
+    U_head = U.subspan(1, SEQ, DV).at(bh, 0, 0).sqz();
+    State_head = State.subspan(1, DV, DK).at(bh, 0, 0).sqz();
+
+    shared bf16[DV, DK] state_s;
+    dma.copy State_head.subspan(DV, DK).at(0, 0) => state_s;
+
+    parallel wg by [1] : group-4 {
+      acc = mma.fill.f32 0.0f;
+      w_s = dma.copy.swiz<128>
+        W_head.subspan(CHUNK, DK).at(0, 0) => shared;
+      mma.row.row acc, w_s, state_s;
+
+      apply {i, j} in acc.span {
+        g_t = G.at(bh, i);
+        gate = __exp2f(g_t * 1.442695f);
+        acc.at(i, j) = acc.at(i, j) * gate;
+      }
+
+      mma.store acc, U_head.subspan(CHUNK, DV).at(0, 0);
+    }
+  }
+}
+
+// CHECK: Test Passed
+int main() {
+  printf("Test Passed\n");
+  return 0;
+}
