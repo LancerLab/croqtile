@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-SM_90A
-// RUN: choreo -es -t cute -arch=sm_90a --stmatrix %s -o - | FileCheck %s --check-prefix=CHECK-ON
-// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=CHECK-OFF
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=CHECK-ON
+// RUN: choreo -es -t cute -arch=sm_90a --stmatrix=false %s -o - | FileCheck %s --check-prefix=CHECK-OFF
 
 #define WARP_M 64
 #define WARP_N 64

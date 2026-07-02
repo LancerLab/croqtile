@@ -70,11 +70,7 @@ extern Option<bool> verbose;
 extern Option<bool> use_pic;
 extern Option<bool> use_fast_math;
 extern Option<bool> tma_cluster_aware;
-extern Option<bool> ptx_barrier;
 extern Option<bool> use_stmatrix;
-extern Option<bool> hoist_offset;
-extern Option<bool> hoist_scale;
-extern Option<bool> event_arrive_tx;
 
 namespace Choreo {
 extern Option<bool> sim_sparse;
@@ -364,42 +360,7 @@ size_t GetWGMMAKAxis(const MMAInfo& ssmi) {
 
 const AST::MMAOperation*
 CuteCodeGen::FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const {
-  if (!n) return nullptr;
-  if (!hoist_scale) return nullptr;
-
-  if (auto mma = dyn_cast<AST::MMA>(n)) {
-    auto op = mma->GetOperation();
-    if (!op || op->Tag() != AST::MMAOperation::Exec || !op->HasScale())
-      return nullptr;
-    auto c_sym = AST::FragName(op->ExecOperand(0));
-    auto scoped_c_sym = InScopeName(c_sym);
-    if (FCtx(fname).FragHasMMAType(scoped_c_sym) &&
-        FCtx(fname).FragIsWGMMA(scoped_c_sym))
-      return op.get();
-    return nullptr;
-  }
-
-  if (auto mn = dyn_cast<AST::MultiNodes>(n)) {
-    for (auto& item : mn->values)
-      if (auto* op = FindFirstScaledWGMMAExec(item)) return op;
-    return nullptr;
-  }
-
-  if (auto if_else = dyn_cast<AST::IfElseBlock>(n)) {
-    if (if_else->GetThenBody())
-      if (auto* op = FindFirstScaledWGMMAExec(if_else->GetThenBody()))
-        return op;
-    if (if_else->GetElseBody())
-      if (auto* op = FindFirstScaledWGMMAExec(if_else->GetElseBody()))
-        return op;
-    return nullptr;
-  }
-
-  if (auto block = dyn_cast<AST::Block>(n)) {
-    return block->GetBody() ? FindFirstScaledWGMMAExec(block->GetBody())
-                            : nullptr;
-  }
-
+  (void)n;
   return nullptr;
 }
 
@@ -492,155 +453,23 @@ void CuteCodeGen::EmitWGMMAFinalize(std::ostringstream& os,
 std::optional<CuteCodeGen::HoistedScaleAccumInfo>
 CuteCodeGen::AnalyzeHoistableScaledWGMMAAccum(
     const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs) const {
-  HoistedScaleAccumInfo info;
-  if (!hoist_scale) return std::nullopt;
-  bool saw_scaled_exec = false;
-  if (!CollectHoistableScaledWGMMAAccum(n, loop_refs, info, saw_scaled_exec) ||
-      !saw_scaled_exec)
-    return std::nullopt;
-  return info;
+  (void)n;
+  (void)loop_refs;
+  return std::nullopt;
 }
 
 bool CuteCodeGen::CollectHoistableScaledWGMMAAccum(
     const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs,
     HoistedScaleAccumInfo& info, bool& saw_scaled_exec) const {
-  if (!n) return true;
-  if (!hoist_scale) return true;
-
-  if (auto mma = dyn_cast<AST::MMA>(n)) {
-    auto op = mma->GetOperation();
-    if (!op) return true;
-
-    if (op->Tag() == AST::MMAOperation::Store) {
-      auto store_frag = AST::FragName(op->StoreFrom());
-      if (saw_scaled_exec && store_frag == info.frag_sym) return false;
-      return true;
-    }
-
-    if (op->Tag() != AST::MMAOperation::Exec || !op->HasScale()) return true;
-
-    auto c_sym = AST::FragName(op->ExecOperand(0));
-    auto scoped_c_sym = InScopeName(c_sym);
-    if (!FCtx(fname).FragHasMMAType(scoped_c_sym) ||
-        !FCtx(fname).FragIsWGMMA(scoped_c_sym))
-      return true;
-
-    auto scale_a_expr = ExprSTR(op->ScaleA(), false);
-    auto scale_b_expr = ExprSTR(op->ScaleB(), false);
-    for (const auto& loop_ref : loop_refs) {
-      if ((!loop_ref.empty() &&
-           scale_a_expr.find(loop_ref) != std::string::npos) ||
-          (!loop_ref.empty() &&
-           scale_b_expr.find(loop_ref) != std::string::npos))
-        return false;
-    }
-
-    auto& ssmi_c = cgi.GetSymbolMMA(scoped_c_sym);
-    auto acc_ty = NameBaseType(ssmi_c.ty);
-    auto scale_a_strides = GenStrides(op->ScaleA());
-    auto scale_a_sty = GetSpannedType(NodeType(*op->ScaleA()));
-    auto scale_a_shape = scale_a_sty->GetShape();
-    bool scale_a_transposed = VIIsInt(scale_a_shape.ValueAt(0)) &&
-                              *VIInt(scale_a_shape.ValueAt(0)) == 1;
-    std::string scale_a_ld = scale_a_transposed
-                                 ? ValueSTR(scale_a_strides.back())
-                                 : ValueSTR(scale_a_strides.front());
-    auto scale_a_name = c_sym + "_scale_a_ptr";
-    auto scale_a_valid_rows_name = c_sym + "_scale_a_valid_rows";
-    auto scale_b_name = c_sym + "_scale_b_val";
-    auto scale_frag_name = c_sym + "_scale_frag";
-    auto frag_expr = ExprSTR(op->ExecOperand(0), false);
-    auto scale_a_valid_rows_expr = GenScaleValidRowsExpr(op->ScaleA());
-    int scale_a_static_rows = GetScaleStaticRows(op->ScaleA());
-    std::string dim_n = STR(ssmi_c.shape.at(1));
-
-    auto acc_dtype = ssmi_c.ty;
-    ValueItem frag_len = ssmi_c.shape[1] / sbe::nu(2);
-    if (ssmi_c.ty == BaseType::F16) {
-      acc_dtype = BaseType::U32;
-      frag_len = frag_len / sbe::nu(2);
-    }
-    auto reg_num = VIInt(frag_len);
-    if (!reg_num)
-      choreo_unreachable("expect scaled WGMMA frag length to be numeric");
-
-    if (!saw_scaled_exec) {
-      info.frag_sym = c_sym;
-      info.frag_expr = frag_expr;
-      info.scale_frag_name = scale_frag_name;
-      info.scale_a_name = scale_a_name;
-      info.scale_a_valid_rows_name = scale_a_valid_rows_name;
-      info.scale_b_name = scale_b_name;
-      info.scale_a_expr = scale_a_expr;
-      info.scale_a_valid_rows_expr = scale_a_valid_rows_expr;
-      info.scale_b_expr = scale_b_expr;
-      info.scale_a_ld = scale_a_ld;
-      info.acc_ty = acc_ty;
-      info.scale_frag_ty = NameBaseType(acc_dtype);
-      info.dim_n = dim_n;
-      info.scale_a_static_rows = scale_a_static_rows;
-      info.reg_num_d = (size_t)*reg_num;
-      saw_scaled_exec = true;
-      return true;
-    }
-
-    return info.frag_sym == c_sym && info.frag_expr == frag_expr &&
-           info.scale_a_expr == scale_a_expr &&
-           info.scale_a_valid_rows_expr == scale_a_valid_rows_expr &&
-           info.scale_a_static_rows == scale_a_static_rows &&
-           info.scale_b_expr == scale_b_expr && info.scale_a_ld == scale_a_ld &&
-           info.acc_ty == acc_ty && info.dim_n == dim_n &&
-           info.reg_num_d == (size_t)*reg_num;
-  }
-
-  if (auto fb = dyn_cast<AST::ForeachBlock>(n)) {
-    return !fb->GetBody() ||
-           CollectHoistableScaledWGMMAAccum(fb->GetBody(), loop_refs, info,
-                                            saw_scaled_exec);
-  }
-
-  if (auto mn = dyn_cast<AST::MultiNodes>(n)) {
-    for (auto& item : mn->values)
-      if (!CollectHoistableScaledWGMMAAccum(item, loop_refs, info,
-                                            saw_scaled_exec))
-        return false;
-    return true;
-  }
-
-  if (auto if_else = dyn_cast<AST::IfElseBlock>(n)) {
-    if (if_else->GetThenBody() &&
-        !CollectHoistableScaledWGMMAAccum(if_else->GetThenBody(), loop_refs,
-                                          info, saw_scaled_exec))
-      return false;
-    if (if_else->GetElseBody() &&
-        !CollectHoistableScaledWGMMAAccum(if_else->GetElseBody(), loop_refs,
-                                          info, saw_scaled_exec))
-      return false;
-    return true;
-  }
-
-  if (auto block = dyn_cast<AST::Block>(n)) {
-    return !block->GetBody() ||
-           CollectHoistableScaledWGMMAAccum(block->GetBody(), loop_refs, info,
-                                            saw_scaled_exec);
-  }
-
-  if (auto with_block = dyn_cast<AST::WithBlock>(n)) {
-    return !with_block->GetBody() ||
-           CollectHoistableScaledWGMMAAccum(with_block->GetBody(), loop_refs,
-                                            info, saw_scaled_exec);
-  }
-
+  (void)n;
+  (void)loop_refs;
+  (void)info;
+  (void)saw_scaled_exec;
   return true;
 }
 
 const CuteCodeGen::HoistedScaleAccumInfo*
 CuteCodeGen::CurrentHoistedScaleAccum() const {
-  if (!hoist_scale) return nullptr;
-  for (auto it = hoisted_scale_accum_scopes.rbegin();
-       it != hoisted_scale_accum_scopes.rend(); ++it) {
-    if (it->has_value()) return &it->value();
-  }
   return nullptr;
 }
 
@@ -3756,9 +3585,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (is_tma && !future_only && event_only) return "";
     // Warpspec TMA never needs futures (events or direct commit/wait)
     if (is_tma && !future_only && IsWarpSpecActive()) return "";
-    if (is_tma && !future_only && event_arrive_tx && dma_plan &&
-        dma_plan->direction == DMADirection::S2G)
-      return "";
     auto future_name = n.future;
 
     auto cp_atom_name =
@@ -4468,29 +4294,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       size_t effective_tma_rank =
           tma_has_inner_split ? t_shape.Rank() + 1 : t_shape.Rank();
 
-      std::vector<std::string> hoisted_rev_indices;
-      if (hoist_offset && !tma_has_inner_split && t_shape.Rank() == 2 &&
-          rev_indices.size() == 2) {
-        auto make_dim_name = [&](size_t dim_index) {
-          auto dim = f_sty->GetShape().ValueAt(f_sty->Dims() - 1 - dim_index);
-          auto dim_name = ToLower(UnScopedExpr(ValueSTR(dim)));
-          if (dim_name.empty())
-            return std::string("d") + std::to_string(dim_index);
-          bool valid = std::all_of(
-              dim_name.begin(), dim_name.end(),
-              [](unsigned char ch) { return std::isalnum(ch) || ch == '_'; });
-          if (!valid) return std::string("d") + std::to_string(dim_index);
-          return dim_name;
-        };
-
-        auto base_name = f_ca->data ? f_ca->data->name : std::string("src");
-        for (size_t idx = 0; idx < rev_indices.size(); ++idx) {
-          auto offset_name = base_name + "_" + make_dim_name(idx) + "_offset";
-          ds << d_indent << "const unsigned " << offset_name << " = "
-             << ValueSTR(rev_indices.at(idx)) << ";\n";
-          hoisted_rev_indices.push_back(offset_name);
-        }
-      }
       bool is_multicast_tma = n.IsMulticast() && n.IsTMA();
       bool emit_tma_single_guard =
           !ScopeAlreadySingleThreadForLevel(tma_sync_level);
@@ -4563,12 +4366,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
            << ptx_bar_expr << ", " << tma_tx_bytes_expr << ");\n";
       }
 
-      auto coord0_expr = hoisted_rev_indices.empty()
-                             ? ValueSTR(rev_indices.at(0))
-                             : hoisted_rev_indices.at(0);
-      auto coord1_expr = hoisted_rev_indices.empty()
-                             ? ValueSTR(rev_indices.at(1))
-                             : hoisted_rev_indices.at(1);
+      auto coord0_expr = ValueSTR(rev_indices.at(0));
+      auto coord1_expr = ValueSTR(rev_indices.at(1));
 
       if (is_multicast_tma) {
         const auto& lcfg = cgi.GetFunctionLaunches(fname);
@@ -4593,9 +4392,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
            << ptx_bar_expr << ", " << coord0_expr << ", " << coord1_expr
            << ");\n";
       } else if (effective_tma_rank == 3) {
-        auto coord2_expr = hoisted_rev_indices.empty()
-                               ? ValueSTR(rev_indices.at(2))
-                               : hoisted_rev_indices.at(2);
+        auto coord2_expr = ValueSTR(rev_indices.at(2));
         ds << d_indent << tma_issue_prefix
            << "choreo::tma_load_3d_shared_cta_global_mbarrier("
            << t_buf_void_ptr << ", (const void*)&" << *tname << "_tensor_map, "
@@ -5882,7 +5679,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         auto scale_a_valid_rows_name = c_sym + "_scale_a_valid_rows";
         auto scale_b_name = c_sym + "_scale_b_val";
         auto scale_a_valid_rows_expr = GenScaleValidRowsExpr(op.ScaleA());
-        if (!hoist_offset || !active_hoisted_scale_decls.count(scale_a_name)) {
+        if (!active_hoisted_scale_decls.count(scale_a_name)) {
           ds << d_indent << "float* " << scale_a_name << " = (float*)("
              << scale_a_expr << ");\n";
           ds << d_indent << "int " << scale_a_valid_rows_name << " = "
@@ -6094,13 +5891,15 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         }
       }
 
-      if (need_m_mask)
-        assert(!use_stmatrix && !store_trans &&
-               "masked store only supports non-transpose store to "
-               "global memory. Support for more cases can be added if needed.");
-
       // --- Emit store ---
       bool stmatrix_ok = use_stmatrix && f_sty->GetStorage() == Storage::SHARED;
+      if (stmatrix_ok) {
+        auto n_val = VIInt(ssmi.shape.at(1));
+        if (!n_val || *n_val % 8 != 0)
+          stmatrix_ok = false;
+      }
+      if (stmatrix_ok && (need_m_mask || need_n_mask))
+        stmatrix_ok = false;
       if (stmatrix_ok) {
         bool is_f32_acc = (accum_type == BaseType::F32);
         bool is_f32_dest = (f_sty->ElementType() == BaseType::F32);
@@ -7982,7 +7781,7 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
         }
       }
 
-      if ((hoist_offset || hoisted_scale_accum_scopes.back().has_value()) &&
+      if (hoisted_scale_accum_scopes.back().has_value() &&
           invariant_to_loop &&
           !active_hoisted_scale_decls.count(scale_a_name)) {
         ds << d_indent << "float* " << scale_a_name << " = (float*)("
