@@ -137,6 +137,7 @@ private:
     bool isTMA;   // global<->shared with hasTMA
     bool isLoad;  // global->shared direction
     Value constDescResult; // SSA value from DMAConstDescOp
+    int64_t swizzleBytes = 0; // 0=none, 32, 64, 128
   };
   llvm::SmallVector<DescInfo> descInfos;
   DenseMap<Value, unsigned> descValueToIndex;
@@ -386,9 +387,13 @@ private:
       bool isTMA = op.getTma();
       bool isLoad = (srcMS <= 0) && (dstMS == 1);
 
+      int64_t swizBytes = 0;
+      if (auto sb = op.getSwizzleBytes())
+        swizBytes = *sb;
+
       unsigned idx = descInfos.size();
       descInfos.push_back({idx, srcType, dstType, op.getKind(),
-                           isTMA, isLoad, op.getOut()});
+                           isTMA, isLoad, op.getOut(), swizBytes});
       descValueToIndex[op.getOut()] = idx;
     });
   }
@@ -627,7 +632,8 @@ private:
 
   void emitTMADescriptorSetup(unsigned descIdx, const std::string &dataPtr,
                               coir::TensorType globalType,
-                              coir::TensorType tileType) {
+                              coir::TensorType tileType,
+                              int64_t swizzleBytes = 0) {
     auto shape = globalType.getShape();
     auto elemTy = globalType.getElementType();
     unsigned elemBytes = elemTy.getIntOrFloatBitWidth() / 8;
@@ -685,7 +691,11 @@ private:
     os() << "          " << prefix << "_box_shape,\n";
     os() << "          " << prefix << "_elem_strides,\n";
     os() << "          CUtensorMapInterleave::CU_TENSOR_MAP_INTERLEAVE_NONE,\n";
-    os() << "          CUtensorMapSwizzle::CU_TENSOR_MAP_SWIZZLE_NONE,\n";
+    const char *swizEnum = "CU_TENSOR_MAP_SWIZZLE_NONE";
+    if (swizzleBytes == 32) swizEnum = "CU_TENSOR_MAP_SWIZZLE_32B";
+    else if (swizzleBytes == 64) swizEnum = "CU_TENSOR_MAP_SWIZZLE_64B";
+    else if (swizzleBytes == 128) swizEnum = "CU_TENSOR_MAP_SWIZZLE_128B";
+    os() << "          CUtensorMapSwizzle::" << swizEnum << ",\n";
     os() << "          CUtensorMapL2promotion::"
        << "CU_TENSOR_MAP_L2_PROMOTION_L2_128B,\n";
     os() << "          CUtensorMapFloatOOBfill::"
@@ -862,7 +872,8 @@ private:
         auto tileType = descInfos[i].isLoad ? descInfos[i].dstType
                                             : descInfos[i].srcType;
         std::string ptr = getTMAGlobalPtr(tmaIdx, kernel);
-        emitTMADescriptorSetup(tmaIdx, ptr, globalType, tileType);
+        emitTMADescriptorSetup(tmaIdx, ptr, globalType, tileType,
+                               descInfos[i].swizzleBytes);
         tmaIdx++;
       }
 
@@ -1018,7 +1029,8 @@ private:
       auto tileType = descInfos[i].isLoad ? descInfos[i].dstType
                                           : descInfos[i].srcType;
       std::string ptr = getTMAGlobalPtr(tmaIdx, kernel);
-      emitTMADescriptorSetup(tmaIdx, ptr, globalType, tileType);
+      emitTMADescriptorSetup(tmaIdx, ptr, globalType, tileType,
+                             descInfos[i].swizzleBytes);
       tmaIdx++;
     }
 
@@ -1388,9 +1400,15 @@ private:
     }
 
     if (useWGMMA) {
+      const char *swizEnum = "WGMMA_Swizzle::NS";
+      if (auto sb = op.getSwizzleBytes()) {
+        if (*sb == 32) swizEnum = "WGMMA_Swizzle::B32";
+        else if (*sb == 64) swizEnum = "WGMMA_Swizzle::B64";
+        else if (*sb == 128) swizEnum = "WGMMA_Swizzle::B128";
+      }
       os() << getIndent() << "uint64_t " << name
            << " = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, "
-              "WGMMA_Swizzle::NS>("
+           << swizEnum << ">("
            << getName(op.getSource()) << ");\n";
       return;
     }

@@ -2141,8 +2141,22 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
   // DMA: user wrote `dma.copy` -> DmaCopyOp (always produces token).
   mlir::Value token = nullptr;
   if (dma.IsTMA()) {
+    mlir::IntegerAttr swizAttr;
+    auto swizMode = dma.GetSwizzleMode();
+    if (swizMode != SwizMode::NONE) {
+      int64_t swizBytes = 0;
+      switch (swizMode) {
+      case SwizMode::B32: swizBytes = 32; break;
+      case SwizMode::B64: swizBytes = 64; break;
+      case SwizMode::B128: swizBytes = 128; break;
+      default: break;
+      }
+      if (swizBytes > 0)
+        swizAttr = builder.getI64IntegerAttr(swizBytes);
+    }
     auto tmaCopy = builder.create<coir::TmaCopyOp>(
-        loc, coir::AsyncTokenType::get(&IRContext()), srcVal, dstVal);
+        loc, coir::AsyncTokenType::get(&IRContext()), srcVal, dstVal,
+        swizAttr);
     token = tmaCopy.getToken();
   } else {
     auto dmaCopy = builder.create<coir::DmaCopyOp>(
@@ -2300,8 +2314,21 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
 
     auto fragTy = coir::MMAFragType::get(
         &IRContext(), srcTy.getElementType(), tileShape);
+    mlir::IntegerAttr swizAttr;
+    auto swizMode = op.GetSwizzleMode();
+    if (swizMode != SwizMode::NONE) {
+      int64_t swizBytes = 0;
+      switch (swizMode) {
+      case SwizMode::B32: swizBytes = 32; break;
+      case SwizMode::B64: swizBytes = 64; break;
+      case SwizMode::B128: swizBytes = 128; break;
+      default: break;
+      }
+      if (swizBytes > 0)
+        swizAttr = builder.getI64IntegerAttr(swizBytes);
+    }
     auto loadOp = builder.create<coir::MMALoadOp>(
-        loc, fragTy, tileOp.getResult(), /*k_dim=*/nullptr);
+        loc, fragTy, tileOp.getResult(), /*k_dim=*/nullptr, swizAttr);
 
     std::string fragName;
     if (op.IsLoadR()) {
