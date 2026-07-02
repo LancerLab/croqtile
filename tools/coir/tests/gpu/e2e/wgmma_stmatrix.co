@@ -1,0 +1,69 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: cocc -t cute -es -arch=sm_90a %s 2>&1 | FileCheck %s
+// RUN: cocc -t cute -gs -arch=sm_90a %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines --check-prefix=EXEC %s && rm -f %s.result
+//
+// WGMMA SS matmul with stmatrix store to shared + TMA store to global.
+// This exercises the store_fragment_d_stmatrix_f32_f16 path.
+
+#define M 64
+#define N 64
+#define K 32
+#define TILE_K 16
+#define WARP_K 16
+
+__co__ auto matmul(f16 [M, K] lhs, f16 [N, K] rhs) {
+  f16 [M, N] output{0};
+  parallel {block_m, block_n} by [1, 1] : block {
+    shared f16 [M, TILE_K] lhs_s;
+    shared f16 [N, TILE_K] rhs_s;
+    mc = mma.fill.f32 0.0f;
+
+    foreach {iv_k} in [cdiv(K, TILE_K)] {
+      tma.copy.swiz<32> lhs.subspan(M, TILE_K).at(block_m, iv_k) => lhs_s;
+      tma.copy.swiz<32> rhs.subspan(N, TILE_K).at(block_n, iv_k) => rhs_s;
+
+      foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
+        parallel p by 1 : group-4 {
+          ma = mma.load.swiz<32> lhs_s.chunkat(_, iv_warp);
+          mb = mma.load.swiz<32> rhs_s.chunkat(_, iv_warp);
+          mma.row.row mc, ma, mb;
+        }
+      }
+    }
+
+    shared f16 [M, N] out_s;
+    mma.store mc, out_s;
+    tma.copy out_s => output.subspan(M, N).at(block_m, block_n);
+  }
+  return output;
+}
+
+int main() {
+  size_t m = 64, n = 64, k = 32;
+
+  auto lhs_h = choreo::make_spandata<choreo::f16>(m, k);
+  auto rhs_h = choreo::make_spandata<choreo::f16>(n, k);
+  lhs_h.fill(1.0f);
+  rhs_h.fill(1.0f);
+
+  auto res = matmul(lhs_h.view(), rhs_h.view());
+
+  float expected = (float)k;
+  bool pass = true;
+  for (size_t i = 0; i < m && pass; ++i)
+    for (size_t j = 0; j < n && pass; ++j) {
+      float got = __half2float(res[i][j]);
+      if (std::abs(got - expected) > 1.0f) {
+        std::cout << "FAIL at [" << i << "," << j << "]: got " << got
+                  << " expected " << expected << std::endl;
+        pass = false;
+      }
+    }
+
+  if (pass) std::cout << "WGMMA stmatrix Test Passed" << std::endl;
+  else std::cout << "FAIL: wgmma_stmatrix" << std::endl;
+}
+
+// CHECK: store_fragment_d_stmatrix_f32_f16
+// CHECK: CU_TENSOR_MAP_SWIZZLE_32B
+// EXEC: WGMMA stmatrix Test Passed

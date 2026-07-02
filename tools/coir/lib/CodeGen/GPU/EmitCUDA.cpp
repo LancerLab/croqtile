@@ -1862,8 +1862,25 @@ private:
         os() << "cute::make_gmem_ptr<" << elemTy << ">((" << elemTy << "*)"
              << getName(op.getDest()) << ")";
       os() << ", " << layoutName << ");\n";
-      os() << getIndent() << "store_fragment_d<CUTE_WGMMA_M64K16, " << N
-           << ">(" << tensorName << ", " << getName(op.getFragment()) << ");\n";
+      bool useStmatrix = (ms == 1);
+      if (useStmatrix) {
+        bool isF32Acc = fragTy.getElementType().isF32();
+        bool isF16Dest = dstTy.getElementType().isF16();
+        bool isBF16Dest = dstTy.getElementType().isBF16();
+        std::string fn;
+        if (isF32Acc && isF16Dest)
+          fn = "store_fragment_d_stmatrix_f32_f16<";
+        else if (isF32Acc && isBF16Dest)
+          fn = "store_fragment_d_stmatrix_f32_bf16<";
+        else
+          fn = "store_fragment_d_stmatrix<";
+        os() << getIndent() << fn << "CUTE_WGMMA_M64K16, " << N << ">("
+             << tensorName << ", " << getName(op.getFragment()) << ");\n";
+      } else {
+        os() << getIndent() << "store_fragment_d<CUTE_WGMMA_M64K16, " << N
+             << ">(" << tensorName << ", " << getName(op.getFragment())
+             << ");\n";
+      }
       return;
     }
 
