@@ -138,6 +138,7 @@ private:
     bool isLoad;  // global->shared direction
     Value constDescResult; // SSA value from DMAConstDescOp
     int64_t swizzleBytes = 0; // 0=none, 32, 64, 128
+    int storeArgIdx = -1; // kernel arg index for TMA store dest (-1=return)
   };
   llvm::SmallVector<DescInfo> descInfos;
   DenseMap<Value, unsigned> descValueToIndex;
@@ -457,9 +458,18 @@ private:
       if (auto sb = op.getSwizzleBytes())
         swizBytes = *sb;
 
+      int storeArgIdx = -1;
+      if (isTMA && !isLoad) {
+        Value destVal = op.getDest();
+        while (auto tileOp = destVal.getDefiningOp<coir::TensorTileOp>())
+          destVal = tileOp.getSource();
+        if (auto arg = mlir::dyn_cast<mlir::BlockArgument>(destVal))
+          storeArgIdx = (int)arg.getArgNumber();
+      }
+
       unsigned idx = descInfos.size();
       descInfos.push_back({idx, srcType, dstType, op.getKind(),
-                           isTMA, isLoad, op.getOut(), swizBytes});
+                           isTMA, isLoad, op.getOut(), swizBytes, storeArgIdx});
       descValueToIndex[op.getOut()] = idx;
     });
   }
@@ -810,6 +820,8 @@ private:
           unsigned argIdx = tmaLoadIdx < fnInputs ? tmaLoadIdx : 0;
           return "p" + std::to_string(argIdx) + "__device";
         } else {
+          if (descInfos[i].storeArgIdx >= 0)
+            return "p" + std::to_string(descInfos[i].storeArgIdx) + "__device";
           return "__result__device";
         }
       }
@@ -1829,6 +1841,7 @@ private:
       std::string suffix = "_wgmma_st_" + std::to_string(nextId++);
       auto dstTy = cast<coir::TensorType>(op.getDest().getType());
       std::string elemTy = emitElementType(dstTy.getElementType());
+      int32_t ms = dstTy.getMemorySpace();
       int64_t ldm = getSourceLeadingDim(op.getDest());
       std::string shapeName = "__shape" + suffix;
       std::string layoutName = "__layout" + suffix;
@@ -1841,9 +1854,14 @@ private:
            << ", cute::make_stride(cute::Int<" << ldm
            << ">{}, cute::Int<1>{}));\n";
       os() << getIndent() << "auto " << tensorName
-           << " = cute::make_tensor(cute::make_gmem_ptr<" << elemTy << ">(("
-           << elemTy << "*)" << getName(op.getDest()) << "), " << layoutName
-           << ");\n";
+           << " = cute::make_tensor(";
+      if (ms == 1)
+        os() << "cute::make_smem_ptr((" << elemTy << "*)"
+             << getName(op.getDest()) << ")";
+      else
+        os() << "cute::make_gmem_ptr<" << elemTy << ">((" << elemTy << "*)"
+             << getName(op.getDest()) << ")";
+      os() << ", " << layoutName << ");\n";
       os() << getIndent() << "store_fragment_d<CUTE_WGMMA_M64K16, " << N
            << ">(" << tensorName << ", " << getName(op.getFragment()) << ");\n";
       return;
