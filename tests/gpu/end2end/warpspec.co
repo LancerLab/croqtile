@@ -83,7 +83,6 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
             mb = mma.load.swiz<MATMUL_SWIZ> rhs_load_s.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(stage, 0).chunkat(_, iv_warp);
             mma.row.row mc, ma, mb;
           }
-          mma.commit;
           trigger event_b[stage];
         }
         mma.store mc, output_s;

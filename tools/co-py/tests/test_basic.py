@@ -382,15 +382,6 @@ class TestMMA:
         assert "MMA" in text
         assert "ROW.COL" in text or "row" in text.lower()
 
-    def test_mma_commit(self):
-        @croq.co
-        def kern(x: croq.f16[16]) -> croq.f16[16]:
-            croq.mma.commit()
-            return x
-
-        text = croq.Program().add(kern).dump_ast()
-        assert "COMMIT" in text or "commit" in text.lower()
-
 
 # ===================================================================
 # 7. Full kernel ports

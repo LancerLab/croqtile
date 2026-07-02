@@ -46,7 +46,7 @@ completion signal.
 
 - `shared event` -> `cuda::barrier<thread_scope_block>` (CTA-scoped, phase-flip)
 - `bar.sync 15, 128` hardcoded for GROUPx4 internal sync
-- `mma.commit` / `mma.wait<N>` for WGMMA pipeline control
+- `mma.wait<N>` for WGMMA pipeline control
 - No user-accessible named barrier primitives
 
 ## Design
@@ -105,7 +105,6 @@ inthreads.async (p > 0) {
   foreach {bn} in [kv_bound] {
     // QK WGMMA
     mma.row.row acc_s, q_shared, k_buf[stage];
-    mma.commit;
     mma.wait<0>;
 
     // Signal: my QK is done
@@ -119,7 +118,6 @@ inthreads.async (p > 0) {
 
     // PV WGMMA
     mma.row.col acc_o, acc_s_cast, v_buf[stage];
-    mma.commit;
     mma.wait<0>;
   }
 }
@@ -132,7 +130,6 @@ The cross-WG stagger composes with the existing QK/PV overlap (iter036):
 ```co
     // Issue PV[n]
     mma.row.col acc_o, acc_s_cast, v_buf[stage];
-    mma.commit;
 
     __bar_arrive(next_barrier, 256);  // Signal: PV issued, QK next
 
@@ -141,7 +138,6 @@ The cross-WG stagger composes with the existing QK/PV overlap (iter036):
       wait kvf[(bn + 1) % STAGES];
       acc_s = mma.fill.f32 0.0f;
       mma.row.row acc_s, q_shared, k_buf[(bn+1) % STAGES];
-      mma.commit;
 
       __bar_sync(my_barrier, 256);  // Wait for other WG before next softmax
       mma.wait<0>;                  // Both PV[n] and QK[n+1] done

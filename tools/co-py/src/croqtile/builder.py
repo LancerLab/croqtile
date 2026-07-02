@@ -969,7 +969,6 @@ class _MMANamespace:
         ma = croq.mma.load(lhs.chunkat(m @ g0, k))
         croq.mma.exec(mc, ma, mb, method="row.col")
         croq.mma.store(mc, output.chunkat(m @ g0, n @ g1))
-        croq.mma.commit()
     """
 
     ROW_COL = "row.col"
@@ -1049,10 +1048,6 @@ class _MMANamespace:
                 "mma.store target must be a chunkat expression or named Var")
         _emit(node)
         _source_emit(f"mma.store {_var_co(src)}, {target._co};")
-
-    def commit(self):
-        _emit(_core.make_mma_commit())
-        _source_emit("mma.commit;")
 
     def frag(self, name: str, shape: list, init=0.0, *,
              dtype=None) -> "FragArray":

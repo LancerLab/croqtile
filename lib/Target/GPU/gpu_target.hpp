@@ -115,6 +115,7 @@ public:
         {STR(ChoreoFeature::DSDMA), Description(ChoreoFeature::DSDMA)},
         {STR(ChoreoFeature::ASYNC_DMA), Description(ChoreoFeature::ASYNC_DMA)},
         {STR(ChoreoFeature::DGMA), Description(ChoreoFeature::DGMA)},
+        {STR(ChoreoFeature::DSDMA), Description(ChoreoFeature::DSDMA)},
         {STR(ChoreoFeature::SLML), Description(ChoreoFeature::SLML)},
         {STR(ChoreoFeature::MEMALLOC), Description(ChoreoFeature::MEMALLOC)},
     };

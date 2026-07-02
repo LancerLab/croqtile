@@ -19,7 +19,6 @@ __co__ auto direct_array_elem_row_row(f16 [M, K] lhs, f16 [N, K] rhs) {
       parallel g by 1 : group-4 {
         mc = mma.fill.f32 0.0f;
         mma.row.row mc, lhs_s, rhs_s[stage];
-        mma.commit;
         mma.store mc, output;
       }
     }
@@ -40,7 +39,6 @@ __co__ auto direct_array_elem_row_col(f16 [M, K] lhs, f16 [K, N] rhs) {
       parallel g by 1 : group-4 {
         mc = mma.fill.f32 0.0f;
         mma.row.col mc, lhs_s, rhs_s[stage];
-        mma.commit;
         mma.store mc, output;
       }
     }

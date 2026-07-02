@@ -1,10 +1,8 @@
 // RUN: choreo -e %s | FileCheck %s
 
-// CHECK: MMA.COMMIT
 // CHECK: MMA.WAIT<3>
 // CHECK: MMA.WAIT<0>
 __co__ void foo() {
-  mma.commit;
   mma.wait<3>;
   mma.wait<0>;
 }
