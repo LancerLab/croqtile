@@ -1,0 +1,32 @@
+// Mock-vs-Real comparison: count then compact elements > threshold.
+
+__co__ void test() {
+  s32[8] data;
+  s32[8] result;
+
+  foreach i in 8
+    data.at(i) = (i + 1) * 3;
+
+  // Count elements > 10
+  mutable s32 count = 0;
+  foreach i in 8 {
+    if (data.at(i) > 10)
+      count = count + 1;
+  }
+  println(count);
+
+  // Compact elements > 10 into result
+  mutable s32 write_idx = 0;
+  foreach i in 8 {
+    if (data.at(i) > 10) {
+      result.at(write_idx) = data.at(i);
+      write_idx = write_idx + 1;
+    }
+  }
+
+  println(result.at(0));
+  println(result.at(1));
+  println(result.at(2));
+  println(result.at(3));
+  println(result.at(4));
+}

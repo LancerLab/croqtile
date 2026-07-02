@@ -1,0 +1,20 @@
+// Mock-vs-Real comparison: histogram counting.
+
+__co__ void test() {
+  s32[8] data;
+  s32[4] bins;
+
+  foreach i in 8
+    data.at(i) = i % 4;
+
+  foreach i in 4
+    bins.at(i) = 0;
+
+  foreach i in 8
+    bins.at(data.at(i)) = bins.at(data.at(i)) + 1;
+
+  println(bins.at(0));
+  println(bins.at(1));
+  println(bins.at(2));
+  println(bins.at(3));
+}

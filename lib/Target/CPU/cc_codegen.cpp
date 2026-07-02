@@ -220,7 +220,12 @@ const std::string CCCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
             oss << " + " << ValueSTR(offset_vi);
           ++idx;
         } else {
-          oss << " + " << ExprSTR(item);
+          if (shape.Rank() > idx + 1) {
+            auto stride = shape.TrimDims(idx + 1).ElementCountValue();
+            oss << " + (" << ExprSTR(item) << ") * " << ValueSTR(stride);
+          } else {
+            oss << " + (" << ExprSTR(item) << ")";
+          }
           ++idx;
         }
       }
