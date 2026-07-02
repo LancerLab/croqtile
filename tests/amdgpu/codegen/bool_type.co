@@ -1,0 +1,17 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+// Test that bool type is accepted and generates correct code
+__co__ void bool_test(s32 [64] a) {
+  parallel p by 64 : thread {
+    mutable s32 v = a.at(p);
+    mutable s32 result = 0;
+    if (v > 0) {
+      result = 1;
+    }
+    a.at(p) = result;
+  }
+}
+// CHECK: __global__
+// CHECK: int result = 0
+// CHECK: if ((v > 0))
+// CHECK: result = 1

@@ -17,10 +17,96 @@ using namespace Choreo;
 using namespace Choreo::HIP;
 
 // ============================================================================
+// Line directive support
+// ============================================================================
+
+bool HIPCodeGen::ShouldEmitLineDirective(AST::Node& n) const {
+  return isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n) ||
+         isa<AST::InThreadsBlock>(&n) || isa<AST::IfElseBlock>(&n) ||
+         isa<AST::WhileBlock>(&n) || isa<AST::Assignment>(&n) ||
+         isa<AST::ParallelBy>(&n) || isa<AST::DMA>(&n) ||
+         isa<AST::Wait>(&n) || isa<AST::Trigger>(&n) || isa<AST::Break>(&n) ||
+         isa<AST::Continue>(&n) || isa<AST::Rotate>(&n) ||
+         isa<AST::Synchronize>(&n) || isa<AST::Call>(&n) ||
+         isa<AST::NamedVariableDecl>(&n) || isa<AST::Return>(&n);
+}
+
+void HIPCodeGen::EmitLineDirective(AST::Node& n) {
+  if (!EnableLineDirective() || !ShouldEmitLineDirective(n)) return;
+
+  auto loc = n.LOC();
+  if (loc.begin.line <= 0) return;
+
+  auto file =
+      ResolveDebugLinePath(loc, CCtx().GetDebugLinePathMode());
+  if (file.empty()) return;
+
+  auto& line_state = IsHost() ? host_line_state : device_line_state;
+  if (line_state.valid && line_state.line == loc.begin.line &&
+      line_state.file == file)
+    return;
+
+  auto& os = IsHost() ? hs : ds;
+  os << "#line " << loc.begin.line << " \""
+     << EscapeLinePathForDirective(file) << "\"\n";
+
+  line_state.line = loc.begin.line;
+  line_state.file = file;
+  line_state.valid = true;
+}
+
+void HIPCodeGen::ResetLineDirectiveState() {
+  host_line_state = {};
+  device_line_state = {};
+}
+
+// ============================================================================
+// Site-level assertion support
+// ============================================================================
+
+void HIPCodeGen::BuildSiteAssertionMap() {
+  if (CCtx().DisableRuntimeCheck()) return;
+  if (fname.empty()) return;
+
+  for (const auto& ar : FCtx(fname).GetAssertions(AssessType::USE_SITE)) {
+    if (!ar.enabled || !ar.EmitTarget()) continue;
+    if (ar.emit_position == AssertionEmitPosition::BEFORE_NODE)
+      pre_site_assertions[ar.EmitTarget()].push_back(ar);
+    else
+      post_site_assertions[ar.EmitTarget()].push_back(ar);
+  }
+}
+
+void HIPCodeGen::EmitPreSiteAssertions(AST::Node& n) {
+  if (CCtx().DisableRuntimeCheck()) return;
+  auto it = pre_site_assertions.find(&n);
+  if (it == pre_site_assertions.end()) return;
+
+  for (const auto& ar : it->second) {
+    IndStream() << "choreo::choreo_assert(" << ValueSTR(ar.expr, true) << ", \""
+                << ar.message << ", " << ar.loc << "\");\n";
+  }
+}
+
+void HIPCodeGen::EmitPostSiteAssertions(AST::Node& n) {
+  if (CCtx().DisableRuntimeCheck()) return;
+  auto it = post_site_assertions.find(&n);
+  if (it == post_site_assertions.end()) return;
+
+  for (const auto& ar : it->second) {
+    IndStream() << "choreo::choreo_assert(" << ValueSTR(ar.expr, true) << ", \""
+                << ar.message << ", " << ar.loc << "\");\n";
+  }
+}
+
+// ============================================================================
 // BeforeVisitImpl / InMidVisitImpl / AfterVisitImpl
 // ============================================================================
 
 bool HIPCodeGen::BeforeVisitImpl(AST::Node& n) {
+  EmitPreSiteAssertions(n);
+  EmitLineDirective(n);
+
   if (isa<AST::Program>(&n)) {
     EmitFixedHostHead();
     EmitFixedDeviceHead();
@@ -28,6 +114,7 @@ bool HIPCodeGen::BeforeVisitImpl(AST::Node& n) {
     levels.push(ParallelLevel::NONE);
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ResetChoreoFunctionStates();
+    BuildSiteAssertionMap();
     device_fn = "__choreo_device_" + fname;
     fty = cast<FunctionType>(GetSymbolType(fname));
     ssm.EnterScope();
@@ -64,6 +151,8 @@ bool HIPCodeGen::InMidVisitImpl(AST::Node& n) {
 }
 
 bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
+  EmitPostSiteAssertions(n);
+
   if (isa<AST::Program>(&n)) {
     ssm.LeaveScope();
     switch (CCtx().GetOutputKind()) {
@@ -1524,6 +1613,8 @@ bool HIPCodeGen::Visit(AST::Call& n) {
     }
     if (func_name == "croq::cuda::setreg_inc" ||
         func_name == "croq::cuda::setreg_dec") {
+      errs() << "warning: '" << func_name
+             << "' is NVIDIA-only and has no effect on AMDGPU target.\n";
       return true;
     }
     if (n.IsArith()) {         /* fall through to CallSTR emission below */
@@ -1880,9 +1971,11 @@ const std::string HIPCodeGen::CallSTR(AST::Call& n) const {
         {"__floor", "floorf"},      {"__round", "roundf"},
         {"__abs", "fabsf"},         {"__fabs", "fabsf"},
         {"__fmod", "fmodf"},        {"__fmax", "fmaxf"},
-        {"__fmin", "fminf"},        {"__isfinite", "isfinite"},
-        {"__sign", "__fsignbit"},   {"__gelu", "__gelu"},
-        {"__sigmoid", "__sigmoid"}, {"__softplus", "__softplus"},
+        {"__fmin", "fminf"},        {"__fmaf", "fmaf"},
+        {"__frcp_rn", "__frcp_rn"},
+        {"__isfinite", "isfinite"}, {"__sign", "__fsignbit"},
+        {"__gelu", "__gelu"},       {"__sigmoid", "__sigmoid"},
+        {"__softplus", "__softplus"},
     };
     auto it = arith_map.find(n.function->name);
     std::string func = (it != arith_map.end()) ? it->second : n.function->name;
@@ -1967,7 +2060,12 @@ void HIPCodeGen::EmitFixedDeviceHead() {
 }
 
 void HIPCodeGen::EmitSource() {
-  for (auto& code : code_segments) outs() << code << "\n";
+  for (auto& code : code_segments) {
+    if (EnableLineDirective())
+      outs() << PinLineDirectivePerGeneratedLine(code) << "\n";
+    else
+      outs() << code << "\n";
+  }
 }
 
 void HIPCodeGen::EmitScript(std::ostream& os, const std::string& exe_fn) {
@@ -2023,7 +2121,12 @@ HIPCC=${ROCM_HOME}/bin/hipcc
   os << __choreo_types_header_as_string << "\nEOF\n\n";
 
   os << "cat <<'EOF' > " << cc_file << "\n";
-  for (auto& code : code_segments) os << code << "\n";
+  for (auto& code : code_segments) {
+    if (EnableLineDirective())
+      os << PinLineDirectivePerGeneratedLine(code) << "\n";
+    else
+      os << code << "\n";
+  }
   os << "\nEOF\n\n";
 
   auto arch_str = ToLower(CCtx().GetArch());
