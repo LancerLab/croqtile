@@ -1,0 +1,24 @@
+// Mock-vs-Real comparison: arithmetic and bitwise expressions.
+
+__co__ void test() {
+  s32 a = 7;
+  s32 b = 3;
+
+  println(a + b);
+  println(a - b);
+  println(a * b);
+  println(a / b);
+  println(a % b);
+
+  println(a & 3);
+  println(a | 8);
+  println(a ^ b);
+  println(a << 2);
+  println(a >> 1);
+
+  // Compound expressions
+  s32 c = (a + b) * (a - b);
+  println(c);
+  s32 d = a * a + b * b;
+  println(d);
+}

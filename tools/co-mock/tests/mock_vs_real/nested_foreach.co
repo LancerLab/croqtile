@@ -1,0 +1,32 @@
+// Mock-vs-Real comparison: nested foreach with 2D array row/col sums.
+
+__co__ void test() {
+  s32[3, 3] mat;
+  foreach i in 3
+    foreach j in 3
+      mat.at(i, j) = i * 3 + j + 1;
+
+  // Row sums: [6, 15, 24]
+  s32[3] row_sum;
+  foreach i in 3 {
+    mutable s32 rsum = 0;
+    foreach j in 3
+      rsum = rsum + mat.at(i, j);
+    row_sum.at(i) = rsum;
+  }
+  println(row_sum.at(0));
+  println(row_sum.at(1));
+  println(row_sum.at(2));
+
+  // Col sums: [12, 15, 18]
+  s32[3] col_sum;
+  foreach j in 3 {
+    mutable s32 csum = 0;
+    foreach i in 3
+      csum = csum + mat.at(i, j);
+    col_sum.at(j) = csum;
+  }
+  println(col_sum.at(0));
+  println(col_sum.at(1));
+  println(col_sum.at(2));
+}

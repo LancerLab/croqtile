@@ -1,0 +1,30 @@
+// Mock-vs-Real comparison: element-wise operations across arrays.
+
+__co__ void test() {
+  s32[4] a;
+  s32[4] b;
+  s32[4] c;
+
+  foreach i in 4 {
+    a.at(i) = i + 1;
+    b.at(i) = (i + 1) * 10;
+  }
+
+  foreach i in 4
+    c.at(i) = a.at(i) + b.at(i);
+
+  println(c.at(0));
+  println(c.at(1));
+  println(c.at(2));
+  println(c.at(3));
+
+  // Product array
+  s32[4] prod;
+  foreach i in 4
+    prod.at(i) = a.at(i) * b.at(i);
+
+  println(prod.at(0));
+  println(prod.at(1));
+  println(prod.at(2));
+  println(prod.at(3));
+}
