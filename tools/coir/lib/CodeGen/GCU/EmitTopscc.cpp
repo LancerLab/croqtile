@@ -834,6 +834,8 @@ private:
       emitAssert(assertOp);
     else if (auto elemCopy = dyn_cast<ElementCopyOp>(op))
       emitElementCopy(elemCopy);
+    else if (auto storeTile = dyn_cast<TensorStoreTileOp>(op))
+      emitTensorStoreTile(storeTile);
     else
       CoIREmitterBase::emitOpFallback(op);
   }
@@ -1875,6 +1877,45 @@ private:
        << totalElems << "; ++" << idx << ")\n";
     os() << getIndent() << "  " << dst << "[" << idx << "] = " << src
        << "[" << idx << "];\n";
+  }
+
+  void emitTensorStoreTile(TensorStoreTileOp op) {
+    // If the tile came from tensor.tile (pointer alias into dest), the write
+    // already went through the alias -- store_tile is a no-op.
+    if (op.getTile().getDefiningOp<TensorTileOp>()) return;
+
+    // Otherwise the tile is from an independent allocation (tensor.alloc) and
+    // we must copy its contents back into dest at the given offset.
+    auto tileTy = cast<coir::TensorType>(op.getTile().getType());
+    auto destTy = cast<coir::TensorType>(op.getDest().getType());
+    int64_t tileElems = 1;
+    for (auto d : tileTy.getShape()) tileElems *= d;
+
+    std::string tile = getName(op.getTile());
+    std::string dest = getName(op.getDest());
+
+    auto destShape = destTy.getShape();
+    std::string offset;
+    auto indices = op.getIndices();
+    for (unsigned i = 0; i < indices.size(); ++i) {
+      int64_t stride = 1;
+      for (unsigned j = i + 1; j < destShape.size(); ++j)
+        stride *= destShape[j];
+      std::string term = getName(indices[i]);
+      if (stride != 1)
+        term += " * " + std::to_string(stride);
+      if (offset.empty())
+        offset = term;
+      else
+        offset += " + " + term;
+    }
+    if (offset.empty()) offset = "0";
+
+    std::string idx = "i" + std::to_string(nextId++);
+    os() << getIndent() << "for (int " << idx << " = 0; " << idx << " < "
+         << tileElems << "; ++" << idx << ")\n";
+    os() << getIndent() << "  " << dest << "[" << offset << " + " << idx
+         << "] = " << tile << "[" << idx << "];\n";
   }
 
   void emitEventTrigger(EventTriggerOp op) {
