@@ -1,0 +1,28 @@
+// Mock-vs-Real comparison: multi-stage hierarchical reduction (foreach).
+
+__co__ void test() {
+  s32[16] data;
+  s32[4] partial;
+
+  foreach i in 16
+    data.at(i) = i + 1;
+
+  // Stage 1: chunk sums (4 chunks of 4)
+  foreach blk in 4 {
+    mutable s32 chunk_sum = 0;
+    foreach i in 4
+      chunk_sum = chunk_sum + data.at(blk * 4 + i);
+    partial.at(blk) = chunk_sum;
+  }
+
+  println(partial.at(0));
+  println(partial.at(1));
+  println(partial.at(2));
+  println(partial.at(3));
+
+  // Stage 2: final sum
+  mutable s32 total = 0;
+  foreach i in 4
+    total = total + partial.at(i);
+  println(total);
+}

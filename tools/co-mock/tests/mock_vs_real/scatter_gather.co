@@ -1,0 +1,16 @@
+// Mock-vs-Real comparison: scatter/gather access patterns (foreach).
+
+__co__ void test() {
+  s32[8] src;
+  s32[8] dst;
+
+  foreach i in 8
+    src.at(i) = (i + 1) * 10;
+
+  // Gather: dst[i] = src[(i*3) % 8]
+  foreach i in 8
+    dst.at(i) = src.at((i * 3) % 8);
+
+  foreach i in 8
+    println(dst.at(i));
+}
