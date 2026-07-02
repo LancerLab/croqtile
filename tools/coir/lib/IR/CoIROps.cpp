@@ -751,7 +751,7 @@ void TensorAllocOp::print(OpAsmPrinter &printer) {
     printer.printAttribute(*initAttr);
   }
   printer.printOptionalAttrDict((*this)->getAttrs(),
-                                /*elidedAttrs=*/{"init"});
+                                /*elidedAttrs=*/{"init", "spm"});
   printer << " : " << getResult().getType();
 }
 

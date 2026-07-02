@@ -395,6 +395,7 @@ private:
 
   void emitKernel(KernelOp kernel) {
     entryAssertions.clear();
+    lastSpmName.clear();
     prescanMMAFragRoles(kernel);
     prescanDescriptors(kernel);
 

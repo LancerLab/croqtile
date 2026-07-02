@@ -1612,6 +1612,19 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
       return true;
     }
 
+    // SPM backing array: skip IR generation, will be emitted by codegen.
+    if (nvd.HasNote("spm")) {
+      auto &mdspan = sty->GetShape();
+      int64_t spmBytes = 1;
+      if (mdspan.IsValid())
+        for (auto &v : mdspan.Value())
+          spmBytes *= EvalToInt(v);
+      auto elemTy = LowerBaseType(sty->ElementType());
+      spmBytes *= (elemTy.getIntOrFloatBitWidth() / 8);
+      pendingSpmSize = spmBytes;
+      return true;
+    }
+
     auto tty = LowerSpannedType(sty);
     llvm::SmallVector<mlir::Value> dynDimVals;
     if (tty.hasDynamicShape()) {
@@ -1661,8 +1674,22 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
         initAttr = builder.getFloatAttr(tty.getElementType(), v);
       }
     }
-    auto allocOp =
-        builder.create<coir::TensorAllocOp>(loc, tty, dynDimVals, initAttr);
+    mlir::StringAttr reuseSpm;
+    mlir::IntegerAttr reuseOffset;
+    if (nvd.HasNote("reuse")) {
+      int64_t off = 0;
+      if (nvd.HasNote("offset")) {
+        try { off = std::stoll(nvd.GetNote("offset")); }
+        catch (...) {}
+      }
+      reuseOffset = builder.getI64IntegerAttr(off);
+    }
+    auto allocOp = builder.create<coir::TensorAllocOp>(
+        loc, tty, dynDimVals, initAttr, reuseSpm, reuseOffset);
+    if (reuseOffset && pendingSpmSize > 0) {
+      allocOp->setAttr("spm_size",
+                       builder.getI64IntegerAttr(pendingSpmSize));
+    }
     MapValue(nvd.GetName(), allocOp.getResult());
   } else {
     if (nvd.init_expr) {
@@ -1981,8 +2008,9 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
                               srcAlloc.getDynamicDims().end());
         }
         auto allocOp =
-            builder.create<coir::TensorAllocOp>(loc, dstTy, dstDynDims,
-                                                nullptr);
+            builder.create<coir::TensorAllocOp>(
+                loc, dstTy, dstDynDims,
+                mlir::TypedAttr{}, mlir::StringAttr{}, mlir::IntegerAttr{});
         dstVal = allocOp.getResult();
       }
     }

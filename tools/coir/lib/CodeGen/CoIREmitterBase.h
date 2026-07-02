@@ -59,6 +59,7 @@ protected:
   llvm::DenseMap<unsigned, std::string> returnParamNames;
   llvm::DenseSet<mlir::Value> returnValues;
   unsigned nextId = 0;
+  std::string lastSpmName;
 
   llvm::raw_ostream &os() { return *os_; }
 

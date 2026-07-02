@@ -69,6 +69,7 @@ private:
 
   llvm::SmallVector<std::pair<std::string, mlir::Value>> pendingYields;
   unsigned foreachNestDepth = 0;
+  int64_t pendingSpmSize = 0;
   mlir::Value lastSpanAsResult;
 
   struct IfMergeInfo {
