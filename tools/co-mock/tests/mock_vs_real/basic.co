@@ -1,0 +1,18 @@
+// Mock-vs-Real comparison test.
+// Each println has exactly one argument to avoid separator differences.
+
+__co__ void test() {
+  s32[4] arr;
+  foreach i in 4
+    arr.at(i) = (i + 1) * 10;
+
+  println(arr.at(0));
+  println(arr.at(1));
+  println(arr.at(2));
+  println(arr.at(3));
+
+  mutable s32 sum = 0;
+  foreach i in 4
+    sum = sum + arr.at(i);
+  println(sum);
+}
