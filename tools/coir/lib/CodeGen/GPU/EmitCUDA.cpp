@@ -298,22 +298,31 @@ private:
 
   std::string emitWMMAFragType(coir::MMAFragType fragTy,
                                StringRef role = "accumulator",
-                               StringRef layout = "") {
+                               StringRef layout = "",
+                               Value fragVal = nullptr) {
     std::string result;
     llvm::raw_string_ostream ss(result);
-    auto shape = fragTy.getShape();
-    int64_t M = shape.size() > 0 ? shape[0] : 16;
-    int64_t N = shape.size() > 1 ? shape[1] : 16;
-    int64_t K = 16;
+    int64_t M = 16, N = 16, K = 16;
+    if (fragVal && mmaTileDims.count(fragVal)) {
+      auto [tM, tN, tK] = mmaTileDims[fragVal];
+      M = tM; N = tN; K = tK;
+    } else {
+      auto shape = fragTy.getShape();
+      M = shape.size() > 0 ? shape[0] : 16;
+      N = shape.size() > 1 ? shape[1] : 16;
+    }
+    std::string elemStr = emitElementType(fragTy.getElementType());
+    if (fragTy.getElementType().isF32() && K == 8 && role != "accumulator")
+      elemStr = "tf32";
     ss << "wmma::fragment<wmma::" << role << ", "
-       << M << ", " << N << ", " << K << ", "
-       << emitElementType(fragTy.getElementType());
+       << M << ", " << N << ", " << K << ", " << elemStr;
     if (!layout.empty())
       ss << ", wmma::" << layout;
     ss << ">";
     return result;
   }
 
+  DenseMap<Value, std::tuple<int64_t, int64_t, int64_t>> mmaTileDims;
   DenseSet<Value> ctmmaValues;
   bool useWGMMA = false;
   DenseSet<Value> wgmmaOperandFrags; // register-resident A operands for RS
@@ -345,6 +354,20 @@ private:
       mmaFragLayouts[exec.getRhs()] = rhsLayout;
       mmaFragRoles[exec.getAccumulator()] = "accumulator";
       mmaFragRoles[exec.getResult()] = "accumulator";
+      auto accTy = dyn_cast<coir::MMAFragType>(exec.getAccumulator().getType());
+      auto lhsTy = dyn_cast<coir::MMAFragType>(exec.getLhs().getType());
+      if (accTy && lhsTy) {
+        auto accShape = accTy.getShape();
+        auto lhsShape = lhsTy.getShape();
+        int64_t M = accShape.size() > 0 ? accShape[0] : 16;
+        int64_t N = accShape.size() > 1 ? accShape[1] : 16;
+        int64_t K = lhsShape.size() > 1 ? lhsShape[1] : 16;
+        auto tile = std::make_tuple(M, N, K);
+        mmaTileDims[exec.getLhs()] = tile;
+        mmaTileDims[exec.getRhs()] = tile;
+        mmaTileDims[exec.getAccumulator()] = tile;
+        mmaTileDims[exec.getResult()] = tile;
+      }
       // Track all values that feed into CTMMA execs.
       if (exec.getMmaAtomNameAttr()) {
         ctmmaValues.insert(exec.getLhs());
@@ -370,6 +393,16 @@ private:
           ctmmaValues.insert(bodyBlock->getArgument(i + 1));
           ctmmaValues.insert(yieldVals[i]);
           ctmmaValues.insert(foreach.getResult(i));
+        }
+        Value candidates[] = {yieldVals[i], bodyBlock->getArgument(i + 1)};
+        for (Value v : candidates) {
+          if (mmaTileDims.count(v)) {
+            auto tile = mmaTileDims[v];
+            mmaTileDims[iterArgs[i]] = tile;
+            mmaTileDims[bodyBlock->getArgument(i + 1)] = tile;
+            mmaTileDims[yieldVals[i]] = tile;
+            mmaTileDims[foreach.getResult(i)] = tile;
+          }
         }
       }
     });
@@ -1401,7 +1434,8 @@ private:
       return;
     }
 
-    os() << getIndent() << emitWMMAFragType(fragTy, "accumulator")
+    os() << getIndent()
+       << emitWMMAFragType(fragTy, "accumulator", "", op.getResult())
        << " " << name << ";\n";
     os() << getIndent() << "wmma::fill_fragment(" << name << ", "
        << getName(op.getValue()) << ");\n";
@@ -1457,7 +1491,8 @@ private:
     std::string role = roleIt != mmaFragRoles.end() ? roleIt->second : "matrix_a";
     auto layoutIt = mmaFragLayouts.find(op.getResult());
     std::string layout = layoutIt != mmaFragLayouts.end() ? layoutIt->second : "";
-    os() << getIndent() << emitWMMAFragType(fragTy, role, layout)
+    os() << getIndent()
+       << emitWMMAFragType(fragTy, role, layout, op.getResult())
        << " " << name << ";\n";
     int64_t ldm = getSourceLeadingDim(op.getSource());
     os() << getIndent() << "wmma::load_matrix_sync(" << name << ", "

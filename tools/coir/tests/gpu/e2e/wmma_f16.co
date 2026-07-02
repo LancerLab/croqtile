@@ -1,5 +1,4 @@
 // REQUIRES: TARGET-GPU
-// XFAIL: *
 // RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
 // RUN: cocc -t gpu -gs %s -o %s.gpu.result && bash %s.gpu.result --execute | FileCheck --match-full-lines --check-prefix=GPU %s && rm -f %s.gpu.result
 //
