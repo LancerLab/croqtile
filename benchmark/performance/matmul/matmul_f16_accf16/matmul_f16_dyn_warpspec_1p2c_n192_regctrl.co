@@ -24,7 +24,7 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
 
     parallel wg by 3 : group-4, t by 128 : thread {
       inthreads.async (wg == 0) {
-        setreg.dec(40);
+        call croq::cuda::setreg_dec(40);
         foreach {iv_k} in [cdiv(K, TILE_K)] {
           stage = iv_k % STAGES;
           wait empty[stage];
@@ -37,7 +37,7 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
       }
 
       inthreads.async (wg >= 1) {
-        setreg.inc(216);
+        call croq::cuda::setreg_inc(216);
         mc = mma.fill.f16 0.0f;
         cidx = wg - 1;
         foreach {s} in [STAGES]

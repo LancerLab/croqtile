@@ -3761,11 +3761,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       // Skip outer tensor decls when batch_dims or dyn_box is set -- those
       // paths create their own sub-tensors with per-iteration offsets.
       const auto f_mds = GenTensorDecl(
-          RemoveSuffix(f_buf_name, ".data()"), f_buf_name, f_sty->GetStorage(),
-          f_sty->ElementType(), f_mds_shape, false, f_mds_offset,
-          ValueSTR(f_stride, false, true), {}, false);
+          RemoveSuffix(f_buf_name, ".data()"), f_buf.second,
+          f_sty->GetStorage(), f_sty->ElementType(), f_mds_shape, false,
+          f_mds_offset, ValueSTR(f_stride, false, true), {}, false);
       const auto t_mds =
-          GenTensorDecl(RemoveSuffix(t_buf_name, ".data()"), t_buf_name,
+          GenTensorDecl(RemoveSuffix(t_buf_name, ".data()"), t_buf.second,
                         t_sty->GetStorage(), t_sty->ElementType(), t_mds_shape,
                         false, t_mds_offset, ValueSTR(t_stride, false, true),
                         {}, use_wgmma_layout_t, swizzle_mode);

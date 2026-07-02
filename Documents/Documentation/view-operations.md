@@ -152,7 +152,7 @@ dma.copy a.subspan(tile_m, tile_k).step(step_m, step_k).at(m_idx, k_idx) => shar
 
 Like `subspan.at`, this form lets you access any tile by index. `chunkat` is the simpler alternative when tiles are accessed in the natural loop order and spacing equals tile size.
 
-*(Reference: `tests/parse/stride.co`, `benchmark/performance/matmul/matmul_f16_dyn_persis_sta_sm90.co`)*
+*(Reference: `tests/parse/stride.co`, `benchmark/performance/matmul/matmul_f16_dyn_persis_sta.co`)*
 
 ## Choosing the Right Operation
 

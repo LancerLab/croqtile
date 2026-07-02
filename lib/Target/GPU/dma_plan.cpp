@@ -844,6 +844,19 @@ void DMAPlan::ResolvePrediction(const AST::DMA& n, DMALoweringDecision& dec,
     if (n.operation == ".pad") dec.is_zfill = false;
 
     if (pred_matches_box(pred_inner)) {
+      // For S2G, even when dest bounds match the box, the source may have
+      // a dynamic subspan smaller than the box that requires predication.
+      if (guard_on_dest) {
+        auto from_vals = ShapeToValueList(dec.from_ca_shape);
+        auto proj_from = ProjectPredDims(from_vals);
+        if (!pred_matches_box(proj_from)) {
+          param.need_pred = true;
+          param.prediction = proj_from;
+          dec.has_pred = true;
+          dec.is_zfill = false;
+          return;
+        }
+      }
       param.need_pred = false;
       param.prediction.clear();
       dec.has_pred = false;
@@ -882,6 +895,22 @@ void DMAPlan::ResolvePrediction(const AST::DMA& n, DMALoweringDecision& dec,
     }
   }
 
+  // For S2G, when the source (shared) has a dynamic subspan smaller than
+  // the box, we must predicate on the source bounds even though we normally
+  // guard on the destination side.
+  if (full_tiles && guard_on_dest) {
+    auto from_shape = ShapeToValueList(dec.from_ca_shape);
+    auto proj_from = ProjectPredDims(from_shape);
+    for (size_t i = 0; i < 2 && i < proj_from.size(); ++i) {
+      auto from_v = VIInt(proj_from[i]);
+      auto box_v = VIInt(param.box_shape[i]);
+      if (!from_v || (box_v && from_v && *from_v < *box_v)) {
+        full_tiles = false;
+        break;
+      }
+    }
+  }
+
   if (full_tiles) {
     param.need_pred = false;
     param.prediction.clear();
@@ -903,6 +932,20 @@ void DMAPlan::ResolvePrediction(const AST::DMA& n, DMALoweringDecision& dec,
       auto box_v = VIInt(param.box_shape[i]);
       if (inner_v && box_v && *inner_v < *box_v)
         prediction[i] = pred_inner[i];
+    }
+  }
+
+  // For S2G, override prediction with source bounds when source is smaller.
+  if (guard_on_dest) {
+    auto from_vals = ShapeToValueList(dec.from_ca_shape);
+    auto proj_from = ProjectPredDims(from_vals);
+    for (size_t i = 0; i < 2 && i < proj_from.size(); ++i) {
+      auto from_v = VIInt(proj_from[i]);
+      auto box_v = VIInt(param.box_shape[i]);
+      if ((!from_v || !box_v || *from_v < *box_v) &&
+          i < prediction.size()) {
+        prediction[i] = proj_from[i];
+      }
     }
   }
 

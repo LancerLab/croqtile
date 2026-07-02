@@ -1,57 +1,34 @@
-# matmul_f16_accf16 -- FP16 GEMM Benchmark Variants
+# matmul_f16_accf16 -- FP16 Matrix Multiply Benchmarks
 
-Dense GEMM: `C[M,N] = A[M,K] * B[K,N]`, FP16 input, FP16 accumulation.
-All kernels target SM90a (Hopper) using WGMMA via CuTe backend.
+FP16 input, FP16 accumulator GEMM variants. All kernels target SM90a (Hopper).
 
 ## Performance Summary
 
-Measured on NVIDIA H800 PCIe (SM90a, 132 SMs).
-Default timing: 10 warmup, 500 timed iterations.
+Measured on NVIDIA H800 PCIe (SM90a, 114 SMs).
+Default problem: M=4096, N=4096, K=4096.
+H800 PCIe peak F16: 1513 TFLOPS.
 
-### Non-Warpspec Kernels (no producer/consumer specialization)
-
-| Variant | Tile (MxNxK) | Stages | Feature | Size | TFLOPS | ms |
-|---------|-------------|--------|---------|------|-------:|---:|
-| dyn | 64x128x64 | -- | Baseline WGMMA | 2048^3 | 254.8 | 0.067 |
-| dyn_mwg | 128x64x64 | -- | Multi-warpgroup (2 WG) | 2048^3 | 239.4 | 0.072 |
-| dyn_transout | 64x128x64 | -- | Transposed output | 2048^3 | 256.7 | 0.067 |
-| dyn_persis_colmajor | 64x128x64 | -- | Persistent, col-major scheduling | 2048^3 | 108.7 | 0.158 |
-| dyn_persis_hilbert | 64x128x64 | -- | Persistent, Hilbert-curve scheduling | 2048^3 | 125.5 | 0.137 |
-| dyn_persis_swizzle | 64x128x64 | -- | Persistent, swizzle scheduling | 2048^3 | 124.5 | 0.138 |
-
-### Warpspec Kernels (producer/consumer warp specialization)
-
-| Variant | Tile (MxNxK) | Stages | Consumers | Feature | Size | TFLOPS | ms |
-|---------|-------------|--------|-----------|---------|------|-------:|---:|
-| warpspec_1p1c | 64x128x64 | 4 | 1 | Base 1P1C | 2048^3 | 319.7 | 0.054 |
-| warpspec_1p1c_persis_sta | 64x128x64 | 4 | 1 | 1P1C + persistent | 2048^3 | 243.4 | 0.071 |
-| warpspec_1p2c | 128x128x64 | 3 | 2 | Base 1P2C | 2048^3 | 320.1 | 0.054 |
-| warpspec_1p2c_n192_regctrl | 128x192x64 | 2 | 2 | WN=192, register control | 8192^3 | 353.7 | 3.109 |
-| warpspec_1p3c | 192x128x64 | 2 | 3 | Base 1P3C | 2048^3 | 295.6 | 0.058 |
-| warpspec_1p3c_persis_sta | 192x128x64 | 2 | 3 | 1P3C + persistent | 2048^3 | 294.4 | 0.058 |
-
-### AI-Tuned Kernels (aitune 2026-03-23)
-
-| Variant | Tile (MxNxK) | Stages | Consumers | Feature | Size | TFLOPS | ms |
-|---------|-------------|--------|-----------|---------|------|-------:|---:|
-| iter048_s3_wn176_best | 64x176x64 | 3 | 1 | WN=176, 3-stage | 2048^3 | 345.8 | 0.050 |
-| iter050_1p2c_splitout | 128x128x64 | 2 | 2 | Split-output SMEM | 4096^3 | 443.5 | 0.310 |
-| iter061_1p2c_so_wn160_kunroll | 128x160x64 | 2 | 2 | WN=160, K-unrolled | 8192^3 | 431.6 | 2.547 |
+| Variant | Feature | TFLOPS | ms | HW% |
+|---------|---------|-------:|---:|----:|
+| dyn | Baseline dynamic | 173.5 | 0.099 | 11.5 |
+| dyn_mwg | Multi-warp-group | 169.1 | 0.102 | 11.2 |
+| dyn_transout | Transposed output | 174.7 | 0.098 | 11.5 |
+| dyn_persis_colmajor | Persistent + col-major | 72.2 | 0.238 | 4.8 |
+| dyn_persis_hilbert | Persistent + Hilbert curve | 83.4 | 0.206 | 5.5 |
+| dyn_persis_swizzle | Persistent + swizzle | 84.7 | 0.203 | 5.6 |
+| dyn_warpspec_1p1c | 1P1C warpspec | 218.4 | 0.079 | 14.4 |
+| dyn_warpspec_1p1c_persis_sta | 1P1C + persistent + static | 173.9 | 0.099 | 11.5 |
+| dyn_warpspec_1p2c | 1P2C warpspec | 221.8 | 0.077 | 14.7 |
+| dyn_warpspec_1p2c_n192_regctrl | 1P2C + N192 + regctrl | 282.5 | 3.892 | 18.7 |
+| dyn_warpspec_1p3c | 1P3C warpspec | 204.2 | 0.084 | 13.5 |
+| dyn_warpspec_1p3c_persis_sta | 1P3C + persistent + static | 201.8 | 0.085 | 13.3 |
+| aitune_iter048_s3_wn176_best | aitune: 3-stage, wn176 | 246.3 | 0.070 | 16.3 |
+| aitune_iter050_1p2c_splitout | aitune: 1P2C + split output | 318.3 | 0.432 | 21.0 |
+| aitune_iter061_1p2c_so_wn160_kunroll | aitune: 1P2C + wn160 + K-unroll | 370.1 | 2.971 | 24.5 |
 
 ## Build & Run
-
-All kernels compile with no extra flags:
 
 ```bash
 ./choreo -gs -t cute -arch=sm_90a <file>.co -o /tmp/out.cute.result
 bash /tmp/out.cute.result --execute
 ```
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| CHOREO_TIMING_WARMUP | 10 | Warmup iterations before timing |
-| CHOREO_TIMING_REPEAT | 500 | Number of timed iterations |
-| CHOREO_DISABLE_TIMING | 0 | Set to 1 to skip timing |
-| CHOREO_SKIP_VERIFY | 0 | Set to 1 to skip correctness check |

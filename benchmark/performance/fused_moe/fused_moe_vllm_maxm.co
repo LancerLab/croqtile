@@ -39,8 +39,7 @@
 // thread scaling; iter099 fused cudaMemsetAsync into QSG kernel start.
 //
 // Compiler flags used (example):
-//   ./choreo -gs -t cute -arch=sm_90a --use_fast_math --disable-runtime-check \
-//       --hoist-offset --hoist-scale [source.co]
+//   ./choreo -gs -t cute -arch=sm_90a --use_fast_math --disable-runtime-check [source.co]
 //
 // High-level pipeline: device route → count/layout → quant+sort+gather → grouped
 // FP8 WGMMA with fused scatter to [M,N]. Aligns with attention.rs FP8 helpers.

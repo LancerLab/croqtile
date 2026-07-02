@@ -69,9 +69,9 @@ __co__ void spmm(global f8_e4m3 [M, PACKED_K] lhs_packed,
   parallel {block_m, block_n}
       by [cdiv(M, SPMM_WARP_M), cdiv(N, SPMM_WARP_N)] : block {
     shared event full[SPMM_STAGES], empty[SPMM_STAGES];
-    shared f8_e4m3 [SPMM_STAGES * SPMM_WARP_M, SPMM_PACKED_TILE_K] lhs_load_s;
-    shared f8_e4m3 [SPMM_STAGES * SPMM_WARP_N, SPMM_TILE_K] rhs_load_s;
-    shared u32 [SPMM_STAGES * SPMM_WARP_M, SPMM_META_TILE_COLS] meta_s;
+    shared f8_e4m3 [SPMM_WARP_M, SPMM_PACKED_TILE_K] lhs_load_s[SPMM_STAGES];
+    shared f8_e4m3 [SPMM_WARP_N, SPMM_TILE_K] rhs_load_s[SPMM_STAGES];
+    shared u32 [SPMM_WARP_M, SPMM_META_TILE_COLS] meta_s[SPMM_STAGES];
     parallel p1 by 2 : group-4, t by 128 : thread {
       inthreads.async (p1 == 0) {
         foreach {iv_k} in [cdiv(K, SPMM_TILE_K)] {
@@ -80,15 +80,15 @@ __co__ void spmm(global f8_e4m3 [M, PACKED_K] lhs_packed,
           tma.copy.async<full[stage]> lhs_meta
               .subspan(SPMM_WARP_M, SPMM_META_TILE_COLS)
               .at(block_m, iv_k)
-              => meta_s.subspan(SPMM_WARP_M, SPMM_META_TILE_COLS).at(stage, 0);
+              => meta_s[stage];
           tma.copy.async<full[stage]>.swiz<SPMM_LHS_SWIZ> lhs_packed
               .subspan(SPMM_WARP_M, SPMM_PACKED_TILE_K)
               .at(block_m, iv_k)
-              => lhs_load_s.subspan(SPMM_WARP_M, SPMM_PACKED_TILE_K).at(stage, 0);
+              => lhs_load_s[stage];
           tma.copy.async<full[stage]>.swiz<SPMM_RHS_SWIZ> rhs
               .subspan(SPMM_WARP_N, SPMM_TILE_K)
               .at(block_n, iv_k)
-              => rhs_load_s.subspan(SPMM_WARP_N, SPMM_TILE_K).at(stage, 0);
+              => rhs_load_s[stage];
           trigger full[stage];
         }
       }
@@ -102,22 +102,12 @@ __co__ void spmm(global f8_e4m3 [M, PACKED_K] lhs_packed,
           stage = iv_k % SPMM_STAGES;
           wait full[stage];
           foreach {iv_warp} in [cdiv(SPMM_TILE_K, SPMM_WARP_K)] {
-            ma = mma.load.swiz<SPMM_LHS_SWIZ> lhs_load_s
-                .subspan(SPMM_WARP_M, SPMM_PACKED_TILE_K)
-                .at(stage, 0)
-                .chunkat(_, iv_warp);
-            mb = mma.load.swiz<SPMM_RHS_SWIZ> rhs_load_s
-                .subspan(SPMM_WARP_N, SPMM_TILE_K)
-                .at(stage, 0)
-                .chunkat(_, iv_warp);
-            me = mma.load meta_s
-                .subspan(SPMM_WARP_M, SPMM_META_TILE_COLS)
-                .at(stage, 0)
-                .chunkat(_, iv_warp);
+            ma = mma.load.swiz<SPMM_LHS_SWIZ> lhs_load_s[stage].chunkat(_, iv_warp);
+            mb = mma.load.swiz<SPMM_RHS_SWIZ> rhs_load_s[stage].chunkat(_, iv_warp);
+            me = mma.load meta_s[stage].chunkat(_, iv_warp);
             mma.row.row.sp mc, ma, mb, me;
           }
           trigger empty[stage];
-          mma.commit;
         }
         shared f16 [SPMM_WARP_M, SPMM_WARP_N] output_s;
         mma.store mc, output_s;

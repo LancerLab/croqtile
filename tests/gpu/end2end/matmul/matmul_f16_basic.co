@@ -53,7 +53,7 @@ __co__ void matmul_f16_sm86(global f16 [M, K] lhs, global f16 [N, K] rhs, global
 #undef MATMUL_TILE_N
 #undef MATMUL_TILE_K
 
-// ============ matmul_f16_dyn_sm90: WGMMA+TMA (64x128 warp tile) ============
+// ============ matmul_f16_dyn: WGMMA+TMA (64x128 warp tile) ============
 #define MATMUL_WARP_M 64
 #define MATMUL_WARP_N 128
 #define MATMUL_TILE_M 64
@@ -101,7 +101,7 @@ __co__ void matmul_f16_sm90(global f16 [M, K] lhs, global f16 [N, K] rhs, global
 
 #undef MATMUL_WARP_N
 
-// ============ matmul_f16_dyn_sm90_N96: WGMMA+DMA N=96 (non-power-of-2) ============
+// ============ matmul_f16_dyn_N96: WGMMA+DMA N=96 (non-power-of-2) ============
 // Uses dma.copy.swiz instead of tma.copy.swiz because TMA with swizzle
 // requires power-of-2 box dimensions, and N=96 is not a power of 2.
 #define MATMUL_WARP_N 96
@@ -134,7 +134,7 @@ __co__ void matmul_f16_sm90_n96(global f16 [M, K] lhs, global f16 [N, K] rhs, gl
 
 #undef MATMUL_WARP_N
 
-// ============ matmul_f16_dyn_sm90_tbc: WGMMA+TMA+TensorBlockCluster ============
+// ============ matmul_f16_dyn_tbc: WGMMA+TMA+TensorBlockCluster ============
 #define MATMUL_WARP_N 128
 #define CLUSTER_M 2
 
@@ -164,7 +164,7 @@ __co__ void matmul_f16_sm90_tbc(global f16 [M, K] lhs, global f16 [N, K] rhs, gl
 
 #undef CLUSTER_M
 
-// ============ matmul_f16_dyn_sm90_unaligned_k: dma.copy.swiz (non-aligned K) ============
+// ============ matmul_f16_dyn_unaligned_k: dma.copy.swiz (non-aligned K) ============
 __co__ void matmul_f16_unaligned_k(global f16 [M, K] lhs, global f16 [N, K] rhs,
                                     global f16 [M, N] output) {
   parallel {block_m, block_n} by [cdiv(M, MATMUL_WARP_M), cdiv(N, MATMUL_WARP_N)] : block {
@@ -195,7 +195,7 @@ __co__ void matmul_f16_unaligned_k(global f16 [M, K] lhs, global f16 [N, K] rhs,
 #undef MATMUL_WARP_K
 #undef MATMUL_SWIZ
 
-// ============ matmul_f16_dynamic_mwg_sm90: multi-warp-group, 2 warpgroups/block ============
+// ============ matmul_f16_dyn_mwg: multi-warp-group, 2 warpgroups/block ============
 #define MATMUL_WARP_M 64
 #define MATMUL_WARP_N 64
 #define MATMUL_TILE_M 128
@@ -347,7 +347,7 @@ __co__ void matmul_trans_sm86(global f16 [M, K] lhs, global f16 [N, K] rhs, glob
 #undef MATMUL_TILE_N
 #undef MATMUL_TILE_K
 
-// ============ matmul_trans_f16_dyn_sm90: WGMMA+TMA transpose output ============
+// ============ matmul_f16_dyn_transout: WGMMA+TMA transpose output ============
 #define MATMUL_WARP_M 64
 #define MATMUL_WARP_N 128
 #define MATMUL_TILE_M 64

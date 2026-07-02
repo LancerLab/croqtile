@@ -157,7 +157,7 @@ __co__ void matmul_persis_hilbert_sm86(global f16 [M, K] lhs, global f16 [N, K] 
 #undef MATMUL_TILE_K
 #undef NUM_SMS
 
-// ============ matmul_f16_dyn_persis_sta_sm90: WGMMA+TMA persistent ============
+// ============ matmul_f16_dyn_persis_sta: WGMMA+TMA persistent ============
 #define MATMUL_WARP_M 64
 #define MATMUL_WARP_N 128
 #define MATMUL_TILE_M 64
@@ -212,7 +212,7 @@ __co__ void matmul_persis_sta_sm90(global f16 [M, K] lhs, global f16 [N, K] rhs,
   }
 }
 
-// ============ matmul_f16_dyn_persis_colmajor_sm90: WGMMA+TMA persistent colmajor ============
+// ============ matmul_f16_dyn_persis_colmajor: WGMMA+TMA persistent colmajor ============
 __co__ void matmul_persis_colmajor_sm90(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output) {
   int total_tiles = cdiv(M, MATMUL_WARP_M) * cdiv(N, MATMUL_WARP_N);
   int tiles_m = cdiv(M, MATMUL_WARP_M);
@@ -244,7 +244,7 @@ __co__ void matmul_persis_colmajor_sm90(global f16 [M, K] lhs, global f16 [N, K]
   }
 }
 
-// ============ matmul_f16_dyn_persis_swizzle_sm90: WGMMA+TMA persistent diagonal swizzle ============
+// ============ matmul_f16_dyn_persis_swizzle: WGMMA+TMA persistent diagonal swizzle ============
 __co__ void matmul_persis_swizzle_sm90(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output,
                                         global s32 [T] schedule_m, global s32 [T] schedule_n) {
   int total_tiles = cdiv(M, MATMUL_WARP_M) * cdiv(N, MATMUL_WARP_N);
@@ -276,7 +276,7 @@ __co__ void matmul_persis_swizzle_sm90(global f16 [M, K] lhs, global f16 [N, K] 
   }
 }
 
-// ============ matmul_f16_dyn_persis_hilbert_sm90: WGMMA+TMA persistent Hilbert ============
+// ============ matmul_f16_dyn_persis_hilbert: WGMMA+TMA persistent Hilbert ============
 __co__ void matmul_persis_hilbert_sm90(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output,
                                         global s32 [T] schedule_m, global s32 [T] schedule_n) {
   int total_tiles = cdiv(M, MATMUL_WARP_M) * cdiv(N, MATMUL_WARP_N);
@@ -310,7 +310,7 @@ __co__ void matmul_persis_hilbert_sm90(global f16 [M, K] lhs, global f16 [N, K] 
 
 #undef NUM_SMS
 
-// ============ matmul_f16_dyn_persis_1p3c_sm90: WGMMA+TMA 1-producer 3-consumer ============
+// ============ matmul_f16_dyn_persis_1p3c: WGMMA+TMA 1-producer 3-consumer ============
 #define MATMUL_TILE_M_1P3C 192
 #define NUM_SMS 132
 

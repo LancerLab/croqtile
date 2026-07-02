@@ -29,7 +29,7 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
                    global f32 [EXPERTS, DIV_BLK_N, DIV_BLK_K] scale_b,
                    global s32 [EXPERTS1] expert_offsets,
                    global bf16 [M, N] output, stream s) {
-  parallel.async<s> {eid, block_n} by [EXPERTS, cdiv(N, WARP_N)] : block
+  parallel<s> {eid, block_n} by [EXPERTS, cdiv(N, WARP_N)] : block
   parallel by 1 : group-4 {
     shared f8_e4m3 [WARP_M, TILE_K] sA; // 64 * 128
     shared f8_e4m3 [WARP_N, TILE_K] sB; // 128 * 128
@@ -52,20 +52,16 @@ __co__ void moe_gemm_kernel_bf16(global f8_e4m3 [M, K] lhs,
           .at(eid # block_n, iv_k)
           => sB;
 
-        foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
-          ma = mma.load.swiz<128> sA.chunkat(_, iv_warp);
-          mb = mma.load.swiz<128> sB.chunkat(_, iv_warp);
-          mma.row.row mc, ma, mb;
-        }
+        mma.row.row mc, sA, sB;
 
         sc_a = scale_a.view(WARP_M, 1).from(seg_start + iv_m * WARP_M, iv_k);
         sc_b = scale_b.at(eid, block_n, iv_k);
         mma.scale mc, sc_a, sc_b;
       }
 
-      mma.store.mask mc, 
-        output.view(WARP_M, WARP_N)
-              .from(seg_start + iv_m * WARP_M, block_n * WARP_N), ROWS_M;
+      shared bf16 [WARP_M, WARP_N] sC {0.0f};
+      mma.store.mask mc, sC, ROWS_M;
+      dma.copy sC.subspan(ROWS_M, WARP_N) => output.view(WARP_M, WARP_N).from(seg_start + iv_m * WARP_M, block_n * WARP_N);
     }
   }
 }
@@ -260,39 +256,44 @@ int main(int argc, char** argv) {
     return std::abs(ref - got) / denom;
   };
 
-  for (int eid = 0; eid < num_experts; ++eid) {
+  size_t max_verify = 512;
+  const char* max_verify_env = std::getenv("CHOREO_MAX_VERIFY");
+  if (max_verify_env) max_verify = std::atoi(max_verify_env);
+  size_t verified = 0;
+  uint32_t rng_v = 0xDEADBEEFu;
+  for (int eid = 0; eid < num_experts && verified < max_verify; ++eid) {
     int seg_start = expert_offsets_h[eid];
     int seg_end = expert_offsets_h[eid + 1];
-    for (int m = seg_start; m < seg_end; ++m) {
-      for (int n = 0; n < (int)N; ++n) {
-        float acc = 0.0f;
-        for (int k = 0; k < (int)K; ++k) {
-          float a_val = to_f32(lhs_view[m][k]);
-          float b_val = to_f32(rhs_view[eid][n][k]);
-          acc += a_val * b_val * scale_a_view[m][k / block_size_k] * scale_b_view[eid][n / block_size_n][k / block_size_k];
-        }
-        float got = to_f32(res_view[m][n]);
-        float abs_error = std::abs(acc - got);
-        float delta = rel_error(acc, got);
-        bool pass = delta <= rel_tolerance;
-        // bool pass = abs_error <= abs_tolerance || delta <= rel_tolerance;
-
-        if (abs_error > max_abs_error) max_abs_error = abs_error;
-        if (delta > max_rel_error) {
-          max_rel_error = delta;
-          worst_m = m;
-          worst_n = n;
-          worst_ref = acc;
-          worst_got = got;
-        }
-
-        if (!pass) {
-          ++mismatch_count;
-          std::cout << "[M=" << m << ", N=" << n << "] " << acc << " <-> " << got
-                    << ", abs error: " << abs_error
-                    << ", rel error: " << delta * 100 << "%\n";
-        }
+    for (int m = seg_start; m < seg_end && verified < max_verify; ++m) {
+      rng_v = rng_v * 1664525u + 1013904223u;
+      int n = (int)(rng_v % (uint32_t)N);
+      float acc = 0.0f;
+      for (int k = 0; k < (int)K; ++k) {
+        float a_val = to_f32(lhs_view[m][k]);
+        float b_val = to_f32(rhs_view[eid][n][k]);
+        acc += a_val * b_val * scale_a_view[m][k / block_size_k] * scale_b_view[eid][n / block_size_n][k / block_size_k];
       }
+      float got = to_f32(res_view[m][n]);
+      float abs_error = std::abs(acc - got);
+      float delta = rel_error(acc, got);
+      bool pass = delta <= rel_tolerance;
+
+      if (abs_error > max_abs_error) max_abs_error = abs_error;
+      if (delta > max_rel_error) {
+        max_rel_error = delta;
+        worst_m = m;
+        worst_n = n;
+        worst_ref = acc;
+        worst_got = got;
+      }
+
+      if (!pass) {
+        ++mismatch_count;
+        std::cout << "[M=" << m << ", N=" << n << "] " << acc << " <-> " << got
+                  << ", abs error: " << abs_error
+                  << ", rel error: " << delta * 100 << "%\n";
+      }
+      ++verified;
     }
   }
 

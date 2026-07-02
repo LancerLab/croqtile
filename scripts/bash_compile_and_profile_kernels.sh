@@ -212,8 +212,28 @@ infer_arch() {
     printf '%s\n' "sm_86"
     return 0
   fi
+  # Fallback: use detected GPU architecture
+  if [[ -n "${detected_arch:-}" ]]; then
+    printf '%s\n' "${detected_arch}"
+    return 0
+  fi
   printf '%s\n' ""
 }
+
+detect_gpu_arch() {
+  local gpu_id="${1:-0}"
+  local cc
+  cc="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader -i "${gpu_id}" 2>/dev/null | tr -d '[:space:]')"
+  case "${cc}" in
+    9.0) printf 'sm_90a' ;;
+    8.9) printf 'sm_89' ;;
+    8.6) printf 'sm_86' ;;
+    8.0) printf 'sm_80' ;;
+    *)   printf '' ;;
+  esac
+}
+
+detected_arch="$(detect_gpu_arch "${selected_gpu}")"
 
 csv_escape() {
   local value="$1"

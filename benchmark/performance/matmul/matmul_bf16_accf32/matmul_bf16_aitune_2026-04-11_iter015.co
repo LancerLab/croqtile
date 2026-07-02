@@ -1,5 +1,5 @@
-// Compile: ./choreo -gs -t cute -arch=sm_90a --stmatrix benchmark/performance/matmul_bf16/matmul_bf16_aitune_2026-04-11_iter015.co -o build/agent_tmp/matmul_bf16_aitune_2026-04-11_iter015.cute.result
-// Run: CUDA_VISIBLE_DEVICES=0 CHOREO_TIMING_WARMUP=5 CHOREO_TIMING_REPEAT=50 bash build/agent_tmp/matmul_bf16_aitune_2026-04-11_iter015.cute.result --execute
+// Build & Run:
+//   ./choreo -gs -t cute -arch=sm_90a benchmark/performance/matmul/matmul_bf16_accf32/matmul_bf16_aitune_2026-04-11_iter015.co -o /tmp/bf16_iter015.cute.result && bash /tmp/bf16_iter015.cute.result --execute
 #include <cstring>
 #include <cstdlib>
 

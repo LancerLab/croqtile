@@ -4,7 +4,7 @@
 #include <cstring>
 #include <cstdlib>
 
-// ============ matmul_e4m3_dynamic_sm90: basic e4m3 WGMMA+TMA ============
+// ============ matmul_e4m3_dyn: basic e4m3 WGMMA+TMA ============
 #define MATMUL_WARP_M 64
 #define MATMUL_WARP_N 128
 #define MATMUL_TILE_K 128
@@ -51,7 +51,7 @@ __co__ void matmul_e4m3_sm90(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rh
 
 #undef MATMUL_WARP_N
 
-// ============ matmul_e4m3_dynamic_mwg_sm90: MWG e4m3 (TILE_M=128) ============
+// ============ matmul_e4m3_dyn_mwg: MWG e4m3 (TILE_M=128) ============
 #define MATMUL_WARP_N 64
 #define MATMUL_TILE_M 128
 
@@ -82,7 +82,7 @@ __co__ void matmul_e4m3_mwg_sm90(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K
   }
 }
 
-// ============ matmul_e4m3_dyn_mwg_sm90_tbc: MWG+TBC e4m3 (CLUSTER_M=4) ============
+// ============ matmul_e4m3_dyn_mwg_tbc: MWG+TBC e4m3 (CLUSTER_M=4) ============
 #define CLUSTER_M 4
 
 __co__ void matmul_e4m3_mwg_tbc_sm90(global f8_e4m3 [M, K] lhs, global f8_e4m3 [N, K] rhs, global f16 [M, N] output) {
@@ -114,7 +114,7 @@ __co__ void matmul_e4m3_mwg_tbc_sm90(global f8_e4m3 [M, K] lhs, global f8_e4m3 [
 #undef MATMUL_TILE_M
 #undef MATMUL_WARP_N
 
-// ============ matmul_e4m3_dyn_persis_sta_sm90: persistent e4m3 ============
+// ============ matmul_e4m3_dyn_persis_sta: persistent e4m3 ============
 #define MATMUL_WARP_N 128
 #define MATMUL_TILE_M 64
 #define NUM_SMS 132
