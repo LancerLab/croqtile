@@ -1,0 +1,53 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: cocc -t cute -es -arch=sm_90a %s 2>&1 | FileCheck %s
+// RUN: cocc -t cute -gs -arch=sm_90a %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines --check-prefix=EXEC %s && rm -f %s.result
+//
+// WGMMA SS mode with swizzled TMA/MMA loads.
+// Simple matmul: output = lhs * rhs^T (row.row layout).
+
+#define M 64
+#define N 64
+#define K 16
+
+__co__ auto wgmma_ss(f16 [M, K] lhs, f16 [N, K] rhs) {
+  f32 [M, N] output{0.0f};
+  parallel {bm, bn} by [1, 1] : block {
+    mc = mma.fill.f32 0.0f;
+    lhs_s = tma.copy.swiz<32> lhs.subspan(M, K).at(bm, 0) => shared;
+    rhs_s = tma.copy.swiz<32> rhs.subspan(N, K).at(bn, 0) => shared;
+    parallel p by 1 : group-4 {
+      ma = mma.load.swiz<32> lhs_s;
+      mb = mma.load.swiz<32> rhs_s;
+      mma.row.row mc, ma, mb;
+    }
+    mma.store mc, output.chunkat(bm, bn);
+  }
+  return output;
+}
+
+int main() {
+  auto lhs = choreo::make_spandata<choreo::f16>(M, K);
+  auto rhs = choreo::make_spandata<choreo::f16>(N, K);
+
+  // A=1, B=1 => C = A * B^T = K * ones(M,N)
+  lhs.fill(1.0f);
+  rhs.fill(1.0f);
+
+  auto res = wgmma_ss(lhs.view(), rhs.view());
+
+  float expected = (float)K;
+  bool pass = true;
+  for (int i = 0; i < M; ++i)
+    for (int j = 0; j < N; ++j)
+      if (std::abs(float(res[i][j]) - expected) > 1e-2f)
+        pass = false;
+
+  if (pass) std::cout << "WGMMA SS Swizzle Test Passed" << std::endl;
+  else std::cout << "FAIL: wgmma_ss_swizzle" << std::endl;
+}
+
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B32>
+// CHECK: MMA_64x64x16_F32F16F16_SS
+// CHECK: store_fragment_d<CUTE_WGMMA_M64K16
+// CHECK: CU_TENSOR_MAP_SWIZZLE_32B
+// EXEC: WGMMA SS Swizzle Test Passed

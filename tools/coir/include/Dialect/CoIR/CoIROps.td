@@ -49,6 +49,8 @@ def DMAConstDescOp : CoIR_Op<"dma.const.desc", [NoMemoryEffect]> {
     accelerator path (requires target support). Without `tma`, the descriptor
     uses the standard asynchronous DMA or cooperative-copy mechanism.
 
+    Optional swizzle_bytes: 0 (none), 32, 64, or 128.
+
     Example:
       %d = coir.dma.const.desc %src, %dst {kind = #coir.dma_kind<copy>, tma}
              : !coir.tensor<128x64xf32, global>,
@@ -58,7 +60,8 @@ def DMAConstDescOp : CoIR_Op<"dma.const.desc", [NoMemoryEffect]> {
     CoIR_TensorTypeC:$source,
     CoIR_TensorTypeC:$dest,
     CoIR_DMAKindAttr:$kind,
-    UnitAttr:$tma
+    UnitAttr:$tma,
+    OptionalAttr<I64Attr>:$swizzle_bytes
   );
   let results = (outs CoIR_DMADescType:$out);
   let hasCustomAssemblyFormat = 1;
@@ -364,7 +367,8 @@ def MMALoadOp : CoIR_Op<"mma.load", [NoMemoryEffect]> {
   let summary = "Load MMA operand from a tensor tile";
   let arguments = (ins
     CoIR_TensorTypeC:$source,
-    OptionalAttr<I64Attr>:$k_dim
+    OptionalAttr<I64Attr>:$k_dim,
+    OptionalAttr<I64Attr>:$swizzle_bytes
   );
   let results = (outs CoIR_MMAFragTypeC:$result);
   let assemblyFormat = "$source attr-dict `:` type($source) `->` type($result)";
@@ -502,10 +506,12 @@ def TmaCopyOp : CoIR_Op<"tma.copy", []> {
   let description = [{
     TMA-based bulk copy for SM90+. Uses hardware tensor descriptors
     for efficient global <-> shared memory transfers.
+    Optional swizzle_bytes: 0 (none), 32, 64, or 128.
   }];
   let arguments = (ins
     CoIR_TensorTypeC:$source,
-    CoIR_TensorTypeC:$dest
+    CoIR_TensorTypeC:$dest,
+    OptionalAttr<I64Attr>:$swizzle_bytes
   );
   let results = (outs CoIR_AsyncTokenTypeC:$token);
   let hasCustomAssemblyFormat = 1;
