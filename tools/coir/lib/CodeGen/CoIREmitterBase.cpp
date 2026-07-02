@@ -624,6 +624,23 @@ void CoIREmitterBase::emitTensorAlloc(TensorAllocOp op) {
 
   // Memory reuse: buffer is aliased into an SPM at a fixed offset.
   if (op.getReuseOffsetAttr()) {
+    // Dynamic offset: use kernel parameter instead of constant.
+    if (auto dynArgAttr =
+            op->getAttrOfType<mlir::StringAttr>("dyn_offset_arg")) {
+      if (!dynSpmEmitted) {
+        os() << getIndent()
+             << "extern __shared__ unsigned char __dyn_smem[];\n";
+        lastSpmName = "__dyn_smem";
+        dynSpmEmitted = true;
+      }
+      std::string offName = dynArgAttr.getValue().str();
+      std::string eType = emitElementType(tensorTy.getElementType());
+      os() << getIndent() << eType << "* " << name << " = (" << eType
+           << "*)((unsigned char*)" << lastSpmName << " + " << offName
+           << ");\n";
+      return;
+    }
+    // Static offset.
     if (lastSpmName.empty()) {
       if (auto spmSizeAttr = op->getAttrOfType<mlir::IntegerAttr>("spm_size")) {
         int64_t spmBytes = spmSizeAttr.getInt();
