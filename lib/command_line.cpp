@@ -91,7 +91,7 @@ Option<bool> use_kernel_template(
     OptionKind::Hidden, "--use-kernel-template", "-kt", false,
     "(Experimental) Allow choreo code to instantiate C++ template functions.");
 Option<bool> use_hetero_tileflow(
-    OptionKind::Hidden, "--use-hetero-tileflow", "-ht", false,
+    OptionKind::Hidden, "--use-hetero-tileflow-discard", "-ht", false,
     "(Experimental) Allow choreo code to apply implicit/aggressive tileflow"
     "optimisation under heterogeneous scenario.");
 Option<bool>
