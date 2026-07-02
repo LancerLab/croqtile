@@ -1,7 +1,7 @@
 // RUN: coir-opt --coir-hoist-assertions --coir-estimate-assert-cost="cost-threshold=4" %s | FileCheck %s
 // RUN: coir-opt --coir-hoist-assertions --coir-estimate-assert-cost="cost-threshold=0" %s | FileCheck --check-prefix=NONE %s
 
-// Test 1: Assertion inside foreach, but condition is all constants
+// Test 1: Assertion inside foreach, but condition depends only on kernel arg
 // -> hoisted to ENTRY at kernel level -> cost=1 (entry block), enabled.
 // CHECK-LABEL: coir.kernel @test_cost_entry
 // CHECK: coir.assert %{{.*}}, "positive dim" <entry> <hw_constraint> {cost_class = #coir.cost_class<entry>, enabled = true, estimated_cost = 1 : i64}
@@ -9,12 +9,12 @@
 // NONE-LABEL: coir.kernel @test_cost_entry
 // NONE: coir.assert %{{.*}}, "positive dim" <entry> <hw_constraint> {cost_class = #coir.cost_class<entry>, enabled = false, estimated_cost = 1 : i64}
 coir.kernel @test_cost_entry(
-    %src: !coir.tensor<128xf32, global>) {
+    %src: !coir.tensor<128xf32, global>,
+    %dim: index) {
   %c16 = arith.constant 16 : index
   coir.foreach %k in %c16 {
-    %c128 = arith.constant 128 : index
     %c0 = arith.constant 0 : index
-    %cmp = arith.cmpi sgt, %c128, %c0 : index
+    %cmp = arith.cmpi sgt, %dim, %c0 : index
     coir.assert %cmp, "positive dim" <use> <hw_constraint>
     coir.yield
   }
@@ -73,7 +73,8 @@ coir.kernel @test_cost_foreach_dynamic(
 // CHECK-LABEL: coir.kernel @test_cost_while
 // CHECK: coir.assert %{{.*}}, "while bound" <use> <hw_constraint> {cost_class = #coir.cost_class<medium>, enabled = true, estimated_cost = 100 : i64}
 coir.kernel @test_cost_while(
-    %src: !coir.tensor<128xf32, global>) {
+    %src: !coir.tensor<128xf32, global>,
+    %limit: index) {
   %c0 = arith.constant 0 : i32
   %c128 = arith.constant 128 : i32
   %res = scf.while (%i = %c0) : (i32) -> i32 {
@@ -81,9 +82,8 @@ coir.kernel @test_cost_while(
     scf.condition(%cond) %i : i32
   } do {
   ^bb0(%iv: i32):
-    %c100 = arith.constant 100 : index
     %c0_1 = arith.constant 0 : index
-    %check = arith.cmpi sgt, %c100, %c0_1 : index
+    %check = arith.cmpi sgt, %limit, %c0_1 : index
     coir.assert %check, "while bound" <use> <hw_constraint>
     %c1 = arith.constant 1 : i32
     %next = arith.addi %iv, %c1 : i32

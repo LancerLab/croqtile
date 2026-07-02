@@ -19,8 +19,10 @@
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/Passes.h"
 
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Dominance.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/Pass/Pass.h"
 #include "llvm/Support/Debug.h"
 
@@ -190,6 +192,31 @@ struct HoistAssertionsPass
   void runOnOperation() override {
     SmallVector<AssertOp> asserts;
     getOperation()->walk([&](AssertOp op) { asserts.push_back(op); });
+
+    // Fold away assertions whose predicates are statically evaluable.
+    // Covers both direct constant-true and cmpi on two constants.
+    for (auto it = asserts.begin(); it != asserts.end();) {
+      auto assertOp = *it;
+      Value cond = assertOp.getCondition();
+      std::optional<bool> staticVal;
+
+      if (auto constOp = cond.getDefiningOp<arith::ConstantOp>()) {
+        if (auto bv = dyn_cast<IntegerAttr>(constOp.getValue()))
+          staticVal = bv.getValue().getBoolValue();
+      } else if (auto cmpOp = cond.getDefiningOp<arith::CmpIOp>()) {
+        APInt lhs, rhs;
+        if (matchPattern(cmpOp.getLhs(), mlir::m_ConstantInt(&lhs)) &&
+            matchPattern(cmpOp.getRhs(), mlir::m_ConstantInt(&rhs)))
+          staticVal = arith::applyCmpPredicate(cmpOp.getPredicate(), lhs, rhs);
+      }
+
+      if (staticVal && *staticVal) {
+        assertOp.erase();
+        it = asserts.erase(it);
+        continue;
+      }
+      ++it;
+    }
 
     for (auto assertOp : asserts) {
       if (assertOp.getSite() == AssertSite::ENTRY) continue;
