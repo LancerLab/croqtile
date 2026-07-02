@@ -139,6 +139,7 @@ private:
     Value constDescResult; // SSA value from DMAConstDescOp
     int64_t swizzleBytes = 0; // 0=none, 32, 64, 128
     int storeArgIdx = -1; // kernel arg index for TMA store dest (-1=return)
+    bool zfill = false; // out-of-bounds zero fill
   };
   llvm::SmallVector<DescInfo> descInfos;
   DenseMap<Value, unsigned> descValueToIndex;
@@ -467,9 +468,12 @@ private:
           storeArgIdx = (int)arg.getArgNumber();
       }
 
+      bool hasZfill = op.getZfill();
+
       unsigned idx = descInfos.size();
       descInfos.push_back({idx, srcType, dstType, op.getKind(),
-                           isTMA, isLoad, op.getOut(), swizBytes, storeArgIdx});
+                           isTMA, isLoad, op.getOut(), swizBytes, storeArgIdx,
+                           hasZfill});
       descValueToIndex[op.getOut()] = idx;
     });
   }
@@ -738,7 +742,8 @@ private:
   void emitTMADescriptorSetup(unsigned descIdx, const std::string &dataPtr,
                               coir::TensorType globalType,
                               coir::TensorType tileType,
-                              int64_t swizzleBytes = 0) {
+                              int64_t swizzleBytes = 0,
+                              bool zfill = false) {
     auto shape = globalType.getShape();
     auto elemTy = globalType.getElementType();
     unsigned elemBytes = elemTy.getIntOrFloatBitWidth() / 8;
@@ -803,8 +808,10 @@ private:
     os() << "          CUtensorMapSwizzle::" << swizEnum << ",\n";
     os() << "          CUtensorMapL2promotion::"
        << "CU_TENSOR_MAP_L2_PROMOTION_L2_128B,\n";
-    os() << "          CUtensorMapFloatOOBfill::"
-       << "CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);\n";
+    const char *oobEnum = zfill
+        ? "CU_TENSOR_MAP_FLOAT_OOB_FILL_NAN_REQUEST_ZERO_FMA"
+        : "CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE";
+    os() << "          CUtensorMapFloatOOBfill::" << oobEnum << ");\n";
     os() << "  choreo::abend_true(" << prefix << "_res != CUDA_SUCCESS);\n";
   }
 
@@ -985,7 +992,8 @@ private:
                                             : descInfos[i].srcType;
         std::string ptr = getTMAGlobalPtr(tmaIdx, kernel);
         emitTMADescriptorSetup(tmaIdx, ptr, globalType, tileType,
-                               descInfos[i].swizzleBytes);
+                               descInfos[i].swizzleBytes,
+                               descInfos[i].zfill);
         tmaIdx++;
       }
 
@@ -1205,7 +1213,8 @@ private:
                                           : descInfos[i].srcType;
       std::string ptr = getTMAGlobalPtr(tmaIdx, kernel);
       emitTMADescriptorSetup(tmaIdx, ptr, globalType, tileType,
-                             descInfos[i].swizzleBytes);
+                             descInfos[i].swizzleBytes,
+                             descInfos[i].zfill);
       tmaIdx++;
     }
 

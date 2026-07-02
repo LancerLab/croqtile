@@ -61,7 +61,8 @@ def DMAConstDescOp : CoIR_Op<"dma.const.desc", [NoMemoryEffect]> {
     CoIR_TensorTypeC:$dest,
     CoIR_DMAKindAttr:$kind,
     UnitAttr:$tma,
-    OptionalAttr<I64Attr>:$swizzle_bytes
+    OptionalAttr<I64Attr>:$swizzle_bytes,
+    UnitAttr:$zfill
   );
   let results = (outs CoIR_DMADescType:$out);
   let hasCustomAssemblyFormat = 1;
@@ -507,11 +508,13 @@ def TmaCopyOp : CoIR_Op<"tma.copy", []> {
     TMA-based bulk copy for SM90+. Uses hardware tensor descriptors
     for efficient global <-> shared memory transfers.
     Optional swizzle_bytes: 0 (none), 32, 64, or 128.
+    When `zfill` is set, out-of-bounds accesses return zero.
   }];
   let arguments = (ins
     CoIR_TensorTypeC:$source,
     CoIR_TensorTypeC:$dest,
-    OptionalAttr<I64Attr>:$swizzle_bytes
+    OptionalAttr<I64Attr>:$swizzle_bytes,
+    UnitAttr:$zfill
   );
   let results = (outs CoIR_AsyncTokenTypeC:$token);
   let hasCustomAssemblyFormat = 1;

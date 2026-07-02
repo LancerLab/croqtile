@@ -2314,7 +2314,8 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
     }
     auto tmaCopy = builder.create<coir::TmaCopyOp>(
         loc, coir::AsyncTokenType::get(&IRContext()), srcVal, dstVal,
-        swizAttr);
+        swizAttr, dma.IsOOBZeroFill() ? builder.getUnitAttr()
+                                      : mlir::UnitAttr());
     token = tmaCopy.getToken();
   } else {
     auto dmaCopy = builder.create<coir::DmaCopyOp>(
