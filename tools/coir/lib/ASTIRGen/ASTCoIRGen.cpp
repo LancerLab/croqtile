@@ -1170,6 +1170,18 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
     mlir::Value ubValue = lr ? resolveRangeUBValue(lr, bound)
                              : builder.create<mlir::arith::ConstantIndexOp>(loc, bound);
 
+    mlir::Value lbValue;
+    if (lr && lr->lbound) {
+      auto lbExpr = EmitExpr(*lr->lbound);
+      if (lbExpr) {
+        if (!mlir::isa<mlir::IndexType>(lbExpr.getType()))
+          lbExpr = builder.create<mlir::arith::IndexCastOp>(
+              loc, indexType, lbExpr);
+        lbValue = lbExpr;
+        ubValue = builder.create<mlir::arith::SubIOp>(loc, ubValue, lbValue);
+      }
+    }
+
     coir::ForeachOp foreachOp;
     if (ri == 0) {
       foreachOp = builder.create<coir::ForeachOp>(
@@ -1184,8 +1196,6 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
     bodyRegion.push_back(block);
 
     auto ivArg = block->addArgument(indexType, loc);
-    if (lr)
-      MapValue(lr->GetIVName(), ivArg);
 
     if (ri == 0) {
       pendingYields.clear();
@@ -1199,6 +1209,13 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
     builder.setInsertionPointToEnd(block);
     builder.create<coir::YieldOp>(loc, mlir::ValueRange{});
     builder.setInsertionPoint(block->getTerminator());
+
+    if (lr) {
+      mlir::Value mappedIV = ivArg;
+      if (lbValue)
+        mappedIV = builder.create<mlir::arith::AddIOp>(loc, ivArg, lbValue);
+      MapValue(lr->GetIVName(), mappedIV);
+    }
   }
 
   foreachNestDepth = numRanges;
@@ -2391,6 +2408,11 @@ bool ASTCoIRGen::Visit(AST::MMA &n) {
 
     auto srcVal = LookupValue(chunkAt->data->name);
     if (!srcVal) return true;
+
+    if (mlir::isa<coir::AsyncTokenType>(srcVal.getType())) {
+      auto dataVal = LookupValue(chunkAt->data->name + ".data");
+      if (dataVal) srcVal = dataVal;
+    }
 
     auto srcTy = mlir::dyn_cast<coir::TensorType>(srcVal.getType());
     if (!srcTy) return true;
