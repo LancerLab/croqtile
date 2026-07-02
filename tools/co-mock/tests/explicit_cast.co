@@ -1,0 +1,19 @@
+// RUN: co-mock %s 2>&1 | FileCheck %s
+// Test explicit type casting with __to<>.
+
+__co__ void test_cast() {
+  f32 pi = 3.14;
+  s32 rounded = __to<s32>(pi);
+  println(rounded);
+  // CHECK: 3
+
+  s32 x = 42;
+  f32 fx = __to<f32>(x);
+  println(fx);
+  // CHECK: 42
+
+  f32 neg = -2.7;
+  s32 neg_i = __to<s32>(neg);
+  println(neg_i);
+  // CHECK: -2
+}
