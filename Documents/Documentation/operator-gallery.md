@@ -52,10 +52,10 @@ A curated index of example `.co` files in the repository, organized by operator 
 | File | Description |
 |------|-------------|
 | `tests/gpu/end2end/warpspec.co` | Warp-specialized GEMM |
-| `tests/gpu/end2end/matmul/matmul_f16_dyn_sm90.co` | Dynamic f16 matmul (SM90) |
+| `tests/gpu/end2end/matmul/matmul_f16_dyn.co` | Dynamic f16 matmul (SM90) |
 | `tests/gpu/end2end/matmul/matmul_f16_dyn_persis_*.co` | Persistent scheduling variants |
-| `tests/gpu/end2end/matmul/matmul_f16_dyn_sm90_warpspec_*.co` | Warpspec variants (1p1c, 1p3c) |
-| `tests/gpu/end2end/matmul/matmul_e4m3_dynamic_sm90.co` | FP8 e4m3 dynamic matmul |
+| `tests/gpu/end2end/matmul/matmul_f16_dyn_warpspec_*.co` | Warpspec variants (1p1c, 1p3c) |
+| `tests/gpu/end2end/matmul/matmul_e4m3_dyn.co` | FP8 e4m3 dynamic matmul |
 | `tests/gpu/end2end/matmul/blockscale_gemm_*.co` | Block-scaled GEMM |
 
 ## Sparse GEMM
