@@ -267,9 +267,7 @@ void DMAPlan::ResolveDMADecision(const AST::DMA& n,
         tma_is_pad ? false
                    : StaticShapeMismatch(tma_effective_from, t_ca_shape);
 
-    if (tma_mismatch) {
-      dec.is_zfill = true;
-    }
+    if (tma_mismatch) { dec.is_zfill = true; }
 
     // Warn about S2G TMA with padded shared memory source.  TMA reads shared
     // memory contiguously (no stride support in hardware).  If the source
@@ -930,8 +928,7 @@ void DMAPlan::ResolvePrediction(const AST::DMA& n, DMALoweringDecision& dec,
     for (size_t i = 0; i < 2 && i < pred_inner.size(); ++i) {
       auto inner_v = VIInt(pred_inner[i]);
       auto box_v = VIInt(param.box_shape[i]);
-      if (inner_v && box_v && *inner_v < *box_v)
-        prediction[i] = pred_inner[i];
+      if (inner_v && box_v && *inner_v < *box_v) prediction[i] = pred_inner[i];
     }
   }
 
@@ -942,8 +939,7 @@ void DMAPlan::ResolvePrediction(const AST::DMA& n, DMALoweringDecision& dec,
     for (size_t i = 0; i < 2 && i < proj_from.size(); ++i) {
       auto from_v = VIInt(proj_from[i]);
       auto box_v = VIInt(param.box_shape[i]);
-      if ((!from_v || !box_v || *from_v < *box_v) &&
-          i < prediction.size()) {
+      if ((!from_v || !box_v || *from_v < *box_v) && i < prediction.size()) {
         prediction[i] = proj_from[i];
       }
     }

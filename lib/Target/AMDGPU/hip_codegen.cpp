@@ -24,8 +24,8 @@ bool HIPCodeGen::ShouldEmitLineDirective(AST::Node& n) const {
   return isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n) ||
          isa<AST::InThreadsBlock>(&n) || isa<AST::IfElseBlock>(&n) ||
          isa<AST::WhileBlock>(&n) || isa<AST::Assignment>(&n) ||
-         isa<AST::ParallelBy>(&n) || isa<AST::DMA>(&n) ||
-         isa<AST::Wait>(&n) || isa<AST::Trigger>(&n) || isa<AST::Break>(&n) ||
+         isa<AST::ParallelBy>(&n) || isa<AST::DMA>(&n) || isa<AST::Wait>(&n) ||
+         isa<AST::Trigger>(&n) || isa<AST::Break>(&n) ||
          isa<AST::Continue>(&n) || isa<AST::Rotate>(&n) ||
          isa<AST::Synchronize>(&n) || isa<AST::Call>(&n) ||
          isa<AST::NamedVariableDecl>(&n) || isa<AST::Return>(&n);
@@ -37,8 +37,7 @@ void HIPCodeGen::EmitLineDirective(AST::Node& n) {
   auto loc = n.LOC();
   if (loc.begin.line <= 0) return;
 
-  auto file =
-      ResolveDebugLinePath(loc, CCtx().GetDebugLinePathMode());
+  auto file = ResolveDebugLinePath(loc, CCtx().GetDebugLinePathMode());
   if (file.empty()) return;
 
   auto& line_state = IsHost() ? host_line_state : device_line_state;
@@ -47,8 +46,8 @@ void HIPCodeGen::EmitLineDirective(AST::Node& n) {
     return;
 
   auto& os = IsHost() ? hs : ds;
-  os << "#line " << loc.begin.line << " \""
-     << EscapeLinePathForDirective(file) << "\"\n";
+  os << "#line " << loc.begin.line << " \"" << EscapeLinePathForDirective(file)
+     << "\"\n";
 
   line_state.line = loc.begin.line;
   line_state.file = file;
@@ -1691,8 +1690,7 @@ void HIPCodeGen::EmitHipFree() {
     if (auto sty = dyn_cast<SpannedType>(item.type))
       freed.insert(UnScopedName(item.name) + "__device");
   for (auto& buf : global_buffers)
-    if (!freed.count(buf))
-      hs << h_indent << "(void)hipFree(" << buf << ");\n";
+    if (!freed.count(buf)) hs << h_indent << "(void)hipFree(" << buf << ");\n";
   for (auto& buf : event_global_buffers)
     hs << h_indent << "(void)hipFree(" << buf << ");\n";
 }
@@ -1814,22 +1812,22 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
     if (expr->IsUnary()) {
       return Choreo::STR(expr->op) + "(" + ExprSTR(expr->GetR(), is_host) + ")";
     }
-    if (expr->IsBinary()) {
-      return "(" + ExprSTR(expr->GetL(), is_host) + " " +
-             Choreo::STR(expr->op) + " " + ExprSTR(expr->GetR(), is_host) + ")";
+    if (op == Op::CeilDiv) {
+      return "((" + ExprSTR(expr->GetL(), is_host) + " + " +
+             ExprSTR(expr->GetR(), is_host) + " - 1) / " +
+             ExprSTR(expr->GetR(), is_host) + ")";
     }
     if (op == Op::ElemOf) {
       return ExprSTR(expr->GetL(), is_host) + "[" +
              ExprSTR(expr->GetR(), is_host) + "]";
     }
+    if (expr->IsBinary()) {
+      return "(" + ExprSTR(expr->GetL(), is_host) + " " +
+             Choreo::STR(expr->op) + " " + ExprSTR(expr->GetR(), is_host) + ")";
+    }
     if (op == Op::Select) {
       return "(" + ExprSTR(expr->GetL(), is_host) + " ? " +
              ExprSTR(expr->GetR(), is_host) + " : " +
-             ExprSTR(expr->GetR(), is_host) + ")";
-    }
-    if (op == Op::CeilDiv) {
-      return "((" + ExprSTR(expr->GetL(), is_host) + " + " +
-             ExprSTR(expr->GetR(), is_host) + " - 1) / " +
              ExprSTR(expr->GetR(), is_host) + ")";
     }
     if (op == Op::UBound) {
@@ -1985,10 +1983,9 @@ const std::string HIPCodeGen::CallSTR(AST::Call& n) const {
         {"__abs", "fabsf"},         {"__fabs", "fabsf"},
         {"__fmod", "fmodf"},        {"__fmax", "fmaxf"},
         {"__fmin", "fminf"},        {"__fmaf", "fmaf"},
-        {"__frcp_rn", "__frcp_rn"},
-        {"__isfinite", "isfinite"}, {"__sign", "__fsignbit"},
-        {"__gelu", "__gelu"},       {"__sigmoid", "__sigmoid"},
-        {"__softplus", "__softplus"},
+        {"__frcp_rn", "__frcp_rn"}, {"__isfinite", "isfinite"},
+        {"__sign", "__fsignbit"},   {"__gelu", "__gelu"},
+        {"__sigmoid", "__sigmoid"}, {"__softplus", "__softplus"},
     };
     auto it = arith_map.find(n.function->name);
     std::string func = (it != arith_map.end()) ? it->second : n.function->name;

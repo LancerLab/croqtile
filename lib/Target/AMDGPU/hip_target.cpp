@@ -56,12 +56,11 @@ public:
     return "";
   }
 
-  size_t GetMemCapacity(const Storage& sto,
-                        const ArchId& arch) const override {
+  size_t GetMemCapacity(const Storage& sto, const ArchId& arch) const override {
     // arch -> {local, shared}
     static std::map<std::string, std::pair<size_t, size_t>> caps = {
         {"gfx1030", {1024, 64ull * 1024}},  // RDNA2: 64KB LDS per WGP
-        {"gfx1100", {1024, 128ull * 1024}},  // RDNA3: 128KB LDS per WGP
+        {"gfx1100", {1024, 128ull * 1024}}, // RDNA3: 128KB LDS per WGP
     };
     if (sto == Storage::GLOBAL) return 16ull * 1024 * 1024 * 1024;
     auto it = caps.find(arch);
@@ -111,9 +110,9 @@ public:
         {AtomicOp::ADD,
          {BaseType::S32, BaseType::U32, BaseType::U64, BaseType::F32}});
     caps.push_back({AtomicOp::SUB, {BaseType::S32, BaseType::U32}});
-    caps.push_back({AtomicOp::EXCH,
-                     {BaseType::S32, BaseType::U32, BaseType::U64,
-                      BaseType::F32}});
+    caps.push_back(
+        {AtomicOp::EXCH,
+         {BaseType::S32, BaseType::U32, BaseType::U64, BaseType::F32}});
     caps.push_back(
         {AtomicOp::MIN,
          {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
@@ -129,9 +128,9 @@ public:
     caps.push_back(
         {AtomicOp::XOR,
          {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
-    caps.push_back({AtomicOp::CAS,
-                     {BaseType::S32, BaseType::U32, BaseType::U64,
-                      BaseType::U16}});
+    caps.push_back(
+        {AtomicOp::CAS,
+         {BaseType::S32, BaseType::U32, BaseType::U64, BaseType::U16}});
     return caps;
   }
 

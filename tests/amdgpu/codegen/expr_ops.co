@@ -1,4 +1,4 @@
-// TODORUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
 
 // --- Float32 literal with f suffix ---
 __co__ void float_suffix_test(f32 [16] a) {
