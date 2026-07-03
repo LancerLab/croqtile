@@ -1,6 +1,5 @@
-// REQUIRES: TARGET-SM_90+
+// REQUIRES: TARGET-SM_86+
 // RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
-// XFAIL: *
 
 __co__ auto ele_add_f6(f6_e2m3 [6, 64] lhs, f6_e2m3 [6, 64] rhs) {
   f16[lhs.span] output;
