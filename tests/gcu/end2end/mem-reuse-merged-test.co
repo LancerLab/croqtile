@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCU300
-// RUN: choreo -gs -arch=gcu300 --liveness --mem-reuse %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo -gs -arch=gcu300 --mem-reuse %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
 // Merged from: mem_reuse.co, mem_reuse_dynamic.co, mem_reuse_dynamic_ifelse.co,
 //              spanned_array_memreuse.co

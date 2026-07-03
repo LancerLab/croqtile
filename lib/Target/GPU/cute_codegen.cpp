@@ -9555,7 +9555,6 @@ show_usage() {
   if (!target_options.GetValue().empty())
     os << " " << target_options.GetValue();
   if (use_pic) os << " -fPIC";
-  if (use_fast_math) os << " --use_fast_math";
   if (verbose) os << " -v"; // if it requires to be verbose
   os << " --expt-relaxed-constexpr";
   // always enclose
