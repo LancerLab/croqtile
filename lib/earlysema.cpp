@@ -2179,7 +2179,8 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
 
   auto rank = sty->GetShape().Rank();
 
-  for (auto op : n.AllOperations()) {
+  for (size_t op_idx = 0; op_idx < n.AllOperations().size(); ++op_idx) {
+    auto op = n.AllOperations()[op_idx];
     op->accept(*this);
 
     if (auto rop = dyn_cast<AST::SOP::Reshape>(op)) {
@@ -2198,7 +2199,33 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     }
 
     if (isa<AST::SOP::Squeeze>(op)) {
-      // .sqz rank is resolved in ShapeInference
+      // Best-effort rank estimation: count subspan dims that are not
+      // literal 1 so that downstream DMA/data-access checks see the
+      // squeezed rank before ShapeInference runs.
+      ptr<AST::MultiValues> src_dims = nullptr;
+      for (int j = (int)op_idx - 1; j >= 0; --j) {
+        if (auto sbs = dyn_cast<AST::SOP::SubSpan>(n.OpAt(j))) {
+          src_dims = sbs->subspan;
+          break;
+        }
+        if (auto rsp = dyn_cast<AST::SOP::Reshape>(n.OpAt(j))) {
+          src_dims = rsp->GetNewSpan();
+          break;
+        }
+        if (auto vw = dyn_cast<AST::SOP::View>(n.OpAt(j))) {
+          src_dims = vw->subspan;
+          break;
+        }
+      }
+      if (src_dims) {
+        size_t squeezed = 0;
+        for (auto& v : src_dims->AllValues()) {
+          auto il = GetIntLiteral(v);
+          if (il && il->Val() == 1) continue;
+          ++squeezed;
+        }
+        if (squeezed > 0) rank = squeezed;
+      }
       continue;
     }
 

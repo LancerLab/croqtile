@@ -1045,8 +1045,7 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
             if (da->AccessElement()) {
               auto sc = InScopeNameForRef(da->data->name);
               bool is_frag = FCtx(fname).HasFragmentLayout(sc);
-              for (auto& idx : da->GetIndices())
-                self(self, idx, is_frag);
+              for (auto& idx : da->GetIndices()) self(self, idx, is_frag);
             }
             return;
           }
