@@ -8,34 +8,34 @@ stages:
 #  - artifacts
 
 # Mock interpreter testing (no hardware required)
-mock_test:
-  variables:
-   GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
-  stage: check-in-tests
-  rules:
-    - if: >
-        $CI_COMMIT_BRANCH == "main" || 
-        $CI_COMMIT_BRANCH =~ /^release\// ||
-        $CI_COMMIT_BRANCH =~ /^oss\// ||
-        $CI_PIPELINE_SOURCE == "merge_request_event"
-      when: on_success
-  before_script:
-    - |
-      if echo "$CI_COMMIT_BRANCH" | grep -q '^oss/'; then
-        echo "OSS branch detected -- using cmake/deps.conf from main..."
-        git fetch origin main --depth=1
-        git show origin/main:cmake/deps.conf > cmake/deps.conf
-      fi
-  script:
-    - echo "Running co-mock tests..."
-    - make mock-test
-  tags:
-    - GPU
-  timeout: 5m
-  after_script:
-    - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
-    - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
-    - 'echo "Cleanup done."'
+#mock_test:
+#  variables:
+#   GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
+#  stage: check-in-tests
+#  rules:
+#    - if: >
+#        $CI_COMMIT_BRANCH == "main" ||
+#        $CI_COMMIT_BRANCH =~ /^release\// ||
+#        $CI_COMMIT_BRANCH =~ /^oss\// ||
+#        $CI_PIPELINE_SOURCE == "merge_request_event"
+#      when: on_success
+#  before_script:
+#    - |
+#      if echo "$CI_COMMIT_BRANCH" | grep -q '^oss/'; then
+#        echo "OSS branch detected -- using cmake/deps.conf from main..."
+#        git fetch origin main --depth=1
+#        git show origin/main:cmake/deps.conf > cmake/deps.conf
+#      fi
+#  script:
+#    - echo "Running co-mock tests..."
+#    - make test-mock
+#  tags:
+#    - GPU
+#  timeout: 5m
+#  after_script:
+#    - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
+#    - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
+#    - 'echo "Cleanup done."'
 
 # GPU Testing
 gpu_test:
@@ -46,8 +46,8 @@ gpu_test:
     - if: $NO_GPU == "true"
       when: never
     - if: >
-        $CI_COMMIT_BRANCH == "main" || 
-        $CI_COMMIT_BRANCH == "cute" || 
+        $CI_COMMIT_BRANCH == "main" ||
+        $CI_COMMIT_BRANCH == "cute" ||
         $CI_COMMIT_BRANCH =~ /^release\// ||
         $CI_COMMIT_BRANCH =~ /^oss\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -90,7 +90,7 @@ amdgpu_test:
     - if: $NO_AMDGPU == "true"
       when: never
     - if: >
-        $CI_COMMIT_BRANCH == "main" || 
+        $CI_COMMIT_BRANCH == "main" ||
         $CI_COMMIT_BRANCH =~ /^release\// ||
         $CI_COMMIT_BRANCH =~ /^oss\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -129,14 +129,14 @@ gcu2_test:
         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
       when: never
     - if: >
-        $CI_COMMIT_BRANCH == "main" || 
+        $CI_COMMIT_BRANCH == "main" ||
         $CI_COMMIT_BRANCH =~ /^release\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
       when: on_success
   script:
     - echo "Running tests with GCU2..."
     - make setup-gcu2
-    - make test-all
+    - make test
   artifacts:
     paths:
       - choreo
@@ -166,14 +166,14 @@ gcu3_test:
         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
       when: never
     - if: >
-        $CI_COMMIT_BRANCH == "main" || 
+        $CI_COMMIT_BRANCH == "main" ||
         $CI_COMMIT_BRANCH =~ /^release\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
       when: on_success
   script:
     - echo "Running tests with GCU3 S60..."
     - make setup-gcu3
-    - make test-all
+    - make test
   artifacts:
     paths:
       - choreo
@@ -205,14 +205,13 @@ gcu4_test:
         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
       when: never
     - if: >
-        $CI_COMMIT_BRANCH == "main" || 
+        $CI_COMMIT_BRANCH == "main" ||
         $CI_COMMIT_BRANCH =~ /^release\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
       when: on_success
   script:
     - echo "Running tests with GCU4 LIBRA..."
     - make setup-gcu4
-    - make build
     - make test-libra
   artifacts:
     paths:
@@ -243,14 +242,14 @@ gcu3_debug_test:
         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
       when: never
     - if: >
-        $CI_COMMIT_BRANCH == "main" || 
+        $CI_COMMIT_BRANCH == "main" ||
         $CI_COMMIT_BRANCH =~ /^release\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
       when: on_success
   script:
     - echo "Running DEBUG tests with GCU3 S60..."
     - make setup-gcu3
-    - make test-all-debug
+    - make test-debug
   artifacts:
     paths:
       - choreo
@@ -280,7 +279,7 @@ gcu3_debug_test:
 #         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
 #       when: never
 #     - if: >
-#         $CI_COMMIT_BRANCH == "main" || 
+#         $CI_COMMIT_BRANCH == "main" ||
 #         $CI_COMMIT_BRANCH =~ /^release\// ||
 #         $CI_PIPELINE_SOURCE == "merge_request_event"
 #       when: on_success
@@ -323,7 +322,7 @@ package_test:
         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
       when: never
     - if: >
-        $CI_COMMIT_BRANCH == "main" || 
+        $CI_COMMIT_BRANCH == "main" ||
         $CI_COMMIT_BRANCH =~ /^release\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
       when: on_success

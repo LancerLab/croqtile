@@ -11,10 +11,6 @@ SRC_DIR = $(WORK_DIR)/lib
 BUILD_DIR = $(WORK_DIR)/build
 DBG_BUILD_DIR = $(WORK_DIR)/build-debug
 REL_BUILD_DIR = $(WORK_DIR)/build-release
-LGY_BUILD_DIR = $(WORK_DIR)/build-legacy
-CHOREO_BIN = $(LGY_BUILD_DIR)/choreo
-COPP_BIN =  $(LGY_BUILD_DIR)/copp
-TARGET = $(CHOREO_BIN) $(COPP_BIN)
 LEX_SRC = $(SRC_DIR)/scanner.l
 PARSER_SRC = $(SRC_DIR)/parser.yy
 BISON_FLAGS = -t -d  # Generates both parser.tab.cpp and parser.tab.h
@@ -24,17 +20,11 @@ MDPP = $(SCRIPT_DIR)/mdpp.awk # Markdown Pre-process
 JOBS ?= 1
 
 # toolchains
-FLEX = $(TOOLCHAIN_DIR)/bin/flex
-BISON_BIN = $(TOOLCHAIN_DIR)/bin/bison
 LIT:=$(WORK_DIR)/tests/lit.sh -j$(JOBS)
-BISON?=/usr/bin/bison
 
 # Test targets
 TEST_FILES :=  $(shell find tests -name '*_test.co')
 TEST_TARGETS := $(TEST_FILES:.co=.test)
-
-# headers
-HEADER_FILES :=  $(shell find $(SRC_DIR) -name '*.hpp') $(LGY_BUILD_DIR)/choreo_header.inc
 
 CHOREO_DEFAULT_TARGET ?= cute
 CLANG_FORMAT ?= /usr/bin/clang-format
@@ -47,10 +37,6 @@ TARGET_MK   := $(addsuffix target.mk,$(TARGET_DIRS))
 TOOLS_MK    := $(sort $(wildcard tools/*/target.mk))
 
 all: build docs
-
-build: build-with-cmake-ninja
-
-build-all: coir
 
 -include $(TARGET_MK)
 -include $(TOOLS_MK)
@@ -77,31 +63,15 @@ FAST_COMPILE_DEFAULT=OFF
 # This overrides any `.DEFAULT_GOAL` set in included makefragments.
 .DEFAULT_GOAL := build
 
-all: build
-
-
-build: build-with-cmake-ninja
-
-# Specific Release/debug build
-release: CMAKE_BUILD_TYPE=Release
-release: CMAKE_BUILD_DIR=$(REL_BUILD_DIR)
-release: STANDALONE=OFF
-release: build-with-cmake-ninja
-
-release-full: CMAKE_BUILD_TYPE=Release
-release-full: CMAKE_BUILD_DIR=$(REL_BUILD_DIR)
-release-full: STANDALONE=ON
-release-full: build-with-cmake-ninja
-
 package: PUBLIC_PACKAGE=ON
-package: release
+package: choreo-release
 	@cmake --build $(REL_BUILD_DIR) --target package-compiler
 
 package-full: PUBLIC_PACKAGE=ON
-package-full: release-full
+package-full: choreo-release
 	@cmake --build $(REL_BUILD_DIR) --target package-compiler
 
-sdk-package: release
+sdk-package: choreo-release
 	@cmake --build $(REL_BUILD_DIR) --target package-sdk
 
 SDK_INSTALL_PREFIX ?= $(WORK_DIR)/sdk-install
@@ -119,59 +89,81 @@ sdk-install: sdk
 sdk-test: sdk-install
 	@$(MAKE) -C tests/sdk test SDK_PREFIX=$(SDK_INSTALL_PREFIX)
 
-debug: CMAKE_BUILD_TYPE=Debug
-debug: CMAKE_BUILD_DIR=$(DBG_BUILD_DIR)
-debug: build-with-cmake-ninja
-
-legacy: $(TARGET)
-	ln -sf $(CHOREO_BIN) $(WORK_DIR)/choreo
-	ln -sf $(COPP_BIN) $(WORK_DIR)/copp
-
-test-legacy: legacy
-	$(LIT) tests && $(MAKE) standalone_test
-
-test: build
-	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake
-
-test-debug: debug
-	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake
-
-test-release: release
-	$(LIT) tests && $(MAKE) standalone-test-with-cmake
-
-# Unified test targets: choreo + coir
-test-all: build
-	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake && $(LIT) tools/coir/tests/
-
-test-all-debug: debug
-	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake && $(LIT) tools/coir/tests/
-
-test-all-release: release
-	$(LIT) tests && $(MAKE) standalone-test-with-cmake && $(LIT) tools/coir/tests/
-
-ci-test:
-	$(LIT) tests && $(MAKE) standalone-test-with-cmake
-
 .PHONY: cmake-test
 cmake-test:
 	bash tests/cmake/test_croq_options.sh
 
-# ---- choreo-only (no CoIR/co-mock) ----
+
+.PHONY: symlink-choreo symlink-coir
+symlink-choreo:
+	@test -f $(CHOREO_BUILD_DIR)/choreo && ln -sf $(CHOREO_BUILD_DIR)/choreo $(WORK_DIR)/choreo || true
+	@test -f $(CHOREO_BUILD_DIR)/copp && ln -sf $(CHOREO_BUILD_DIR)/copp $(WORK_DIR)/copp || true
+
+symlink-coir:
+	@test -f $(COIR_BUILD_DIR)/tools/coir/co2ir && ln -sf $(COIR_BUILD_DIR)/tools/coir/co2ir $(WORK_DIR)/co2ir || true
+	@test -f $(COIR_BUILD_DIR)/tools/coir/coir-opt && ln -sf $(COIR_BUILD_DIR)/tools/coir/coir-opt $(WORK_DIR)/coir-opt || true
+	@test -f $(COIR_BUILD_DIR)/tools/coir/cocc && ln -sf $(COIR_BUILD_DIR)/tools/coir/cocc $(WORK_DIR)/cocc || true
+
+define build-croqtile
+	@echo "=== Building CoIR tools ($(1)) ==="
+	$(CMAKE) -S $(WORK_DIR) -B $(2) \
+		-G Ninja \
+		-DCMAKE_BUILD_TYPE=$(1) \
+		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) \
+		'-DCROQ_PROJECT=$(CROQ_PROJECT)' \
+		'-DCROQ_TARGET=$(CROQ_TARGET)'
+	ninja -C $(2) choreo copp co2ir coir-opt cocc
+	@$(MAKE) --no-print-directory CHOREO_BUILD_DIR=$(2) symlink-choreo
+	@$(MAKE) --no-print-directory COIR_BUILD_DIR=$(2) symlink-coir
+endef
+
+# Unified test targets: choreo + coir
+.PHONY: build debug release
+debug:
+	$(call build-croqtile,Debug,$(DBG_BUILD_DIR))
+
+release:
+	$(call build-croqtile,Release,$(REL_BUILD_DIR))
+
+build: release
+
+test: build
+	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake && $(LIT) coir-test
+
+test-debug: debug
+	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake && $(LIT) coir-test
+
+test-release: release
+	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake && $(LIT) coir-test
+
+# ---- choreo-only (no CoIR) ----
 define build-choreo-only
 	@echo "=== Building choreo only ($(1)) ==="
 	$(CMAKE) -S $(WORK_DIR) -B $(2) -G Ninja \
 		-DCMAKE_BUILD_TYPE=$(1) \
 		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) \
 		'-DCROQ_PROJECT=choreo' \
+		'-DSTANDALONE=OFF' \
 		'-DCROQ_TARGET=$(CROQ_TARGET)'
 	ninja -C $(2) choreo copp
-	@test -f $(2)/choreo && ln -sf $(2)/choreo $(WORK_DIR)/choreo || true
-	@test -f $(2)/copp && ln -sf $(2)/copp $(WORK_DIR)/copp || true
+	@$(MAKE) --no-print-directory CHOREO_BUILD_DIR=$(2) symlink-choreo
 endef
 
-.PHONY: choreo choreo-debug choreo-release
-choreo:
-	$(call build-choreo-only,$(CMAKE_BUILD_TYPE),$(CMAKE_BUILD_DIR))
+# ---- coir-only (no CoIR) ----
+define build-coir-only
+	@echo "=== Building CoIR tools ($(1)) ==="
+	$(CMAKE) -S $(WORK_DIR) -B $(COIR_BUILD_DIR) \
+		-G Ninja \
+		-DCMAKE_BUILD_TYPE=$(1) \
+		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) \
+		'-DCROQ_PROJECT=coir' \
+		'-DCROQ_TARGET=$(CROQ_TARGET)'
+	ninja -C $(COIR_BUILD_DIR) co2ir coir-opt cocc
+	@$(MAKE) --no-print-directory COIR_BUILD_DIR=$(COIR_BUILD_DIR) symlink-coir
+endef
+
+.PHONY: choreo choreo-only choreo-debug choreo-release
+choreo: choreo-release
 
 choreo-debug:
 	$(call build-choreo-only,Debug,$(DBG_BUILD_DIR))
@@ -179,43 +171,40 @@ choreo-debug:
 choreo-release:
 	$(call build-choreo-only,Release,$(REL_BUILD_DIR))
 
+.PHONY: test-choreo test-choreo-debug test-choreo-release
+test-choreo: choreo
+	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake
+
+test-choreo-debug: choreo-debug
+	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake
+
+test-choreo-release: choreo-release
+	$(LIT) tests && $(MAKE) standalone-test-with-cmake
+
 # ---- CoIR IR tooling ----
 COIR_BUILD_DIR ?= $(CMAKE_BUILD_DIR)
+COIR_DBG_BUILD_DIR ?= $(DBG_BUILD_DIR)
+COIR_REL_BUILD_DIR ?= $(REL_BUILD_DIR)
 
-.PHONY: symlink-coir
-symlink-coir:
-	@test -f $(COIR_BUILD_DIR)/tools/coir/co2ir && ln -sf $(COIR_BUILD_DIR)/tools/coir/co2ir $(WORK_DIR)/co2ir || true
-	@test -f $(COIR_BUILD_DIR)/tools/coir/coir-opt && ln -sf $(COIR_BUILD_DIR)/tools/coir/coir-opt $(WORK_DIR)/coir-opt || true
-	@test -f $(COIR_BUILD_DIR)/tools/coir/cocc && ln -sf $(COIR_BUILD_DIR)/tools/coir/cocc $(WORK_DIR)/cocc || true
+.PHONY: coir coir-debug coir-release
+coir: coir-release
 
-define build-coir
-	@echo "=== Building CoIR tools ($(1)) ==="
-	$(CMAKE) -S $(WORK_DIR) -B $(COIR_BUILD_DIR) \
-		-G Ninja \
-		-DCMAKE_BUILD_TYPE=$(1) \
-		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) \
-		'-DCROQ_PROJECT=$(CROQ_PROJECT)' \
-		'-DCROQ_TARGET=$(CROQ_TARGET)'
-	ninja -C $(COIR_BUILD_DIR) co2ir coir-opt cocc
-	@$(MAKE) --no-print-directory COIR_BUILD_DIR=$(COIR_BUILD_DIR) symlink-coir
-endef
-
-.PHONY: coir
-coir:
-	$(call build-coir,$(CMAKE_BUILD_TYPE))
-
-.PHONY: coir-debug
 coir-debug:
-	$(eval COIR_BUILD_DIR := $(DBG_BUILD_DIR))
-	$(call build-coir,Debug)
+	$(call build-coir-only,Debug,$(COIR_DBG_BUILD_DIR))
 
-.PHONY: coir-release
 coir-release:
-	$(eval COIR_BUILD_DIR := $(REL_BUILD_DIR))
-	$(call build-coir,Release)
+	$(call build-coir-only,Release,$(COIR_REL_BUILD_DIR))
 
-.PHONY: coir-test
-coir-test: coir
+.PHONY: test-coir test-coir-debug test-coir-release
+test-coir: coir
+	@echo "=== Running CoIR tests ==="
+	$(LIT) tools/coir/tests/
+
+test-coir-debug: coir-debug
+	@echo "=== Running CoIR tests ==="
+	$(LIT) tools/coir/tests/
+
+test-coir-release: coir-release
 	@echo "=== Running CoIR tests ==="
 	$(LIT) tools/coir/tests/
 
@@ -229,6 +218,7 @@ coir-clean:
 	done
 
 # ---- co-mock (standalone mock interpreter) ----
+.PHONY: co-mock test-mock
 co-mock: build-co-mock-with-cmake-ninja
 
 build-co-mock-with-cmake-ninja:
@@ -242,17 +232,19 @@ build-co-mock-with-cmake-ninja:
 	ninja -C $(CMAKE_BUILD_DIR) co-mock
 	@ln -sf $(CMAKE_BUILD_DIR)/co-mock $(WORK_DIR)/co-mock
 
-mock-test: co-mock
+test-mock: co-mock
 	$(LIT) tools/co-mock/tests/
 
 standalone-test-with-cmake: build-with-cmake-ninja
 	cd tests/standalone/ && $(MAKE) test
 
 clean:
-	@rm -rf $(BUILD_DIR) $(DBG_BUILD_DIR) $(REL_BUILD_DIR) $(LGY_BUILD_DIR) $(WASM_BUILD_DIR) $(TEST_TARGETS) tests/*.result
+	@rm -rf $(BUILD_DIR) $(DBG_BUILD_DIR) $(REL_BUILD_DIR) $(WASM_BUILD_DIR) $(TEST_TARGETS) tests/*.result
 	@cd tests/standalone/ && $(MAKE) clean
 
 clean-all: clean coir-clean
+
+test-all: test test-mock
 
 build-with-cmake:
 	@echo "Starting build with CMake..."
@@ -292,54 +284,6 @@ config-with-cmake-ninja:
 		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) \
 		'-DCROQ_PROJECT=$(CROQ_PROJECT)' \
 		'-DCROQ_TARGET=$(CROQ_TARGET)'
-
-
-# Legacy Makefile
-SRC_CPP := $(shell find $(SRC_DIR) -type f -name '*.cpp')
-LGY_BUILD_OBJECTS := $(patsubst $(SRC_DIR)/%.cpp,$(LGY_BUILD_DIR)/%.o,$(SRC_CPP))
-
-$(LGY_BUILD_DIR):
-	mkdir -p $(LGY_BUILD_DIR)
-
-$(CHOREO_BIN): $(TOOLS_DIR)/choreo/choreo_main.cpp $(LGY_BUILD_DIR)/parser.tab.o $(LGY_BUILD_DIR)/scanner.yy.o $(LGY_BUILD_OBJECTS) | $(LGY_BUILD_DIR)
-	$(CC) $(CFLAGS) $^ -I$(WORK_DIR) -I$(SRC_DIR) -lpthread -o $@
-
-$(LGY_BUILD_DIR)/scanner.yy.cc: $(LEX_SRC) | $(LGY_BUILD_DIR)
-	$(FLEX) -o $@ $(LEX_SRC)
-
-$(LGY_BUILD_DIR)/parser.tab.hh $(LGY_BUILD_DIR)/parser.tab.cc: $(PARSER_SRC) | $(LGY_BUILD_DIR)
-	$(BISON) $(BISON_FLAGS) $(PARSER_SRC) --defines=$(LGY_BUILD_DIR)/parser.tab.hh -o $(LGY_BUILD_DIR)/parser.tab.cc
-
-$(LGY_BUILD_DIR)/parser.tab.o: $(LGY_BUILD_DIR)/parser.tab.cc $(HEADER_FILES) parser.tab.hh | $(LGY_BUILD_DIR)
-	$(CC) -I$(LGY_BUILD_DIR) -I$(SRC_DIR) $(CFLAGS) $< -c -o $@
-
-$(LGY_BUILD_DIR)/%.o: $(LGY_BUILD_DIR)/%.cc $(HEADER_FILES) parser.tab.hh | $(LGY_BUILD_DIR)
-	$(CC) -I$(LGY_BUILD_DIR) -I$(SRC_DIR) $(CFLAGS) $< -c -o $@
-
-$(LGY_BUILD_DIR)/%.o : $(SRC_DIR)/%.cpp | $(LGY_BUILD_DIR)
-	@mkdir -p $(dir $@)
-	$(CC) -I$(LGY_BUILD_DIR) -I$(SRC_DIR) $(CFLAGS) $< -c  -o $@
-
-$(COPP_BIN): $(TOOLS_DIR)/copp/choreo_preprocess.cpp $(LGY_BUILD_DIR)/parser.tab.o $(LGY_BUILD_DIR)/scanner.yy.o $(LGY_BUILD_OBJECTS)
-	$(CC) $(CFLAGS) $^ -I$(LGY_BUILD_DIR) -I$(SRC_DIR) -static-libstdc++ -lpthread -o $@
-
--include $(OBJ:.o=.d)
-
-$(LGY_BUILD_DIR)/choreo_header.inc : $(RT_DIR)/choreo.h
-	echo "#ifndef __CHOREO_RUNTIME_HEADER_H__" > $@
-	echo "#define __CHOREO_RUNTIME_HEADER_H__" >> $@
-	echo -n "static const char* __choreo_header_as_string = R\"(" >> $@
-	cat $< >> $@
-	echo ")\";" >> $@
-	echo "#endif // __CHOREO_RUNTIME_HEADER_H__" >> $@
-
-clean-legacy:
-	@rm $(LGY_BUILD_DIR)/* $(TEST_TARGETS)
-	@cd $(WORK_DIR) && find tests -name '*.result' -exec rm -f {} \;
-	@cd $(WORK_DIR)/tests/standalone/ && $(MAKE) clean
-
-clobber: clean
-	find $(TOOLCHAIN_DIR) -mindepth 1 ! -name 'Makefile' -print0 | xargs -0 rm -rf
 
 # =============================================================================
 # Auto-tune helper
@@ -427,7 +371,7 @@ help:
 	@echo "==================="
 	@echo ""
 	@echo "Build Targets:"
-	@echo "  all, build          - Build choreo, copp, and co-mock"
+	@echo "  build               - Build choreo, copp, and co-mock"
 	@echo "  co-mock             - Build co-mock standalone (no choreo/copp)"
 	@echo "  release             - Build release version"
 	@echo "  debug               - Build debug version"
@@ -435,13 +379,11 @@ help:
 	@echo ""
 	@echo ""
 	@echo "Test Targets:"
-	@echo "  test                - Run choreo compiler tests"
-	@echo "  test-all            - Run all tests (choreo + co-mock)"
-	@echo "  mock-test           - Run co-mock tests only"
-	@echo "  sample-test         - Test all elementwise operators"
-	@echo "  sample-test-operator OPERATOR=name"
-	@echo "                      - Test specific operator"
-	@echo "                        Available operators: $(OPERATOR_NAMES)"
+	@echo "  test-choreo         - Run choreo compiler tests"
+	@echo "  test-coir           - Run coir/cocc compiler tests"
+	@echo "  test                - Run all compile tests (choreo + coir)"
+	@echo "  test-mock           - Run mock tests"
+	@echo "  test-all            - Run all tests"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  format              - Format C++ code with clang-format"

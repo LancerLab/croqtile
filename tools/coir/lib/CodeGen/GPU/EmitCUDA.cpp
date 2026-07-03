@@ -1826,7 +1826,6 @@ private:
       auto shape = fragTy.getShape();
       int64_t M = shape.size() > 0 ? shape[0] : 64;
       int64_t N = shape.size() > 1 ? shape[1] : 64;
-      int64_t accRegs = (M * N) / 128;
       std::string suffix = "_wgmma_st_" + std::to_string(nextId++);
       auto dstTy = cast<coir::TensorType>(op.getDest().getType());
       std::string elemTy = emitElementType(dstTy.getElementType());
@@ -2325,7 +2324,6 @@ private:
       os() << getIndent() << "if (threadIdx.x == 0 && threadIdx.y == 0) {\n";
       incIndent();
 
-      auto srcType = desc.srcType;
       std::string storeFunc = rank <= 2
           ? "cde::cp_async_bulk_tensor_2d_shared_to_global"
           : "cde::cp_async_bulk_tensor_3d_shared_to_global";

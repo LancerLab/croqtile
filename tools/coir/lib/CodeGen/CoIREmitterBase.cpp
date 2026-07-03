@@ -173,7 +173,6 @@ void CoIREmitterBase::emitLinearIndex(ValueRange indices, TensorType tty) {
       }
     }
 
-    unsigned dynIdx = 0;
     for (unsigned i = 0; i < indices.size(); ++i) {
       if (i > 0) os() << " + ";
       os() << getName(indices[i]);
