@@ -508,10 +508,8 @@ private:
   bool trace_vn = false;            // trace the value numbering
   bool trace_vectorize = false;     // trace the masking
   bool show_source_loc = true;    // show source code location when error, etc.
-  bool liveness = false;          // analyze the liveness of the program
   bool mem_reuse = false;         // reuse the memory of the program
   bool sala = true;               // signal-aware liveness analysis
-  bool simplify_fp_valno = false; // simplify the floating point value number
   bool verify = false;            // verify visitors for legality
   bool gen_debug_info = false;    // generate source-level debug information
   bool target_debug_info = false; // pass debug flags to target compilation
@@ -751,10 +749,8 @@ public:
   bool CrossCompile() const { return cross_compile; }
   bool TraceValueNumbers() const { return trace_vn; }
   bool TraceVectorize() const { return trace_vectorize; }
-  bool LivenessAnalysis() const { return liveness; }
   bool MemReuse() const { return mem_reuse; }
   bool SALA() const { return sala; }
-  bool SimplifyFpValno() const { return simplify_fp_valno; }
   bool VerifyVisitors() const { return verify; }
   bool GenDebugInfo() const { return gen_debug_info; }
   bool TargetDebugInfo() const { return target_debug_info; }
@@ -811,10 +807,8 @@ public:
   void SetCrossCompile(bool value) { cross_compile = value; }
   void SetTraceValueNumbers(bool value) { trace_vn = value; }
   void SetTraceVectorize(bool value) { trace_vectorize = value; }
-  void SetLivenessAnalysis(bool value) { liveness = value; }
   void SetMemReuse(bool value) { mem_reuse = value; }
   void SetSALA(bool value) { sala = value; }
-  void SetSimplifyFpValno(bool value) { simplify_fp_valno = value; }
   void SetVerifyVisitors(bool value) { verify = value; }
   void SetGenDebugInfo(bool value) { gen_debug_info = value; }
   void SetTargetDebugInfo(bool value) { target_debug_info = value; }

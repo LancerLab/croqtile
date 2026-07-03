@@ -97,9 +97,6 @@ Option<bool> use_hetero_tileflow(
 Option<bool>
     use_pic(OptionKind::Hidden, "--use-pic", "-fpic", false,
             "Generate position-independent code if possible (small mode).");
-Option<bool> simplify_fp_valno(
-    OptionKind::Hidden, "--simplify-fp-valno", "-sfv", false,
-    "(Experimental) Simplify the value numbering for floating point types.");
 Option<bool>
     native_f16(OptionKind::User, "--native-f16", "-f16n", false,
                "Utilize native f16 type when target platform support.");
@@ -206,8 +203,6 @@ Option<bool> visualiz(OptionKind::Hidden, "--visualize", "-u", false,
                       "Visualize the data movement of DMAs.");
 Option<bool> ncodegen(OptionKind::Hidden, "--no-codegen", "-s", false,
                       "Do not generate Code.");
-Option<bool> sym_repl(OptionKind::Hidden, "--print-sym-replace", "-sr", false,
-                      "Trace the symbol replace process.");
 Option<bool> prt_pass(OptionKind::Hidden, "--show-passes", "-sp", false,
                       "Show the visit pass pipeline.");
 Option<bool>
@@ -215,8 +210,6 @@ Option<bool>
                 "Measure and display the time spent in each compiler pass.");
 Option<bool> save_temps(OptionKind::Hidden, "--save-temps", "", false,
                         "Save the temporal files.");
-Option<bool> liveness(OptionKind::Hidden, "--liveness", "", true,
-                      "Analyze the liveness of the program.");
 Option<bool> mem_reuse(OptionKind::Hidden, "--mem-reuse", "", true,
                        "Analyze the memory usage, then perform memory reuse.");
 Option<bool> no_sala(OptionKind::Hidden, "--no-sala", "", false,
@@ -466,10 +459,8 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetNoVectorize(no_vectorize.GetValue());
   CCtx().SetVectorize(vectorize.GetValue());
   CCtx().SetShowSourceLocation(!no_show_source.GetValue());
-  CCtx().SetLivenessAnalysis(liveness.GetValue());
   CCtx().SetMemReuse(mem_reuse.GetValue());
   CCtx().SetSALA(!no_sala.GetValue());
-  CCtx().SetSimplifyFpValno(simplify_fp_valno.GetValue());
   CCtx().SetVerifyVisitors(verify_visitors.GetValue());
   CCtx().SetDMADiagnosis(diag_dma.GetValue());
   CCtx().SetLoopNorm(loop_norm.GetValue());

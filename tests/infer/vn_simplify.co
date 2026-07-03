@@ -1,14 +1,9 @@
 // RUN: choreo -dv=valno -sa=valno %s | FileCheck --check-prefix=CHECK --match-full-lines %s
-// RUN: choreo -dv=valno -sfv -sa=valno %s | FileCheck --check-prefix=CHECK-SFV --match-full-lines %s
 
 __co__ void vn_simplify(s32 [N, M] i) {
   double d0 = 1.5;
   double d1 = 3.9;
   double d2 = d0 + d1;
-
-  float f0 = 1.5f;
-  float f1 = 3.9f;
-  float f2 = f0 - f1;
 
   int i0 = 2;
   int i1 = 3;
@@ -28,8 +23,3 @@ __co__ void vn_simplify(s32 [N, M] i) {
 // CHECK:  |-<symval> ::vn_simplify::i1: 3
 // CHECK:  |-<symval> ::vn_simplify::i2: 6
 // CHECK:  |-<symval> ::vn_simplify::x: ((::vn_simplify::N / 5) * 5)
-
-// CHECK-SFV:  |-<symval> ::vn_simplify::i0: 2
-// CHECK-SFV:  |-<symval> ::vn_simplify::i1: 3
-// CHECK-SFV:  |-<symval> ::vn_simplify::i2: 6
-// CHECK-SFV:  |-<symval> ::vn_simplify::x: ((::vn_simplify::N / 5) * 5)

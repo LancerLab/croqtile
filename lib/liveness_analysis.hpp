@@ -163,7 +163,6 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   LivenessAnalyzer() : VisitorWithSymTab("liveness") {
     auto_declare_symbols = true;
     if (trace_visit) debug_visit = true; // force debug when tracing
-    if (disabled) CCtx().SetLivenessAnalysis(false);
   }
   ~LivenessAnalyzer() {}
 

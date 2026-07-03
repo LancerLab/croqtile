@@ -298,7 +298,6 @@ private:
 public:
   MemReuse() : VisitorWithSymTab("memreuse") {
     if (trace_visit) debug_visit = true;
-    // TODO: maybe should do the same for other passes.
     if (disabled) CCtx().SetMemReuse(false);
   }
   ~MemReuse() {}

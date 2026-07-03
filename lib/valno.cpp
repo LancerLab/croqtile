@@ -363,7 +363,7 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
 
   // try the more general constant folding, including floating-point
   if (l_csn && r_csn) {
-    if ((!l_csn->IsFloat() && !r_csn->IsFloat()) || CCtx().SimplifyFpValno()) {
+    if (!l_csn->IsFloat() && !r_csn->IsFloat()) {
       auto res = std::visit(ConstSign::ArithmeticVisitor{op}, l_csn->Value(),
                             r_csn->Value());
       if (!IsUnknown(res)) return Report(res);
