@@ -155,6 +155,140 @@ __host__ __device__ constexpr inline uint32_t broadcast_to_u32(T x) {
 
 } // namespace choreo
 
+  // Arithmetic operators for FP6 and FP4 scalar types.
+  // CUDA and CUTE FP6/FP4 types do not provide built-in arithmetic operators.
+  // We promote to float for the computation and convert the result back to the
+  // same type.  The codegen stores the intermediate result in the same FP6/FP4
+  // type before a final cast to the output type, so the operator must return
+  // the same type as its operands.
+  //
+  // Operators must live in the same namespace as the underlying type so that
+  // ADL can find them.  Type aliases do not contribute their enclosing
+  // namespace to ADL lookup; ADL follows the underlying (non-alias) type's
+  // namespace.
+  //
+  // Two cases:
+  //   - CUDA >= 12090: underlying types are __nv_fp6_e2m3, __nv_fp6_e3m2,
+  //     __nv_fp4_e2m1 in the global namespace; constructors from float are
+  //     explicit, so we use explicit construction in the return.
+  //   - Otherwise (CUTE path or older CUDA): underlying types are
+  //     cute::float_e2m3_t, cute::float_e3m2_t, cute::float_e2m1_t in the
+  //     cute namespace; same explicit-constructor pattern applies.
+
+  #ifdef __CHOREO_TARGET_NATIVE_FP6_SUPPORT__
+    #if defined(__USE_CUDA_TYPE__) && CUDA_VERSION >= 12090
+__host__ __device__ static inline __nv_fp6_e2m3 operator+(__nv_fp6_e2m3 a,
+                                                          __nv_fp6_e2m3 b) {
+  return __nv_fp6_e2m3(float(a) + float(b));
+}
+__host__ __device__ static inline __nv_fp6_e2m3 operator-(__nv_fp6_e2m3 a,
+                                                          __nv_fp6_e2m3 b) {
+  return __nv_fp6_e2m3(float(a) - float(b));
+}
+__host__ __device__ static inline __nv_fp6_e2m3 operator*(__nv_fp6_e2m3 a,
+                                                          __nv_fp6_e2m3 b) {
+  return __nv_fp6_e2m3(float(a) * float(b));
+}
+__host__ __device__ static inline __nv_fp6_e2m3 operator/(__nv_fp6_e2m3 a,
+                                                          __nv_fp6_e2m3 b) {
+  return __nv_fp6_e2m3(float(a) / float(b));
+}
+
+__host__ __device__ static inline __nv_fp6_e3m2 operator+(__nv_fp6_e3m2 a,
+                                                          __nv_fp6_e3m2 b) {
+  return __nv_fp6_e3m2(float(a) + float(b));
+}
+__host__ __device__ static inline __nv_fp6_e3m2 operator-(__nv_fp6_e3m2 a,
+                                                          __nv_fp6_e3m2 b) {
+  return __nv_fp6_e3m2(float(a) - float(b));
+}
+__host__ __device__ static inline __nv_fp6_e3m2 operator*(__nv_fp6_e3m2 a,
+                                                          __nv_fp6_e3m2 b) {
+  return __nv_fp6_e3m2(float(a) * float(b));
+}
+__host__ __device__ static inline __nv_fp6_e3m2 operator/(__nv_fp6_e3m2 a,
+                                                          __nv_fp6_e3m2 b) {
+  return __nv_fp6_e3m2(float(a) / float(b));
+}
+    #else  // CUTE types (cute::float_e2m3_t / cute::float_e3m2_t)
+namespace cute {
+__host__ __device__ static inline float_e2m3_t operator+(float_e2m3_t a,
+                                                         float_e2m3_t b) {
+  return float_e2m3_t(float(a) + float(b));
+}
+__host__ __device__ static inline float_e2m3_t operator-(float_e2m3_t a,
+                                                         float_e2m3_t b) {
+  return float_e2m3_t(float(a) - float(b));
+}
+__host__ __device__ static inline float_e2m3_t operator*(float_e2m3_t a,
+                                                         float_e2m3_t b) {
+  return float_e2m3_t(float(a) * float(b));
+}
+__host__ __device__ static inline float_e2m3_t operator/(float_e2m3_t a,
+                                                         float_e2m3_t b) {
+  return float_e2m3_t(float(a) / float(b));
+}
+
+__host__ __device__ static inline float_e3m2_t operator+(float_e3m2_t a,
+                                                         float_e3m2_t b) {
+  return float_e3m2_t(float(a) + float(b));
+}
+__host__ __device__ static inline float_e3m2_t operator-(float_e3m2_t a,
+                                                         float_e3m2_t b) {
+  return float_e3m2_t(float(a) - float(b));
+}
+__host__ __device__ static inline float_e3m2_t operator*(float_e3m2_t a,
+                                                         float_e3m2_t b) {
+  return float_e3m2_t(float(a) * float(b));
+}
+__host__ __device__ static inline float_e3m2_t operator/(float_e3m2_t a,
+                                                         float_e3m2_t b) {
+  return float_e3m2_t(float(a) / float(b));
+}
+} // namespace cute
+    #endif // __USE_CUDA_TYPE__ && CUDA_VERSION >= 12090
+  #endif   // __CHOREO_TARGET_NATIVE_FP6_SUPPORT__
+
+  #ifdef __CHOREO_TARGET_NATIVE_FP4_SUPPORT__
+    #if defined(__USE_CUDA_TYPE__) && CUDA_VERSION >= 12090
+__host__ __device__ static inline __nv_fp4_e2m1 operator+(__nv_fp4_e2m1 a,
+                                                          __nv_fp4_e2m1 b) {
+  return __nv_fp4_e2m1(float(a) + float(b));
+}
+__host__ __device__ static inline __nv_fp4_e2m1 operator-(__nv_fp4_e2m1 a,
+                                                          __nv_fp4_e2m1 b) {
+  return __nv_fp4_e2m1(float(a) - float(b));
+}
+__host__ __device__ static inline __nv_fp4_e2m1 operator*(__nv_fp4_e2m1 a,
+                                                          __nv_fp4_e2m1 b) {
+  return __nv_fp4_e2m1(float(a) * float(b));
+}
+__host__ __device__ static inline __nv_fp4_e2m1 operator/(__nv_fp4_e2m1 a,
+                                                          __nv_fp4_e2m1 b) {
+  return __nv_fp4_e2m1(float(a) / float(b));
+}
+    #else  // CUTE types (cute::float_e2m1_t)
+namespace cute {
+__host__ __device__ static inline float_e2m1_t operator+(float_e2m1_t a,
+                                                         float_e2m1_t b) {
+  return float_e2m1_t(float(a) + float(b));
+}
+__host__ __device__ static inline float_e2m1_t operator-(float_e2m1_t a,
+                                                         float_e2m1_t b) {
+  return float_e2m1_t(float(a) - float(b));
+}
+__host__ __device__ static inline float_e2m1_t operator*(float_e2m1_t a,
+                                                         float_e2m1_t b) {
+  return float_e2m1_t(float(a) * float(b));
+}
+__host__ __device__ static inline float_e2m1_t operator/(float_e2m1_t a,
+                                                         float_e2m1_t b) {
+  return float_e2m1_t(float(a) / float(b));
+}
+} // namespace cute
+    #endif // __USE_CUDA_TYPE__ && CUDA_VERSION >= 12090
+  #endif   // __CHOREO_TARGET_NATIVE_FP4_SUPPORT__
+
 #endif // __CHOREO_TARGET_CUTE__
 
 #endif // __CHOREO_TYPES_CUTE_H__
