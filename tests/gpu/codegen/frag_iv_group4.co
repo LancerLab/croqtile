@@ -1,3 +1,4 @@
+// REQUIRES: TARGET-SM_90A
 // RUN: choreo -gs -t cute -arch=sm_90a %s 2>&1 | bash 2>&1 | FileCheck %s
 // Test: apply on MMA acc reading global memory inside group-4
 // Regression test for __frag_iv_* undefined bug when iterators
