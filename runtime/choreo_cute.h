@@ -3531,8 +3531,7 @@ __device__ static inline void store_fragment_d_stmatrix(Tensor& D,
                                                         AccumT* const d) {
   static_assert(sizeof(AccumT) == 2,
                 "stmatrix store requires 16-bit accumulator type, f16 or bf16");
-  static_assert((N % 8) == 0,
-                "stmatrix store requires N to be divisible by 8");
+  static_assert((N % 8) == 0, "stmatrix store requires N to be divisible by 8");
 
   int tid = threadIdx.x % 128;
   int lane = tid % 32;
@@ -3590,8 +3589,7 @@ __device__ static inline void store_fragment_d_stmatrix_trans(Tensor& D,
                                                               AccumT* const d) {
   static_assert(sizeof(AccumT) == 2,
                 "stmatrix store requires 16-bit accumulator type, f16 or bf16");
-  static_assert((N % 8) == 0,
-                "stmatrix store requires N to be divisible by 8");
+  static_assert((N % 8) == 0, "stmatrix store requires N to be divisible by 8");
 
   int tid = threadIdx.x % 128;
   int lane = tid % 32;
