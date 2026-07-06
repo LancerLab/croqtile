@@ -508,10 +508,10 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
               var_name = "__dte_" + slot_users[0] + "__";
             }
             dte_named_vars[i] = var_name;
-            pool_decl += "tops::private_dte " + var_name + ";\n  ";
+            pool_decl += "  tops::private_dte " + var_name + ";\n";
           }
         } else {
-          pool_decl = "choreo::choreo_sdte __choreo_dte_pool__[" +
+          pool_decl = "  choreo::choreo_sdte __choreo_dte_pool__[" +
                       std::to_string(dte_pool_size) +
                       "];\n"
                       "  for (int __i = 0; __i < " +
@@ -519,7 +519,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
                       "; ++__i) __choreo_dte_pool__[__i].init();";
         }
         // Replace ALL placeholders with DTE declarations
-        const std::string placeholder = "/*__CHOREO_DTE_POOL_PLACEHOLDER__*/";
+        const std::string placeholder = "  /*__CHOREO_DTE_POOL_PLACEHOLDER__*/";
         size_t pos = 0;
         while ((pos = device_code.find(placeholder, pos)) !=
                std::string::npos) {
@@ -552,7 +552,8 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
           }
         }
       } else {
-        const std::string placeholder = "/*__CHOREO_DTE_POOL_PLACEHOLDER__*/\n";
+        const std::string placeholder =
+            "  /*__CHOREO_DTE_POOL_PLACEHOLDER__*/\n";
         size_t pos = 0;
         while ((pos = device_code.find(placeholder, pos)) !=
                std::string::npos) {
@@ -1158,11 +1159,16 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
            << "(" << reuse << " + " << offset << ");\n";
       } else {
         // the buffer is not reused
-        // which means that it is declared but never used.
-        // TODO: should we DCE the unused buffer?
         assert(!n.HasNote("offset"));
-        ds << d_indent << type_modifiers << bts << " " << sym << "["
-           << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
+        if (ref) {
+          ds << d_indent << bts << "* " << sym << " = (" << bts << "*)"
+             << "(" << ExprSTR(n.init_expr, false) << ");\n";
+        } else {
+          // which means that it is declared but never used.
+          // TODO: should we DCE the unused buffer?
+          ds << d_indent << type_modifiers << bts << " " << sym << "["
+             << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
+        }
       }
     };
 
@@ -1441,15 +1447,11 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
   }
 
   if (n.AssignToDataElement()) {
-    if (!IsHost()) {
+    if (!IsHost())
       ds << d_indent << DASTR(n.da, ExprSTR(n.value, false), false) << ";\n";
-    }
-
-    if (IsHost()) {
-      // TODO: test the case!
+    else
       choreo_unreachable(
           "error: assignment to data element should be on device side.");
-    }
 
     return true;
   }
@@ -3178,8 +3180,6 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
     }
   }
 
-  hs << "\n";
-
   for (const auto& rc : FCtx(fname).GetRtChecks()) {
     hs << h_indent << "choreo::runtime_check(" << ValueSTR(sbe::sym(rc.lhs))
        << " " << rc.op << " " << ValueSTR(sbe::sym(rc.rhs)) << ", \""
@@ -3201,8 +3201,7 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
 void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
   const auto& mri = FCtx(fname).GetDynMemReuseInfo(df_name);
   if (!mri) return;
-  hs << h_indent << R"(// JIT memory reuse begin)"
-     << "\n";
+  hs << h_indent << R"(// JIT memory reuse begin)" << "\n";
   for (const auto& [sto, ie] : mri->infos) {
     hs << h_indent << "HeapSimulator::Chunks " << ie.chunks_name << ";\n";
     for (const auto& c : ie.chunks)
@@ -3247,31 +3246,29 @@ void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
        << ".chunk_offsets)\n";
     hs << h_indent << "  " << ie.offsets_name << "[" << idx
        << "++] = offset;\n";
-
     // --- memory reuse diagnostics ---
-    hs << h_indent << "printf(\"[mem-reuse] heap_size = %u bytes (%.1f KB), "
-       << "capacity = " << mem_capacity << " bytes (%.1f KB), "
-       << "usage = %.1f%%\\n\", " << ie.spm_size << ", " << ie.spm_size
-       << " / 1024.0, " << mem_capacity << " / 1024.0, " << ie.spm_size
-       << " * 100.0 / " << mem_capacity << ");\n";
-    hs << h_indent << "printf(\"[mem-reuse] %zu chunks allocated:\\n\", "
-       << ie.chunks_name << ".size());\n";
-    hs << h_indent << "{\n";
-    hs << h_indent << "  size_t __mr_i = 0;\n";
-    hs << h_indent << "  for (const auto& __mr_c : " << ie.chunks_name
-       << ") {\n";
-    hs << h_indent << "    printf(\"[mem-reuse]   [%zu] %-60s  size=%8zu  "
-       << "offset=%8lu\\n\",\n";
-    hs << h_indent
-       << "           __mr_i, __mr_c.buffer_id.c_str(), __mr_c.size, "
-       << ie.offsets_name << "[__mr_i]);\n";
-    hs << h_indent << "    __mr_i++;\n";
-    hs << h_indent << "  }\n";
-    hs << h_indent << "}\n";
+    VST_DEBUG(
+        hs << h_indent
+           << "printf(\"[mem-reuse] heap_size = %u bytes (%.1f KB), "
+           << "capacity = " << mem_capacity << " bytes (%.1f KB), "
+           << "usage = %.1f%%\\n\", " << ie.spm_size << ", " << ie.spm_size
+           << " / 1024.0, " << mem_capacity << " / 1024.0, " << ie.spm_size
+           << " * 100.0 / " << mem_capacity << ");\n";
+        hs << h_indent << "printf(\"[mem-reuse] %zu chunks allocated:\\n\", "
+           << ie.chunks_name << ".size());\n";
+        hs << h_indent << "{\n"; hs << h_indent << "  size_t __mr_i = 0;\n";
+        hs << h_indent << "  for (const auto& __mr_c : " << ie.chunks_name
+           << ") {\n";
+        hs << h_indent << "    printf(\"[mem-reuse]   [%zu] %-60s  size=%8zu  "
+           << "offset=%8lu\\n\",\n";
+        hs << h_indent
+           << "           __mr_i, __mr_c.buffer_id.c_str(), __mr_c.size, "
+           << ie.offsets_name << "[__mr_i]);\n";
+        hs << h_indent << "    __mr_i++;\n"; hs << h_indent << "  }\n";
+        hs << h_indent << "}\n";);
     // --- end memory reuse diagnostics ---
   }
-  hs << h_indent << R"(// JIT memory reuse end)"
-     << "\n";
+  hs << h_indent << R"(// JIT memory reuse end)" << "\n";
 }
 
 static inline const std::string
@@ -3911,7 +3908,6 @@ bool TopsccCodeGen::CompileWithScript(const std::string& action) {
 #endif
 }
 
-// TODO: eliminate the need of the value replacement?
 // Currently, it is guaranteed that ValueSTR can be used safely and directly.
 const std::string TopsccCodeGen::ValueSTR(const ValueItem& vi,
                                           bool LL_suffix) const {

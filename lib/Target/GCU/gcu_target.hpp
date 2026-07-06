@@ -22,13 +22,6 @@ public:
       default: choreo_unreachable("Unsupported mem level.");
       }
     } else if (arch == "gcu300") {
-      /*
-      TODO:
-      For GCU3, all is different with Scorpio (1 Die) in the link below
-      Is S60G same with c035?
-      L3 (global) is different with Dorado (3VG per Cluster) in
-      http://wiki.enflame.cn/display/~james.zhu/Enflame+GCU+Programming+Model#EnflameGCUProgrammingModel-get_memory_space
-      */
       switch (sto) {
       case Storage::LOCAL: {
         return 1.5 * 1024 * 1024 - 512; // 1.5MB minus reserved

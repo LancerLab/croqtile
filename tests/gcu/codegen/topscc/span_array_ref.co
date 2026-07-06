@@ -1,0 +1,14 @@
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+
+__co__ void foo() {
+  parallel p by 1 {
+    shared f32 [128] ii[5];
+    ggg = ii[3];
+    call foo(ii[2], ggg);
+  }
+}
+
+// CHECK: __shared__ unsigned char anon_0[2560];
+// CHECK: float* ii = (float*)(anon_0 + 0);
+// CHECK: float* ggg = (float*)(((float*)((char*)ii + (3) * 512)));
+// CHECK: foo((float*)((float*)((char*)ii + (2) * 512)), (float*)ggg);
