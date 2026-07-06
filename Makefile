@@ -128,13 +128,13 @@ release:
 build: release
 
 test: build
-	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake && $(LIT) test-coir
+	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake && $(MAKE) test-coir
 
 test-debug: debug
-	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake && $(LIT) test-coir
+	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake && $(MAKE) test-coir
 
 test-release: release
-	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake && $(LIT) test-coir
+	$(LIT) -l tests && $(MAKE) standalone-test-with-cmake && $(MAKE) test-coir
 
 # ---- choreo-only (no CoIR) ----
 define build-choreo-only
