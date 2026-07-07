@@ -236,6 +236,8 @@ private:
   size_t current_thread_count = 0;
   std::string current_thread_count_expr;
   std::string stream_name; // deprecated: kept for ABI, no longer populated
+  bool extern_smem; // true: has dynamic smem, decl `extern __shared__ ...`
+  ValueItem shared_spm_size = sbe::nu(0);
   int tma_count = 0;
   int tma_future_count = 0;
   bool cluster_defers_launch = false;
@@ -447,7 +449,6 @@ private:
     has_pending_wgmma_finalize = false;
     has_explicit_mma_wait = false;
     wgmma_arrive_state_declared = false;
-    set_cuda_func_attribute_max_dynamic_shared_memory_size = false;
     hoisted_scale_decl_scopes.clear();
     active_hoisted_scale_decls.clear();
     hoisted_scale_accum_scopes.clear();

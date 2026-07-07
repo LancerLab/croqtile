@@ -3201,11 +3201,11 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   if (n.IsOuter() && n.GetLevel() == ParallelLevel::CLUSTER) {
     cluster_defers_launch = true;
     deferred_cluster_pb = &n;
-    auto cluster_scope = SSTab().ScopeName();
-    auto mri = FCtx(fname).GetStaticMemReuseInfo(cluster_scope);
-    if (mri && mri->infos.count(Storage::SHARED) &&
-        mri->infos.at(Storage::SHARED).spm_size > 48 * 1024)
-      set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
+    // auto cluster_scope = SSTab().ScopeName();
+    // auto mri = FCtx(fname).GetStaticMemReuseInfo(cluster_scope);
+    // if (mri && mri->infos.count(Storage::SHARED) &&
+    //     mri->infos.at(Storage::SHARED).spm_size > 48 * 1024)
+    //   set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
     ds << d_indent << "// cluster parallel-by: " << n.LOC() << "\n";
     return true;
   }
@@ -3217,7 +3217,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   // only do the whole codegen when accessing the outer parallel-by
   if (emit_launch) {
     tma_future_count = 0;
-
+    set_cuda_func_attribute_max_dynamic_shared_memory_size = false; // reset
     auto required_shared_align = [&]() -> size_t {
       size_t alignment = CCtx().GetMemoryAlignmentByte(Storage::SHARED);
       auto collect = [&](auto&& self, const ptr<AST::Node>& node) -> void {
@@ -3247,7 +3247,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       return alignment;
     }();
 
-    ValueItem cur_spm_size = sbe::nu(0);
+    shared_spm_size = sbe::nu(0);
     ValueItem ring_start = sbe::nu(0);
     ValueItem ring_size = sbe::nu(0);
 
@@ -3279,7 +3279,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     if (cgi.HasAsyncDMA(fname)) {
       ring_size = group_count * sbe::nu(8);
       // add the size of the future ring (see choreo.h)
-      cur_spm_size += ring_size;
+      shared_spm_size += ring_size;
     }
 
     /*
@@ -3294,7 +3294,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     auto EmitCudaFuncAttributeMaxDynamicSharedMemorySize = [&]() -> void {
       hs << h_indent << "cudaFuncSetAttribute(" << device_fn
          << ", cudaFuncAttributeMaxDynamicSharedMemorySize, "
-         << ValueSTR(cur_spm_size) << " + (" << required_shared_align
+         << ValueSTR(shared_spm_size) << " + (" << required_shared_align
          << " - 1));\n";
       set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
     };
@@ -3306,7 +3306,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       assert(mri);
       auto code_spm_end =
           sbe::sym(mri->infos[Storage::SHARED].spm_size)->Normalize();
-      cur_spm_size += code_spm_end;
+      shared_spm_size += code_spm_end;
       ring_start = code_spm_end;
 
       EmitCudaFuncAttributeMaxDynamicSharedMemorySize();
@@ -3326,14 +3326,14 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
         // 48KB is the largest capacity that static shared memory supports.
         if (mri->infos[Storage::SHARED].spm_size > 48 * 1024) {
           auto code_spm_end = sbe::nu(mri->infos[Storage::SHARED].spm_size);
-          cur_spm_size += code_spm_end;
+          shared_spm_size += code_spm_end;
           ring_start = code_spm_end;
           EmitCudaFuncAttributeMaxDynamicSharedMemorySize();
           Note(
               n.LOC(),
               "In the current kernel `" + device_fn +
                   "`, cudaFuncAttributeMaxDynamicSharedMemorySize is set to `" +
-                  ValueSTR(cur_spm_size) + "` bytes, " +
+                  ValueSTR(shared_spm_size) + "` bytes, " +
                   "cause shared memory usage" +
                   " has exceeded the default limit 48KB.");
         }
@@ -3344,9 +3344,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
        << ", __" << fname << "_bdims" << parallel_idx;
 
     bool explicit_smem = false;
-    if (!sbe::ceq(cur_spm_size, sbe::nu(0))) {
+    if (!sbe::ceq(shared_spm_size, sbe::nu(0))) {
       // TODO: conservative padding. To be optimized.
-      hs << ", " << ValueSTR(cur_spm_size) << " + (" << required_shared_align
+      hs << ", " << ValueSTR(shared_spm_size) << " + (" << required_shared_align
          << " - 1)";
       explicit_smem = true;
     }
@@ -3416,7 +3416,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
         ds << d_indent << "asm volatile(\"setmaxnreg.dec.sync.aligned.u32 "
            << reg_limit.value() << ";\");\n";
     }
-    if (!(sbe::ceq(cur_spm_size, sbe::nu(0)) &&
+    if (!(sbe::ceq(shared_spm_size, sbe::nu(0)) &&
           sbe::ceq(ring_start, sbe::nu(0)))) {
       ds << d_indent << "extern __shared__ char " << device_fn
          << "__runtime_shared_buffer__raw[];\n";
@@ -3428,7 +3428,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
             "reinterpret_cast<char*>(aligned_up_ptr<"
          << required_shared_align << " * 8>(" << device_fn
          << "__runtime_shared_buffer__raw));\n";
-      if (!sbe::ceq(cur_spm_size, sbe::nu(0)) && cgi.HasAsyncDMA(fname)) {
+      if (!sbe::ceq(shared_spm_size, sbe::nu(0)) && cgi.HasAsyncDMA(fname)) {
         ds << d_indent << "auto " << device_fn
            << "__ring__ = reinterpret_cast<choreo::future_ring<6>*>("
            << device_fn << "__runtime_shared_buffer__ + " + ValueSTR(ring_start)
