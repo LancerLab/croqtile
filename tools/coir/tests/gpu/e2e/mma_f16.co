@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GPU
-// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
-// RUN: cocc -t gpu -gs %s -o %s.gpu.result && bash %s.gpu.result --execute | FileCheck --match-full-lines --check-prefix=GPU %s && rm -f %s.gpu.result
+// RUN: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines --check-prefix=GPU %s
 //
 // MMA f16 matmul: fill + row.col with group-4 (WGMMA path on SM90).
 

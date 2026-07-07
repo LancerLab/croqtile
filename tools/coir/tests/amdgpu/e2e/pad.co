@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-AMDGPU
-// RUN: cocc -t hip -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t hip -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 //
 // DMA pad: copy source into padded destination with fill value.
 

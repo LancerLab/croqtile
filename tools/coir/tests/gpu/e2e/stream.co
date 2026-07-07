@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GPU
-// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck %s && rm -f %s.result
+// RUN: cocc -t cute -gs %s | bash -s -- --execute | FileCheck %s
 
 __co__ auto addone(f32[6, 256] data, stream _s) {
   f32[data.span] output;

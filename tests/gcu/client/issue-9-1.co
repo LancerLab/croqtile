@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GCU300
 // SHELL-ONLY
-// RUN: choreo -t topscc -gs %s -o %s.result && bash %s.result |FileCheck %s && rm -f %s.result
+// RUN: choreo -t topscc -gs %s | bash -s | FileCheck %s
 
 __cok__ {
   /* Copyright 2020-2023 Enflame. All Rights Reserved.

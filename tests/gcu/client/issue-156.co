@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -t topscc -gs %s -o %s.result && bash %s.result | FileCheck %s --match-full-lines && rm -f %s.result
+// RUN: choreo -t topscc -gs %s | bash -s | FileCheck %s --match-full-lines
 // RUN: choreo -es -t topscc %s -o - | FileCheck --check-prefix=CODEGEN --match-full-lines %s
 
 #include <iostream>

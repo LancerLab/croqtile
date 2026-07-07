@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCUALL SHELL-ONLY
-// RUN: choreo -t topscc %s -gs -o %s.result && bash %s.result | FileCheck %s && rm -f %s.result
+// RUN: choreo -t topscc %s -gs | bash -s | FileCheck %s
 
 __co__ void nowait(f32 [15] input) {
   parallel p by 1 {

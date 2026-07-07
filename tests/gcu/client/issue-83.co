@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -t topscc -gs %s -o %s.result && bash %s.result | FileCheck %s --match-full-lines && rm -f %s.result
+// RUN: choreo -t topscc -gs %s | bash -s | FileCheck %s --match-full-lines
 
 #include <chrono>
 __device__ void voidKernel(choreo::s32* inptr, int size) {}

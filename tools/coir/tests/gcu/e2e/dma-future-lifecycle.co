@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCU
-// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 //
 // Test: async DMA with choreo::future lifecycle -- proper wait, no diagnosis error.
 // Verifies that __CHOREO_DMA_DIAGNOSIS__ is enabled and futures are correctly

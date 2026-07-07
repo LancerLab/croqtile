@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCUx2
-// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 //
 // Multi-device parallel with per-device data partitioning.
 // 2D input [2, 4]: device 0 processes row 0, device 1 processes row 1.

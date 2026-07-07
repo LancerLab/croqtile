@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCU
-// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute 2>&1 | FileCheck %s && rm -f %s.result
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute 2>&1 | FileCheck %s
 //
 // Test: runtime detection of unwaited async DMA via choreo::future destructor.
 // swap bypasses the compiler's static check, but at runtime the rotated

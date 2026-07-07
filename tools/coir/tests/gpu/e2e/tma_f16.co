@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-SM_90
-// RUN: cocc -t cute -gs -arch=sm_90a %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t cute -gs -arch=sm_90a %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // TMA copy with f16 data type on SM90.
 

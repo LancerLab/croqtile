@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCU
-// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 //
 // Multi-block parallel: 4 blocks each processing 1/4 of the input.
 

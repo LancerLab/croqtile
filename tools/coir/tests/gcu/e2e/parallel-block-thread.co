@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCU
-// RUN: cocc -t topscc -gs %s > %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 //
 // Block+thread parallel: 2 blocks x 4 threads processing global input.
 // Uses global storage to access input directly from threads.
