@@ -333,9 +333,22 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
       EmitDeviceFuncDecl(ds);
       ds << " {\n";
       IncrDeviceIndent();
-      if (use_dte_pool) {
-        ds << d_indent << "/*__CHOREO_DTE_POOL_PLACEHOLDER__*/\n";
+      extern_smem = false;
+      if (auto dev_name = SSTab().ScopeName();
+          FCtx(fname).HaveDynamicBuffer(dev_name, Storage::SHARED)) {
+        auto mri = FCtx(fname).GetDynMemReuseInfo(dev_name);
+        assert(mri);
+        shared_spm_size =
+            sbe::sym(mri->infos[Storage::SHARED].spm_size)->Normalize();
+        if (!sbe::ceq(shared_spm_size, sbe::nu(0))) {
+          ds << d_indent << "extern __shared__ char " << device_fn
+             << "__runtime_shared_buffer__[];\n";
+          extern_smem = true;
+        }
       }
+      // The placeholder will be replaced with the actual DTE pool decl.
+      if (use_dte_pool)
+        ds << R"(  /*__CHOREO_DTE_POOL_PLACEHOLDER__*/)" << "\n";
       ds << d_indent << "{ // parallel-by: " << n.LOC() << "\n";
       VST_DEBUG(pb->InlinePrint(dbgs());
                 dbgs() << " (max-level: " << STR(TargetMaxLevel()) << ")\n");
@@ -1146,8 +1159,13 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       // memory reuse is enabled
 
       if (n.HasNote("spm")) {
-        ds << d_indent << type_modifiers << bts << " " << sym << "["
-           << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
+        if (!extern_smem || sto == Storage::LOCAL) {
+          ds << d_indent << type_modifiers << bts << " " << sym << "["
+             << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
+        } else {
+          ds << d_indent << bts << "* " << sym << " = (" << bts << "*)"
+             << device_fn << "__runtime_shared_buffer__;\n";
+        }
         return;
       }
 
@@ -1601,15 +1619,11 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
        << ValueSTR(lconfig.thread_count.z) << ");\n";
   hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
      << ", __" << fname << "_bdims" << parallel_idx;
-  // TODO: support dynamic shared memory size parameter
-  // bool spm_not_zero = !sbe::ceq(cur_spm_size, sbe::nu(0));
-  bool spm_not_zero = false;
-  // if (spm_not_zero) hs << ", " << ValueSTR(cur_spm_size);
+  if (extern_smem) hs << ", " << shared_spm_size;
   std::string effective_stream;
   if (n.HasStream()) effective_stream = STR(n.StreamExpr());
-
   if (effective_stream != "")
-    hs << (spm_not_zero ? "" : ", 0") << ", " << effective_stream;
+    hs << (extern_smem ? "" : ", 0") << ", " << effective_stream;
   hs << ">>>(";
 
   size_t i = 0;

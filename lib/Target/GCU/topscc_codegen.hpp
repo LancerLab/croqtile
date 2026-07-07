@@ -145,6 +145,8 @@ private:
   ptr<FunctionType> fty = nullptr; // current function type
   bool void_return = false;
   std::string stream_name; // deprecated: kept for ABI, no longer populated
+  bool extern_smem; // true: has dynamic smem, decl `extern __shared__ ...`
+  ValueItem shared_spm_size;
 
   SDimsInfo symbolic_dimensions;
 

@@ -1,0 +1,93 @@
+// RUN: choreo -es -t topscc %s -o - | FileCheck --match-full-lines %s
+
+__co__ void foo0(int M) {
+  parallel p by 1 : block {
+    parallel q by 1 : thread {
+      shared s8 [128] ii;
+    }
+  }
+}
+// CHECK: __shared__ unsigned char anon_0[512];
+// CHECK: char* ii = (char*)(anon_0 + 0);
+// CHECK: __choreo_device_foo0<<<__foo0_gdims0, __foo0_bdims0>>>(M);
+
+  
+__co__ void foo1(int M) {
+  parallel p by 1 : block {
+    parallel q by 1 : thread {
+      shared s8 [M]   dd;
+      shared s8 [128] ii;
+    }
+  }
+}
+// CHECK: extern __shared__ char __choreo_device_foo1__runtime_shared_buffer__[];
+// CHECK: unsigned char* anon_1 = (unsigned char*)__choreo_device_foo1__runtime_shared_buffer__;
+// CHECK: char* dd = (char*)(anon_1 + mr_offset_foo1_paraby_2_paraby_3_dd);
+// CHECK: char* ii = (char*)(anon_1 + mr_offset_foo1_paraby_2_paraby_3_ii);
+// CHECK: __choreo_device_foo1<<<__foo1_gdims0, __foo1_bdims0, __co__shared_spm_size>>>(M, __co__shared_chunk_offsets[0], __co__shared_chunk_offsets[1]);
+
+  
+__co__ void foo2(int M, stream s) {
+  parallel<s> p by 1 : block {
+    parallel q by 1 : thread {
+      shared s8 [128] ii;
+    }
+  }
+}
+// CHECK: __shared__ unsigned char anon_2[512];
+// CHECK: char* ii = (char*)(anon_2 + 0);
+// CHECK: __choreo_device_foo2<<<__foo2_gdims0, __foo2_bdims0, 0, s>>>(M);
+
+
+__co__ void foo3(int M, stream s) {
+  parallel<s> p by 1 : block {
+    parallel q by 1 : thread {
+      shared s8 [M]   dd;
+      shared s8 [128] ii;
+    }
+  }
+}
+// CHECK: extern __shared__ char __choreo_device_foo3__runtime_shared_buffer__[];
+// CHECK: unsigned char* anon_3 = (unsigned char*)__choreo_device_foo3__runtime_shared_buffer__;
+// CHECK: char* dd = (char*)(anon_3 + mr_offset_foo3_paraby_6_paraby_7_dd);
+// CHECK: char* ii = (char*)(anon_3 + mr_offset_foo3_paraby_6_paraby_7_ii);
+// CHECK: __choreo_device_foo3<<<__foo3_gdims0, __foo3_bdims0, __co__shared_spm_size, s>>>(M, __co__shared_chunk_offsets[0], __co__shared_chunk_offsets[1]);
+
+
+__co__ void foo4(int M, stream s0, stream s1, stream s) {
+  parallel.async<s0> p by 1 : block {
+    parallel q by 1 : thread {
+      shared s8 [M]   dd;
+      shared s8 [128] ii;
+    }
+  }
+
+  parallel.async<s1> p by 1 : block {
+    parallel q by 1 : thread {
+      shared s8 [128] i;
+    }
+  }
+
+  parallel.async<s> p by 1 : block {
+    parallel q by 1 : thread {
+      shared s8 [M]   ddd;
+      shared s8 [128] iii;
+    }
+  }
+}
+// CHECK: extern __shared__ char __choreo_device_foo40__runtime_shared_buffer__[];
+// CHECK: unsigned char* anon_4 = (unsigned char*)__choreo_device_foo40__runtime_shared_buffer__;
+// CHECK: char* dd = (char*)(anon_4 + mr_offset_foo4_paraby_8_paraby_9_dd);
+// CHECK: char* ii = (char*)(anon_4 + mr_offset_foo4_paraby_8_paraby_9_ii);
+
+// CHECK: __shared__ unsigned char anon_5[512];
+// CHECK: char* i = (char*)(anon_5 + 0);
+
+// CHECK: extern __shared__ char __choreo_device_foo42__runtime_shared_buffer__[];
+// CHECK: unsigned char* anon_6 = (unsigned char*)__choreo_device_foo42__runtime_shared_buffer__;
+// CHECK: char* ddd = (char*)(anon_6 + mr_offset_foo4_paraby_12_paraby_13_ddd);
+// CHECK: char* iii = (char*)(anon_6 + mr_offset_foo4_paraby_12_paraby_13_iii);
+
+// CHECK: __choreo_device_foo40<<<__foo4_gdims0, __foo4_bdims0, __co__shared_spm_size1, s0>>>(M, __co__shared_chunk_offsets1[0], __co__shared_chunk_offsets1[1]);
+// CHECK: __choreo_device_foo41<<<__foo4_gdims1, __foo4_bdims1, 0, s1>>>(M);
+// CHECK: __choreo_device_foo42<<<__foo4_gdims2, __foo4_bdims2, __co__shared_spm_size0, s>>>(M, __co__shared_chunk_offsets0[0], __co__shared_chunk_offsets0[1]);

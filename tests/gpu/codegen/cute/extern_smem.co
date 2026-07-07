@@ -1,0 +1,99 @@
+// RUN: choreo -es -t cute %s -o - | FileCheck --match-full-lines %s
+
+__co__ void foo0(int M) {
+  parallel p by 1 : block {
+    parallel q by 1 : thread {
+      shared s8 [128] ii;
+    }
+  }
+}
+// CHECK: __shared__ alignas(16) unsigned char anon_0[128];
+// CHECK: signed char* ii = (signed char*)(anon_0 + 0);
+// CHECK: __choreo_device_foo0<<<__foo0_gdims0, __foo0_bdims0>>>(M);
+
+
+__co__ void foo1(int M) {
+  parallel p by 1 : block {
+    parallel q by 1 : thread {
+      shared s8 [M]   dd;
+      shared s8 [128] ii;
+    }
+  }
+}
+// CHECK: extern __shared__ char __choreo_device_foo1__runtime_shared_buffer__raw[];
+// CHECK: auto __choreo_device_foo1__runtime_shared_buffer__ = reinterpret_cast<char*>(aligned_up_ptr<16 * 8>(__choreo_device_foo1__runtime_shared_buffer__raw));
+// CHECK: auto anon_1 = (unsigned char*)__choreo_device_foo1__runtime_shared_buffer__;
+// CHECK: signed char* dd = (signed char*)(anon_1 + mr_offset_foo1_paraby_3_paraby_4_paraby_5_dd);
+// CHECK: signed char* ii = (signed char*)(anon_1 + mr_offset_foo1_paraby_3_paraby_4_paraby_5_ii);
+// CHECK: __choreo_device_foo1<<<__foo1_gdims0, __foo1_bdims0, __co__shared_spm_size + (16 - 1)>>>(M, __co__shared_chunk_offsets[0], __co__shared_chunk_offsets[1], __co__shared_spm_size);
+
+  
+__co__ void foo2(int M, stream s) {
+  parallel<s> p by 1 : block {
+    parallel q by 1 : thread {
+      shared s8 [128] ii;
+    }
+  }
+}
+// CHECK: __shared__ alignas(16) unsigned char anon_2[128];
+// CHECK: signed char* ii = (signed char*)(anon_2 + 0);
+// CHECK: __choreo_device_foo2<<<__foo2_gdims0, __foo2_bdims0, 0, s>>>(M);
+
+
+__co__ void foo3(int M, stream s) {
+  parallel<s> p by 1 : block {
+    parallel q by 1 : thread {
+      shared s8 [M]   dd;
+      shared s8 [128] ii;
+    }
+  }
+}
+// CHECK: extern __shared__ char __choreo_device_foo3__runtime_shared_buffer__raw[];
+// CHECK: auto __choreo_device_foo3__runtime_shared_buffer__ = reinterpret_cast<char*>(aligned_up_ptr<16 * 8>(__choreo_device_foo3__runtime_shared_buffer__raw));
+// CHECK: auto anon_3 = (unsigned char*)__choreo_device_foo3__runtime_shared_buffer__;
+// CHECK: signed char* dd = (signed char*)(anon_3 + mr_offset_foo3_paraby_9_paraby_10_paraby_11_dd);
+// CHECK: signed char* ii = (signed char*)(anon_3 + mr_offset_foo3_paraby_9_paraby_10_paraby_11_ii);
+// CHECK: __choreo_device_foo3<<<__foo3_gdims0, __foo3_bdims0, __co__shared_spm_size + (16 - 1), s>>>(M, __co__shared_chunk_offsets[0], __co__shared_chunk_offsets[1], __co__shared_spm_size);
+  
+
+__co__ void foo4(int M, stream s0, stream s1, stream s) {
+  parallel.async<s0> p by 1 : block {
+    parallel q by 1 : thread {
+      shared s8 [M]   dd;
+      shared s8 [128] ii;
+    }
+  }
+
+  parallel.async<s1> p by 1 : block {
+    parallel q by 1 : thread {
+      shared s8 [128] i;
+    }
+  }
+
+  parallel.async<s> p by 1 : block {
+    parallel q by 1 : thread {
+      shared s8 [M]   ddd;
+      shared s8 [128] iii;
+    }
+  }
+}
+// CHECK: extern __shared__ char __choreo_device_foo40__runtime_shared_buffer__raw[];
+// CHECK: auto __choreo_device_foo40__runtime_shared_buffer__ = reinterpret_cast<char*>(aligned_up_ptr<16 * 8>(__choreo_device_foo40__runtime_shared_buffer__raw));
+// CHECK: auto anon_4 = (unsigned char*)__choreo_device_foo40__runtime_shared_buffer__;
+// CHECK: signed char* dd = (signed char*)(anon_4 + mr_offset_foo4_paraby_12_paraby_13_paraby_14_dd);
+// CHECK: signed char* ii = (signed char*)(anon_4 + mr_offset_foo4_paraby_12_paraby_13_paraby_14_ii);
+  
+// CHECK: __shared__ alignas(16) unsigned char anon_5[128];
+// CHECK: signed char* i = (signed char*)(anon_5 + 0);
+
+// CHECK: extern __shared__ char __choreo_device_foo42__runtime_shared_buffer__raw[];
+// CHECK: auto __choreo_device_foo42__runtime_shared_buffer__ = reinterpret_cast<char*>(aligned_up_ptr<16 * 8>(__choreo_device_foo42__runtime_shared_buffer__raw));
+// CHECK: auto anon_6 = (unsigned char*)__choreo_device_foo42__runtime_shared_buffer__;
+// CHECK: signed char* ddd = (signed char*)(anon_6 + mr_offset_foo4_paraby_18_paraby_19_paraby_20_ddd);
+// CHECK: signed char* iii = (signed char*)(anon_6 + mr_offset_foo4_paraby_18_paraby_19_paraby_20_iii);
+
+// CHECK: cudaFuncSetAttribute(__choreo_device_foo40, cudaFuncAttributeMaxDynamicSharedMemorySize, __co__shared_spm_size0 + (16 - 1));
+// CHECK: __choreo_device_foo40<<<__foo4_gdims0, __foo4_bdims0, __co__shared_spm_size0 + (16 - 1), s0>>>(M, __co__shared_chunk_offsets0[0], __co__shared_chunk_offsets0[1], __co__shared_spm_size0);
+// CHECK: __choreo_device_foo41<<<__foo4_gdims1, __foo4_bdims1, 0, s1>>>(M);
+// CHECK: cudaFuncSetAttribute(__choreo_device_foo42, cudaFuncAttributeMaxDynamicSharedMemorySize, __co__shared_spm_size1 + (16 - 1));
+// CHECK: __choreo_device_foo42<<<__foo4_gdims2, __foo4_bdims2, __co__shared_spm_size1 + (16 - 1), s>>>(M, __co__shared_chunk_offsets1[0], __co__shared_chunk_offsets1[1], __co__shared_spm_size1);
