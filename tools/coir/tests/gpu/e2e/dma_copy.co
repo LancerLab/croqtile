@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GPU
-// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
-// RUN: cocc -t gpu -gs %s -o %s.gpu.sh && bash %s.gpu.sh --execute | FileCheck --check-prefix=GPU --match-full-lines %s && rm -f %s.gpu.sh
+// RUN: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --check-prefix=GPU --match-full-lines %s
 //
 // DMA copy operations (global -> shared -> global).
 

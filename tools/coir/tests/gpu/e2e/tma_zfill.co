@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-SM_90A
 // RUN: cocc -t cute -es -arch=sm_90a %s 2>&1 | FileCheck %s
-// RUN: cocc -t cute -gs -arch=sm_90a %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines --check-prefix=EXEC %s && rm -f %s.result
+// RUN: cocc -t cute -gs -arch=sm_90a %s | bash -s -- --execute | FileCheck --match-full-lines --check-prefix=EXEC %s
 //
 // TMA copy with .zfill: out-of-bounds elements are zero-filled.
 // Tests CU_TENSOR_MAP_FLOAT_OOB_FILL_NAN_REQUEST_ZERO_FMA emission.

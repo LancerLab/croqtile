@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-SM_90A
 // RUN: cocc -t cute -es -arch=sm_90a %s 2>&1 | FileCheck %s
-// RUN: cocc -t cute -gs -arch=sm_90a %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines --check-prefix=EXEC %s && rm -f %s.result
+// RUN: cocc -t cute -gs -arch=sm_90a %s | bash -s -- --execute | FileCheck --match-full-lines --check-prefix=EXEC %s
 //
 // WGMMA RS mode: A from registers, B from shared memory.
 // Since a_frag is filled with 0, output = 0 * B = 0 regardless of B values.

@@ -1,4 +1,4 @@
-// RUN: cocc -t cc -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t cc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 //
 // Control flow: foreach loop with accumulation.
 

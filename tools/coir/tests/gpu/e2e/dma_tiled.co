@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-SM_90
-// RUN: cocc -t cute -gs -arch=sm_90a %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
-// RUN: cocc -t gpu -gs %s -o %s.gpu.sh && bash %s.gpu.sh --execute | FileCheck --check-prefix=GPU --match-full-lines %s && rm -f %s.gpu.sh
+// RUN: cocc -t cute -gs -arch=sm_90a %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --check-prefix=GPU --match-full-lines %s
 
 // DMA tiled copy: foreach loop with chunkat for tiled global->shared->global.
 // Tests the descriptor pipeline for non-TMA async DMA with tiling.

@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GPU
-// RUN: cocc -t cute -gs %s --disable-runtime-check -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t cute -gs %s --disable-runtime-check | bash -s -- --execute | FileCheck --match-full-lines %s
 
 __co__ s32 [6, 17, 64] ele_add(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) {
   s32[lhs.span] output;

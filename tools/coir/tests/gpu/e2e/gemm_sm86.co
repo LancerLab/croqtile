@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GPU
-// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // GEMM using PTX mma.sync m16n8k8 (Ampere SM80+, inline PTX path).
 

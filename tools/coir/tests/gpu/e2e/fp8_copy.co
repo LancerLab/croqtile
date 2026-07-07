@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GPU
-// RUN: cocc -t cute -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 __co__ auto copy_e4m3(f8_e4m3 [8, 64] lhs) {
   f8_e4m3[lhs.span] output;

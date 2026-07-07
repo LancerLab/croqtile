@@ -1,4 +1,4 @@
-// RUN: cocc -t cc -gs %s -o %s.result && bash %s.result --execute | FileCheck --match-full-lines %s && rm -f %s.result
+// RUN: cocc -t cc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 //
 // 2D element-wise operations with void kernel.
 
