@@ -995,15 +995,17 @@ void LivenessAnalyzer::DumpLivenessResults(
     if (var_name == "::__choreo_parent_dim__") return true;
     return false;
   };
-  VST_DEBUG(if (!stmt_linfo[preorder_stmts[0]].live_in.empty()) {
-    std::set<std::string> li_set;
-    for (const auto& item : stmt_linfo[preorder_stmts[0]].live_in)
-      if (!IsGlobalOrBuiltIn(item)) li_set.insert(item);
-    if (!li_set.empty()) {
-      errs() << StmtStr(preorder_stmts[0]);
-      errs() << "live_in of the first stmt is not empty, including:\n";
-      for (const auto& item : li_set) errs() << "\t" << item << "\n";
-      choreo_unreachable("expecting the live_in of the first stmt is empty.");
+  VST_DEBUG({
+    if (!stmt_linfo[preorder_stmts[0]].live_in.empty()) {
+      std::set<std::string> li_set;
+      for (const auto& item : stmt_linfo[preorder_stmts[0]].live_in)
+        if (!IsGlobalOrBuiltIn(item)) li_set.insert(item);
+      if (!li_set.empty()) {
+        errs() << StmtStr(preorder_stmts[0]);
+        errs() << "live_in of the first stmt is not empty, including:\n";
+        for (const auto& item : li_set) errs() << "\t" << item << "\n";
+        choreo_unreachable("expecting the live_in of the first stmt is empty.");
+      }
     }
   });
 }

@@ -539,19 +539,21 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
                 hb_graph->CanOverlap(all_bufs[i].buffer_id,
                                      all_bufs[j].buffer_id)) {
               interfere = false;
-              errs() << "info: HB analysis: buffers "
-                     << UnScopedExpr(all_bufs[i].buffer_id) << " and "
-                     << UnScopedExpr(all_bufs[j].buffer_id)
-                     << " can share memory (signal-ordered lifetimes).\n";
+              VST_DEBUG(dbgs()
+                        << "info: HB analysis: buffers "
+                        << UnScopedExpr(all_bufs[i].buffer_id) << " and "
+                        << UnScopedExpr(all_bufs[j].buffer_id)
+                        << " can share memory (signal-ordered lifetimes).\n");
             }
             if (!interfere && hb_graph &&
                 hb_graph->IsUnsafeMultiInstanceOverlap(all_bufs[i].buffer_id,
                                                        all_bufs[j].buffer_id)) {
               interfere = true;
-              errs() << "info: HB analysis: buffers "
-                     << UnScopedExpr(all_bufs[i].buffer_id) << " and "
-                     << UnScopedExpr(all_bufs[j].buffer_id)
-                     << " cannot share memory (multi-instance safety).\n";
+              VST_DEBUG(dbgs()
+                        << "info: HB analysis: buffers "
+                        << UnScopedExpr(all_bufs[i].buffer_id) << " and "
+                        << UnScopedExpr(all_bufs[j].buffer_id)
+                        << " cannot share memory (multi-instance safety).\n");
             }
             ie.interference[i * n + j] = interfere;
             ie.interference[j * n + i] = interfere;
@@ -613,7 +615,7 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
       HeapSimulator::Result result =
           simulator.Allocate(chunks, alignment, hb_override, hb_must_interfere);
       if (!ValidateResult(result, chunks, hb_override, hb_must_interfere)) {
-        errs() << "  in device function: " << df_name << "\n";
+        VST_DEBUG(dbgs() << "  in device function: " << df_name << "\n");
         assert(false && "memory reuse validation failed");
       }
       auto& ctx_spm_size =
@@ -623,18 +625,19 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
       CCtx().GetMemReuseStats().total_static_heap_bytes += result.heap_size;
       for (const auto& [buffer_id, offset] : result.chunk_offsets)
         ctx.mem_offset.emplace(buffer_id, offset);
-      VST_DEBUG(dbgs() << "For '" << df_name << "'\n\t" << STR(sto)
-                       << " memory usage: " << result.heap_size << " bytes\n");
-      if (!hb_overlapped_pairs.empty() && result.heap_size < baseline_size) {
-        errs() << "info: HB analysis: shared memory reduced from "
-               << baseline_size << " to " << result.heap_size << " bytes ("
-               << (baseline_size - result.heap_size)
-               << " saved). Overlapped buffers:";
-        for (const auto& [a, b] : hb_overlapped_pairs) {
-          errs() << " (" << UnScopedExpr(a) << ", " << UnScopedExpr(b) << ")";
+      VST_DEBUG({
+        dbgs() << "For '" << df_name << "'\n\t" << STR(sto)
+               << " memory usage: " << result.heap_size << " bytes\n";
+        if (!hb_overlapped_pairs.empty() && result.heap_size < baseline_size) {
+          dbgs() << "info: HB analysis: shared memory reduced from "
+                 << baseline_size << " to " << result.heap_size << " bytes ("
+                 << (baseline_size - result.heap_size)
+                 << " saved). Overlapped buffers:";
+          for (const auto& [a, b] : hb_overlapped_pairs)
+            dbgs() << " (" << UnScopedExpr(a) << ", " << UnScopedExpr(b) << ")";
+          dbgs() << "\n";
         }
-        errs() << "\n";
-      }
+      });
     }
   };
 
@@ -662,10 +665,11 @@ bool MemReuse::ValidateResult(
         auto o2 = res.chunk_offsets.at(c2.buffer_id);
         if ((o1 <= o2 && o1 + c1.size > o2) ||
             (o2 <= o1 && o2 + c2.size > o1)) {
-          errs() << "Error: unexpected memory overlap detected between "
-                    "buffers "
-                 << c1.buffer_id << " and " << c2.buffer_id
-                 << " after applying memory reuse.\n";
+          VST_DEBUG(
+              dbgs() << "Error: unexpected memory overlap detected between "
+                        "buffers "
+                     << c1.buffer_id << " and " << c2.buffer_id
+                     << " after applying memory reuse.\n");
           return false;
         }
       }
