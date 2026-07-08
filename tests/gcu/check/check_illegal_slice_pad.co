@@ -11,4 +11,4 @@ __co__ s32 [8, 6] test_slice_pad(s32 [4, 4] input) {
   return output;
 }
 
-// CHECK: combined slice+pad DMA is not supported
+// CHECK: slice+pad DMA (dma.pad with chunkAt source) is not supported on GCU2
