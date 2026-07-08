@@ -23,6 +23,35 @@ Choreo repository and the public open-source repository (croqtile).
   proprietary content is stripped.
 - **`oss-shadow`** -- the git remote pointing to the public GitHub repository.
 
+### Where the tooling lives
+
+All OSS scan and sync tooling lives on **`main` only** (`scripts/oss/`). It does
+NOT exist on `oss/main`. This is by design:
+
+- When CI runs on an `oss/*` branch, it fetches `oss-scan.sh` and `os_kw.txt`
+  from `main` before scanning.
+- Excluded paths never reach `oss/main` in the first place (the `oss-push.sh`
+  script filters them). The scanner naturally skips files that aren't there.
+- No exclude config file is needed on `oss/main` -- the scanner only sees
+  what's actually present in the tree.
+
+### Excluded paths vs. conflict paths
+
+There are two categories of paths that differ between branches:
+
+| Type | File | Meaning |
+|------|------|---------|
+| Excluded | `scripts/oss/oss_exclude_paths.txt` | Must never appear on `oss/main`. Filtered during push. Does not exist on `oss/main` (naturally absent). |
+| Conflict | `scripts/oss/oss_conflict_paths.txt` | Exists on both branches with different content per branch (e.g., `cmake/deps.conf`). On `oss/main` these files MUST be scanned for keyword violations. |
+
+This means:
+
+- `cmake/deps.conf` is a **conflict path** -- it exists on both branches with
+  branch-appropriate content (internal URLs on main, public URLs on oss/main).
+  The scanner scans `oss/main`'s copy and will flag any internal keywords.
+- `lib/Target/GCU/` is an **excluded path** -- it never appears on `oss/main`.
+  The scanner won't see it because it isn't there.
+
 ### What gets excluded
 
 The file `scripts/oss/oss_exclude_paths.txt` defines everything that must NOT
@@ -42,14 +71,17 @@ appear on `oss/main`. Key exclusions:
 
 ### What gets scanned
 
-In addition to path filtering, the keyword scanner (`oss-scan.sh`) blocks any
-commit that contains:
+The keyword scanner (`oss-scan.sh`) checks every file present on `oss/main`
+(including conflict-path files like `cmake/deps.conf`) for:
 
 1. **Proprietary keywords** -- hardware codenames, internal tool names, company
    identifiers (see `scripts/oss/os_kw.txt` for the full list).
 2. **Non-ASCII characters** -- a strict policy. No em-dashes, CJK characters,
    or any byte outside 0x00-0x7F. Use `--` instead of `--`, `->` instead of
    right arrows, etc.
+
+Excluded paths don't need path-level filtering during scanning because they
+simply don't exist on `oss/main`.
 
 ---
 
@@ -290,10 +322,15 @@ git cherry-pick --abort
 
 ## CI Integration
 
-The `.gitlab-ci.yml` includes:
+The `.gitlab-ci.yml` (main only, excluded from oss/main) includes:
 
-- **`oss_scan`** job: runs `oss-scan.sh --tree oss/main` on merge requests
-  that touch `oss/` branches, preventing accidental keyword leaks.
+- **`oss_scan`** job: triggered on `oss/*` branches. Since `oss-scan.sh` does
+  not exist on `oss/main`, the job fetches the scan script and keyword list
+  from `main` before scanning `HEAD`. It scans every file present in the
+  `oss/main` tree, including conflict-path files like `cmake/deps.conf`.
+  Excluded paths don't need explicit filter rules because they never exist
+  on `oss/main`.
+
 - **GPU tests** for `oss/` branches: runs the GPU end-to-end test suite
   (no GCU tests, since GCU code is excluded).
 
