@@ -256,7 +256,9 @@ endforeach()
 # assess.cpp.o).  GNU ld can fail merging them with MLIR static libs
 # (.LASF undefined reference in .debug_info).  Strip debug at link for
 # these executables only; choreo/copp and Debug builds are unaffected.
-target_link_options(co2ir PRIVATE "-Wl,--strip-debug")
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+  target_link_options(co2ir PRIVATE "-Wl,--strip-debug")
+endif()
 
 # ------------------------------------------------------------------
 # cocc: end-to-end CoIR compiler driver (.co -> target code)
@@ -287,7 +289,9 @@ foreach(_lib ${COIR_CODEGEN_LIBS})
   target_link_libraries(cocc PRIVATE
     -Wl,--whole-archive ${_lib} -Wl,--no-whole-archive)
 endforeach()
-target_link_options(cocc PRIVATE "-Wl,--strip-debug")
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+  target_link_options(cocc PRIVATE "-Wl,--strip-debug")
+endif()
 
 # ------------------------------------------------------------------
 # Install rules
