@@ -646,8 +646,14 @@ phase4_post_sync() {
     local ff_out ff_rc=0
     ff_out="$(lgit pull --ff-only origin "$MAIN_BRANCH" 2>&1)" || ff_rc=$?
     if [[ $ff_rc -ne 0 ]]; then
-      fatal_error "FF local main failed" "git pull --ff-only origin $MAIN_BRANCH\n$ff_out"
-      return 1
+      log "FF failed (local diverged from origin). Resetting local main to origin/main (origin > local)."
+      local reset_out reset_rc=0
+      reset_out="$(lgit reset --hard "origin/$MAIN_BRANCH" 2>&1)" || reset_rc=$?
+      if [[ $reset_rc -ne 0 ]]; then
+        fatal_error "Reset local main to origin failed" "git reset --hard origin/$MAIN_BRANCH\n$reset_out"
+        return 1
+      fi
+      log "  Local main reset to origin/main OK."
     fi
   fi
 
@@ -660,8 +666,14 @@ phase4_post_sync() {
     local ff_out ff_rc=0
     ff_out="$(lgit pull --ff-only origin "$OSS_BRANCH" 2>&1)" || ff_rc=$?
     if [[ $ff_rc -ne 0 ]]; then
-      fatal_error "FF local oss/main failed" "git pull --ff-only origin $OSS_BRANCH\n$ff_out"
-      return 1
+      log "FF failed (local diverged from origin). Resetting local oss/main to origin/oss/main (origin > local)."
+      local reset_out reset_rc=0
+      reset_out="$(lgit reset --hard "origin/$OSS_BRANCH" 2>&1)" || reset_rc=$?
+      if [[ $reset_rc -ne 0 ]]; then
+        fatal_error "Reset local oss/main to origin failed" "git reset --hard origin/$OSS_BRANCH\n$reset_out"
+        return 1
+      fi
+      log "  Local oss/main reset to origin/oss/main OK."
     fi
     ensure_on_branch "$saved" || return 1
   fi
