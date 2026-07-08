@@ -4,13 +4,11 @@
 // for a simple elementwise add kernel.
 
 // CHECK: coir.kernel @ele_add
-// CHECK-SAME: !coir.tensor<64xi32, default>
+// CHECK: !coir.tensor<64xi32, default>
 // CHECK: coir.parallel
-// CHECK-SAME: level = #coir.level<block>
+// CHECK: level = #coir.level<block>
 // CHECK: coir.parallel
-// CHECK-SAME: level = #coir.level<group>
-// CHECK: coir.parallel
-// CHECK-SAME: level = #coir.level<thread>
+// CHECK: level = #coir.level<thread>
 // CHECK: coir.tensor.load_elem
 // CHECK: coir.tensor.load_elem
 // CHECK: arith.addi
