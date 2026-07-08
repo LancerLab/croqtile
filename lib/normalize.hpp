@@ -899,6 +899,7 @@ public:
 struct ParaByFiller : public NormBase {
 private:
   bool changed = false;
+  bool must_abend = false;
 
   // analyze the parallel-by structure
   std::vector<AST::ParallelBy*> pb_stack;
@@ -1062,6 +1063,7 @@ public:
     pb_tree.Clear();
     active_device_target.reset();
     device_target_depth = 0;
+    must_abend = false;
   }
 
   void FillPB(AST::ParallelBy* pb, FillType ty, ParallelLevel pl, int v = 1) {
@@ -1122,6 +1124,7 @@ public:
   }
 
   bool AfterVisitImpl(AST::Node& n) override {
+    if (must_abend) return false;
     if (isa<AST::ChoreoFunction>(&n)) {
       for (auto fi : fill_info) {
         if (fi.ft == Outer)
@@ -1143,11 +1146,13 @@ public:
     auto pb = cast<AST::ParallelBy>(&n);
 
     if (ExplicitLevel(pb) && pb->GetLevel() != ParallelLevel::DEVICE &&
-        !DeviceTargetHasLevel(pb->GetLevel()))
+        !DeviceTargetHasLevel(pb->GetLevel())) {
       Error1(pb->LOC(),
              STR(pb->GetLevel()) +
                  " level is not supported by the target architecture: " +
                  CCtx().GetArch() + ".");
+      must_abend = true;
+    }
 
     if (pb->GetLevel() == ParallelLevel::DEVICE && pb->HasDeviceTarget()) {
       if (active_device_target) {
@@ -1171,6 +1176,9 @@ public:
                  " > " + std::to_string(eff_max) + ".");
       return true;
     }
+
+    // no more processing
+    if (must_abend) return false;
 
     if (!ExplicitLevel(pb)) InferImplicitLevel(pb, eff_max);
 

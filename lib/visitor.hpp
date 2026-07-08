@@ -375,6 +375,7 @@ public:
   }
 
   virtual int Status() { return error_count; }
+  int ErrorCount() const { return error_count; }
   virtual bool HasError() const {
     if (error_count > 0) {
       dbgs() << "Totally " << error_count << " errors have been detected.\n";
@@ -1058,6 +1059,12 @@ public:
     if (abend_after) return false;
 
     return true;
+  }
+
+  int Status() override {
+    int total = error_count;
+    for (auto* v : members) total += v->ErrorCount();
+    return total;
   }
 
 private:
