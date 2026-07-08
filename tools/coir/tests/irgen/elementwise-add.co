@@ -8,6 +8,8 @@
 // CHECK: coir.parallel
 // CHECK-SAME: level = #coir.level<block>
 // CHECK: coir.parallel
+// CHECK-SAME: level = #coir.level<group>
+// CHECK: coir.parallel
 // CHECK-SAME: level = #coir.level<thread>
 // CHECK: coir.tensor.load_elem
 // CHECK: coir.tensor.load_elem
