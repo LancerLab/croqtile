@@ -49,6 +49,24 @@ if(NOT EXISTS "${_LLVM_CMAKE_DIR}/mlir/MLIRConfig.cmake")
     file(DOWNLOAD ${_dl_args})
     list(GET _dl_status 0 _dl_code)
     if(NOT _dl_code EQUAL 0)
+      # Primary download failed — try fallback URL if configured
+      list(GET _dl_status 1 _dl_msg)
+      file(REMOVE "${_TAR_PATH}")
+      if(DEFINED COIR_LLVM_FALLBACK_URL AND NOT "${COIR_LLVM_FALLBACK_URL}" STREQUAL "")
+        message(WARNING
+          "CoIR: LLVM primary download failed (${_dl_msg})\n"
+          "  Primary URL: ${COIR_LLVM_URL}\n"
+          "  Trying fallback URL: ${COIR_LLVM_FALLBACK_URL}")
+        set(_dl_args "${COIR_LLVM_FALLBACK_URL}" "${_TAR_PATH}"
+          SHOW_PROGRESS STATUS _dl_status TIMEOUT 600)
+        if(DEFINED COIR_LLVM_FALLBACK_MD5 AND NOT "${COIR_LLVM_FALLBACK_MD5}" STREQUAL "")
+          list(APPEND _dl_args EXPECTED_MD5 "${COIR_LLVM_FALLBACK_MD5}")
+        endif()
+        file(DOWNLOAD ${_dl_args})
+        list(GET _dl_status 0 _dl_code)
+      endif()
+    endif()
+    if(NOT _dl_code EQUAL 0)
       list(GET _dl_status 1 _dl_msg)
       file(REMOVE "${_TAR_PATH}")
       message(FATAL_ERROR
