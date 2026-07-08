@@ -802,25 +802,12 @@ public:
   bool Visit(AST::DMA& n) override {
     TraceEachVisit(n);
 
-    // GCU2 does not support combined DMA operations (slice+pad,
-    // slice+transpose, transpose+deslice).  Reject early before
-    // CheckDMA which requires both operands to be ChunkAt.
-    if (CCtx().GetArch() == "gcu200" || CCtx().GetArch() == "gcu210") {
-      bool has_src_tile = isa<AST::ChunkAt>(n.from) &&
-                          cast<AST::ChunkAt>(n.from)->HasTilingOperation();
-      bool has_dst_tile = isa<AST::ChunkAt>(n.to) &&
-                          cast<AST::ChunkAt>(n.to)->HasTilingOperation();
-      if (n.operation == ".pad" && has_src_tile)
-        Error1(n.LOC(),
-               "On " + cur_arch + ", combined slice+pad DMA is not supported.");
-      if (n.operation == ".transp" && has_src_tile && !has_dst_tile)
-        Error1(n.LOC(), "On " + cur_arch +
-                            ", combined slice+transpose DMA is not supported.");
-      if (n.operation == ".transp" && !has_src_tile && has_dst_tile)
-        Error1(n.LOC(),
-               "On " + cur_arch +
-                   ", combined transpose+deslice DMA is not supported.");
-    }
+    // GCU2 does not support slice+pad (dma.pad with chunkAt source).
+    // slice+transpose and transpose+deslice work fine on GCU2.
+    if ((CCtx().GetArch() == "gcu200" || CCtx().GetArch() == "gcu210") &&
+        n.operation == ".pad" && isa<AST::ChunkAt>(n.from))
+      Error1(n.LOC(), "slice+pad DMA (dma.pad with chunkAt source) is not "
+                      "supported on GCU2.");
 
     // Check DMA first.
     CheckDMA(n);
