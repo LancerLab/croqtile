@@ -3,7 +3,7 @@
 // case19: [64, 512, 512] + [512, 2048] --> [64, 512, 2048] (Transformer)
 __co__ auto matmul19(f32 [64, 512, 512] lhs, f32 [512, 2048] rhs) {
   f32 [lhs.span(0), lhs.span(1), rhs.span(1)] output;
-  parallel p by 4, q by 8 {
+  parallel p by 2, q by 8 {
     with index = {m_tile, n_tile, k_tile} in [32, 512, 1] {
       foreach m_tile, n_tile {
         local f32[output.span(0)/#p/#q, output.span(1)/#m_tile, output.span(2)/#n_tile] l1_out {0.0f};

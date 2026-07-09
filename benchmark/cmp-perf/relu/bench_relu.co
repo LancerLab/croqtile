@@ -28,13 +28,13 @@ __co_device__ void relu_kernel_dyn(float* input, float* out, int m, int n) {
 __co__ f32 [M, N] relu2d_view(f32 [M, N] input) {
   f32[input.span(0), input.span(1)] output;
 
-  parallel p by 4 {
+  parallel p by 2 {
     with index = {n_tile} in [4] {
       foreach n_tile {
         shared f32[input.span(0)/#p, input.span(1)/#n_tile] l2_out;
         input_load = dma.copy.async input.chunkat(p, n_tile) => shared;
         wait input_load;
-        parallel q by 4 {
+        parallel q by 8 {
           with index = {n_tile_s} in [8] {
             foreach n_tile_s {
               input_load_s = dma.copy.async input_load.data.chunkat(q, n_tile_s) => local;
@@ -62,13 +62,13 @@ __co__ f32 [M, N] relu2d_view(f32 [M, N] input) {
 __co__ f32 [M, N] relu2d_view_cfg2(f32 [M, N] input) {
   f32[input.span(0), input.span(1)] output;
 
-  parallel p by 128 {
+  parallel p by 2 {
     with index = {n_tile} in [16] {
       foreach n_tile {
         shared f32[input.span(0)/#p, input.span(1)/#n_tile] l2_out;
         input_load = dma.copy.async input.chunkat(p, n_tile) => shared;
         wait input_load;
-        parallel q by 8 {
+        parallel q by 12 {
           with index = {n_tile_s} in [16] {
             foreach n_tile_s {
               input_load_s = dma.copy.async input_load.data.chunkat(q, n_tile_s) => local;
@@ -96,7 +96,7 @@ __co__ f32 [M, N] relu2d_view_cfg2(f32 [M, N] input) {
 __co__ f32 [M, N] relu2d_view_cfg7(f32 [M, N] input) {
   f32[input.span(0), input.span(1)] output;
 
-  parallel p by 2048 {
+  parallel p by 2 {
     with index = {n_tile} in [1] {
       foreach n_tile {
         shared f32[input.span(0)/#p, input.span(1)/#n_tile] l2_out;
@@ -130,13 +130,13 @@ __co__ f32 [M, N] relu2d_view_cfg7(f32 [M, N] input) {
 __co__ f32 [M, N] relu2d_view_cfg3(f32 [M, N] input) {
   f32[input.span(0), input.span(1)] output;
 
-  parallel p by 20480 {
+  parallel p by 2 {
     with index = {n_tile} in [112] {
       foreach n_tile {
         shared f32[input.span(0)/#p, input.span(1)/#n_tile] l2_out;
         input_load = dma.copy.async input.chunkat(p, n_tile) => shared;
         wait input_load;
-        parallel q by 112 {
+        parallel q by 12 {
           with index = {n_tile_s} in [1] {
             foreach n_tile_s {
               input_load_s = dma.copy.async input_load.data.chunkat(q, n_tile_s) => local;

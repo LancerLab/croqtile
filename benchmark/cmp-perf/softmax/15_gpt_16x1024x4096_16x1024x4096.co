@@ -3,29 +3,45 @@
 // case15: [16, 1024, 4096] --> [16, 1024, 4096] (GPT)
 __co__ auto softmax15(f32 [16, 1024, 4096] input)  {
   f32 [input.span(0), input.span(1), input.span(2)] output;
-  parallel p by 4, q by 8 {
+  parallel p by 2, q by 8 {
     foreach {i} in [input.span(0)] {
-      l1_input = dma.copy input.chunkat(i, p#q, _) => local;
-      local f32[1, l1_input.span(1), l1_input.span(2)] l1_out;
-      foreach {j} in [l1_input.span(1)] {
-        // Find max for numerical stability
-        f32 max_val = l1_input.data.at(0, j, 0);
-        foreach {k} in [l1_input.span(2)]
-          if (l1_input.data.at(0, j, k) > max_val)
-            max_val = l1_input.data.at(0, j, k);
-
-        // Compute exp and sum
-        f32 sum_exp = 0.0f;
-        foreach {k} in [l1_input.span(2)] {
-          l1_out.at(0, j, k) = __exp(l1_input.data.at(0, j, k) - max_val);
-          sum_exp += l1_out.at(0, j, k);
+      // Pass 1: find global max using tiled k-dim
+      f32 global_max = 0.0f;
+      with index = {k_tile} in [8] {
+        foreach k_tile {
+          l1_input = dma.copy input.chunkat(i, p#q, k_tile) => local;
+          if (k_tile == 0)
+            global_max = l1_input.data.at(0, 0, 0);
+          foreach {j} in [l1_input.span(1)] {
+            foreach {k} in [l1_input.span(2)]
+              if (l1_input.data.at(0, j, k) > global_max)
+                global_max = l1_input.data.at(0, j, k);
+          }
         }
-
-        // Normalize
-        foreach {k} in [l1_input.span(2)]
-          l1_out.at(0, j, k) = l1_out.at(0, j, k) / sum_exp;
       }
-      dma.copy l1_out => output.chunkat(i, p#q, _);
+      // Pass 2: compute sum of exp
+      f32 global_sum = 0.0f;
+      with index = {k_tile} in [8] {
+        foreach k_tile {
+          l1_input = dma.copy input.chunkat(i, p#q, k_tile) => local;
+          foreach {j} in [l1_input.span(1)] {
+            foreach {k} in [l1_input.span(2)]
+              global_sum += __exp(l1_input.data.at(0, j, k) - global_max);
+          }
+        }
+      }
+      // Pass 3: normalize and store
+      with index = {k_tile} in [8] {
+        foreach k_tile {
+          l1_input = dma.copy input.chunkat(i, p#q, k_tile) => local;
+          local f32[1, l1_input.span(1), l1_input.span(2)] l1_out;
+          foreach {j} in [l1_input.span(1)] {
+            foreach {k} in [l1_input.span(2)]
+              l1_out.at(0, j, k) = __exp(l1_input.data.at(0, j, k) - global_max) / global_sum;
+          }
+          dma.copy l1_out => output.chunkat(i, p#q, k_tile);
+        }
+      }
     }
   }
   return output;

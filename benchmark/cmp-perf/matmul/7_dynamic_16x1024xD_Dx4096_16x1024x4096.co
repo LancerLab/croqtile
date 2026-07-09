@@ -7,7 +7,7 @@
 // case7: [16, 1024, D] + [D, 4096] --> [16, 1024, 4096] (Dynamic)
 __co__ auto matmul7(f32 [16, 1024, D] lhs, f32 [D, 4096] rhs) {
   f32 [lhs.span(0), lhs.span(1), rhs.span(1)] output;
-  parallel p by 4, q by 4 {
+  parallel p by 2, q by 4 {
     with index = {m_tile, n_tile, k_tile} in [128, 512, 1] {
       foreach m_tile, n_tile {
         local f32[output.span(0)/#p/#q, output.span(1)/#m_tile, output.span(2)/#n_tile] l1_out {0.0f};

@@ -3,7 +3,7 @@
 // case14: [64, 1280] + [1280, 1000] --> [64, 1000] (EfficientNet)
 __co__ auto matmul14(f32 [64, 1280] lhs, f32 [1280, 1000] rhs) {
   f32 [lhs.span(0), rhs.span(1)] output;
-  parallel p by 4, q by 10 {
+  parallel p by 2, q by 10 {
     foreach {m_tile, n_tile} in [4, 5] {
       local f32[lhs.span(0)/#m_tile/#p, rhs.span(1)/#n_tile/#q] l1_out {0.0f};
       foreach {k_tile} in [16] {

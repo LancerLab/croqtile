@@ -7,7 +7,7 @@
 // case4: [32, num_heads, 512, 64] + [32, num_heads, 64, 512] --> [32, num_heads, 512, 512] (Dynamic)
 __co__ auto matmul4(f32 [32, num_heads, 512, 64] lhs, f32 [32, num_heads, 64, 512] rhs) {
   f32 [lhs.span(0), lhs.span(1), lhs.span(2), rhs.span(3)] output;
-  parallel p by 4, q by 8 {
+  parallel p by 2, q by 8 {
     with index = {m_tile, n_tile, k_tile} in [16, 16, 1] {
       foreach m_tile, n_tile {
         local f32[output.span(0)/#p/#q, output.span(1), output.span(2)/#m_tile, output.span(3)/#n_tile] l1_out {0.0f};

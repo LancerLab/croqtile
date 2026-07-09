@@ -3,7 +3,7 @@
 // case3: [256, 512] + [512, 10] --> [256, 10] (CNN)
 __co__ auto matmul3(f32 [256, 512] lhs, f32 [512, 10] rhs) {
   f32 [lhs.span(0), rhs.span(1)] output;
-  parallel p by 4, q by 10 {
+  parallel p by 2, q by 10 {
     foreach {m_tile, n_tile} in [8, 1] {
       local f32[lhs.span(0)/#m_tile/#p, rhs.span(1)/#n_tile/#q] l1_out {0.0f};
       foreach {k_tile} in [16] {

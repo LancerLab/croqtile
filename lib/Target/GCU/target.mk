@@ -48,6 +48,58 @@ setup-skills:
 	ln -sf $(TOOLCHAIN_DIR)/croqtile-skills/.github $(WORK_DIR); \
 	ln -sf $(TOOLCHAIN_DIR)/croqtile-skills/.codex $(WORK_DIR)
 
+# -----------------------------------------------------------------------
+# cmp-perf  --  CI benchmark targets for choreo+topscc vs coir+topscc
+#
+# These targets compare the two GCU compilation paths:
+#   1. choreo -t topscc  (AST pipeline)
+#   2. cocc -t topscc    (CoIR MLIR pipeline)
+#
+# Targets:
+#   make cmp-perf          Run compile + execute + stats (fail-fast)
+#   make cmp-perf-compile  Compile all benchmarks (emit-source only)
+#   make cmp-perf-execute  Compile and execute all benchmarks on GCU
+#   make cmp-perf-stats    Collect and compare --stats from both paths
+#
+# Variables:
+#   CMP_PERF_FILTER   Limit to files matching a pattern (e.g. "matmul")
+#   CMP_PERF_JOBS      Parallelism for compilation (default: 1)
+# -----------------------------------------------------------------------
+CMP_PERF_FILTER ?=
+CMP_PERF_JOBS   ?= 1
+CMP_PERF_SCRIPT := $(SCRIPT_DIR)/cmp-perf-ci.sh
+CMP_PERF_STATS  := $(SCRIPT_DIR)/cmp-perf-stats.sh
+
+.PHONY: cmp-perf cmp-perf-compile cmp-perf-execute cmp-perf-stats
+
+cmp-perf: coir
+	@echo "[cmp-perf] Phase 1/3: compile check..."
+	@bash $(CMP_PERF_SCRIPT) compile --jobs $(CMP_PERF_JOBS) \
+	  $(if $(CMP_PERF_FILTER),--filter "$(CMP_PERF_FILTER)",)
+	@echo "[cmp-perf] Phase 2/3: execute check..."
+	@bash $(CMP_PERF_SCRIPT) execute --jobs $(CMP_PERF_JOBS) \
+	  $(if $(CMP_PERF_FILTER),--filter "$(CMP_PERF_FILTER)",)
+	@echo "[cmp-perf] Phase 3/3: stats..."
+	@bash $(CMP_PERF_STATS) stats-collect \
+	  $(if $(CMP_PERF_FILTER),--filter "$(CMP_PERF_FILTER)",) \
+	  --output $(BUILD_DIR)/cmp-perf-stats.jsonl
+	@cat $(BUILD_DIR)/cmp-perf-stats.jsonl | bash $(CMP_PERF_STATS) stats-compare
+	@echo "[cmp-perf] All phases PASSED"
+
+cmp-perf-compile: coir
+	@bash $(CMP_PERF_SCRIPT) compile --jobs $(CMP_PERF_JOBS) \
+	  $(if $(CMP_PERF_FILTER),--filter "$(CMP_PERF_FILTER)",)
+
+cmp-perf-execute: coir
+	@bash $(CMP_PERF_SCRIPT) execute --jobs $(CMP_PERF_JOBS) \
+	  $(if $(CMP_PERF_FILTER),--filter "$(CMP_PERF_FILTER)",)
+
+cmp-perf-stats: coir
+	@bash $(CMP_PERF_STATS) stats-collect \
+	  $(if $(CMP_PERF_FILTER),--filter "$(CMP_PERF_FILTER)",) \
+	  --output $(BUILD_DIR)/cmp-perf-stats.jsonl
+	@cat $(BUILD_DIR)/cmp-perf-stats.jsonl | bash $(CMP_PERF_STATS) stats-compare
+
 setup-gcu-acore:
 	cd $(TOOLCHAIN_DIR) && $(MAKE) setup-acore FTP_SERVER=$(FTP_SERVER)
 

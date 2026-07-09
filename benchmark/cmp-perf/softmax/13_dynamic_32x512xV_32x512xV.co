@@ -5,7 +5,7 @@
 // case13: [32, 512, vocab_size] + [vocab_size, 768] --> [32, 512, 768] (Dynamic)
 __co__ auto softmax13(f32 [32, 512, vocab_size] input) {
   f32 [input.span(0), input.span(1), input.span(2)] output;
-  parallel p by 4, q by 4 {
+  parallel p by 2, q by 4 {
     foreach {i} in [input.span(0)/#p] {
       l1_input = dma.copy input.chunkat(i#p, q, _) => local;
       local f32[1, l1_input.span(1), l1_input.span(2)] l1_out;

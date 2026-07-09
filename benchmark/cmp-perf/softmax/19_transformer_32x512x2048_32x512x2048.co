@@ -3,7 +3,7 @@
 // case19: [32, 512, 2048] --> [32, 512, 2048] (Transformer)
 __co__ auto softmax19(f32 [32, 512, 2048] input)  {
   f32 [input.span(0), input.span(1), input.span(2)] output;
-  parallel p by 4, q by 8 {
+  parallel p by 2, q by 8 {
     foreach {i} in [input.span(0)] {
       l1_input = dma.copy input.chunkat(i, p#q, _) => local;
       local f32[1, l1_input.span(1), l1_input.span(2)] l1_out;

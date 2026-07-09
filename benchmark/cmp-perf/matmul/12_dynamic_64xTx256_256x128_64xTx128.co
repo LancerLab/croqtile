@@ -5,7 +5,7 @@
 // case12: [64, T, 256] + [256, 128] --> [64, T, 128] (Dynamic)
 __co__ auto matmul12(f32 [64, T, 256] lhs, f32 [256, 128] rhs) {
   f32 [lhs.span(0), lhs.span(1), rhs.span(1)] output;
-  parallel p by 4, q by 8 {
+  parallel p by 2, q by 8 {
     with index = {m_tile, n_tile, k_tile} in [1, 1, 2] {
       foreach m_tile, n_tile {
         local f32[output.span(0)/#p/#q, output.span(1)/#m_tile, output.span(2)/#n_tile] l1_out {0.0f};

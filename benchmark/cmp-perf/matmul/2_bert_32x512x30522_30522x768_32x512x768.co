@@ -3,7 +3,7 @@
 // case2: [32, 512, 30522] + [30522, 768] --> [32, 512, 768] (BERT)
 __co__ auto matmul2(f32 [32, 512, 30522] lhs, f32 [30522, 768] rhs)  {
   f32 [lhs.span(0), lhs.span(1), rhs.span(1)] output;
-  parallel p by 4, q by 8 {
+  parallel p by 2, q by 8 {
     with index = {m_tile, n_tile, k_tile} in [512, 768, 6] {
       foreach m_tile, n_tile {
         local f32[output.span(0)/#p/#q, output.span(1)/#m_tile, output.span(2)/#n_tile] l1_out {0.0f};

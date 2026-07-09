@@ -7,7 +7,7 @@
 // case10: [128, 1280] + [1280, N] --> [128, N] (Dynamic)
 __co__ auto matmul10(f32 [128, 1280] lhs, f32 [1280, N] rhs) {
   f32 [lhs.span(0), rhs.span(1)] output;
-  parallel p by 4, q by 1 {
+  parallel p by 2, q by 1 {
     foreach {m_tile, n_tile} in [8, 1] {
       local f32[lhs.span(0)/#m_tile/#p, rhs.span(1)/#n_tile/#q] l1_out {0.0f};
       foreach {k_tile} in [10] {

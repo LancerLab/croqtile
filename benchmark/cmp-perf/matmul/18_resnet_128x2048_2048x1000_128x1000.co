@@ -3,7 +3,7 @@
 // case18: [128, 2048] + [2048, 1000] --> [128, 1000] (ResNet)
 __co__ auto matmul18(f32 [128, 2048] lhs, f32 [2048, 1000] rhs) {
   f32 [lhs.span(0), rhs.span(1)] output;
-  parallel p by 4, q by 10 {
+  parallel p by 2, q by 10 {
     foreach {m_tile, n_tile} in [4, 10] {
       local f32[lhs.span(0)/#m_tile/#p, rhs.span(1)/#n_tile/#q] l1_out {0.0f};
       foreach {k_tile} in [16] {

@@ -3,7 +3,7 @@
 // - case16: [128, 96, 224, 224] --> [128, 96, 112, 112] (MobileNet)
 __co__ auto max_pool2d16(f32 [128, 96, 224, 224] input) {
   f32 [input.span(0), input.span(1), input.span(2)/2, input.span(3)/2] output;
-  parallel p by 4, q by 12 {
+  parallel p by 2, q by 12 {
     foreach {n_tile, c_tile} in [16, 8] {
       l1_input = dma.copy input.chunkat(n_tile#p, c_tile#q, _, _) => local;
       local f32[l1_input.span(0), l1_input.span(1), l1_input.span(2)/2, l1_input.span(3)/2] l1_out;

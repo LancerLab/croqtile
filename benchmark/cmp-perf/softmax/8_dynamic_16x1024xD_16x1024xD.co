@@ -6,7 +6,7 @@
 // case8: [16, 1024, d_model] --> [16, 1024, d_model] (Dynamic)
 __co__ auto softmax8(f32 [16, 1024, d_model] input) {
   f32 [input.span(0), input.span(1), input.span(2)] output;
-  parallel p by 4, q by 8 {
+  parallel p by 2, q by 8 {
     foreach {i} in [input.span(0)/#p] {
       l1_input = dma.copy input.chunkat(i#p, q, _) => local;
       local f32[1, l1_input.span(1), l1_input.span(2)] l1_out;

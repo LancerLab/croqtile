@@ -6,7 +6,7 @@
 // case12: [64, time_steps, 256] + [256, 128] --> [64, time_steps, 128] (Dynamic)
 __co__ auto softmax12(f32 [64, time_steps, 256] input) {
   f32 [input.span(0), input.span(1), input.span(2)] output;
-  parallel p by 4, q by 4 {
+  parallel p by 2, q by 4 {
     foreach {i} in [input.span(0)/#p] {
       l1_input = dma.copy input.chunkat(i#p, q, _) => local;
       local f32[1, l1_input.span(1), l1_input.span(2)] l1_out;

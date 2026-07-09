@@ -3,26 +3,28 @@
 // case20: [32, 197, 3072] --> [32, 197, 3072] (ViT)
 __co__ auto softmax20(f32 [32, 197, 3072] input) {
   f32 [input.span(0), input.span(1), input.span(2)] output;
-  parallel p by 4, q by 8 {
+  parallel p by 2, q by 8 {
     foreach {j} in [input.span(1)] {
       l1_input = dma.copy input.chunkat(p#q, j, _) => local;
-      local f32[1, l1_input.span(1), l1_input.span(2)] l1_out;
-      // Find max for numerical stability
-      f32 max_val = l1_input.data.at(0, 0, 0);
-      foreach {k} in [l1_input.span(2)]
-        if (l1_input.data.at(0, 0, k) > max_val)
-          max_val = l1_input.data.at(0, 0, k);
+      local f32[l1_input.span(0), l1_input.span(1), l1_input.span(2)] l1_out;
+      foreach {i_idx} in [l1_input.span(0)] {
+        // Find max for numerical stability
+        f32 max_val = l1_input.data.at(i_idx, 0, 0);
+        foreach {k} in [l1_input.span(2)]
+          if (l1_input.data.at(i_idx, 0, k) > max_val)
+            max_val = l1_input.data.at(i_idx, 0, k);
 
-      // Compute exp and sum
-      f32 sum_exp = 0.0f;
-      foreach {k} in [l1_input.span(2)] {
-        l1_out.at(0, 0, k) = __exp(l1_input.data.at(0, 0, k) - max_val);
-        sum_exp += l1_out.at(0, 0, k);
+        // Compute exp and sum
+        f32 sum_exp = 0.0f;
+        foreach {k} in [l1_input.span(2)] {
+          l1_out.at(i_idx, 0, k) = __exp(l1_input.data.at(i_idx, 0, k) - max_val);
+          sum_exp += l1_out.at(i_idx, 0, k);
+        }
+
+        // Normalize
+        foreach {k} in [l1_input.span(2)]
+          l1_out.at(i_idx, 0, k) = l1_out.at(i_idx, 0, k) / sum_exp;
       }
-
-      // Normalize
-      foreach {k} in [l1_input.span(2)]
-        l1_out.at(0, 0, k) = l1_out.at(0, 0, k) / sum_exp;
       dma.copy l1_out => output.chunkat(p#q, j, _);
     }
   }

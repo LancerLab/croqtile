@@ -28,6 +28,7 @@ extern/Makefile
 # Internal scripts
 scripts/*.sh
 scripts/*.md
+scripts/*.awk
 scripts/hooks/
 scripts/oss/
 scripts/sdk/
