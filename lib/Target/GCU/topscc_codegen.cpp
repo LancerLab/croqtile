@@ -1691,10 +1691,10 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   // choreo::future entirely, using __choreo_dte_pool__[slot] directly.
   bool is_raw_dte = false;
   std::string raw_dte_ctx; // e.g. "__choreo_dte_pool__[0]"
-  auto claimFuture = [this, &n, &is_raw_dte, &raw_dte_ctx](
-                         const std::string& buf_expr,
-                         Storage sto = Storage::DEFAULT,
-                         const std::string& mdata_expr = "") -> std::string {
+  auto EmitFutureClaim =
+      [this, &n, &is_raw_dte, &raw_dte_ctx](
+          const std::string& buf_expr, Storage sto = Storage::DEFAULT,
+          const std::string& mdata_expr = "") -> std::string {
     if (!n.future.empty() && claimed_dte.count(InScopeName(n.future)))
       return n.future;
 
@@ -1830,7 +1830,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     Storage ph_sto = Storage::DEFAULT;
     auto ph_buf_ty = GetSymbolType(UnScopedName(buf_name));
     if (auto sty = GetSpannedType(ph_buf_ty)) ph_sto = sty->GetStorage();
-    claimFuture(UnScopedName(buf_name), ph_sto);
+    EmitFutureClaim(UnScopedName(buf_name), ph_sto);
     // For auto-alloc (DOK_SYMBOL), redirect buffer references through
     // future.data() so that rotate() transparently updates the pointer.
     // For explicit buffer chunks (DOK_CHUNK), the user manages buffers
@@ -1976,6 +1976,11 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   // TODO: correct?
   if (IsHost()) choreo_unreachable("the dma is not supported in host side!");
 
+  // return {buf_name, buf_expr}
+  // `buf_name` is the base buffer name without subscription, used for mds
+  // declaration and DTE association.
+  // `buf_expr` is the actual expression to access the buffer element, used for
+  // future.data() association and async mds offset calculation
   auto GetBufferExpr = [this](const std::string& sym,
                               const ptr<AST::MultiValues> subscription,
                               const ptr<Type>& sym_ty) {
@@ -2028,7 +2033,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
 
   // return mds name and the declaration string.
   // If offset is not empty, means that need to do memory viewing.
-  //   Just add offset to buf_expr, then utilize new_shape.
+  //   Just add offset to buf_expr, then utilize new_shape to decl mdspan.
   auto GenMDSDecl =
       [this](const std::string& buf_name, const std::string& buf_expr,
              const ptr<SpannedType>& sty, const std::string& offset = "",
@@ -2041,9 +2046,7 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     bool split_to_char = false;
     if (split_8byte_dma_transfer && SizeOf(bt) == 8) split_to_char = true;
     std::string bts{split_to_char ? "char" : NameBaseType(bt)};
-
     std::ostringstream mds_decl;
-
     mds_decl << d_indent << "tops::mdspan " << mds_name << "("
              << TopsMdsStorage(sty->GetStorage()) << ", (" << bts << "*)"
              << buf_expr;
@@ -2077,19 +2080,19 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     mdata_expr = mdata_sym;
   }
 
-  auto future_name = n.future;
+  std::string future_name = n.future;
   bool bind_data = SymbolToSymbol() || TileToSymbol() || TileToTile();
   std::string bound_mdata_expr = (n.IsSparse() && bind_data) ? mdata_expr : "";
   // bind the data to the future
   if (bind_data)
-    future_name = claimFuture(t_buf.second, dma_sto, bound_mdata_expr);
+    future_name = EmitFutureClaim(t_buf.second, dma_sto, bound_mdata_expr);
   else
-    future_name = claimFuture("", dma_sto, "");
+    future_name = EmitFutureClaim("", dma_sto, "");
 
   std::string event_name;
   // nf_named: true when this DMA targets a named future tracked in nofuture
-  // mode. Two cases: (1) claimFuture just created the tracking
-  // (is_raw_dte=true),
+  // mode.
+  // Two cases: (1) EmitFutureClaim just created the tracking (is_raw_dte=true),
   //            (2) future was previously claimed — look it up in nofuture_vars.
   bool nf_named = is_raw_dte && !n.future.empty() && no_future_mode;
   if (!nf_named && no_future_mode && !n.future.empty()) {
@@ -2099,10 +2102,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
       is_raw_dte = true;
     }
   }
-  if (fty->IsAsync()) {
-    event_name =
-        nf_named ? (future_name + "_evt") : (future_name + "__event__");
-  }
+  if (fty->IsAsync())
+    event_name = future_name + (nf_named ? "_evt" : "__event__");
 
   // DTE context expression for DMA API calls:
   // no-future/raw-dte mode uses pool reference directly; normal mode
@@ -2200,6 +2201,56 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     ApplyStrideToShape(f_shape, f_ca, f_sty);
     ApplyStrideToShape(t_shape, t_ca, t_sty);
 
+    // For LOCAL/SHARED dest without its own View/SpanAs, use the
+    // source ChunkAt type shape (includes View adjustments like
+    // .view(block_n)) so the dest mdspan matches the actual DMA
+    // transfer size rather than the declared upper-bound buffer size.
+    // Only applies to .copy (not .pad/.transp) since shape-modifying
+    // operations intentionally change the destination shape.
+    if (n.operation == ".copy" && !t_ca->IndexOfLastSpanAs().has_value()) {
+      auto t_storage = t_sty->GetStorage();
+      if (t_storage == Storage::LOCAL || t_storage == Storage::SHARED) {
+        // Only apply when the source ChunkAt type differs from
+        // the base symbol type (indicating a View/SpanAs was used).
+        auto f_chunkat_shape =
+            dyn_cast<SpannedType>(f_ca->GetType())->GetShape();
+        auto f_base_shape = f_sty->GetShape();
+        bool f_has_view = false;
+        for (size_t d = 0; d < f_chunkat_shape.Value().size() &&
+                           d < f_base_shape.Value().size();
+             ++d) {
+          if (!sbe::ceq(f_chunkat_shape.Value()[d], f_base_shape.Value()[d])) {
+            f_has_view = true;
+            break;
+          }
+        }
+        if (f_has_view &&
+            f_chunkat_shape.Value().size() == t_shape.Value().size()) {
+          t_shape = f_chunkat_shape;
+        }
+      }
+    }
+    // the source actually has a View/SpanAs that changes its shape.
+    if (n.operation == ".copy" && !t_ca->IndexOfLastSpanAs().has_value()) {
+      auto t_storage = t_sty->GetStorage();
+      if (t_storage == Storage::LOCAL || t_storage == Storage::SHARED) {
+        // Check if source has a View/SpanAs by comparing shapes
+        auto f_base_shape = f_sty->GetShape();
+        bool f_has_view = false;
+        for (size_t d = 0; d < f_shape.Value().size(); ++d) {
+          // View changed the shape if operands differ
+          auto fsv = f_shape.Value()[d];
+          auto fbv = f_base_shape.Value()[d];
+          if (!sbe::ceq(fsv, fbv)) {
+            f_has_view = true;
+            break;
+          }
+        }
+        if (f_has_view && f_shape.Value().size() == t_shape.Value().size()) {
+          t_shape = f_shape;
+        }
+      }
+    }
     const auto f_mds =
         GenMDSDecl(f_buf_name, f_buf_expr, f_sty, f_mds_offset, f_shape);
     const auto t_mds =
