@@ -184,16 +184,24 @@ static bool moveOpsBeforeInTopoOrder(SmallVectorImpl<Operation *> &ops,
 
   for (auto *op : ops) visit(op);
 
+  // Save original positions for rollback.  We record the *next* operation
+  // (or nullptr for end-of-block) because MLIR ilist iterators are
+  // element-stable -- comparing &*it after a move always returns the same
+  // operation, so we cannot detect same-block reordering with iterators.
   struct OrigPos {
     Operation *op;
     Block *block;
-    Block::iterator point;
+    Operation *next;
   };
   SmallVector<OrigPos> origPositions;
   SmallVector<Operation *> clonedOps;
 
   for (auto *op : sorted) {
-    origPositions.push_back({op, op->getBlock(), op->getIterator()});
+    auto it = op->getIterator();
+    auto nextIt = std::next(it);
+    origPositions.push_back(
+        {op, op->getBlock(),
+         nextIt != op->getBlock()->end() ? &*nextIt : nullptr});
     bool hasExternalUsers = llvm::any_of(
         op->getUsers(), [&](Operation *u) { return !opSet.count(u); });
     if (hasExternalUsers) {
@@ -213,11 +221,29 @@ static bool moveOpsBeforeInTopoOrder(SmallVectorImpl<Operation *> &ops,
     DominanceInfo domInfo(topOp);
     for (auto *op : sorted) {
       if (!operandsDominate(op, domInfo)) {
+        // Roll back in reverse order to restore original positions.
         for (auto it = origPositions.rbegin(); it != origPositions.rend();
              ++it) {
-          if (it->op->getBlock() != it->block ||
-              &*it->op->getIterator() != &*it->point)
-            it->op->moveBefore(it->block, it->point);
+          if (it->op->getBlock() != it->block) {
+            // Moved to a different block -- move back.
+            it->op->moveBefore(it->block,
+                               it->next ? it->next->getIterator()
+                                        : it->block->end());
+          } else if (it->next) {
+            // Same block -- check if the successor is still the same op.
+            auto curIt = it->op->getIterator();
+            auto curNext = std::next(curIt);
+            if (curNext == it->op->getBlock()->end() ||
+                &*curNext != it->next) {
+              it->op->moveBefore(it->block, it->next->getIterator());
+            }
+          } else {
+            // Was at end of block -- check if it's still the last op.
+            auto curIt = it->op->getIterator();
+            if (std::next(curIt) != it->op->getBlock()->end()) {
+              it->op->moveBefore(it->block, it->op->getBlock()->end());
+            }
+          }
         }
         for (auto *cl : clonedOps) cl->erase();
         return false;
@@ -279,18 +305,46 @@ struct HoistAssertionsPass
         SmallVector<Operation *> chain;
         collectDefChain(assertOp.getCondition(), &kernel.getBody(), chain);
         chain.push_back(assertOp);
-        if (moveOpsBeforeInTopoOrder(chain, &entryBlock,
-                                     entryBlock.begin()))
+
+        // If all ops in the chain are already in the entry block, there
+        // is nothing to move -- just mark the assert as ENTRY.  Moving
+        // ops that are already there can reorder them and break SSA
+        // dominance when destPoint == begin().
+        bool allInEntry = llvm::all_of(chain, [&](Operation *op) {
+          return op->getBlock() == &entryBlock;
+        });
+        if (allInEntry) {
           assertOp.setSiteAttr(
               AssertSiteAttr::get(assertOp.getContext(), AssertSite::ENTRY));
+        } else if (moveOpsBeforeInTopoOrder(chain, &entryBlock,
+                                            entryBlock.begin())) {
+          assertOp.setSiteAttr(
+              AssertSiteAttr::get(assertOp.getContext(), AssertSite::ENTRY));
+        }
       } else if (target.site == AssertSite::HOIST && target.insertBefore) {
         SmallVector<Operation *> chain;
         collectDefChain(assertOp.getCondition(), &kernel.getBody(), chain);
         chain.push_back(assertOp);
-        if (moveOpsBeforeInTopoOrder(chain, target.destBlock,
-                                     target.insertBefore->getIterator()))
+
+        // Same guard: if everything is already in the right block and
+        // positioned before the insertion point, skip the move.
+        Block *destBlock = target.destBlock;
+        auto destPoint = target.insertBefore->getIterator();
+        bool allInPlace = llvm::all_of(chain, [&](Operation *op) {
+          if (op->getBlock() != destBlock)
+            return false;
+          for (auto it = destBlock->begin(); it != destPoint; ++it)
+            if (&*it == op)
+              return true;
+          return false;
+        });
+        if (allInPlace) {
           assertOp.setSiteAttr(
               AssertSiteAttr::get(assertOp.getContext(), AssertSite::HOIST));
+        } else if (moveOpsBeforeInTopoOrder(chain, destBlock, destPoint)) {
+          assertOp.setSiteAttr(
+              AssertSiteAttr::get(assertOp.getContext(), AssertSite::HOIST));
+        }
       }
     }
   }
