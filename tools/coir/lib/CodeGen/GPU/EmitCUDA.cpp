@@ -660,6 +660,7 @@ private:
     llvm::SmallVector<int64_t, 3> grid = {1};
     llvm::SmallVector<int64_t, 3> block = {1};
     llvm::SmallVector<std::string, 3> gridExprs;
+    llvm::SmallVector<std::string, 3> blockExprs;
 
     std::string gridStr() const {
       if (!gridExprs.empty()) {
@@ -680,6 +681,15 @@ private:
       return s + ")";
     }
     std::string blockStr() const {
+      if (!blockExprs.empty()) {
+        if (blockExprs.size() == 1) return blockExprs[0];
+        std::string s = "dim3(";
+        for (unsigned i = 0; i < blockExprs.size(); ++i) {
+          if (i > 0) s += ", ";
+          s += blockExprs[i];
+        }
+        return s + ")";
+      }
       if (block.size() == 1) return std::to_string(block[0]);
       std::string s = "dim3(";
       for (unsigned i = 0; i < block.size(); ++i) {
@@ -862,9 +872,17 @@ private:
 
   LaunchDims getLaunchDims(KernelOp kernel,
                            llvm::ArrayRef<DimArgMeta> dimArgMeta = {}) {
+    constexpr int64_t DYN = std::numeric_limits<int64_t>::min();
     LaunchDims dims;
     int64_t groupWarps = 0;
     bool hasThreadLevel = false;
+    bool hasDynGroup = false;
+    int64_t dynGroupMult = 1; // extra multiplier for GROUPx4
+    // Store dynamic group info for post-walk resolution.
+    llvm::SmallVector<int64_t> dynGroupParams;
+    llvm::SmallVector<int64_t> dynGroupDims;
+    int64_t dynGroupStaticFactor = 1;
+
     kernel.getBody().walk([&](ParallelOp par) {
       auto lvl = par.getLevel();
       auto bounds = par.getBounds();
@@ -876,23 +894,82 @@ private:
         hasThreadLevel = true;
       } else if (lvl == coir::ParallelLevel::GROUP ||
                  lvl == coir::ParallelLevel::GROUPx4) {
-        int64_t nWarps = 1;
-        for (auto b : bounds) nWarps *= b;
-        if (lvl == coir::ParallelLevel::GROUPx4)
-          nWarps *= 4;
-        groupWarps = nWarps;
+        // Check for dynamic GROUP bounds
+        bool anyDyn = false;
+        for (auto b : bounds) {
+          if (b == DYN) { anyDyn = true; break; }
+        }
+        if (anyDyn) {
+          hasDynGroup = true;
+          if (lvl == coir::ParallelLevel::GROUPx4)
+            dynGroupMult = 4;
+          // Compute static factor (product of non-DYN bounds)
+          int64_t staticProd = 1;
+          for (auto b : bounds) {
+            if (b != DYN) staticProd *= b;
+          }
+          dynGroupStaticFactor = staticProd;
+          // Extract param/dim mapping from op attributes
+          auto paramAttr =
+              par->getAttrOfType<mlir::DenseI64ArrayAttr>(
+                  "coir.dyn_group_bound_param");
+          auto dimAttr =
+              par->getAttrOfType<mlir::DenseI64ArrayAttr>(
+                  "coir.dyn_group_bound_dim");
+          if (paramAttr && dimAttr) {
+            auto params = paramAttr.asArrayRef();
+            auto dims_ = dimAttr.asArrayRef();
+            for (unsigned i = 0; i < params.size(); ++i) {
+              dynGroupParams.push_back(params[i]);
+              dynGroupDims.push_back(dims_[i]);
+            }
+          }
+        } else {
+          int64_t nWarps = 1;
+          for (auto b : bounds) nWarps *= b;
+          if (lvl == coir::ParallelLevel::GROUPx4)
+            nWarps *= 4;
+          groupWarps = nWarps;
+        }
       }
     });
-    if (groupWarps > 0 && hasThreadLevel) {
-      int64_t threadsPerGroup = 1;
-      for (auto b : dims.block) threadsPerGroup *= b;
-      dims.block = {groupWarps * threadsPerGroup};
-    } else if (groupWarps > 0) {
-      dims.block = {groupWarps * 32};
+
+    // Resolve dynamic GROUP: now hasThreadLevel and dims.block are known.
+    if (hasDynGroup) {
+      std::string groupExpr;
+      for (unsigned i = 0; i < dynGroupParams.size(); ++i) {
+        if (i > 0) groupExpr += " * ";
+        groupExpr += "(int)p" + std::to_string(dynGroupParams[i]) +
+                     ".shape()[" + std::to_string(dynGroupDims[i]) + "]";
+      }
+      if (dynGroupMult != 1)
+        groupExpr = "(" + groupExpr + ") * " +
+                    std::to_string(dynGroupMult);
+      if (dynGroupStaticFactor != 1)
+        groupExpr = "(" + groupExpr + ") * " +
+                    std::to_string(dynGroupStaticFactor);
+      std::string thrExpr;
+      if (hasThreadLevel) {
+        for (unsigned j = 0; j < dims.block.size(); ++j) {
+          if (j > 0) thrExpr += " * ";
+          thrExpr += std::to_string(dims.block[j]);
+        }
+      } else {
+        thrExpr = "32";
+      }
+      dims.blockExprs.push_back("(" + groupExpr + ") * (" + thrExpr + ")");
+      dims.block.clear();
+    } else {
+      if (groupWarps > 0 && hasThreadLevel) {
+        int64_t threadsPerGroup = 1;
+        for (auto b : dims.block) threadsPerGroup *= b;
+        dims.block = {groupWarps * threadsPerGroup};
+      } else if (groupWarps > 0) {
+        dims.block = {groupWarps * 32};
+      }
     }
 
     // Handle dynamic grid dims (INT64_MIN sentinel)
-    constexpr int64_t DYN = std::numeric_limits<int64_t>::min();
     bool hasDynGrid = false;
     for (auto b : dims.grid)
       if (b == DYN) { hasDynGrid = true; break; }
@@ -3103,10 +3180,18 @@ private:
                                             copyShape, suffix + "_d",
                                             enclosingKernel);
         }
+        os() << getIndent() << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+        incIndent();
         os() << getIndent() << "choreo::naive_copy(" << srcTensor << ", "
            << dstTensor << ");\n";
+        decIndent();
+        os() << getIndent() << "}\n";
       } else {
+        os() << getIndent() << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+        incIndent();
         emitNaiveCopy(constOp.getSource(), constOp.getDest());
+        decIndent();
+        os() << getIndent() << "}\n";
       }
       os() << getIndent() << "__syncthreads();\n";
     } else {
@@ -3118,7 +3203,11 @@ private:
   // --- Fallback handlers for un-lowered copy ops (when LowerDMADesc skips) ---
 
   void emitDmaCopy(DmaCopyOp op) override {
+    os() << getIndent() << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+    incIndent();
     emitNaiveCopy(op.getSource(), op.getDest());
+    decIndent();
+    os() << getIndent() << "}\n";
     os() << getIndent() << "__syncthreads();\n";
     std::string name = getName(op.getToken());
     os() << getIndent() << "int " << name << " = 0;\n";
@@ -3126,7 +3215,11 @@ private:
   }
 
   void emitTmaCopy(TmaCopyOp op) {
+    os() << getIndent() << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+    incIndent();
     emitNaiveCopy(op.getSource(), op.getDest());
+    decIndent();
+    os() << getIndent() << "}\n";
     os() << getIndent() << "__syncthreads();\n";
     std::string name = getName(op.getToken());
     os() << getIndent() << "int " << name << " = 0;\n";

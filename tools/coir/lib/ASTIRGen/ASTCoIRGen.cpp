@@ -818,6 +818,73 @@ bool ASTCoIRGen::Visit(AST::ParallelBy &pb) {
       mlir::DenseI64ArrayAttr::get(&IRContext(), bounds),
       /*stream=*/nullptr, /*is_async=*/nullptr);
 
+  // For GROUP-level parallel with dynamic bounds, record the param/dim
+  // mapping so EmitCUDA can generate the correct block expression.
+  if (levelAttr.getValue() == coir::ParallelLevel::GROUP ||
+      levelAttr.getValue() == coir::ParallelLevel::GROUPx4) {
+    llvm::SmallVector<int64_t> dynParams, dynDims;
+    auto kernelOp = parallelOp->getParentOfType<coir::KernelOp>();
+    auto dimArgs =
+        kernelOp
+            ? kernelOp->getAttrOfType<mlir::ArrayAttr>("coir.dim_args")
+            : nullptr;
+    if (dimArgs) {
+      if (pb.HasSubPVs()) {
+        for (auto &bnd : pb.AllBoundExprs()) {
+          if (auto *expr = dyn_cast<AST::Expr>(bnd.get())) {
+            if (expr->Opts().HasVal() &&
+                EvalToInt(expr->Opts().GetVal()) ==
+                    mlir::ShapedType::kDynamic) {
+              if (auto *sv = dyn_cast<sbe::SymbolicValue>(
+                      expr->Opts().GetVal().get())) {
+                auto name = UnScopedName(sv->Value());
+                for (auto da : dimArgs) {
+                  auto dict = mlir::cast<mlir::DictionaryAttr>(da);
+                  auto n = dict.getAs<mlir::StringAttr>("name");
+                  if (n && n.getValue() == name) {
+                    dynParams.push_back(
+                        mlir::cast<mlir::IntegerAttr>(dict.get("param"))
+                            .getInt());
+                    dynDims.push_back(
+                        mlir::cast<mlir::IntegerAttr>(dict.get("dim"))
+                            .getInt());
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+      } else {
+        auto bv = pb.BoundValue();
+        if (EvalToInt(bv) == mlir::ShapedType::kDynamic) {
+          if (auto *sv = dyn_cast<sbe::SymbolicValue>(bv.get())) {
+            auto name = UnScopedName(sv->Value());
+            for (auto da : dimArgs) {
+              auto dict = mlir::cast<mlir::DictionaryAttr>(da);
+              auto n = dict.getAs<mlir::StringAttr>("name");
+              if (n && n.getValue() == name) {
+                dynParams.push_back(
+                    mlir::cast<mlir::IntegerAttr>(dict.get("param"))
+                        .getInt());
+                dynDims.push_back(
+                    mlir::cast<mlir::IntegerAttr>(dict.get("dim"))
+                        .getInt());
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+    if (!dynParams.empty()) {
+      parallelOp->setAttr("coir.dyn_group_bound_param",
+                           builder.getDenseI64ArrayAttr(dynParams));
+      parallelOp->setAttr("coir.dyn_group_bound_dim",
+                           builder.getDenseI64ArrayAttr(dynDims));
+    }
+  }
+
   if (pb.HasStream()) {
     std::string streamStr = STR(pb.StreamExpr());
     if (!streamStr.empty())
