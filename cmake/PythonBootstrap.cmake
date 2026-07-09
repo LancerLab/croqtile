@@ -50,6 +50,19 @@ if(NOT EXISTS "${_PYBIND11_ROOT}/CMakeLists.txt")
     list(GET _dl_status 0 _dl_code)
     if(NOT _dl_code EQUAL 0)
       list(GET _dl_status 1 _dl_msg)
+      # Try FTP_SERVER mirror if set
+      include(cmake/DepMirror.cmake)
+      dep_mirror_fallback(_mirror_url "${CROPY_PYBIND11_TAR}" pybind11)
+      if(_mirror_url)
+        message(STATUS "pybind11: trying mirror ${_mirror_url}")
+        set(_dl_args "${_mirror_url}" "${_TAR_PATH}"
+          SHOW_PROGRESS STATUS _dl_status TIMEOUT 120)
+        file(DOWNLOAD ${_dl_args})
+        list(GET _dl_status 0 _dl_code)
+      endif()
+    endif()
+    if(NOT _dl_code EQUAL 0)
+      list(GET _dl_status 1 _dl_msg)
       file(REMOVE "${_TAR_PATH}")
       message(FATAL_ERROR
         "Failed to download pybind11: ${_dl_msg}\n"
