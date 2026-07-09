@@ -3812,9 +3812,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                                dma_plan->direction == DMADirection::S2G ||
                                dma_plan->direction == DMADirection::S2S;
       if (to_or_from_shared) {
-        ds << d_indent
-           << "if (threadIdx.x == 0 && threadIdx.y == 0 && "
-              "threadIdx.z == 0) {\n";
+        ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
         ds << d_indent << "  choreo::naive_copy(" << src << ", " << dst
            << ");\n";
         ds << d_indent << "}\n";
