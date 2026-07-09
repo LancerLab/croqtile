@@ -170,7 +170,7 @@ int compileToExecutable(mlir::ModuleOp module, llvm::StringRef arch,
     oss << stubs;
 
     auto hostAttr =
-        module->getAttrOfType<mlir::StringAttr>("coir.host_code");
+        module->getAttrOfType<mlir::StringAttr>("coir.user_cpp_code");
     if (hostAttr && !hostAttr.getValue().empty())
       oss << hostAttr.getValue();
     oss << "\n";

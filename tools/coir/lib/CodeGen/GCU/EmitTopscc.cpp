@@ -54,6 +54,8 @@ public:
     if (hasAcoreCall)
       os() << "#include <common/acore_op.h>\n\n";
 
+    emitExplicitDeviceCode(module, out);
+
     for (auto &op : module.getBody()->getOperations()) {
       if (auto kernel = dyn_cast<KernelOp>(op))
         if (hasBlockParallel(kernel))

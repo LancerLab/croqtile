@@ -42,7 +42,7 @@ public:
   // -- CodeGen pipeline interface --
   // Derived classes implement emitModule() which is called by EmitSource.
   // EmitSource and EmitScript have default implementations that call
-  // emitModule and emitHostCode respectively; targets override EmitScript
+  // emitModule and emitUserCppCode respectively; targets override EmitScript
   // to add their compiler-specific script.
 
   int EmitSource(mlir::ModuleOp module, llvm::StringRef arch,

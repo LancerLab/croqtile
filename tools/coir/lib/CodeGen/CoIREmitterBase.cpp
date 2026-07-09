@@ -74,7 +74,7 @@ int CoIREmitterBase::EmitSource(ModuleOp module, llvm::StringRef /*arch*/,
   os_ = &os;
   resetState();
   emitModule(module, os);
-  emitHostCode(module, os);
+  emitUserCppCode(module, os);
   return 0;
 }
 

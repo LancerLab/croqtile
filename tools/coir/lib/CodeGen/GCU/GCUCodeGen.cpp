@@ -103,6 +103,30 @@ public:
 
     std::string a = arch.empty() ? "gcu300" : arch.str();
 
+    // Emit explicit device code (__cok__ / __device__ blocks) as a separate
+    // file for topscc compilation (Phase 1: script-based integration).
+    auto explicitDeviceAttr = module->getAttrOfType<mlir::StringAttr>(
+        "coir.explicit_device_code");
+    if (explicitDeviceAttr && !explicitDeviceAttr.getValue().empty()) {
+      os << "# Explicit device code (__cok__ / __device__ blocks)\n";
+      os << "EXPLICIT_DEVICE_FILE=\"$TMPDIR/explicit_device.cc\"\n";
+      os << "cat > \"$EXPLICIT_DEVICE_FILE\""
+         << " << '__COIR_EXPLICIT_DEVICE__'\n";
+      os << explicitDeviceAttr.getValue();
+      os << "\n__COIR_EXPLICIT_DEVICE__\n\n";
+    }
+
+    // Emit user C++ host code as a separate file.
+    auto userCppAttr =
+        module->getAttrOfType<mlir::StringAttr>("coir.user_cpp_code");
+    if (userCppAttr && !userCppAttr.getValue().empty()) {
+      os << "# User C++ host code (main, helpers, etc.)\n";
+      os << "USER_CPP_FILE=\"$TMPDIR/user_host.cc\"\n";
+      os << "cat > \"$USER_CPP_FILE\" << '__COIR_USER_CPP__'\n";
+      os << userCppAttr.getValue();
+      os << "\n__COIR_USER_CPP__\n\n";
+    }
+
     os << "MLIRFILE=\"$TMPDIR/kernel.mlir\"\n";
     os << "LOWFILE=\"$TMPDIR/kernel_low.mlir\"\n";
     os << "BINMLIR=\"$TMPDIR/kernel_bin.mlir\"\n";
@@ -128,6 +152,17 @@ public:
     os << "\"" << compilePath << "\""
        << " \"$BINMLIR\" -a " << a
        << " -o \"$BINFILE\" || exit 1\n\n";
+
+    // If explicit device code was emitted, compile it with topscc.
+    if (explicitDeviceAttr && !explicitDeviceAttr.getValue().empty()) {
+      os << "# Compile explicit device code with topscc\n";
+      os << "\"${TOPSCC:-topscc}\" --cuda-device-only -c -emit-llvm"
+         << " -arch " << a
+         << " -o \"$TMPDIR/explicit_device.bc\""
+         << " \"$EXPLICIT_DEVICE_FILE\" 2>&1\n";
+      os << "# TODO(Phase 1): link explicit_device.bc with kurama device"
+         << " binary via llvm-link\n";
+    }
 
     return 0;
   }
