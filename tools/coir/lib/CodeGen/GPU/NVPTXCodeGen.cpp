@@ -95,7 +95,7 @@ public:
 
     os << stubs;
 
-    emitHostCode(module, os);
+    emitUserCppCode(module, os);
 
     os << "\n__COCC_HOST_SOURCE__\n\n";
 

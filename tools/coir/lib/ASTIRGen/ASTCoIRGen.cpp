@@ -3102,17 +3102,17 @@ bool ASTCoIRGen::Visit(AST::IfElseBlock &ifelse) {
 bool ASTCoIRGen::Visit(AST::CppSourceCode &n) {
   if (n.kind == AST::CppSourceCode::Host ||
       n.kind == AST::CppSourceCode::None) {
-    auto existing = IRModule()->getAttrOfType<mlir::StringAttr>("coir.host_code");
+    auto existing = IRModule()->getAttrOfType<mlir::StringAttr>("coir.user_cpp_code");
     std::string combined = existing ? existing.getValue().str() : "";
     combined += n.GetCode();
-    IRModule()->setAttr("coir.host_code",
+    IRModule()->setAttr("coir.user_cpp_code",
                         mlir::StringAttr::get(&IRContext(), combined));
   } else if (n.kind == AST::CppSourceCode::Device) {
     auto existing =
-        IRModule()->getAttrOfType<mlir::StringAttr>("coir.device_code");
+        IRModule()->getAttrOfType<mlir::StringAttr>("coir.explicit_device_code");
     std::string combined = existing ? existing.getValue().str() : "";
     combined += n.GetCode();
-    IRModule()->setAttr("coir.device_code",
+    IRModule()->setAttr("coir.explicit_device_code",
                         mlir::StringAttr::get(&IRContext(), combined));
   }
   return true;

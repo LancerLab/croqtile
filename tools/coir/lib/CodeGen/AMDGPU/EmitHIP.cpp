@@ -38,6 +38,7 @@ public:
     os_ = &os;
     resetState();
     emitHeader();
+    emitExplicitDeviceCode(module, os);
     for (auto &op : module.getBody()->getOperations()) {
       if (auto kernel = dyn_cast<KernelOp>(op))
         emitKernel(kernel);

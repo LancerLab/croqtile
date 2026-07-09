@@ -53,6 +53,7 @@ public:
       hasDMA = attr.getValue();
 
     emitHeader(hasTMA);
+    emitExplicitDeviceCode(module, os);
     for (auto &op : module.getBody()->getOperations()) {
       if (auto kernel = dyn_cast<KernelOp>(op))
         emitKernel(kernel);
@@ -794,7 +795,6 @@ private:
               auto resTy =
                   dyn_cast<coir::TensorType>(tileOp.getResult().getType());
               if (srcTy && resTy) {
-                auto srcSh = srcTy.getShape();
                 auto resSh = resTy.getShape();
                 // Find which dim index in tileOp's indices corresponds to our
                 // bound. Use the tile size from result type at the tiled dim.

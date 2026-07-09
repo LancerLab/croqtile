@@ -70,9 +70,20 @@ public:
 
   // -- Shared script helpers (used by all source-text targets) --
 
-  /// Emit the user's host-code block attached to the module.
-  static void emitHostCode(mlir::ModuleOp module, llvm::raw_ostream &os) {
-    auto attr = module->getAttrOfType<mlir::StringAttr>("coir.host_code");
+  /// Emit the user's explicit-device-code block attached to the module
+  /// (e.g. __cok__ / __device__ function definitions for a specific target).
+  static void emitExplicitDeviceCode(mlir::ModuleOp module,
+                                     llvm::raw_ostream &os) {
+    auto attr = module->getAttrOfType<mlir::StringAttr>(
+        "coir.explicit_device_code");
+    if (attr) os << "\n" << attr.getValue() << "\n";
+  }
+
+  /// Emit the user's C++ code block attached to the module
+  /// (host-side __cok__ blocks, main(), helper functions, etc.).
+  static void emitUserCppCode(mlir::ModuleOp module, llvm::raw_ostream &os) {
+    auto attr =
+        module->getAttrOfType<mlir::StringAttr>("coir.user_cpp_code");
     if (attr) os << "\n" << attr.getValue() << "\n";
   }
 
