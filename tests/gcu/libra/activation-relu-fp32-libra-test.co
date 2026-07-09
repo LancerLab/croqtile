@@ -1,5 +1,4 @@
 // REQUIRES: TARGET-GCU400 TARGET-GCUSIM4
-// XFAIL: *
 // RUN: choreo -t topscc -arch=gcu400 %s -o %s.result && %s.result | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 
 #include "choreo.h"

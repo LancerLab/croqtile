@@ -1249,7 +1249,7 @@ for _entry in "${files_array[@]}"; do
 
   # Skip whole file early when required targets cannot match current machine/simulator.
   if ! set_empty REQ_TARGETS; then
-    if [[ $device_type == "none"  ]] || ! { set_contains REQ_TARGETS "$mach" || set_contains REQ_TARGETS "$simulator";  }; then
+    if [[ $device_type == "none" && "$simulator" == "none" ]] || ! { set_contains REQ_TARGETS "$mach" || set_contains REQ_TARGETS "$simulator";  }; then
       _all_skipped_targets=$(set_print REQ_TARGETS)
       print_status_line "SKIP($(toupper "${_all_skipped_targets}")):" "${file}"
       num_skiped=$(($num_skiped + 1));
@@ -1329,7 +1329,7 @@ for _entry in "${files_array[@]}"; do
     # requires specific device to run
     if ! set_empty REQ_TARGETS; then
       #echo "device: $device_type, reqs: $(set_print REQ_TARGETS), mach: $mach"
-      if [[ $device_type == "none"  ]] || ! { set_contains REQ_TARGETS "$mach" || set_contains REQ_TARGETS "$simulator";  }; then
+      if [[ $device_type == "none" && "$simulator" == "none" ]] || ! { set_contains REQ_TARGETS "$mach" || set_contains REQ_TARGETS "$simulator";  }; then
         # Not matched, skip
         _all_skipped_targets=$(set_print REQ_TARGETS)
         print_status_line "SKIP($(toupper "${_all_skipped_targets}")):" "${file} ($run_count of $run_num)"
