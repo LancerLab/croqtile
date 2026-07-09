@@ -983,8 +983,9 @@ private:
       if (mlir::isa<coir::AsyncTokenType>(initVal.getType())) {
         auto futIt = asyncFutures.find(initVal);
         if (futIt != asyncFutures.end()) {
-          asyncFutures[args[i + 1]] = futIt->second;
-          valueNames[args[i + 1]] = futIt->second;
+          std::string futName = futIt->second;
+          asyncFutures[args[i + 1]] = futName;
+          valueNames[args[i + 1]] = futName;
         } else {
           asyncFutures[args[i + 1]] = iterName;
           os() << getIndent() << "choreo::future " << iterName << ";\n";
