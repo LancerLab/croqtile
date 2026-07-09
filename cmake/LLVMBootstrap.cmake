@@ -49,7 +49,7 @@ if(NOT EXISTS "${_LLVM_CMAKE_DIR}/mlir/MLIRConfig.cmake")
     file(DOWNLOAD ${_dl_args})
     list(GET _dl_status 0 _dl_code)
     if(NOT _dl_code EQUAL 0)
-      # Primary download failed — try fallback URL if configured
+      # Primary download failed -- try fallback URL if configured
       list(GET _dl_status 1 _dl_msg)
       file(REMOVE "${_TAR_PATH}")
       if(DEFINED COIR_LLVM_FALLBACK_URL AND NOT "${COIR_LLVM_FALLBACK_URL}" STREQUAL "")
