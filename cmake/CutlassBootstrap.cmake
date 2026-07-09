@@ -52,6 +52,19 @@ if(NOT _cutlass_present)
     list(GET _dl_status 0 _dl_code)
     if(NOT _dl_code EQUAL 0)
       list(GET _dl_status 1 _dl_msg)
+      # Try FTP_SERVER mirror if set
+      include(cmake/DepMirror.cmake)
+      dep_mirror_fallback(_mirror_url "${CUTLASS_TAR}" cutlass)
+      if(_mirror_url)
+        message(STATUS "CUTLASS: trying mirror ${_mirror_url}")
+        set(_dl_args "${_mirror_url}" "${_CUTLASS_TAR_PATH}"
+          SHOW_PROGRESS STATUS _dl_status TIMEOUT 300)
+        file(DOWNLOAD ${_dl_args})
+        list(GET _dl_status 0 _dl_code)
+      endif()
+    endif()
+    if(NOT _dl_code EQUAL 0)
+      list(GET _dl_status 1 _dl_msg)
       file(REMOVE "${_CUTLASS_TAR_PATH}")
       message(WARNING
         "Failed to download CUTLASS: ${_dl_msg}\n"
