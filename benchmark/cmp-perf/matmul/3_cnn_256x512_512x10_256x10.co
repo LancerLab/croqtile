@@ -1,19 +1,19 @@
 #include "common.hpp"
 
-// case3: [256, 512] + [512, 10] --> [256, 10] (CNN)
+// case3: [256, 512] + [512, 10] --> [256, 10] (CNN) -- k_matmul vectorized
 __co__ auto matmul3(f32 [256, 512] lhs, f32 [512, 10] rhs) {
   f32 [lhs.span(0), rhs.span(1)] output;
-  parallel p by 2, q by 10 {
-    foreach {m_tile, n_tile} in [8, 1] {
-      local f32[lhs.span(0)/#m_tile/#p, rhs.span(1)/#n_tile/#q] l1_out {0.0f};
-      foreach {k_tile} in [16] {
-        l1_a = dma.copy lhs.chunkat(p#m_tile, k_tile) => local;
-        l1_b = dma.copy rhs.chunkat(k_tile, q#n_tile) => local;
-        foreach {i, j, k} in [l1_a.span(0), l1_b.span(1), l1_a.span(1)] {
-          l1_out.at(i, j) += l1_a.data.at(i, k) * l1_b.data.at(k, j);
+  parallel p by 2 {
+    with tilings = {m_tile, n_tile, k_tile} in [256/16, 10/1, 512/32] {
+      foreach m_tile, n_tile {
+        local f32[16, 1] l1_out {0.0f};
+        foreach k_tile {
+          l1_a = dma.copy lhs.chunkat(m_tile, k_tile) => local;
+          l1_b = dma.transp<1,0> rhs.chunkat(k_tile, n_tile) => local;
+          call k_matmul(l1_a.data, l1_b.data, l1_out, 16, 1, 32);
         }
+        dma.copy l1_out => output.chunkat(m_tile, n_tile);
       }
-      dma.copy l1_out => output.chunkat(p#m_tile, q#n_tile);
     }
   }
   return output;

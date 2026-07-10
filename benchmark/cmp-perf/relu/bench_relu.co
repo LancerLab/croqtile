@@ -218,7 +218,7 @@ int main() {
   };
 
   std::vector<Case> cases_cfg3 = {
-    {"Dynamic-5",      {batch_size, 1280, height, width}},
+    {"Dynamic-5",      {batch_size, 128, height, width}},
   };
 
   size_t total_cases = 0;

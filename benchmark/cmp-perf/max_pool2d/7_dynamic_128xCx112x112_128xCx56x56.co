@@ -8,8 +8,8 @@
 __co__ auto max_pool2d7(f32 [128, channels, 112, 112] input) {
   f32 [input.span(0), input.span(1), input.span(2)/2, input.span(3)/2] output;
   parallel p by 2, q by 4 {
-    foreach {n_tile, c_tile} in [2, 4] {
-      l1_input = dma.copy input.chunkat(n_tile#p, c_tile#q, _, _) => local;
+    foreach {n_tile, c_tile, h_tile, w_tile} in [4, 4, 4, 4] {
+      l1_input = dma.copy input.chunkat(n_tile#p, c_tile#q, h_tile, w_tile) => local;
       local f32[l1_input.span(0), l1_input.span(1), l1_input.span(2)/2, l1_input.span(3)/2] l1_out;
       foreach {i, j} in [l1_out.span(0), l1_out.span(1)] {
         foreach {h, w} in [l1_out.span(2), l1_out.span(3)] {
@@ -20,7 +20,7 @@ __co__ auto max_pool2d7(f32 [128, channels, 112, 112] input) {
           l1_out.at(i, j, h, w) = max_val;
         }
       }
-      dma.copy l1_out => output.chunkat(n_tile#p, c_tile#q, _, _);
+      dma.copy l1_out => output.chunkat(n_tile#p, c_tile#q, h_tile, w_tile);
     }
   }
   return output;
