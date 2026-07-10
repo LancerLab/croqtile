@@ -380,6 +380,24 @@ bool ShapeInference::Visit(AST::Expr& n) {
     n.Opts().SetSize(sz);
     VST_DEBUG(dbgs() << " |-<exprsize> <" << PSTR(nty) << "> " << STR(n) << ": "
                      << STR(sz) << "\n");
+    // For DataOf/MDataOf, also set the data pointer value.
+    // The .data / .mdata symbol is already registered in the symbol table
+    // by earlysema/typeinfer; look up its value number from the operand
+    // identifier and store it in Opts so ASTCoIRGen can materialize it.
+    if (n.op == Op::DataOf || n.op == Op::MDataOf) {
+      if (auto *id = dyn_cast<AST::Identifier>(n.GetR().get())) {
+        std::string suffix =
+            (n.op == Op::DataOf) ? ".data" : ".mdata";
+        auto scoped_name = SSTab().InScopeName(id->name + suffix);
+        auto data_vn = vn.GetOrGenValueNumberFromSignature(s_sn(scoped_name));
+        auto data_vi = vn.GenValueItemFromValueNumber(data_vn);
+        if (data_vi) {
+          n.Opts().SetVal(data_vi);
+          VST_DEBUG(dbgs() << " |-<exprval-data> <" << PSTR(nty) << "> "
+                           << STR(n) << ": " << STR(data_vi) << "\n");
+        }
+      }
+    }
   } break;
   default: choreo_unreachable("unsupported valno kind.");
   }
