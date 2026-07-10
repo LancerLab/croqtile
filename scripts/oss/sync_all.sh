@@ -706,6 +706,46 @@ sync_oss_shadow() {
 }
 
 # ======================================================================
+# PHASE 5: Sync croqtile-skills repo
+# Non-fatal: failures are logged but don't halt the cycle.
+# ======================================================================
+
+phase5_sync_skills() {
+  log_phase 5 "Sync croqtile-skills"
+
+  local skills_root=""
+  if [[ -d "$REPO_ROOT/extern/croqtile-skills/.git" ]]; then
+    skills_root="$REPO_ROOT/extern/croqtile-skills"
+  elif [[ -d "$HOME/dev/croqtile-skills/.git" ]]; then
+    skills_root="$HOME/dev/croqtile-skills"
+  fi
+
+  if [[ -z "$skills_root" ]]; then
+    log "  croqtile-skills repo not found, skipping."
+    return 0
+  fi
+
+  local sync_script="$skills_root/scripts/sync-skills.sh"
+  if [[ ! -x "$sync_script" ]]; then
+    log "  sync-skills.sh not found or not executable at $sync_script, skipping."
+    return 0
+  fi
+
+  log "  Running $sync_script --once"
+  if [[ $DRY_RUN -eq 1 ]]; then
+    log "  [dry-run] would sync croqtile-skills"
+  else
+    "$sync_script" --once -q 2>&1 | while IFS= read -r line; do
+      [[ -n "$line" ]] && log "  $line"
+    done
+    local rc=${PIPESTATUS[0]}
+    if [[ $rc -ne 0 ]]; then
+      log "  WARNING: skills sync exited with code $rc"
+    fi
+  fi
+}
+
+# ======================================================================
 # Main cycle
 # ======================================================================
 
@@ -735,6 +775,8 @@ run_cycle() {
   local retrigger=0
   phase4_post_sync && retrigger=1
   [[ $FATAL -eq 1 ]] && { log "FATAL error in Phase 4. Halting cycle."; return 2; }
+
+  phase5_sync_skills || cycle_errors=$((cycle_errors + 1))
 
   local elapsed=$(( $(date +%s) - cycle_start ))
   log ""
