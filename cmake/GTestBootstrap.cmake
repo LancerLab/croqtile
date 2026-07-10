@@ -40,14 +40,19 @@ set(_archive "${CMAKE_BINARY_DIR}/_gtest_download.tar.gz")
 set(_dl_args "${_GTEST_URL}" "${_archive}"
   TIMEOUT 120
   STATUS _dl_status)
-if(_GTEST_MD5)
-  list(APPEND _dl_args EXPECTED_MD5 "${_GTEST_MD5}")
-endif()
 
 message(STATUS "Downloading GoogleTest...")
 file(DOWNLOAD ${_dl_args})
 
 list(GET _dl_status 0 _dl_code)
+if(_dl_code EQUAL 0 AND _GTEST_MD5)
+  file(MD5 "${_archive}" _actual_md5)
+  if(NOT _actual_md5 STREQUAL _GTEST_MD5)
+    file(REMOVE "${_archive}")
+    set(_dl_code 1)
+    set(_dl_msg "MD5 mismatch: expected ${_GTEST_MD5}, got ${_actual_md5}")
+  endif()
+endif()
 if(NOT _dl_code EQUAL 0)
   list(GET _dl_status 1 _dl_msg)
   # Try FTP_SERVER mirror if set
