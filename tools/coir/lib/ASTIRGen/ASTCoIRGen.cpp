@@ -1373,7 +1373,9 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
       return builder.create<coir::TensorLoadElemOp>(
           loc, tty.getElementType(), tensorVal, idxVals);
     } else {
-      return LookupValue(da->GetDataName());
+      auto v = LookupValue(da->GetDataName());
+      if (!v) v = LookupValue(da->GetDataName() + ".data");
+      return v;
     }
   }
 
@@ -1715,6 +1717,18 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
         }
         return (mlir::Value)builder.create<mlir::arith::AddIOp>(loc, lhs,
                                                                  rhs);
+      }
+
+      if (op == Op::SizeOf) {
+        if (!expr->Opts().HasVal())
+          choreo_unreachable("SizeOf: no optimized value available");
+        return MaterializeSBE(loc, expr->Opts().GetVal());
+      }
+
+      if (op == Op::DataOf || op == Op::MDataOf) {
+        if (!expr->Opts().HasVal())
+          choreo_unreachable("DataOf/MDataOf: no optimized value available");
+        return MaterializeSBE(loc, expr->Opts().GetVal());
       }
     }
 

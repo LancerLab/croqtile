@@ -36,13 +36,17 @@
 #include "CodeGen/CoIRKernelLowering.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/IRMapping.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/Pass.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringSet.h"
 
 using namespace mlir;
 using namespace coir;
@@ -72,7 +76,8 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
   }
   void getDependentDialects(mlir::DialectRegistry &registry) const override {
     registry.insert<mgpu::GPUDialect, memref::MemRefDialect,
-                    arith::ArithDialect, scf::SCFDialect>();
+                    arith::ArithDialect, scf::SCFDialect,
+                    func::FuncDialect, LLVM::LLVMDialect>();
   }
 
   MemRefType convertTensorType(coir::TensorType tty) override {
@@ -110,6 +115,64 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
     }
     if (isa<DMAInvokeOp>(op)) {
       builder.create<mgpu::BarrierOp>(loc);
+      return true;
+    }
+    // Lower coir.call to func.call for external device functions
+    if (auto callOp = dyn_cast<coir::CallOp>(op)) {
+      auto callee = callOp.getCallee().str();
+      // Map operands through the convert context (tensor -> memref)
+      SmallVector<Value> mappedOperands;
+      SmallVector<Type> argTypes;
+      for (auto operand : callOp.getOperands_()) {
+        auto mapped = ctx.mapping.lookup(operand);
+        mappedOperands.push_back(mapped);
+        argTypes.push_back(mapped.getType());
+      }
+
+      // Emit func.func private declaration in the gpu.module
+      // (must be in gpu.module, not top-level ModuleOp, because
+      //  SymbolTable::lookupNearestSymbolFrom stops at gpu.module)
+      auto gpuModule =
+          builder.getInsertionBlock()->getParentOp()->getParentOfType<
+              mgpu::GPUModuleOp>();
+      if (!gpuModule) {
+        op.emitError("coir.call not inside a gpu.module");
+        return false;
+      }
+
+      // Check if symbol name is already taken (e.g. by gpu.func)
+      if (auto *existingSym =
+              mlir::SymbolTable::lookupSymbolIn(gpuModule, callee)) {
+        if (!isa<func::FuncOp>(existingSym)) {
+          op.emitError("coir.call callee '")
+              << callee
+              << "' conflicts with existing symbol of type '"
+              << existingSym->getName().getStringRef() << "'";
+          return false;
+        }
+      }
+
+      auto existingFn = gpuModule.lookupSymbol<func::FuncOp>(callee);
+      if (!existingFn) {
+        OpBuilder::InsertionGuard guard(builder);
+        builder.setInsertionPointToStart(gpuModule.getBody());
+        auto fnType = builder.getFunctionType(argTypes, TypeRange{});
+        auto fnOp = builder.create<func::FuncOp>(loc, callee, fnType);
+        fnOp.setPrivate();
+      } else {
+        // Verify arg types match the existing declaration
+        auto existingArgTypes = existingFn.getArgumentTypes();
+        if (existingArgTypes.size() != argTypes.size()) {
+          op.emitError("coir.call to '")
+              << callee << "' has " << argTypes.size()
+              << " operands, but existing declaration has "
+              << existingArgTypes.size() << " arguments";
+          return false;
+        }
+        // Note: full type compatibility check deferred to MLIR verifier
+      }
+
+      builder.create<func::CallOp>(loc, callee, TypeRange{}, mappedOperands);
       return true;
     }
     // MMA ops should have been caught in runOnOperation validation
