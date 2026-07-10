@@ -713,19 +713,7 @@ sync_oss_shadow() {
 phase5_sync_skills() {
   log_phase 5 "Sync croqtile-skills"
 
-  local skills_root=""
-  if [[ -d "$REPO_ROOT/extern/croqtile-skills/.git" ]]; then
-    skills_root="$REPO_ROOT/extern/croqtile-skills"
-  elif [[ -d "$HOME/dev/croqtile-skills/.git" ]]; then
-    skills_root="$HOME/dev/croqtile-skills"
-  fi
-
-  if [[ -z "$skills_root" ]]; then
-    log "  croqtile-skills repo not found, skipping."
-    return 0
-  fi
-
-  local sync_script="$skills_root/scripts/sync-skills.sh"
+  local sync_script="$REPO_ROOT/scripts/oss/sync-skills.sh"
   if [[ ! -x "$sync_script" ]]; then
     log "  sync-skills.sh not found or not executable at $sync_script, skipping."
     return 0

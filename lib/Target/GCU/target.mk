@@ -1,4 +1,5 @@
 FTP_SERVER ?= 172.16.11.18
+GITLAB_SERVER ?= git.enflame.cn
 
 SETUP_TARGET_DEPENDS += setup-clang-format
 SETUP_TARGET_DEPENDS += setup-skills
@@ -41,12 +42,15 @@ setup-choreo-kit: check-choreo-kit
 setup-clang-format: check-clang-format
 	chmod +x $(CLANG_FORMAT)
 
+# setup-skills: internal-only. Clones/updates croqtile-skills, then
+# symlinks .claude, .codex, .github into the choreo workspace.
 setup-skills:
-	@if [ ! -d $(TOOLCHAIN_DIR)/croqtile-skills ]; then cd $(TOOLCHAIN_DIR); git clone git@git.enflame.cn:era-dev/croqtile-skills.git; else cd $(TOOLCHAIN_DIR)/croqtile-skills; git fetch --all; git rebase origin/main; fi; \
-	echo "Installing the skills for agents..."; \
-	ln -sf $(TOOLCHAIN_DIR)/croqtile-skills/.claude $(WORK_DIR); \
-	ln -sf $(TOOLCHAIN_DIR)/croqtile-skills/.github $(WORK_DIR); \
-	ln -sf $(TOOLCHAIN_DIR)/croqtile-skills/.codex $(WORK_DIR)
+	@if [ ! -d $(TOOLCHAIN_DIR)/croqtile-skills ]; then \
+	  echo "[setup-skills] cloning croqtile-skills..."; \
+	  git clone git@$(GITLAB_SERVER):era-dev/croqtile-skills.git $(TOOLCHAIN_DIR)/croqtile-skills; \
+	fi
+	@$(MAKE) -C $(TOOLCHAIN_DIR)/croqtile-skills update
+	@$(MAKE) -C $(TOOLCHAIN_DIR)/croqtile-skills setup-skills
 
 # -----------------------------------------------------------------------
 # cmp-perf  --  CI benchmark targets for choreo+topscc vs coir+topscc
