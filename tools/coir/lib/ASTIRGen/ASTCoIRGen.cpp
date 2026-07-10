@@ -1440,9 +1440,8 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
       for (auto &arg : callArgs) {
         mlir::Value v = EmitExpr(*arg);
         if (!v) {
-          if (isa<AST::Identifier>(arg))
-            v = LookupValue(
-                std::static_pointer_cast<AST::Identifier>(arg)->name);
+          if (auto name = AST::GetName(*arg))
+            v = LookupValue(*name);
         }
         if (v) operands.push_back(v);
       }
@@ -1455,15 +1454,12 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
       llvm::SmallVector<std::string> tplStorage;
       if (call->template_args) {
         for (auto &ta : call->template_args->AllValues()) {
-          if (isa<AST::Identifier>(ta))
-            tplStorage.push_back(
-                std::static_pointer_cast<AST::Identifier>(ta)->name);
-          else if (isa<AST::IntLiteral>(ta))
-            tplStorage.push_back(std::to_string(std::visit(
-                [](auto v) -> int64_t { return v; },
-                std::static_pointer_cast<AST::IntLiteral>(ta)->value)));
+          if (auto name = AST::GetName(*ta))
+            tplStorage.push_back(*name);
+          else if (auto lit = dyn_cast<AST::IntLiteral>(ta))
+            tplStorage.push_back(STR(*lit));
           else
-            tplStorage.push_back("?");
+            choreo_unreachable("unexpected template argument type in call");
         }
         for (auto &s : tplStorage)
           tplStrs.push_back(s);
@@ -1474,6 +1470,54 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
           call->IsLibCall() ? builder.getBoolAttr(true) : nullptr,
           call->IsBIF() ? builder.getBoolAttr(true) : nullptr,
           builder.getBoolAttr(true));
+      return callOp.getResult();
+    }
+    // Handle device function calls used as expressions
+    // (e.g., call kernel2() in an if condition)
+    if (call->IsExpr()) {
+      auto &fname = call->function->name;
+      auto &callArgs = call->GetArguments();
+      llvm::SmallVector<mlir::Value> operands;
+      for (auto &arg : callArgs) {
+        mlir::Value v = EmitExpr(*arg);
+        if (!v) {
+          if (auto name = AST::GetName(*arg))
+            v = LookupValue(*name);
+        }
+        if (v) operands.push_back(v);
+      }
+      // Determine return type from device function declarations
+      mlir::Type resTy;
+      if (!call->device_functions.empty()) {
+        auto &df = call->device_functions[0];
+        resTy = LowerBaseType(df->ret_type->GetDataType());
+      } else {
+        // Default to i32 when device function not resolved
+        resTy = mlir::IntegerType::get(&IRContext(), 32,
+                                       mlir::IntegerType::Signless);
+      }
+      llvm::SmallVector<mlir::StringRef> tplStrs;
+      llvm::SmallVector<std::string> tplStorage;
+      if (call->template_args) {
+        for (auto &ta : call->template_args->AllValues()) {
+          std::string taStr;
+          if (auto name = AST::GetName(*ta))
+            taStr = *name;
+          else if (auto lit = dyn_cast<AST::IntLiteral>(ta))
+            taStr = STR(*lit);
+          else
+            choreo_unreachable("unexpected template argument type in call");
+          tplStorage.push_back(std::move(taStr));
+        }
+        for (auto &s : tplStorage)
+          tplStrs.push_back(s);
+      }
+      auto callOp = builder.create<coir::CallOp>(
+          loc, resTy, builder.getStringAttr(fname), operands,
+          tplStrs.empty() ? nullptr : builder.getStrArrayAttr(tplStrs),
+          nullptr, // not lib call
+          nullptr, // not BIF
+          builder.getBoolAttr(true)); // is_expr
       return callOp.getResult();
     }
   }
@@ -2723,8 +2767,7 @@ bool ASTCoIRGen::Visit(AST::Wait &w) {
           if (auto *si = dyn_cast<AST::Identifier>(expr->GetR().get()))
             subscript = si->name;
           else if (auto *sl = dyn_cast<AST::IntLiteral>(expr->GetR().get()))
-            subscript = std::to_string(std::visit(
-                [](auto v) -> int64_t { return v; }, sl->value));
+            subscript = STR(*sl);
         }
       } else if (auto *id = dyn_cast<AST::Identifier>(expr->GetR().get()))
         name = id->name;
@@ -2755,8 +2798,7 @@ bool ASTCoIRGen::Visit(AST::Trigger &trig) {
           if (auto *si = dyn_cast<AST::Identifier>(expr->GetR().get()))
             subscript = si->name;
           else if (auto *sl = dyn_cast<AST::IntLiteral>(expr->GetR().get()))
-            subscript = std::to_string(std::visit(
-                [](auto v) -> int64_t { return v; }, sl->value));
+            subscript = STR(*sl);
         }
       } else if (auto *id = dyn_cast<AST::Identifier>(expr->GetR().get()))
         name = id->name;
@@ -2867,14 +2909,17 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
       fname != "print" && fname != "println")
     return true;
 
+  // Device calls used as expressions are handled by EmitExpr
+  if (call.IsExpr() && !call.IsArith() && !call.IsLibCall())
+    return true;
+
   // Emit arguments as operands
   llvm::SmallVector<mlir::Value> operands;
   for (auto &arg : args) {
     mlir::Value v = EmitExpr(*arg);
     if (!v) {
-      if (isa<AST::Identifier>(arg))
-        v = LookupValue(
-            std::static_pointer_cast<AST::Identifier>(arg)->name);
+      if (auto name = AST::GetName(*arg))
+        v = LookupValue(*name);
     }
     if (v) operands.push_back(v);
   }
@@ -2885,14 +2930,12 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
   if (call.template_args) {
     for (auto &ta : call.template_args->AllValues()) {
       std::string taStr;
-      if (isa<AST::Identifier>(ta))
-        taStr = std::static_pointer_cast<AST::Identifier>(ta)->name;
-      else if (isa<AST::IntLiteral>(ta))
-        taStr = std::to_string(std::visit(
-            [](auto v) -> int64_t { return v; },
-            std::static_pointer_cast<AST::IntLiteral>(ta)->value));
+      if (auto name = AST::GetName(*ta))
+        taStr = *name;
+      else if (auto lit = dyn_cast<AST::IntLiteral>(ta))
+        taStr = STR(*lit);
       else
-        taStr = "?";
+        choreo_unreachable("unexpected template argument type in call");
       tplStorage.push_back(std::move(taStr));
     }
     for (auto &s : tplStorage)
