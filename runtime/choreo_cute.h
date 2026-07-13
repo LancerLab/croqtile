@@ -950,6 +950,14 @@ CUTE_HOST_DEVICE void naive_copy(const Src& src, Dst& dst) {
                          cutlass::sizeof_bits<SrcVal>::value < 8) {
       SrcVal tmp = src(i);
       dst(i) = tmp.raw();
+    } else if constexpr (cutlass::sizeof_bits<SrcVal>::value < 8 &&
+                         std::is_same<SrcVal, DstVal>::value) {
+      // Same-type sub-byte copy: use raw pointer byte copy to avoid
+      // subbyte_iterator bit-level packed addressing, since memory is
+      // laid out at 1 byte per element (sizeof(subbyte_type) == 1).
+      auto* src_data = cute::raw_pointer_cast(src.data());
+      auto* dst_data = cute::raw_pointer_cast(dst.data());
+      dst_data[i] = src_data[i];
     } else {
       dst(i) = src(i);
     }
