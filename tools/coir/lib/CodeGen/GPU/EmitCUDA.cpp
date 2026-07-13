@@ -3180,12 +3180,8 @@ private:
                                             copyShape, suffix + "_d",
                                             enclosingKernel);
         }
-        os() << getIndent() << "if (__CHOREO_BLOCK_SINGLE__) {\n";
-        incIndent();
         os() << getIndent() << "choreo::naive_copy(" << srcTensor << ", "
            << dstTensor << ");\n";
-        decIndent();
-        os() << getIndent() << "}\n";
       } else {
         os() << getIndent() << "if (__CHOREO_BLOCK_SINGLE__) {\n";
         incIndent();
@@ -3203,11 +3199,7 @@ private:
   // --- Fallback handlers for un-lowered copy ops (when LowerDMADesc skips) ---
 
   void emitDmaCopy(DmaCopyOp op) override {
-    os() << getIndent() << "if (__CHOREO_BLOCK_SINGLE__) {\n";
-    incIndent();
     emitNaiveCopy(op.getSource(), op.getDest());
-    decIndent();
-    os() << getIndent() << "}\n";
     os() << getIndent() << "__syncthreads();\n";
     std::string name = getName(op.getToken());
     os() << getIndent() << "int " << name << " = 0;\n";
@@ -3215,11 +3207,7 @@ private:
   }
 
   void emitTmaCopy(TmaCopyOp op) {
-    os() << getIndent() << "if (__CHOREO_BLOCK_SINGLE__) {\n";
-    incIndent();
     emitNaiveCopy(op.getSource(), op.getDest());
-    decIndent();
-    os() << getIndent() << "}\n";
     os() << getIndent() << "__syncthreads();\n";
     std::string name = getName(op.getToken());
     os() << getIndent() << "int " << name << " = 0;\n";
