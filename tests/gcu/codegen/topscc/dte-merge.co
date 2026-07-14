@@ -28,3 +28,310 @@ __co__ void test_mergedte(f32 [128] input, f32 [128] output) {
 // NOMERGE: tops::private_dte __dte_fB__;
 // NOMERGE: tops::private_dte __dte_fC__;
 
+
+__co__ void test_mergedte2(f32 [128] input, f32 [128] output) {
+  parallel p by 1 {
+    local f32 [128] buf_a;
+    local f32 [128] buf_b;
+    local f32 [128] buf_c;
+    fD = dma.copy buf_b => output;
+    fA = dma.copy.async input => buf_a;
+    fB = dma.copy.async input => buf_b;
+    wait fA;
+    wait fB;
+    foreach i in 5 {
+      fa = dma.copy.async input => local;
+      wait fa;
+      fb = dma.copy fa.data => input;
+    }
+    fC = dma.copy.async buf_a => output;
+    wait fC;
+
+  }
+}
+
+// With merge: only 2 DTEs (fD/fA/fa/fC share one, fB/fb share another)
+// MERGE: __choreo_device_test_mergedte2
+// MERGE: tops::private_dte __dte_fA__;
+// MERGE: tops::private_dte __dte_fB__;
+// MERGE-NOT: __dte_fC__;
+// MERGE-NOT: __dte_fD__;
+// MERGE-NOT: __dte_fa__;
+// MERGE-NOT: __dte_fb__;
+
+// Without merge: 6 separate DTE instances
+// NOMERGE: tops::private_dte __dte_fD__;
+// NOMERGE: tops::private_dte __dte_fA__;
+// NOMERGE: tops::private_dte __dte_fB__;
+// NOMERGE: tops::private_dte __dte_fa__;
+// NOMERGE: tops::private_dte __dte_fb__;
+// NOMERGE: tops::private_dte __dte_fC__;
+// ============================================================================
+// Test 3: Chained reuse (A→B→C share one slot)
+// Verifies that stale entries from A and B don't block C from reusing.
+// ============================================================================
+__co__ void test_chained_reuse(f32 [128] input, f32 [128] output) {
+  parallel p by 1 {
+    local f32 [128] buf_a;
+    fA = dma.copy.async input => buf_a;
+    wait fA;
+    fB = dma.copy.async buf_a => output;
+    wait fB;
+    fC = dma.copy.async output => buf_a;
+    wait fC;
+  }
+}
+
+// MERGE: __choreo_device_test_chained_reuse
+// MERGE: tops::private_dte __dte_fA__;
+// MERGE-NOT: __dte_fB__;
+// MERGE-NOT: __dte_fC__;
+
+// NOMERGE: __choreo_device_test_chained_reuse
+// NOMERGE: tops::private_dte __dte_fA__;
+// NOMERGE: tops::private_dte __dte_fB__;
+// NOMERGE: tops::private_dte __dte_fC__;
+
+
+// ============================================================================
+// Test 4: Interleaved alloc/wait
+// A and B in-flight together (2 slots). A waited → C reuses A's slot.
+// B waited → D reuses B's slot. Total: 2 DTEs.
+// ============================================================================
+__co__ void test_interleaved(f32 [128] input, f32 [128] output) {
+  parallel p by 1 {
+    local f32 [128] buf_a;
+    local f32 [128] buf_b;
+    fA = dma.copy.async input => buf_a;
+    fB = dma.copy.async input => buf_b;
+    wait fA;
+    fC = dma.copy.async buf_a => output;
+    wait fB;
+    fD = dma.copy.async buf_b => output;
+    wait fC;
+    wait fD;
+  }
+}
+
+// MERGE: __choreo_device_test_interleaved
+// MERGE: tops::private_dte __dte_fA__;
+// MERGE: tops::private_dte __dte_fB__;
+// MERGE-NOT: __dte_fC__;
+// MERGE-NOT: __dte_fD__;
+
+// NOMERGE: __choreo_device_test_interleaved
+// NOMERGE: tops::private_dte __dte_fA__;
+// NOMERGE: tops::private_dte __dte_fB__;
+// NOMERGE: tops::private_dte __dte_fC__;
+// NOMERGE: tops::private_dte __dte_fD__;
+
+
+// ============================================================================
+// Test 5: Loop reuse (same future name across iterations)
+// fA alloc. fB in loop reuses fA's slot each iteration.
+// fC after loop reuses via merge. Total: 1 DTE.
+// ============================================================================
+__co__ void test_loop_reuse(f32 [128] input, f32 [128] output) {
+  parallel p by 1 {
+    local f32 [128] buf_a;
+    local f32 [128] buf_b;
+    fA = dma.copy.async input => buf_a;
+    wait fA;
+    foreach i in 3 {
+      fB = dma.copy.async buf_a => output;
+      wait fB;
+    }
+    fC = dma.copy.async input => buf_b;
+    wait fC;
+  }
+}
+
+// MERGE: __choreo_device_test_loop_reuse
+// MERGE: tops::private_dte __dte_fA__;
+// MERGE-NOT: __dte_fB__;
+// MERGE-NOT: __dte_fC__;
+
+// NOMERGE: __choreo_device_test_loop_reuse
+// NOMERGE: tops::private_dte __dte_fA__;
+// NOMERGE: tops::private_dte __dte_fB__;
+// NOMERGE: tops::private_dte __dte_fC__;
+
+
+// ============================================================================
+// Test 6: Sequential with sync DMA interleaved
+// fA async, waited. fB sync (no future). fC async reuses fA.
+// fC waited. fD sync. fE async reuses fC. Total: 1 DTE.
+// ============================================================================
+__co__ void test_sync_interleaved(f32 [128] input, f32 [128] output) {
+  parallel p by 1 {
+    local f32 [128] buf_a;
+    local f32 [128] buf_b;
+    fA = dma.copy.async input => buf_a;
+    wait fA;
+    fB = dma.copy buf_a => output;
+    fC = dma.copy.async input => buf_b;
+    wait fC;
+    fD = dma.copy buf_b => output;
+    fE = dma.copy.async input => buf_a;
+    wait fE;
+  }
+}
+
+// MERGE: __choreo_device_test_sync_interleaved
+// MERGE: tops::private_dte __dte_fA__;
+// MERGE-NOT: __dte_fB__;
+// MERGE-NOT: __dte_fC__;
+// MERGE-NOT: __dte_fD__;
+// MERGE-NOT: __dte_fE__;
+
+// NOMERGE: __choreo_device_test_sync_interleaved
+// NOMERGE: tops::private_dte __dte_fA__;
+// NOMERGE: tops::private_dte __dte_fB__;
+// NOMERGE: tops::private_dte __dte_fC__;
+// NOMERGE: tops::private_dte __dte_fD__;
+// NOMERGE: tops::private_dte __dte_fE__;
+
+
+// ============================================================================
+// Test 7: Partial wait (one future kept in-flight)
+// fA and fB in-flight together (2 slots). fA waited → fC reuses fA.
+// fB still in-flight → its slot cannot be reused until waited.
+// ============================================================================
+__co__ void test_partial_wait(f32 [128] input, f32 [128] output) {
+  parallel p by 1 {
+    local f32 [128] buf_a;
+    local f32 [128] buf_b;
+    local f32 [128] buf_c;
+    fA = dma.copy.async input => buf_a;
+    fB = dma.copy.async input => buf_b;
+    wait fA;
+    fC = dma.copy.async buf_a => output;
+    wait fC;
+    wait fB;
+  }
+}
+
+// MERGE: __choreo_device_test_partial_wait
+// MERGE: tops::private_dte __dte_fA__;
+// MERGE: tops::private_dte __dte_fB__;
+// MERGE-NOT: __dte_fC__;
+
+// NOMERGE: __choreo_device_test_partial_wait
+// NOMERGE: tops::private_dte __dte_fA__;
+// NOMERGE: tops::private_dte __dte_fB__;
+// NOMERGE: tops::private_dte __dte_fC__;
+
+
+// ============================================================================
+// Test 8: Multiple concurrent, then sequential
+// fA, fB, fC all in-flight together (3 slots). All waited.
+// fD, fE, fF sequential — each reuses one of the 3 slots.
+// ============================================================================
+__co__ void test_multi_concurrent(f32 [128] input, f32 [128] output) {
+  parallel p by 1 {
+    local f32 [128] buf_a;
+    local f32 [128] buf_b;
+    local f32 [128] buf_c;
+    fA = dma.copy.async input => buf_a;
+    fB = dma.copy.async input => buf_b;
+    fC = dma.copy.async input => buf_c;
+    wait fA;
+    wait fB;
+    wait fC;
+    fD = dma.copy.async buf_a => output;
+    wait fD;
+    fE = dma.copy.async buf_b => output;
+    wait fE;
+    fF = dma.copy.async buf_c => output;
+    wait fF;
+  }
+}
+
+// MERGE: __choreo_device_test_multi_concurrent
+// MERGE: tops::private_dte __dte_fA__;
+// MERGE: tops::private_dte __dte_fB__;
+// MERGE: tops::private_dte __dte_fC__;
+// MERGE-NOT: __dte_fD__;
+// MERGE-NOT: __dte_fE__;
+// MERGE-NOT: __dte_fF__;
+
+// NOMERGE: __choreo_device_test_multi_concurrent
+// NOMERGE: tops::private_dte __dte_fA__;
+// NOMERGE: tops::private_dte __dte_fB__;
+// NOMERGE: tops::private_dte __dte_fC__;
+// NOMERGE: tops::private_dte __dte_fD__;
+// NOMERGE: tops::private_dte __dte_fE__;
+// NOMERGE: tops::private_dte __dte_fF__;
+
+
+// ============================================================================
+// Test 9: Two independent sequential chains
+// Chain 1: fA → fB. Chain 2: fC → fD.
+// Both chains sequential, reuse same slot. Total: 1 DTE.
+// ============================================================================
+__co__ void test_two_chains(f32 [128] input, f32 [128] output) {
+  parallel p by 1 {
+    local f32 [128] buf_a;
+    local f32 [128] buf_b;
+    fA = dma.copy.async input => buf_a;
+    wait fA;
+    fB = dma.copy.async buf_a => output;
+    wait fB;
+    fC = dma.copy.async input => buf_b;
+    wait fC;
+    fD = dma.copy.async buf_b => output;
+    wait fD;
+  }
+}
+
+// MERGE: __choreo_device_test_two_chains
+// MERGE: tops::private_dte __dte_fA__;
+// MERGE-NOT: __dte_fB__;
+// MERGE-NOT: __dte_fC__;
+// MERGE-NOT: __dte_fD__;
+
+// NOMERGE: __choreo_device_test_two_chains
+// NOMERGE: tops::private_dte __dte_fA__;
+// NOMERGE: tops::private_dte __dte_fB__;
+// NOMERGE: tops::private_dte __dte_fC__;
+// NOMERGE: tops::private_dte __dte_fD__;
+
+
+// ============================================================================
+// Test 10: Nested loops with sync DMA inside
+// fA alloc. Outer loop: fB → inner loop: fC, sync fD.
+// All sequential through waits. fE after loops reuses. Total: 1 DTE.
+// ============================================================================
+__co__ void test_nested_loops(f32 [128] input, f32 [128] output) {
+  parallel p by 1 {
+    local f32 [128] buf_a;
+    local f32 [128] buf_b;
+    fA = dma.copy.async input => buf_a;
+    wait fA;
+    foreach i in 2 {
+      fB = dma.copy.async buf_a => output;
+      wait fB;
+      foreach j in 3 {
+        fC = dma.copy.async output => buf_b;
+        wait fC;
+        fD = dma.copy buf_b => output;
+      }
+    }
+    fE = dma.copy.async input => buf_b;
+    wait fE;
+  }
+}
+
+// MERGE: __choreo_device_test_nested_loops
+// MERGE: tops::private_dte __dte_fA__;
+// MERGE-NOT: __dte_fB__;
+// MERGE-NOT: __dte_fC__;
+// MERGE-NOT: __dte_fD__;
+// MERGE-NOT: __dte_fE__;
+
+// NOMERGE: __choreo_device_test_nested_loops
+// NOMERGE: tops::private_dte __dte_fA__;
+// NOMERGE: tops::private_dte __dte_fB__;
+// NOMERGE: tops::private_dte __dte_fC__;
+// NOMERGE: tops::private_dte __dte_fD__;
+// NOMERGE: tops::private_dte __dte_fE__;

@@ -509,6 +509,9 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
           for (int i = 0; i < dte_pool_size; ++i) {
             std::vector<std::string> slot_users;
             for (const auto& kv : dte_pool_slots) {
+              // Skip the internal sentinel key used for anonymous DMA
+              // merge tracking; it's not a real future name.
+              if (kv.first == "__anon__") continue;
               if (kv.second == i) slot_users.push_back(kv.first);
             }
             std::string var_name;
@@ -1721,11 +1724,22 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
           // but only if the slot is truly free (no un-waited future uses it).
           int reuse_slot = -1;
           if (dte_merge_mode) {
-            // Collect slots that are currently in-flight (have un-waited users)
+            // Collect slots that are currently in-flight (have un-waited
+            // users). A slot is in-flight only if ALL its users are non-waited;
+            // if any user is waited, the non-waited entries are stale.
             std::set<int> in_flight_slots;
             for (const auto& kv : dte_pool_slots) {
-              if (!waited_futures.count(kv.first))
-                in_flight_slots.insert(kv.second);
+              if (!waited_futures.count(kv.first)) {
+                bool has_waited_user = false;
+                for (const auto& kv2 : dte_pool_slots) {
+                  if (kv2.second == kv.second &&
+                      waited_futures.count(kv2.first)) {
+                    has_waited_user = true;
+                    break;
+                  }
+                }
+                if (!has_waited_user) in_flight_slots.insert(kv.second);
+              }
             }
             for (const auto& kv : dte_pool_slots) {
               if (waited_futures.count(kv.first) &&
@@ -1745,11 +1759,90 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
           waited_futures.erase(key);
         }
       } else {
-        // Anonymous DMA: use a dedicated slot separate from named futures.
-        // This avoids conflicts with rotate patterns where named DTEs'
-        // data/event get rotated but the DTE context does not.
-        if (anon_dte_slot < 0) anon_dte_slot = dte_pool_size++;
-        slot = anon_dte_slot;
+        // Anonymous DMA: in merge mode, dynamically find a free slot
+        // and track it so named futures can reuse it. Sync DMA completes
+        // immediately, so its slot is always available for reuse.
+        if (dte_merge_mode) {
+          static const std::string anon_key = "__anon__";
+          auto it = dte_pool_slots.find(anon_key);
+          if (it != dte_pool_slots.end()) {
+            // Check if the current anonymous slot is in-flight (used by an
+            // un-waited named future). If so, find a new free slot.
+            int cur_slot = it->second;
+            bool slot_in_flight = false;
+            for (const auto& kv : dte_pool_slots) {
+              if (kv.first != anon_key && kv.second == cur_slot &&
+                  !waited_futures.count(kv.first)) {
+                slot_in_flight = true;
+                break;
+              }
+            }
+            if (slot_in_flight) {
+              // Find a waited future's free slot, or allocate new
+              std::set<int> in_flight_slots;
+              for (const auto& kv : dte_pool_slots) {
+                if (!waited_futures.count(kv.first)) {
+                  bool has_waited_user = false;
+                  for (const auto& kv2 : dte_pool_slots) {
+                    if (kv2.second == kv.second &&
+                        waited_futures.count(kv2.first)) {
+                      has_waited_user = true;
+                      break;
+                    }
+                  }
+                  if (!has_waited_user) in_flight_slots.insert(kv.second);
+                }
+              }
+              int reuse_slot = -1;
+              for (const auto& kv : dte_pool_slots) {
+                if (waited_futures.count(kv.first) &&
+                    !in_flight_slots.count(kv.second)) {
+                  reuse_slot = kv.second;
+                  break;
+                }
+              }
+              if (reuse_slot >= 0)
+                it->second = reuse_slot;
+              else
+                it->second = dte_pool_size++;
+            }
+            slot = it->second;
+          } else {
+            // First anonymous DMA: try to reuse a waited future's slot
+            std::set<int> in_flight_slots;
+            for (const auto& kv : dte_pool_slots) {
+              if (!waited_futures.count(kv.first)) {
+                bool has_waited_user = false;
+                for (const auto& kv2 : dte_pool_slots) {
+                  if (kv2.second == kv.second &&
+                      waited_futures.count(kv2.first)) {
+                    has_waited_user = true;
+                    break;
+                  }
+                }
+                if (!has_waited_user) in_flight_slots.insert(kv.second);
+              }
+            }
+            int reuse_slot = -1;
+            for (const auto& kv : dte_pool_slots) {
+              if (waited_futures.count(kv.first) &&
+                  !in_flight_slots.count(kv.second)) {
+                reuse_slot = kv.second;
+                break;
+              }
+            }
+            if (reuse_slot >= 0)
+              slot = reuse_slot;
+            else
+              slot = dte_pool_size++;
+            dte_pool_slots[anon_key] = slot;
+          }
+          // Sync DMA completes immediately; mark slot as available
+          waited_futures.insert(anon_key);
+        } else {
+          if (anon_dte_slot < 0) anon_dte_slot = dte_pool_size++;
+          slot = anon_dte_slot;
+        }
       }
       dte_ctx = "__choreo_dte_pool__[" + std::to_string(slot) + "]";
     } else {
@@ -2546,6 +2639,11 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   };
 
   DMACodeGen();
+
+  // Mark sync named futures as immediately available for DTE merge reuse.
+  // Sync DMA completes immediately, so its DTE slot is free for reuse.
+  if (dte_merge_mode && !n.future.empty() && !fty->IsAsync())
+    waited_futures.insert(n.future);
 
   return true;
 }
