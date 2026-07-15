@@ -1466,6 +1466,10 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
             tplStorage.push_back(
                 CppTypeName(cast<AST::DataType>(expr->GetReference())
                                 ->getBaseType()));
+          else if (auto expr = dyn_cast<AST::Expr>(ta);
+                   expr->Opts().HasVal())
+            tplStorage.push_back(
+                STR(EvalToInt(expr->Opts().GetVal())));
           else
             choreo_unreachable("unexpected template argument type in call");
         }
@@ -1518,6 +1522,9 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
                    isa<AST::DataType>(expr->GetReference()))
             taStr = CppTypeName(
                 cast<AST::DataType>(expr->GetReference())->getBaseType());
+          else if (auto expr = dyn_cast<AST::Expr>(ta);
+                   expr->Opts().HasVal())
+            taStr = STR(EvalToInt(expr->Opts().GetVal()));
           else
             choreo_unreachable("unexpected template argument type in call");
           tplStorage.push_back(std::move(taStr));
@@ -2964,6 +2971,9 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
                isa<AST::DataType>(expr->GetReference()))
         taStr = CppTypeName(
             cast<AST::DataType>(expr->GetReference())->getBaseType());
+      else if (auto expr = dyn_cast<AST::Expr>(ta);
+               expr->Opts().HasVal())
+        taStr = STR(EvalToInt(expr->Opts().GetVal()));
       else
         choreo_unreachable("unexpected template argument type in call");
       tplStorage.push_back(std::move(taStr));
