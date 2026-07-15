@@ -23,7 +23,15 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
+
+#if __has_include(<ATen/core/ScalarType.h>) &&                                \
+    __has_include(<ATen/core/TensorBody.h>)
+  #include <ATen/core/ScalarType.h>
+  #include <ATen/core/TensorBody.h>
+  #define __CHOREO_HAS_ATEN_TENSOR__
+#endif
 
 #if __has_include("private_target0_defines.h")
   #include "private_target0_defines.h"
@@ -970,6 +978,73 @@ make_spanview(const void* ptr, std::initializer_list<size_t> init) {
   return spanned_view<U, Rank>(const_cast<U*>(reinterpret_cast<const U*>(ptr)),
                                make_mdspan<Rank>(init));
 }
+
+#ifdef __CHOREO_HAS_ATEN_TENSOR__
+namespace detail {
+
+template <typename>
+struct always_false : std::false_type {};
+
+template <typename T>
+inline at::ScalarType aten_scalar_type_for() {
+  using U = typename std::remove_cv<T>::type;
+  if constexpr (std::is_same<U, f64>::value) {
+    return at::kDouble;
+  } else if constexpr (std::is_same<U, f32>::value) {
+    return at::kFloat;
+  } else if constexpr (std::is_same<U, f16>::value) {
+    return at::kHalf;
+  } else if constexpr (std::is_same<U, bf16>::value) {
+    return at::kBFloat16;
+  } else if constexpr (std::is_same<U, bool>::value) {
+    return at::kBool;
+  } else if constexpr (std::is_same<U, int8_t>::value ||
+                       std::is_same<U, char>::value) {
+    return at::kChar;
+  } else if constexpr (std::is_same<U, uint8_t>::value ||
+                       std::is_same<U, unsigned char>::value) {
+    return at::kByte;
+  } else if constexpr (std::is_same<U, int16_t>::value ||
+                       std::is_same<U, short>::value) {
+    return at::kShort;
+  } else if constexpr (std::is_same<U, int32_t>::value ||
+                       std::is_same<U, int>::value) {
+    return at::kInt;
+  } else if constexpr (std::is_same<U, int64_t>::value ||
+                       std::is_same<U, long long>::value) {
+    return at::kLong;
+  } else {
+    static_assert(always_false<U>::value,
+                  "Unsupported at::Tensor element type for make_spanview.");
+  }
+}
+
+} // namespace detail
+
+template <typename T, size_t Rank>
+__co_host__ spanned_view<typename std::remove_const<T>::type, Rank>
+make_spanview(const at::Tensor& tensor) {
+  static_assert(Rank != 0, "unexpected 0-dims.");
+  using U = typename std::remove_const<T>::type;
+
+  runtime_check(tensor.defined(), "at::Tensor is undefined.");
+  #ifdef __CHOREO_TARGET_CUTE__
+  runtime_check(tensor.is_cuda(), "at::Tensor must be a CUDA tensor.");
+  #endif
+  runtime_check(static_cast<size_t>(tensor.dim()) == Rank,
+                "at::Tensor rank mismatch: expect " + std::to_string(Rank) +
+                    ", but got " + std::to_string(tensor.dim()) + ".");
+  runtime_check(tensor.scalar_type() == detail::aten_scalar_type_for<U>(),
+                "at::Tensor dtype mismatch.");
+  runtime_check(tensor.is_contiguous(), "at::Tensor must be contiguous.");
+
+  mdspan<Rank> shape({1});
+  for (size_t i = 0; i < Rank; ++i)
+    shape[i] = static_cast<size_t>(tensor.size(static_cast<int64_t>(i)));
+
+  return spanned_view<U, Rank>(reinterpret_cast<U*>(tensor.data_ptr()), shape);
+}
+#endif // __CHOREO_HAS_ATEN_TENSOR__
 
 template <typename T, size_t N>
 __co_any__ spanned_view<T, 1> make_spanview(T (&arr)[N]) {
