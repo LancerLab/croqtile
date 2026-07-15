@@ -429,6 +429,46 @@ inline static std::string GetStringFrom(ParallelLevel st) {
 
 } // end namespace __internal__
 
+/// Convert BaseType to its C++ type name for use in template arguments.
+/// Returns the device-side C++ type name (e.g. "double" for F64,
+/// "choreo::half" for F16).
+inline static const std::string CppTypeName(BaseType bt) {
+  switch (bt) {
+  case BaseType::F64:  return "double";
+  case BaseType::F32:  return "float";
+  case BaseType::TF32: return "choreo::tf32";
+  case BaseType::F16:  return "choreo::half";
+  case BaseType::BF16: return "choreo::bfloat16";
+  case BaseType::F8_E4M3:  return "choreo::f8_e4m3";
+  case BaseType::F8_E5M2:  return "choreo::f8_e5m2";
+  case BaseType::F8_UE8M0: return "choreo::f8_ue8m0";
+  case BaseType::F8_UE4M3: return "choreo::f8_ue4m3";
+  case BaseType::F6_E2M3:  return "choreo::f6_e2m3";
+  case BaseType::F6_E3M2:  return "choreo::f6_e3m2";
+  case BaseType::F4_E2M1:  return "choreo::f4_e2m1";
+  case BaseType::U64:  return "uint64_t";
+  case BaseType::U32:  return "unsigned int";
+  case BaseType::U16:  return "unsigned short";
+  case BaseType::U8:   return "unsigned char";
+  case BaseType::S64:  return "int64_t";
+  case BaseType::S32:  return "int";
+  case BaseType::S16:  return "short";
+  case BaseType::S8:   return "char";
+  case BaseType::U6:   return "choreo::u6";
+  case BaseType::S6:   return "choreo::s6";
+  case BaseType::U4:   return "choreo::u4";
+  case BaseType::S4:   return "choreo::s4";
+  case BaseType::U2:   return "choreo::u2";
+  case BaseType::S2:   return "choreo::s2";
+  case BaseType::U1:   return "choreo::u1";
+  case BaseType::BIN1: return "choreo::bin1";
+  case BaseType::BOOL: return "bool";
+  default:
+    choreo_unreachable("unsupported base-type for C++ template: " +
+                       __internal__::GetStringFrom(bt));
+  }
+}
+
 inline static const std::string STR(size_t sz) { return std::to_string(sz); }
 inline static const std::string STR(BaseType bt) {
   return __internal__::GetStringFrom(bt);
