@@ -3201,11 +3201,11 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   if (n.IsOuter() && n.GetLevel() == ParallelLevel::CLUSTER) {
     cluster_defers_launch = true;
     deferred_cluster_pb = &n;
-    // auto cluster_scope = SSTab().ScopeName();
-    // auto mri = FCtx(fname).GetStaticMemReuseInfo(cluster_scope);
-    // if (mri && mri->infos.count(Storage::SHARED) &&
-    //     mri->infos.at(Storage::SHARED).spm_size > 48 * 1024)
-    //   set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
+    auto cluster_scope = SSTab().ScopeName();
+    auto mri = FCtx(fname).GetStaticMemReuseInfo(cluster_scope);
+    if (mri && mri->infos.count(Storage::SHARED) &&
+        mri->infos.at(Storage::SHARED).spm_size >= 48 * 1024)
+      set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
     ds << d_indent << "// cluster parallel-by: " << n.LOC() << "\n";
     return true;
   }
@@ -3324,7 +3324,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       }
       if (mri) {
         // 48KB is the largest capacity that static shared memory supports.
-        if (mri->infos[Storage::SHARED].spm_size > 48 * 1024) {
+        if (mri->infos[Storage::SHARED].spm_size >= 48 * 1024) {
           auto code_spm_end = sbe::nu(mri->infos[Storage::SHARED].spm_size);
           shared_spm_size += code_spm_end;
           ring_start = code_spm_end;
