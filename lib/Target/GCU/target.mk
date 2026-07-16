@@ -16,7 +16,7 @@ BISON_ENV:=BISON_PKGDATADIR=$(TOOLCHAIN_DIR)/shared/bison/
 BISON:=$(BISON_ENV) $(BISON_BIN)
 CFLAGS += -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR)"
 
-.PHONY: setup-gcu2 setup-gcu3
+.PHONY: setup-gcu2 setup-gcu3 setup-gcu4sim setup-gcu5sim
 
 check-choreo-kit:
 	@if [ "$(CUR_PKG_MD5)" != "$(PACKAGE_MD5)"  ]; then \
@@ -122,6 +122,12 @@ setup-gcu4: setup-core
 setup-gcu5: setup-core
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu5-kit FTP_SERVER=$(FTP_SERVER)
 
+setup-gcu4sim: setup-core
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu4-kit FTP_SERVER=$(FTP_SERVER)
+
+setup-gcu5sim: setup-core
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu5-kit FTP_SERVER=$(FTP_SERVER)
+
 resetup-gcu2: install-choreo-kit
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-install FTP_SERVER=$(FTP_SERVER)
 
@@ -205,7 +211,7 @@ publish-sdk: sdk-package
 	curl -T $$pkg_name ftp://$(FTP_SERVER)/\%2fdev/choreo-sdk/$$sdk_name --user ftp_era:Enflame@321
 
 test-libra: release
-	$(LIT) tests/gcu/libra && $(MAKE) standalone-test-with-cmake
+	$(LIT) --sim=only tests/gcu/end2end && $(MAKE) standalone-test-with-cmake
 
 # =============================================================================
 # Sample Tests for topscc/elementwise

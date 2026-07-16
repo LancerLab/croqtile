@@ -3949,11 +3949,12 @@ option_detect() {
 
   os << "\"";
   os << "\noption_detect";
-  // if (use_sim) os << "\nexport INTERNAL_GCU_SIM=LIBRA";
-  if (CCtx().GetArch() == "gcu400")
-    os << "\nexport INTERNAL_GCU_SIM=LIBRA";
-  else if (CCtx().GetArch() == "gcu500")
-    os << "\nexport INTERNAL_GCU_SIM=DRACO";
+  if (CCtx().IsSimArch()) {
+    if (CCtx().ArchNum() == 400)
+      os << "\nexport INTERNAL_GCU_SIM=LIBRA";
+    else if (CCtx().ArchNum() == 500)
+      os << "\nexport INTERNAL_GCU_SIM=DRACO";
+  }
 
   os << "\n";
 

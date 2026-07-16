@@ -1,0 +1,3 @@
+// Two RUN lines with different binaries.
+// RUN: choreo -t mock %s -o /dev/null
+// RUN: cocc -t mock %s -o /dev/null

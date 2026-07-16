@@ -1,4 +1,4 @@
-// REQUIRES: TARGET-GCU300
+// REQUIRES: TARGET-GCU300+
 // RUN: choreo -gs -t topscc %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 __device__ void relu_kernel(float* input, float* out, int m, int n) {

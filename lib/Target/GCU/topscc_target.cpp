@@ -37,9 +37,14 @@ public:
 
   const std::vector<ArchInfo> SupportedArchs() const override {
     return {
-        {"gcu200", "GCU Architecture 2.0"}, {"gcu210", "GCU Architecture 2.1"},
-        {"gcu300", "GCU Architecture 3.0"}, {"gcu400", "GCU Architecture 4.0"},
-        {"gcu450", "GCU Architecture 4.5"}, {"gcu500", "GCU Architecture 5.0"},
+        {"gcu200", "GCU Architecture 2.0"},
+        {"gcu210", "GCU Architecture 2.1"},
+        {"gcu300", "GCU Architecture 3.0"},
+        {"gcu400", "GCU Architecture 4.0"},
+        {"gcu450", "GCU Architecture 4.5"},
+        {"gcu500", "GCU Architecture 5.0"},
+        {"sim-gcu400", "GCU Architecture 4.0 (simulator)"},
+        {"sim-gcu500", "GCU Architecture 5.0 (simulator)"},
     };
   }
 
