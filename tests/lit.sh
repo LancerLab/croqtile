@@ -60,6 +60,28 @@ set_contains() {
   return 1
 }
 
+# Check if any element starts with the given prefix
+# Usage: set_contains_prefix SET_NAME "prefix"
+# Returns 0 if found, 1 if not found
+set_contains_prefix() {
+  local set_name="$1"
+  local prefix="$2"
+  local current_elements
+
+  eval "current_elements=(\"\${${set_name}[@]}\")"
+
+  if [ ${#current_elements[@]} -eq 0 ]; then
+    return 1
+  fi
+
+  for element in "${current_elements[@]}"; do
+    if [[ "$element" == "${prefix}"* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Check if set is empty
 # Usage: set_empty SET_NAME
 # Returns 0 if empty, 1 if not empty
@@ -623,6 +645,10 @@ declare -A FEATURE_CACHE=()
 max_jobs=1
 dry_run=0
 
+sim_mode="off"
+run_only=""
+target_only=""
+
 need_cute=0
 need_cuda=0
 
@@ -942,8 +968,11 @@ execute_command() {
   local _co_mock_bin; _co_mock_bin="$(which co-mock 2>/dev/null || echo co-mock)"
   local _sed_args=()
   _sed_args+=(-e "s#\bco-mock\b#__CO_MOCK_PLACEHOLDER__#g")
+  [[ -n "$_choreo_bin" ]] && _sed_args+=(-e "s#%choreo#${_choreo_bin} -n#g")
   [[ -n "$_choreo_bin" ]] && _sed_args+=(-e "s#\bchoreo\b#${_choreo_bin} -n#g")
+  [[ -n "$_copp_bin" ]]   && _sed_args+=(-e "s#%copp#${_copp_bin}#g")
   [[ -n "$_copp_bin" ]]   && _sed_args+=(-e "s#\bcopp\b#${_copp_bin}#g")
+  [[ -n "$_cocc_bin" ]]   && _sed_args+=(-e "s#%cocc#${_cocc_bin} -n#g")
   [[ -n "$_cocc_bin" ]]   && _sed_args+=(-e "s#\bcocc\b#${_cocc_bin} -n#g")
   _sed_args+=(-e "s#\bFileCheck\b#${FILECHECK}#g")
   _sed_args+=(-e "s#\bgdb\b#${GDB_BIN}#g")
@@ -1033,7 +1062,7 @@ execute_command() {
 #         Handle arguments
 # ---------------------------------------"
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 [-jN] [--dry-run] <file_or_directory>"
+    echo "Usage: $0 [-jN] [--dry-run] [--sim=off|on|only] [--run-only=BIN] [--target-only=TGT] <file_or_directory>"
     exit 1
 fi
 
@@ -1058,6 +1087,22 @@ while [[ $# -gt 0 ]]; do
       ;;
     --dry-run)
       dry_run=1
+      shift
+      ;;
+    --sim=*)
+      sim_mode="${1#*=}"
+      if [[ "$sim_mode" != "off" && "$sim_mode" != "on" && "$sim_mode" != "only" ]]; then
+        echo "Error: --sim must be off, on, or only"
+        exit 1
+      fi
+      shift
+      ;;
+    --run-only=*)
+      run_only="${1#*=}"
+      shift
+      ;;
+    --target-only=*)
+      target_only="${1#*=}"
       shift
       ;;
     -*)
@@ -1197,7 +1242,9 @@ for _entry in "${files_array[@]}"; do
   prepare "$file" "$_cfg_override"
 
   if [ ! -z "$expect_skip" ]; then
-    print_status_line "SKIP:" "$file"
+    _skip_reason="${expect_skip#*SKIP:}"
+    _skip_reason="$(trim_spaces "$_skip_reason")"
+    print_status_line "SKIP(${_skip_reason}):" "$file"
     num_skiped=$(($num_skiped + 1));
     continue;
   fi
@@ -1249,11 +1296,37 @@ for _entry in "${files_array[@]}"; do
 
   # Skip whole file early when required targets cannot match current machine/simulator.
   if ! set_empty REQ_TARGETS; then
-    if [[ $device_type == "none" && "$simulator" == "none" ]] || ! { set_contains REQ_TARGETS "$mach" || set_contains REQ_TARGETS "$simulator";  }; then
+    _sim_base="${simulator#sim-}"
+    if [[ $device_type == "none" && "$simulator" == "none" ]] || ! { set_contains REQ_TARGETS "$mach" || set_contains REQ_TARGETS "$simulator" || set_contains REQ_TARGETS "$_sim_base";  }; then
       _all_skipped_targets=$(set_print REQ_TARGETS)
       print_status_line "SKIP($(toupper "${_all_skipped_targets}")):" "${file}"
       num_skiped=$(($num_skiped + 1));
       continue;
+    fi
+  fi
+
+  # --sim=only: only run files that require a simulator target
+  if [[ $sim_mode == "only" ]]; then
+    if ! set_contains_prefix REQ_TARGETS "sim-"; then
+      _all_skipped_targets=$(set_print REQ_TARGETS)
+      print_status_line "SKIP(sim=only):" "${file}"
+      num_skiped=$(($num_skiped + 1));
+      continue;
+    fi
+  fi
+
+  # --sim=off: skip files that exclusively require a simulator target.
+  # Tests that also match a non-sim arch (e.g. TARGET-ARCH300+,TARGET-SIMARCH)
+  # are allowed through since they can run without a simulator.
+  if [[ $sim_mode == "off" ]]; then
+    if set_contains_prefix REQ_TARGETS "sim-"; then
+      _sim_base="${simulator#sim-}"
+      if ! set_contains REQ_TARGETS "$mach" && ! set_contains REQ_TARGETS "$_sim_base"; then
+        _all_skipped_targets=$(set_print REQ_TARGETS)
+        print_status_line "SKIP(sim=off):" "${file}"
+        num_skiped=$(($num_skiped + 1));
+        continue;
+      fi
     fi
   fi
 
@@ -1329,11 +1402,48 @@ for _entry in "${files_array[@]}"; do
     # requires specific device to run
     if ! set_empty REQ_TARGETS; then
       #echo "device: $device_type, reqs: $(set_print REQ_TARGETS), mach: $mach"
-      if [[ $device_type == "none" && "$simulator" == "none" ]] || ! { set_contains REQ_TARGETS "$mach" || set_contains REQ_TARGETS "$simulator";  }; then
+      if [[ $device_type == "none" && "$simulator" == "none" ]] || ! { set_contains REQ_TARGETS "$mach" || set_contains REQ_TARGETS "$simulator" || set_contains REQ_TARGETS "$_sim_base";  }; then
         # Not matched, skip
         _all_skipped_targets=$(set_print REQ_TARGETS)
         print_status_line "SKIP($(toupper "${_all_skipped_targets}")):" "${file} ($run_count of $run_num)"
         num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
+        continue;
+      fi
+    fi
+
+    # --run-only: skip RUN lines that don't invoke a specified binary
+    if [[ -n "$run_only" ]]; then
+      # Split comma-separated list; keep if any binary matches as a
+      # standalone word (or %placeholder) in the command.
+      local _ro_list=() _ro_bin _ro_match
+      IFS=',' read -ra _ro_list <<< "$run_only"
+      _ro_match=0
+      for _ro_bin in "${_ro_list[@]}"; do
+        if [[ "$run_command" =~ (^|[[:space:]])(%?${_ro_bin})($|[[:space:]]) ]]; then
+          _ro_match=1; break
+        fi
+      done
+      if [[ $_ro_match -eq 0 ]]; then
+        print_status_line "SKIP(run-only=${run_only}):" "${file} ($run_count of $run_num)"
+        num_skiped=$(($num_skiped + 1));
+        continue;
+      fi
+    fi
+
+    # --target-only: skip RUN lines that don't target a specified -t target
+    if [[ -n "$target_only" ]]; then
+      # Split comma-separated list; keep if any target matches.
+      local _to_list=() _to_tgt _to_match
+      IFS=',' read -ra _to_list <<< "$target_only"
+      _to_match=0
+      for _to_tgt in "${_to_list[@]}"; do
+        if [[ "$run_command" =~ [[:space:]]-t[[:space:]]+${_to_tgt}($|[[:space:]]) ]]; then
+          _to_match=1; break
+        fi
+      done
+      if [[ $_to_match -eq 0 ]]; then
+        print_status_line "SKIP(target-only=${target_only}):" "${file} ($run_count of $run_num)"
+        num_skiped=$(($num_skiped + 1));
         continue;
       fi
     fi
