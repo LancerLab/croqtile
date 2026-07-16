@@ -478,6 +478,7 @@ private:
   std::unique_ptr<Target> compile_target = nullptr;
   std::map<std::string, std::unique_ptr<Target>> device_targets;
   std::vector<ArchId> archs;
+  bool is_sim_arch = false;
   std::vector<FeatureToggle> features;
   OutputKind out_kind = OutputKind::TargetExecutable;
   int8_t opt_level = -1; // undecided
@@ -649,6 +650,7 @@ public:
 #endif
 
   bool IsArchSet() const { return !archs.empty(); }
+  bool IsSimArch() const { return is_sim_arch; }
   const std::vector<ArchId> GetArchs() const {
     if (archs.size() == 0) return {GetTarget().DefaultArch()};
     return archs;
@@ -669,6 +671,12 @@ public:
   }
   void AddArch(const ArchId& arch) {
     ArchId resolved = arch;
+    // Handle sim- prefix: strip it, validate the base arch,
+    // and flag that the script should set simulator env vars.
+    if (resolved.compare(0, 4, "sim-") == 0) {
+      resolved = resolved.substr(4);
+      is_sim_arch = true;
+    }
     if (arch == "native") {
       resolved = GetTarget().ResolveNativeArch();
       if (resolved.empty())
