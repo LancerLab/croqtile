@@ -24,6 +24,10 @@ namespace coir {
 struct KernelConvertCtx {
   mlir::IRMapping &mapping;
   llvm::DenseMap<mlir::Value, mlir::Value> &returnAllocMap;
+  /// SPM pool base allocations.  Keyed by reuse_spm name.
+  /// First reuse alloc for a pool creates the base memref.alloc;
+  /// subsequent allocs create subview + reinterpret_cast into it.
+  llvm::DenseMap<llvm::StringRef, mlir::Value> spmPools;
 };
 
 struct LaunchDims {

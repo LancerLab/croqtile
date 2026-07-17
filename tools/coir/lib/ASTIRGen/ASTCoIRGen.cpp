@@ -786,6 +786,33 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
                          mlir::StringAttr::get(&IRContext(), ie.result));
       kernelOp->setAttr("coir.mr_offsets_name",
                          mlir::StringAttr::get(&IRContext(), ie.offsets_name));
+
+      // Const interference matrix for parametric HeapSimulator plan.
+      if (ie.n_buffers > 0 && !ie.interference.empty()) {
+        kernelOp->setAttr("coir.mr_n_buffers",
+                           mlir::IntegerAttr::get(
+                               mlir::IntegerType::get(&IRContext(), 64),
+                               ie.n_buffers));
+        kernelOp->setAttr("coir.mr_alignment",
+                           mlir::IntegerAttr::get(
+                               mlir::IntegerType::get(&IRContext(), 64),
+                               ie.alignment));
+        llvm::SmallVector<mlir::Attribute> boolMat;
+        for (bool v : ie.interference)
+          boolMat.push_back(mlir::BoolAttr::get(&IRContext(), v));
+        kernelOp->setAttr("coir.mr_interference",
+                           mlir::ArrayAttr::get(&IRContext(), boolMat));
+        llvm::SmallVector<mlir::Attribute> sizeExprs;
+        for (auto &s : ie.size_exprs)
+          sizeExprs.push_back(mlir::StringAttr::get(&IRContext(), s));
+        kernelOp->setAttr("coir.mr_size_exprs",
+                           mlir::ArrayAttr::get(&IRContext(), sizeExprs));
+        llvm::SmallVector<mlir::Attribute> bufIds;
+        for (auto &b : ie.buffer_ids)
+          bufIds.push_back(mlir::StringAttr::get(&IRContext(), b));
+        kernelOp->setAttr("coir.mr_buffer_ids",
+                           mlir::ArrayAttr::get(&IRContext(), bufIds));
+      }
     }
     // Update function type with the new args
     auto mlirFnType3 =

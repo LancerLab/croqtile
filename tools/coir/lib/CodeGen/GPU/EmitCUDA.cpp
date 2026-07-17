@@ -1317,8 +1317,33 @@ private:
                << mlir::cast<mlir::StringAttr>(chunkAttr).getValue().str()
                << ");\n";
         os() << "  HeapSimulator __mr_sim;\n";
-        os() << "  HeapSimulator::Result " << resultName
-             << " = __mr_sim.Allocate(" << chunksName << ", 512);\n";
+
+        // Const interference matrix (parametric plan).
+        auto nBuf =
+            kernel->getAttrOfType<mlir::IntegerAttr>("coir.mr_n_buffers");
+        auto imat =
+            kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_interference");
+        auto mrAlign =
+            kernel->getAttrOfType<mlir::IntegerAttr>("coir.mr_alignment");
+        unsigned align = mrAlign ? (unsigned)mrAlign.getInt() : 512;
+        if (nBuf && imat && !imat.empty()) {
+          std::string imatName = chunksName + "_imat";
+          os() << "  std::vector<bool> " << imatName << " = {";
+          bool first = true;
+          for (auto v : imat) {
+            if (!first) os() << ",";
+            first = false;
+            os() << (mlir::cast<mlir::BoolAttr>(v).getValue() ? "true"
+                                                               : "false");
+          }
+          os() << "};\n";
+          os() << "  HeapSimulator::Result " << resultName
+               << " = __mr_sim.Allocate(" << chunksName << ", " << align
+               << ", " << imatName << ");\n";
+        } else {
+          os() << "  HeapSimulator::Result " << resultName
+               << " = __mr_sim.Allocate(" << chunksName << ", 512);\n";
+        }
         os() << "  unsigned " << mrSpmSizeName << " = " << resultName
              << ".heap_size;\n";
         os() << "  unsigned long " << mrOffsetsName << "["
