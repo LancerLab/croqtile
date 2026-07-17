@@ -1,0 +1,35 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -es %s | FileCheck --check-prefix=DEV %s
+// RUN: cocc -t topscc -gs %s | FileCheck --check-prefix=HOST %s
+//
+// DEV checks: device code uses extern __shared__ + mr_offset_* kernel args.
+// HOST checks: host wrapper emits HeapSimulator with const interference matrix.
+
+__co__ void memreuse_dynamic(s32 [1024] src, s32 [N] input, s32 [1024] out) {
+  parallel tid by 5 : thread {
+    foreach k in 8 {
+      l_h = dma.copy input => local;
+      local s32[l_h.span] l_h2;
+      foreach i in [l_h.span(0)] {
+        l_h2.at(i) = l_h.data.at(i) * 3;
+      }
+      l_s = dma.copy src.chunkat(k) => local;
+      local s32[l_s.span] l_s2;
+      foreach i in [l_s.span(0)] {
+        l_s2.at(i) = l_s.data.at(i) + l_h2.at(i % l_h.span(0));
+      }
+      dma.copy l_s2 => out.chunkat(k);
+    }
+  }
+}
+
+// DEV: extern __local__ unsigned char __dyn_smem[];
+// DEV-COUNT-4: mr_offset_
+// DEV: HeapSimulator
+
+// HOST: HeapSimulator::Chunks
+// HOST: HeapSimulator __mr_sim
+// HOST: vector<bool> {{.*}}_imat = {false,true,true,false,true,false,true,false,true,true,false,true,false,false,true,false}
+// HOST: Allocate({{.*}}, 512, {{.*}}_imat)
+// HOST: __co__local_chunk_offsets
+// HOST: __co__local_spm_size

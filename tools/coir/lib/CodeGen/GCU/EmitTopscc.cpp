@@ -58,8 +58,11 @@ public:
 
     for (auto &op : module.getBody()->getOperations()) {
       if (auto kernel = dyn_cast<KernelOp>(op))
-        if (hasBlockParallel(kernel))
+        if (hasBlockParallel(kernel)) {
+          spmNames_.clear();
+          dynSpmEmitted_ = false;
           emitDeviceFunction(kernel);
+        }
     }
 
     if (!stubCode.empty())
@@ -100,6 +103,13 @@ private:
 
   struct EntryAssertion { AssertOp op; };
   llvm::SmallVector<EntryAssertion> entryAssertions;
+
+  /// SPM pool tracking for memory reuse.
+  /// Maps reuse_spm name → __spm_N variable name.  First reuse alloc for
+  /// a pool emits the backing array; subsequent allocs emit pointer aliases.
+  llvm::DenseMap<llvm::StringRef, std::string> spmNames_;
+  /// Whether the dynamic shared-memory extern declaration has been emitted.
+  bool dynSpmEmitted_ = false;
 
   bool hasGroupLevel() const override { return archNum >= 400; }
   bool supportsFP8() const override { return archNum >= 400; }
@@ -191,7 +201,8 @@ private:
     os() << "#include <stdint.h>\n";
     os() << "#include <tops.h>\n";
     os() << "#include \"tops/tops_runtime.h\"\n";
-    os() << "#include \"choreo.h\"\n\n";
+    os() << "#include \"choreo.h\"\n";
+    os() << "using namespace choreo;\n\n";
   }
 
   void preCollectStubs(KernelOp kernel) {
@@ -349,11 +360,31 @@ private:
 
     auto &body = kernel.getBody();
     unsigned paramIdx = 0;
+
+    // Build MR arg name mapping so dynamic reuse offsets are named
+    // with their mr_offset_* / spm_size identifiers instead of "argN".
+    auto mrOffsets =
+        kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_offset_args");
+    auto mrSpmSize =
+        kernel->getAttrOfType<mlir::StringAttr>("coir.mr_spm_size_arg");
+    unsigned numMrOffsets = mrOffsets ? mrOffsets.size() : 0;
+    unsigned mrBaseIdx = 0;
     if (!body.empty()) {
       auto args = body.getArguments();
+      mrBaseIdx = args.size() - numMrOffsets - (mrSpmSize ? 1 : 0);
       for (unsigned i = 0; i < args.size(); ++i) {
         if (paramIdx > 0) os() << ", ";
-        std::string name = "arg" + std::to_string(paramIdx);
+        std::string name;
+        if (mrOffsets && i >= mrBaseIdx && i < mrBaseIdx + numMrOffsets) {
+          auto offsetIdx = i - mrBaseIdx;
+          name = mlir::cast<mlir::StringAttr>(mrOffsets[offsetIdx])
+                     .getValue()
+                     .str();
+        } else if (mrSpmSize && i == args.size() - 1) {
+          name = mrSpmSize.getValue().str();
+        } else {
+          name = "arg" + std::to_string(paramIdx);
+        }
         valueNames[args[i]] = name;
         os() << emitType(fnType.getInput(i)) << " " << name;
         paramIdx++;
@@ -393,6 +424,53 @@ private:
 
     decIndent();
     os() << "}\n\n";
+  }
+
+  /// Walk through tensor.tile ops to find the underlying tensor.alloc.
+  TensorAllocOp getTensorAllocDef(Value tensor) const {
+    while (auto tile = tensor.getDefiningOp<TensorTileOp>())
+      tensor = tile.getSource();
+    return tensor.getDefiningOp<TensorAllocOp>();
+  }
+
+  /// Emit a single dimension expression.  Returns the static value as a
+  /// string or the name of the dynamic SSA value.
+  std::string emitDimExpr(Value tensor, unsigned dimIdx) {
+    auto tty = cast<coir::TensorType>(tensor.getType());
+    int64_t staticDim = tty.getShape()[dimIdx];
+    if (!mlir::ShapedType::isDynamic(staticDim))
+      return std::to_string(staticDim);
+
+    auto alloc = getTensorAllocDef(tensor);
+    if (!alloc) {
+      // No tensor.alloc defining op (e.g. kernel argument).
+      // For mdspan shapes we fall back to emitting the kDynamic sentinel;
+      // the caller is responsible for resolving dynamic sizes from the
+      // other tensor in the copy pair.
+      return std::to_string(staticDim);
+    }
+
+    auto dynDims = alloc.getDynamicDims();
+    unsigned dynIdx = 0;
+    for (unsigned i = 0; i < tty.getShape().size(); ++i) {
+      if (tty.isDynamicDim(i)) {
+        if (i == dimIdx && dynIdx < dynDims.size())
+          return getName(dynDims[dynIdx]);
+        dynIdx++;
+      }
+    }
+    return std::to_string(staticDim); // fallback
+  }
+
+  /// Emit the full shape of a tensor as comma-separated dim expressions.
+  std::string emitTensorShape(Value tensor) {
+    auto tty = cast<coir::TensorType>(tensor.getType());
+    std::string result;
+    for (unsigned i = 0; i < tty.getShape().size(); ++i) {
+      if (i > 0) result += ", ";
+      result += emitDimExpr(tensor, i);
+    }
+    return result;
   }
 
   int64_t getTensorNumElems(coir::TensorType tty) {
@@ -480,6 +558,102 @@ private:
     }
   }
 
+  struct MRInfo {
+    bool hasDynamicMR = false;
+    unsigned numOffsetArgs = 0;
+    std::string chunksName;
+    std::string resultName;
+    std::string offsetsName;
+    std::string spmSizeName;
+    mlir::ArrayAttr chunks;
+    // Const interference matrix (from topscc_codegen optimization).
+    unsigned nBuffers = 0;
+    unsigned alignment = 512;
+    mlir::ArrayAttr interference;
+    mlir::ArrayAttr sizeExprs;
+    mlir::ArrayAttr bufferIds;
+  };
+
+  MRInfo getMRInfo(KernelOp kernel) {
+    MRInfo info;
+    info.chunks =
+        kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_chunks");
+    if (!info.chunks) return info;
+    info.hasDynamicMR = true;
+    auto chunksName =
+        kernel->getAttrOfType<mlir::StringAttr>("coir.mr_chunks_name");
+    if (chunksName) info.chunksName = chunksName.getValue().str();
+    auto resultName =
+        kernel->getAttrOfType<mlir::StringAttr>("coir.mr_result_name");
+    if (resultName) info.resultName = resultName.getValue().str();
+    auto offsetsName =
+        kernel->getAttrOfType<mlir::StringAttr>("coir.mr_offsets_name");
+    if (offsetsName) info.offsetsName = offsetsName.getValue().str();
+    auto spmSizeName =
+        kernel->getAttrOfType<mlir::StringAttr>("coir.mr_spm_size_arg");
+    if (spmSizeName) info.spmSizeName = spmSizeName.getValue().str();
+    auto mrOffsets =
+        kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_offset_args");
+    if (mrOffsets) info.numOffsetArgs = mrOffsets.size();
+    // Const interference matrix (parametric plan).
+    auto nBuf =
+        kernel->getAttrOfType<mlir::IntegerAttr>("coir.mr_n_buffers");
+    if (nBuf) info.nBuffers = nBuf.getInt();
+    auto align =
+        kernel->getAttrOfType<mlir::IntegerAttr>("coir.mr_alignment");
+    if (align) info.alignment = align.getInt();
+    info.interference =
+        kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_interference");
+    info.sizeExprs =
+        kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_size_exprs");
+    info.bufferIds =
+        kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_buffer_ids");
+    return info;
+  }
+
+  void emitHeapSimulator(const MRInfo &mr,
+                         llvm::SmallVectorImpl<DimArgMeta> &dimArgMeta) {
+    // Emit dimension aliases so chunk size exprs can reference them.
+    for (auto &da : dimArgMeta) {
+      os() << "  unsigned " << da.name << " = (int)p" << da.paramIdx
+           << ".shape()[" << da.dimIdx << "];\n";
+    }
+    os() << "  // JIT memory reuse\n";
+    os() << "  HeapSimulator::Chunks " << mr.chunksName << ";\n";
+    for (auto chunkAttr : mr.chunks) {
+      os() << "  " << mr.chunksName << ".push_back("
+           << mlir::cast<mlir::StringAttr>(chunkAttr).getValue().str()
+           << ");\n";
+    }
+    os() << "  HeapSimulator __mr_sim;\n";
+    if (mr.nBuffers > 0 && mr.interference && !mr.interference.empty()) {
+      // Parametric plan with const interference matrix.
+      std::string imatName = mr.chunksName + "_imat";
+      os() << "  std::vector<bool> " << imatName << " = {";
+      bool first = true;
+      for (auto v : mr.interference) {
+        if (!first) os() << ",";
+        first = false;
+        os() << (mlir::cast<mlir::BoolAttr>(v).getValue() ? "true" : "false");
+      }
+      os() << "};\n";
+      os() << "  HeapSimulator::Result " << mr.resultName
+           << " = __mr_sim.Allocate(" << mr.chunksName << ", "
+           << mr.alignment << ", " << imatName << ");\n";
+    } else {
+      os() << "  HeapSimulator::Result " << mr.resultName
+           << " = __mr_sim.Allocate(" << mr.chunksName << ", 512);\n";
+    }
+    os() << "  unsigned " << mr.spmSizeName << " = " << mr.resultName
+         << ".heap_size;\n";
+    os() << "  unsigned long " << mr.offsetsName << "[" << mr.numOffsetArgs
+         << "];\n";
+    os() << "  { size_t __idx = 0;\n";
+    os() << "    for (const auto& [id, off] : " << mr.resultName
+         << ".chunk_offsets)\n";
+    os() << "      " << mr.offsetsName << "[__idx++] = off; }\n";
+  }
+
   void emitHostEntry(KernelOp kernel) override {
     auto fnType = kernel.getFunctionType();
     auto name = kernel.getSymName();
@@ -490,7 +664,11 @@ private:
                      ? dyn_cast<coir::TensorType>(fnType.getResult(0))
                      : nullptr;
 
-    // __global__ trampoline -- when device offload is needed.
+    auto mrInfo = getMRInfo(kernel);
+    auto dimArgMeta = getDimArgs(kernel);
+    unsigned numMrExtra = mrInfo.hasDynamicMR ? mrInfo.numOffsetArgs + 1 : 0;
+
+    // __global__ trampoline — when device offload is needed.
     if (needsDevice) {
       bool isMultiDevice = hasDeviceParallel(kernel);
 
@@ -529,9 +707,8 @@ private:
       os() << "}\n\n";
     }
 
-    // Host function signature.
-    auto dimArgMeta = getDimArgs(kernel);
-    unsigned numOrigInputs = numInputs - dimArgMeta.size();
+    // Host function signature — exclude MR args (computed by HeapSimulator).
+    unsigned numOrigInputs = numInputs - dimArgMeta.size() - numMrExtra;
     llvm::SmallVector<llvm::StringRef> hostElemHints;
     if (auto attr = kernel->getAttrOfType<ArrayAttr>("coir.host_elem_types"))
       for (auto a : attr)
@@ -542,9 +719,10 @@ private:
       auto inTy = fnType.getInput(i);
       if (auto tensorTy = dyn_cast<coir::TensorType>(inTy)) {
         unsigned inDim = tensorTy.getShape().size();
-        std::string elemStr = (i < hostElemHints.size() && !hostElemHints[i].empty())
-            ? ("choreo::" + hostElemHints[i].str())
-            : choreoType(tensorTy.getElementType());
+        std::string elemStr =
+            (i < hostElemHints.size() && !hostElemHints[i].empty())
+                ? ("choreo::" + hostElemHints[i].str())
+                : choreoType(tensorTy.getElementType());
         os() << "const choreo::spanned_view<"
            << elemStr << ", " << inDim << "> & p" << i;
       } else {
@@ -557,13 +735,15 @@ private:
       os() << ", topsStream_t " << lcForHost.streamName;
     os() << ") {\n";
     emitDimChecks(kernel);
+    if (mrInfo.hasDynamicMR)
+      emitHeapSimulator(mrInfo, dimArgMeta);
 
     if (needsDevice && resTy) {
       emitEntryAssertions(kernel);
-      emitDeviceOffloadBody(kernel, resTy);
+      emitDeviceOffloadBody(kernel, resTy, mrInfo);
     } else if (needsDevice && !resTy) {
       emitEntryAssertions(kernel);
-      emitVoidDeviceOffloadBody(kernel);
+      emitVoidDeviceOffloadBody(kernel, mrInfo);
     } else {
       // No device offload: emit the body directly (the function IS the
       // host function, just like how the AST codegen handles __co__
@@ -581,17 +761,26 @@ private:
     os() << "}\n\n";
   }
 
+  void emitMRLaunchArgs(const MRInfo &mr) {
+    if (!mr.hasDynamicMR) return;
+    for (unsigned i = 0; i < mr.numOffsetArgs; ++i)
+      os() << ", (int)" << mr.offsetsName << "[" << i << "]";
+    os() << ", (int)" << mr.spmSizeName;
+  }
+
   bool isDeviceGlobal(coir::TensorType tty) {
     return tty.getMemorySpace() ==
            static_cast<int32_t>(coir::TensorMemorySpace::Global);
   }
 
-  void emitDeviceOffloadBody(KernelOp kernel, coir::TensorType resTy) {
+  void emitDeviceOffloadBody(KernelOp kernel, coir::TensorType resTy,
+                             const MRInfo &mr) {
     auto fnType = kernel.getFunctionType();
     auto name = kernel.getSymName();
     unsigned numInputs = fnType.getNumInputs();
     auto dimArgMeta = getDimArgs(kernel);
-    unsigned numOrigInputs = numInputs - dimArgMeta.size();
+    unsigned numMrExtra = mr.hasDynamicMR ? mr.numOffsetArgs + 1 : 0;
+    unsigned numOrigInputs = numInputs - dimArgMeta.size() - numMrExtra;
     int retInputIdx = getReturnInputArgIdx(kernel, 0);
     std::string eType = emitType(resTy.getElementType());
     std::string choreoElem = choreoType(resTy.getElementType());
@@ -649,6 +838,7 @@ private:
       }
       for (auto &da : dimArgMeta)
         os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+      emitMRLaunchArgs(mr);
       os() << ");\n";
       os() << "  topsDeviceSynchronize();\n";
       os() << "  topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
@@ -689,12 +879,13 @@ private:
     }
   }
 
-  void emitVoidDeviceOffloadBody(KernelOp kernel) {
+  void emitVoidDeviceOffloadBody(KernelOp kernel, const MRInfo &mr) {
     auto fnType = kernel.getFunctionType();
     auto name = kernel.getSymName();
     unsigned numInputs = fnType.getNumInputs();
     auto dimArgMeta = getDimArgs(kernel);
-    unsigned numOrigInputs = numInputs - dimArgMeta.size();
+    unsigned numMrExtra = mr.hasDynamicMR ? mr.numOffsetArgs + 1 : 0;
+    unsigned numOrigInputs = numInputs - dimArgMeta.size() - numMrExtra;
     auto lc = collectLaunchConfig(kernel);
     std::string gdims = emitDim3(lc.blockDims);
     std::string bdims = hasGroupLevel()
@@ -734,6 +925,7 @@ private:
     }
     for (auto &da : dimArgMeta)
       os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+    emitMRLaunchArgs(mr);
     os() << ");\n";
     os() << "  topsDeviceSynchronize();\n";
 
@@ -1421,15 +1613,12 @@ private:
       space = "tops::Shared";
     else
       space = "tops::Global";
-    std::string result = "tops::mdspan(" + space + ", (" +
-                         emitType(tty.getElementType()) + "*)" + name;
-    for (auto dim : tty.getShape())
-      result += ", " + std::to_string(dim);
-    result += ")";
-    return result;
+    return "tops::mdspan(" + space + ", (" +
+           emitType(tty.getElementType()) + "*)" + name +
+           ", " + emitTensorShape(tensor) + ")";
   }
 
-  std::string emitCopyMdspan(Value tensor, int64_t transferElems) {
+  std::string emitCopyMdspan(Value tensor, const std::string &sizeStr) {
     auto tty = cast<coir::TensorType>(tensor.getType());
     std::string name = getName(tensor);
     std::string space;
@@ -1442,7 +1631,7 @@ private:
       space = "tops::Global";
     return "tops::mdspan(" + space + ", (" +
            emitType(tty.getElementType()) + "*)" + name + ", " +
-           std::to_string(transferElems) + ")";
+           sizeStr + ")";
   }
 
   int64_t tensorElems(Value v) {
@@ -1468,12 +1657,9 @@ private:
       space = "tops::Shared";
     else
       space = "tops::Global";
-    std::string result = "tops::mdspan(" + space + ", (" +
-                         emitType(baseTy.getElementType()) + "*)" + name;
-    for (auto dim : baseTy.getShape())
-      result += ", " + std::to_string(dim);
-    result += ")";
-    return result;
+    return "tops::mdspan(" + space + ", (" +
+           emitType(baseTy.getElementType()) + "*)" + name +
+           ", " + emitTensorShape(base) + ")";
   }
 
   std::string emitSliceOffsets(TensorTileOp tile, const std::string &prefix) {
@@ -1503,7 +1689,11 @@ private:
     os() << getIndent() << "unsigned int " << arrName << "[] = {";
     for (unsigned i = 0; i < tileTy.getShape().size(); ++i) {
       if (i) os() << ", ";
-      os() << tileTy.getShape()[i];
+      int64_t d = tileTy.getShape()[i];
+      if (mlir::ShapedType::isDynamic(d))
+        os() << emitDimExpr(tile.getResult(), i);
+      else
+        os() << d;
     }
     os() << "};\n";
     return arrName;
@@ -1558,8 +1748,18 @@ private:
                    srcMds + ", " + srcOff + ", " + sShape + ", " +
                    dstOff + ")";
       } else {
-        std::string srcMds = emitCopyMdspan(op.getSource(), copyElems);
-        std::string dstMds = emitCopyMdspan(op.getDest(), copyElems);
+        // Flat copy: resolve dynamic copyElems from the dest tensor's
+        // dynamic dim (if available) so both mdspans get the right size.
+        std::string flatSizeStr;
+        if (mlir::ShapedType::isDynamic(copyElems)) {
+          auto dstTty = cast<coir::TensorType>(op.getDest().getType());
+          if (dstTty.getShape().size() == 1 && dstTty.isDynamicDim(0))
+            flatSizeStr = emitDimExpr(op.getDest(), 0);
+        }
+        if (flatSizeStr.empty())
+          flatSizeStr = std::to_string(copyElems);
+        std::string srcMds = emitCopyMdspan(op.getSource(), flatSizeStr);
+        std::string dstMds = emitCopyMdspan(op.getDest(), flatSizeStr);
         apiCall = (isAsync ? "tops::memcpy_async" : "tops::memcpy");
         apiCall += "(*" + futName + ".get_ctx(), " + dstMds + ", " +
                    srcMds + ")";
@@ -1613,8 +1813,17 @@ private:
                    srcMds + ", " + layout + ")";
       }
     } else {
-      std::string srcMds = emitCopyMdspan(op.getSource(), copyElems);
-      std::string dstMds = emitCopyMdspan(op.getDest(), copyElems);
+      // Other DMA kinds (Slice, etc.): also handle dynamic copyElems.
+      std::string otherSizeStr;
+      if (mlir::ShapedType::isDynamic(copyElems)) {
+        auto dstTty = cast<coir::TensorType>(op.getDest().getType());
+        if (dstTty.getShape().size() == 1 && dstTty.isDynamicDim(0))
+          otherSizeStr = emitDimExpr(op.getDest(), 0);
+      }
+      if (otherSizeStr.empty())
+        otherSizeStr = std::to_string(copyElems);
+      std::string srcMds = emitCopyMdspan(op.getSource(), otherSizeStr);
+      std::string dstMds = emitCopyMdspan(op.getDest(), otherSizeStr);
       apiCall = (isAsync ? "tops::memcpy_async" : "tops::memcpy");
       apiCall += "(*" + futName + ".get_ctx(), " + dstMds + ", " +
                  srcMds + ")";
@@ -1799,11 +2008,94 @@ private:
     return "";
   }
 
+  void emitReuseInit(TensorAllocOp op, coir::TensorType tty,
+                      const std::string &name) {
+    auto initAttr = op.getInit();
+    if (!initAttr) return;
+    auto ms = tty.getMemorySpace();
+    bool isLocal =
+        (ms == static_cast<int32_t>(coir::TensorMemorySpace::Local));
+    std::string space = isLocal ? "tops::Private" : "tops::Shared";
+    std::string initVal;
+    mlir::TypedAttr attr = *initAttr;
+    if (auto ia = mlir::dyn_cast<mlir::IntegerAttr>(attr)) {
+      initVal = std::to_string(ia.getInt());
+    } else if (auto fa = mlir::dyn_cast<mlir::FloatAttr>(attr)) {
+      llvm::SmallString<16> buf;
+      fa.getValue().toString(buf);
+      initVal = std::string(buf);
+      if (initVal.find('.') == std::string::npos &&
+          initVal.find('e') == std::string::npos)
+        initVal += ".0";
+      if (tty.getElementType().isF16() || tty.getElementType().isBF16())
+        initVal = "(" + emitType(tty.getElementType()) + ")" + initVal;
+    }
+    std::string mds = "tops::mdspan(" + space + ", (" +
+                      emitType(tty.getElementType()) + "*)" + name;
+    for (auto d : tty.getShape())
+      mds += ", " + std::to_string(d);
+    mds += ")";
+    unsigned id = nextId++;
+    std::string ctxName = "__dte_init_" + std::to_string(id);
+    os() << getIndent() << "{\n";
+    incIndent();
+    os() << getIndent() << getDTEType() << " " << ctxName << ";\n";
+    if (needsExplicitInit())
+      os() << getIndent() << ctxName << ".init();\n";
+    os() << getIndent() << "tops::memset(" << ctxName << ", " << mds
+         << ", " << initVal << ");\n";
+    decIndent();
+    os() << getIndent() << "}\n";
+  }
+
   void emitTensorAlloc(TensorAllocOp op) override {
     if (returnValues.count(op.getResult())) return;
 
     auto tensorTy = cast<coir::TensorType>(op.getResult().getType());
     std::string name = getName(op.getResult());
+
+    // -- Memory reuse: buffer is aliased into a shared SPM at a given offset --
+    if (op.getReuseOffsetAttr()) {
+      // Dynamic offset: use kernel parameter instead of constant.
+      if (auto dynArgAttr =
+              op->getAttrOfType<mlir::StringAttr>("dyn_offset_arg")) {
+        if (!dynSpmEmitted_) {
+          std::string qual = getAllocQualifier(tensorTy);
+          os() << getIndent() << "extern " << qual
+               << "unsigned char __dyn_smem[];\n";
+          dynSpmEmitted_ = true;
+        }
+        std::string offName = dynArgAttr.getValue().str();
+        std::string eType = emitElementType(tensorTy.getElementType());
+        os() << getIndent() << eType << "* " << name << " = (" << eType
+             << "*)((unsigned char*)__dyn_smem + " << offName << ");\n";
+        emitReuseInit(op, tensorTy, name);
+        return;
+      }
+
+      // Static offset: emit pool array on first use, then pointer alias.
+      auto poolNameOpt = op.getReuseSpm();
+      llvm::StringRef poolName =
+          poolNameOpt.has_value() ? *poolNameOpt : "__default_spm";
+      std::string &spmVar = spmNames_[poolName];
+      if (spmVar.empty()) {
+        spmVar = "__spm_" + std::to_string(nextId++);
+        int64_t spmBytes = 0;
+        if (auto spmSizeAttr =
+                op->getAttrOfType<mlir::IntegerAttr>("spm_size"))
+          spmBytes = spmSizeAttr.getInt();
+        std::string qual = getAllocQualifier(tensorTy);
+        os() << getIndent() << qual << "unsigned char "
+             << spmVar << "[" << spmBytes << "];\n";
+      }
+      int64_t offset = op.getReuseOffset().value_or(0);
+      std::string eType = emitElementType(tensorTy.getElementType());
+      os() << getIndent() << eType << "* " << name << " = (" << eType
+           << "*)((unsigned char*)" << spmVar << " + " << offset << ");\n";
+      emitReuseInit(op, tensorTy, name);
+      return;
+    }
+
     int64_t totalElems = 1;
     for (auto d : tensorTy.getShape()) totalElems *= d;
 

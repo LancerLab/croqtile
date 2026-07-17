@@ -93,6 +93,169 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
                            AffineMap{}, addrSpace);
   }
 
+  /// Build a MemRefType for a memref.view target that shares the pool's
+  /// workgroup address space (reuse allocs always alias into shared memory).
+  MemRefType viewMemRefType(coir::TensorType tty) {
+    return MemRefType::get(
+        tty.getShape(), tty.getElementType(), AffineMap{},
+        IntegerAttr::get(IntegerType::get(tty.getContext(), 64),
+                         kGCUAddrWorkgroup));
+  }
+
+  /// Resolve a named kernel arg (mr_offset_* or spm_size) to the
+  /// corresponding gpu.func argument via ctx.mapping.
+  Value resolveMRArg(KernelOp kernelOp, KernelConvertCtx &ctx,
+                     llvm::StringRef name) {
+    auto &kernelBody = kernelOp.getBody();
+    auto kernelArgs = kernelBody.getArguments();
+
+    // MR args are at the end of the kernel signature:
+    //   [tensor] [dim] [mr_off_0..mr_off_N-1] [spm_size]
+    auto mrOffsets =
+        kernelOp->getAttrOfType<mlir::ArrayAttr>("coir.mr_offset_args");
+    unsigned numMrOffsets = mrOffsets ? mrOffsets.size() : 0;
+    unsigned baseMrIdx = kernelArgs.size() - numMrOffsets - 1;
+
+    // Check among offset args.
+    if (mrOffsets) {
+      for (unsigned i = 0; i < numMrOffsets; ++i) {
+        auto mrName =
+            mlir::cast<mlir::StringAttr>(mrOffsets[i]).getValue();
+        if (mrName == name)
+          return ctx.mapping.lookup(kernelArgs[baseMrIdx + i]);
+      }
+    }
+
+    // Check spm_size arg (the last one).
+    auto spmSizeName =
+        kernelOp->getAttrOfType<mlir::StringAttr>("coir.mr_spm_size_arg");
+    if (spmSizeName && spmSizeName.getValue() == name)
+      return ctx.mapping.lookup(kernelArgs[kernelArgs.size() - 1]);
+
+    return {};
+  }
+
+  void convertAlloc(OpBuilder &builder, Location loc,
+                    TensorAllocOp alloc, KernelConvertCtx &ctx) override {
+    auto tty = cast<coir::TensorType>(alloc.getResult().getType());
+
+    // --- Dynamic memory reuse: offset comes from a kernel arg ---
+    if (auto dynOffsetAttr =
+            alloc->getAttrOfType<mlir::StringAttr>("dyn_offset_arg")) {
+      auto kernelOp = alloc->getParentOfType<KernelOp>();
+      if (!kernelOp) {
+        CoIRKernelLoweringBase::convertAlloc(builder, loc, alloc, ctx);
+        return;
+      }
+
+      llvm::StringRef offsetName = dynOffsetAttr.getValue();
+      Value offsetVal = resolveMRArg(kernelOp, ctx, offsetName);
+      if (!offsetVal) {
+        CoIRKernelLoweringBase::convertAlloc(builder, loc, alloc, ctx);
+        return;
+      }
+
+      // Get or create the dynamic SPM pool (one per kernel).
+      Value &dynPool = ctx.spmPools["__dyn_spm__"];
+      if (!dynPool) {
+        auto spmSizeNameAttr =
+            kernelOp->getAttrOfType<mlir::StringAttr>("coir.mr_spm_size_arg");
+        Value spmSizeVal;
+        if (spmSizeNameAttr)
+          spmSizeVal = resolveMRArg(kernelOp, ctx, spmSizeNameAttr.getValue());
+
+        auto byteTy = mlir::IntegerType::get(builder.getContext(), 8);
+        auto dynPoolTy = MemRefType::get(
+            {mlir::ShapedType::kDynamic}, byteTy, mlir::AffineMap{},
+            mlir::IntegerAttr::get(
+                mlir::IntegerType::get(builder.getContext(), 64),
+                kGCUAddrWorkgroup));
+
+        auto gpuFunc = builder.getBlock()
+                           ->getParent()
+                           ->getParentOfType<mgpu::GPUFuncOp>();
+        OpBuilder::InsertionGuard guard(builder);
+        auto &funcBody = gpuFunc.getBody().front();
+        if (funcBody.empty() || funcBody.begin() == funcBody.end())
+          builder.setInsertionPointToStart(&funcBody);
+        else
+          builder.setInsertionPoint(&funcBody, funcBody.begin());
+
+        mlir::SmallVector<mlir::Value> dynSizes;
+        if (spmSizeVal)
+          dynSizes.push_back(spmSizeVal);
+        dynPool = builder.create<memref::AllocOp>(loc, dynPoolTy, dynSizes)
+                      .getResult();
+      }
+
+      // Create view with the dynamic offset.
+      // Use the pool's workgroup address space for the view target type.
+      auto targetMemTy = viewMemRefType(tty);
+      // Pass dynamic dim SSA values (mapped to gpu.func args).
+      mlir::SmallVector<mlir::Value> viewSizes;
+      for (auto dim : alloc.getDynamicDims())
+        viewSizes.push_back(ctx.mapping.lookup(dim));
+      auto view = builder.create<memref::ViewOp>(
+          loc, targetMemTy, dynPool, offsetVal,
+          /*sizes=*/viewSizes);
+
+      ctx.mapping.map(alloc.getResult(), view->getResult(0));
+      return;
+    }
+
+    // --- Static memory reuse: fixed offset within a named SPM pool ---
+    auto reuseSpm = alloc.getReuseSpm();
+    if (!reuseSpm) {
+      CoIRKernelLoweringBase::convertAlloc(builder, loc, alloc, ctx);
+      return;
+    }
+
+    // Look up or create the SPM pool.
+    llvm::StringRef poolName = *reuseSpm;
+    Value &poolBase = ctx.spmPools[poolName];
+
+    if (!poolBase) {
+      auto spmSizeAttr =
+          alloc->getAttrOfType<mlir::IntegerAttr>("spm_size");
+      int64_t poolBytes = spmSizeAttr ? spmSizeAttr.getInt() : 0;
+      auto byteTy = mlir::IntegerType::get(builder.getContext(), 8);
+      auto poolMemTy = MemRefType::get(
+          {poolBytes}, byteTy, AffineMap{},
+          IntegerAttr::get(
+              IntegerType::get(builder.getContext(), 64),
+              kGCUAddrWorkgroup));
+
+      // Walk up to find the enclosing gpu.func (builder may be inside
+      // nested regions like scf.for).
+      auto gpuFunc = builder.getBlock()->getParent()->getParentOfType<
+          mgpu::GPUFuncOp>();
+      OpBuilder::InsertionGuard guard(builder);
+
+      // Insert at the top of the function.  For subsequent pools we
+      // insert after the last pool alloc so they appear in creation order.
+      auto &funcBody = gpuFunc.getBody().front();
+      if (funcBody.empty() || funcBody.begin() == funcBody.end())
+        builder.setInsertionPointToStart(&funcBody);
+      else
+        builder.setInsertionPoint(&funcBody, funcBody.begin());
+      poolBase = builder.create<memref::AllocOp>(loc, poolMemTy).getResult();
+    }
+
+    // Compute byte size of this alloc: totalElems * elemWidth / 8.
+    int64_t offset = alloc.getReuseOffset().value_or(0);
+
+    // Create a view into the pool at the given byte offset.
+    // Use the pool's workgroup address space for the view target type.
+    auto targetMemTy = viewMemRefType(tty);
+    auto byteOffsetVal =
+        builder.create<arith::ConstantIndexOp>(loc, offset);
+    auto view = builder.create<memref::ViewOp>(
+        loc, targetMemTy, poolBase, byteOffsetVal,
+        /*sizes=*/mlir::ValueRange{});
+
+    ctx.mapping.map(alloc.getResult(), view->getResult(0));
+  }
+
   bool convertTargetOp(OpBuilder &builder, Location loc, Operation &op,
                        KernelConvertCtx &ctx) override {
     if (auto tile = dyn_cast<TensorTileOp>(op)) {
@@ -208,6 +371,8 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
 };
 
 } // namespace
+
+static mlir::PassRegistration<ConvertToGCUPass> reg_convert_gcu;
 
 namespace coir {
 std::unique_ptr<mlir::Pass> createConvertToGCUPass() {

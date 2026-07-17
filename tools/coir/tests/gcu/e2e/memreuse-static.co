@@ -1,0 +1,36 @@
+// REQUIRES: TARGET-GCU
+// RUN: cocc -t topscc -es %s | FileCheck --check-prefix=IR %s
+//
+// Static memory reuse verification:
+// The generated topscc device code must contain a single __spm_N pool
+// with four pointer aliases at offsets 0,512,0,512 — proving the two
+// buffer pairs reuse the same scratchpad space.  Without memreuse each
+// buffer would get its own independent array.
+//
+// Runtime execution requires GCU hardware; pass --execute to test.
+
+__co__ void memreuse_static(s32 [256] a, s32 [256] b, s32 [256] out) {
+  parallel tid by 4 : thread {
+    foreach k in 4 {
+      l1_a = dma.copy a.chunkat(k) => local;
+      local s32[l1_a.span] l1_c;
+      foreach i in [l1_a.span(0)] {
+        l1_c.at(i) = l1_a.data.at(i) * 2;
+      }
+      l1_b = dma.copy b.chunkat(k) => local;
+      local s32[l1_b.span] l1_d;
+      foreach i in [l1_b.span(0)] {
+        l1_d.at(i) = l1_b.data.at(i) + 1;
+      }
+      dma.copy l1_d => out.chunkat(k);
+    }
+  }
+}
+
+// One pool array (not four independent arrays):
+// IR: __spm_
+// Four pointer aliases into the same pool, reusing offsets 0 and 512:
+// IR: + 0);
+// IR: + 512);
+// IR: + 0);
+// IR: + 512);

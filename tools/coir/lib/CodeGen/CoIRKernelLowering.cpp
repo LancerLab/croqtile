@@ -104,7 +104,8 @@ LogicalResult CoIRKernelLoweringBase::convertKernel(ModuleOp module,
     }
   }
 
-  KernelConvertCtx ctx{mapping, returnAllocMap};
+  llvm::DenseMap<llvm::StringRef, mlir::Value> emptyPools;
+  KernelConvertCtx ctx{mapping, returnAllocMap, emptyPools};
   for (auto &op : kernelBody.front().getOperations())
     convertOp(builder, loc, op, ctx);
 

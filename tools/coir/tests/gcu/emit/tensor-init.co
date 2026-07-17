@@ -1,4 +1,4 @@
-// RUN: cocc -t topscc -es %s -o - | FileCheck %s
+// RUN: cocc -t topscc -es -dp=memreuse %s -o - | FileCheck %s
 //
 // Verify tensor brace-initializer emits tops::memset with DTE context.
 
