@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GPU
 // RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// RUN-COCR: %cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // Representative PTX mma.sync cases: one per ISA variant / dtype combination.
 // Covers m8n8 (Turing) and m16n8 (Ampere) tile families across major dtypes.

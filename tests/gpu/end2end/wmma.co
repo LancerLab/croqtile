@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GPU
 // RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// RUN-COCR: %cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // One representative kernel per WMMA data type, using the m16n16k16 tile shape.
 // Each dtype exercises a distinct accumulator type and fill/store variant.
