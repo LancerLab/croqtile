@@ -1,4 +1,5 @@
 TOOLCHAIN_DIR:=$(dir $(realpath $(lastword $(MAKEFILE_LIST))))
+GCU_SIM_DIR:=$(TOOLCHAIN_DIR)/gcu-sim
 
 #------------------------- GCU-2.x -------------------------#
 GCU_REL_PATH=.
@@ -118,15 +119,27 @@ install-gcu4-platform-kit:
 	rsync -av $(TOOLCHAIN_DIR)/opt/tops/* $(TOOLCHAIN_DIR); \
 	rm -fr $(TOOLCHAIN_DIR)/opt;
 
+install-gcu4-platform-sim-kit:
+	mkdir -p $(GCU_SIM_DIR) ;\
+	$(GCU4_PLATFORM_PKG) -y -C topsruntime,topscc --install-dir $(GCU_SIM_DIR); \
+	rsync -av $(GCU_SIM_DIR)/opt/tops/* $(GCU_SIM_DIR); \
+	rm -fr $(GCU_SIM_DIR)/opt;
+
 setup-gcu4-platform-kit: check-gcu4-platform-kit
 	@if [ "$(CUR_GCU4_PLATFORM_PKG_MD5)" != "$(GCU4_PLATFORM_PKG_MD5)"  ]; then \
 	    $(MAKE) install-gcu4-platform-kit; \
 	fi
 
+setup-gcu4-platform-sim-kit: check-gcu4-platform-kit
+	@if [ "$(CUR_GCU4_PLATFORM_PKG_MD5)" != "$(GCU4_PLATFORM_PKG_MD5)"  ]; then \
+	    $(MAKE) install-gcu4-platform-sim-kit; \
+	fi
+
 install-gcu-sim:
-	@if [ ! -f "$(TOOLCHAIN_DIR)/lib/libgcusim.so" ]; then \
+	mkdir -p $(GCU_SIM_DIR)/lib
+	@if [ ! -f "$(GCU_SIM_DIR)/lib/libgcusim.so" ]; then \
 		wget http://artifact.enflame.cn/artifactory/release_center/GCUSIM/1.0.91/libgcusim.so; \
-		mv libgcusim.so $(TOOLCHAIN_DIR)/lib/libgcusim.so; \
+		mv libgcusim.so $(GCU_SIM_DIR)/lib/libgcusim.so; \
 	fi;
 
 #------------------------- GCU-5.x -------------------------#
@@ -160,9 +173,10 @@ setup-gcu5-tops-kit: check-gcu5-tops-kit
 	fi
 
 install-gcu-sim5:
-	@if [ ! -f "$(TOOLCHAIN_DIR)/lib/libgcusim5.so" ]; then \
+	mkdir -p $(GCU_SIM_DIR)/lib
+	@if [ ! -f "$(GCU_SIM_DIR)/lib/libgcusim5.so" ]; then \
 		wget http://artifact.enflame.cn:80/artifactory/release_center/GCUSIM/5.0.24/libgcusim5.so; \
-		mv libgcusim5.so $(TOOLCHAIN_DIR)/lib/libgcusim5.so; \
+		mv libgcusim5.so $(GCU_SIM_DIR)/lib/libgcusim5.so; \
 	fi;
 
 #-----------------------------------------------------------#
@@ -232,8 +246,10 @@ gcu4-kmd: check-gcu4-platform-kit
 gcu2-kit: setup-gcu-sfc-kit setup-gcu-platform-kit
 gcu3-kit: setup-gcu3-platform-kit
 gcu4-kit: setup-gcu4-platform-kit install-gcu-sim
+gcu4-sim-kit: setup-gcu4-platform-sim-kit install-gcu-sim
 gcu-sim4: install-gcu-sim
 gcu5-kit: setup-gcu5-tops-kit install-gcu-sim5
+gcu5-sim-kit: setup-gcu5-tops-kit install-gcu-sim5
 gcu-sim5: install-gcu-sim5
 
 gcu2-install: install-gcu-sfc-kit install-gcu-platform-kit

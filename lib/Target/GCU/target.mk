@@ -123,10 +123,10 @@ setup-gcu5: setup-core
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu5-kit FTP_SERVER=$(FTP_SERVER)
 
 setup-gcu4sim: setup-core
-	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu4-kit FTP_SERVER=$(FTP_SERVER)
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu4-sim-kit FTP_SERVER=$(FTP_SERVER)
 
 setup-gcu5sim: setup-core
-	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu5-kit FTP_SERVER=$(FTP_SERVER)
+	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu5-sim-kit FTP_SERVER=$(FTP_SERVER)
 
 resetup-gcu2: install-choreo-kit
 	cd $(TOOLCHAIN_DIR) && $(MAKE) gcu2-install FTP_SERVER=$(FTP_SERVER)
