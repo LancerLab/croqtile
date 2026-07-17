@@ -1,4 +1,4 @@
-// RUN: not choreo -t cute -sa=check %s 2>&1 | FileCheck %s
+// RUN: not choreo %target -sa=check %s 2>&1 | FileCheck %s
 
 __co__ void maxnreg_float() {
   [[maxnreg(1.5)]]

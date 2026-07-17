@@ -1,4 +1,4 @@
-// RUN: not choreo -t cute %s 2>&1 | FileCheck %s
+// RUN: not choreo %target %s 2>&1 | FileCheck %s
 // CHECK: Parsing failed due to syntax errors.
 
 __co__ void bad_placement() {

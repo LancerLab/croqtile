@@ -1,4 +1,4 @@
-// RUN: not choreo -t cute -sa=check %s 2>&1 | FileCheck %s
+// RUN: not choreo %target -sa=check %s 2>&1 | FileCheck %s
 // CHECK: error: {{\[\[}}launch_bounds]] is only valid on block-level parallel-by.
 // CHECK: error: {{\[\[}}launch_bounds]] argument must be a compile-time integer constant.
 // CHECK: error: {{\[\[}}launch_bounds]] argument must be a non-negative integer.
