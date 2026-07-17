@@ -26,6 +26,20 @@ if(NOT EXISTS "${_KURAMA_MARKER}" AND COIR_AUTO_DOWNLOAD_KURAMA AND _KUR_KURAMA_
     list(GET _kur_dl_status 0 _kur_dl_code)
     if(NOT _kur_dl_code EQUAL 0)
       list(GET _kur_dl_status 1 _kur_dl_msg)
+      # Try FTP_SERVER mirror if set
+      include(cmake/DepMirror.cmake)
+      dep_mirror_fallback(_kur_mirror_url "${_KUR_KURAMA_TAR}" kurama)
+      if(_kur_mirror_url)
+        message(STATUS "Kurama: trying mirror ${_kur_mirror_url}")
+        file(DOWNLOAD "${_kur_mirror_url}" "${_KUR_TAR}"
+          SHOW_PROGRESS
+          STATUS _kur_dl_status
+          TIMEOUT 300)
+        list(GET _kur_dl_status 0 _kur_dl_code)
+      endif()
+    endif()
+    if(NOT _kur_dl_code EQUAL 0)
+      list(GET _kur_dl_status 1 _kur_dl_msg)
       file(REMOVE "${_KUR_TAR}")
       message(WARNING
         "Failed to download kurama toolchain: ${_kur_dl_msg}\n"
