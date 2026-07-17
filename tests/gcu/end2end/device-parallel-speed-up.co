@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GCUx2
-// RUN: choreo -t topscc -gs %gcu_arch %s | bash -s -- --execute | FileCheck %s
-// RUN: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: choreo -t topscc -gs %gcu_arch %s | bash -s -- --execute 2>&1 | FileCheck %s
+// RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck %s
 
 #define N (1024 * 1024)
