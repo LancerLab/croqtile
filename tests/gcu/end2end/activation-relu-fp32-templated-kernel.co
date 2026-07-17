@@ -1,6 +1,8 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -gs -t topscc -kt %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo -t topscc -gs -kt %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-DOCKER: choreo -st -t topscc %s -o %s.result && %s.result | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 #include "choreo.h"
 #include <chrono>

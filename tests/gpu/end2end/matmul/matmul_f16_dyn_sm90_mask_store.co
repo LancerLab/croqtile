@@ -1,6 +1,7 @@
 // REQUIRES: TARGET-SM_90
-// RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
-
+// RUN: choreo -t cute -gs %cuda_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // Comprehensive mma.store masking test: covers auto-detected masking
 // and explicit mma.store.mask across aligned and non-aligned sizes.
 //

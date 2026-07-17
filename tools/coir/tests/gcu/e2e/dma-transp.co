@@ -1,4 +1,4 @@
-// REQUIRES: TARGET-GCU
+// REQUIRES: TARGET-GCUALL
 // RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 //
 // Test: dma.transp (global to local) through CoIR path.

@@ -1,5 +1,8 @@
 // REQUIRES: TARGET-GCUSIM4
 // RUN-SIM: choreo -gs -t topscc -arch=sim-gcu400 %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t topscc %gcu_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 __device__ void relu_kernel(float* input, float* out, int m, int n) {
   for (int i = 0; i < m; ++i) {

@@ -1,4 +1,4 @@
-// REQUIRES: TARGET-GCU
+// REQUIRES: TARGET-GCUALL
 // RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 //
 // 2D slice: 4x6 input split across 2 blocks, each processing a 2x6 tile.

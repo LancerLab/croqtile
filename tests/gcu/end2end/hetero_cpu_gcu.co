@@ -1,4 +1,6 @@
-// RUN: choreo -gs -t hetero %s -o %s.hetero.result && bash %s.hetero.result --execute && rm -f %s.hetero.result
+// RUN: choreo -t hetero -gs %s | bash -s -- --execute
+// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // REQUIRES: TARGET-GCUALL
 
 #include "choreo.h"

@@ -1,5 +1,7 @@
 // REQUIRES: TARGET-GPU
-// RUN: choreo -gs -t hetero %s -o %s.hetero.result && bash %s.hetero.result --execute && rm -f %s.hetero.result
+// RUN: choreo -t hetero -gs %s | bash -s -- --execute
+// RUN-COCR: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 #include "choreo.h"
 #include <cmath>

@@ -1,5 +1,7 @@
 // REQUIRES: TARGET-GCUALL
-// RUN-GCU300: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck %s && rm -f %s.topscc.result
+// RUN: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-GCU300: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck %s
+// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck %s
 
 __co__ auto identity(f32 [1024] input) {
   f32 [input.span(0)] output;

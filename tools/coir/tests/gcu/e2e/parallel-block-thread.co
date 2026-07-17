@@ -1,4 +1,4 @@
-// REQUIRES: TARGET-GCU
+// REQUIRES: TARGET-GCUALL
 // RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 //
 // Block+thread parallel: 2 blocks x 4 threads processing global input.

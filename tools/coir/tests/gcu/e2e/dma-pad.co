@@ -1,4 +1,4 @@
-// REQUIRES: TARGET-GCU
+// REQUIRES: TARGET-GCUALL
 // RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 //
 // Test: 2D dma.pad (global to local, async) through CoIR path.

@@ -1,7 +1,8 @@
 // SKIP: merged into acore-lib-merged-test.co
 // REQUIRES: TARGET-GCU300 LIBCALL
-// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
-
+// RUN: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // Activation __lib_gelu end-to-end test on GCU3.
 
 __co__ f32 [6, 128] lib_gelu_test(f32 [6, 128] input) {

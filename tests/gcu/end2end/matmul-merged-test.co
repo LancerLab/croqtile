@@ -1,5 +1,7 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // Merged from: matmul-direct.co, matmul-dyn-direct.co, matmul-gcu-only-test.co
 

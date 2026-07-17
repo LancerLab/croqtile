@@ -1,7 +1,8 @@
 // REQUIRES: TARGET-GCU300 LIBCALL
 // XFAIL: *
-// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
-
+// RUN: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // __lib_gemm end-to-end test on GCU3.
 // XFAIL: acore::matmul hits toolchain relocation error (R_DTU_ADDR16_LO_ICALL).
 // Computes C[128, 128] = A[128, 32] * B[32, 128]

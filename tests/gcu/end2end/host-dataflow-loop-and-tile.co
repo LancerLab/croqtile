@@ -1,4 +1,6 @@
 // REQUIRES: TARGET-GCU300
+// RUN: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // The opt is not maintained for a long time, disable it.
 // TODO-RUN: choreo --use-hetero-tileflow -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
 // TODO-RUN-DOCKER: choreo -st --use-hetero-tileflow -t topscc %s -o %s.topscc.result && %s.topscc.result | FileCheck --match-full-lines %s && rm -f %s.topscc.result

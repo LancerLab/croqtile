@@ -1,6 +1,8 @@
 // REQUIRES: TARGET-GCUALL
-// RUN-GCU210: choreo -gs -t topscc -arch=gcu210 %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --check-prefix=CHK200 --match-full-lines %s && rm -f %s.topscc.result
-// RUN-GCU300: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute 2>&1 | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN-GCU210: choreo -t topscc -gs -arch=gcu210 %s | bash -s -- --execute | FileCheck --check-prefix=CHK200 --match-full-lines %s
+// RUN-GCU300: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --check-prefix=CHK200 --match-full-lines %s
+// RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --check-prefix=CHK200 --match-full-lines %s
 __co__ void foo() {
   parallel q by 1, p by 2 {
     mutable int a = 12;

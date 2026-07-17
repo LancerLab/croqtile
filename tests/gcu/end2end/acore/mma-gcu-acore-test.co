@@ -1,6 +1,7 @@
 // REQUIRES: TARGET-GCU300
-// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
-
+// RUN: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // MMA end-to-end test on GCU3 using acore::matmul micro-kernel backend.
 // Computes C[128, 128] = A[128, 32] * B[32, 128] using mma.fill/load/exec/store.
 

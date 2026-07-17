@@ -1,7 +1,9 @@
 // REQUIRES: TARGET-GCUALL
 
 // RUN: choreo -t topscc -es %s -o - | FileCheck %s --check-prefix=CODEGEN
-// RUN-GCU300: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines --check-prefix=END2END %s && rm -f %s.topscc.result
+// RUN: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-GCU300: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines --check-prefix=END2END %s
+// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck %s --check-prefix=CODEGEN
 
 #include <functional>
 #include <cmath>

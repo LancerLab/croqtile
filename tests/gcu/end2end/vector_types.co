@@ -1,5 +1,7 @@
 // REQUIRES: TARGET-GCU300
-// RUN: choreo -gs -t topscc --vectorize %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo -t topscc -gs --vectorize %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 #define N 4
 #define M 1024
