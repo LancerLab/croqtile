@@ -27,7 +27,7 @@ if(NOT EXISTS "${_KURAMA_MARKER}" AND COIR_AUTO_DOWNLOAD_KURAMA AND _KUR_KURAMA_
     if(NOT _kur_dl_code EQUAL 0)
       list(GET _kur_dl_status 1 _kur_dl_msg)
       # Try FTP_SERVER mirror if set
-      include(cmake/DepMirror.cmake)
+      include("${CMAKE_SOURCE_DIR}/cmake/DepMirror.cmake")
       dep_mirror_fallback(_kur_mirror_url "${_KUR_KURAMA_TAR}" kurama)
       if(_kur_mirror_url)
         message(STATUS "Kurama: trying mirror ${_kur_mirror_url}")
