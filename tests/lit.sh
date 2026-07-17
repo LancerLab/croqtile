@@ -1204,8 +1204,14 @@ retrieve_run_config() {
   run_command=
   run_environ=
   run_target=
+  run_sim=0
 
-  if [[ $line =~ [[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
+  if [[ $line =~ [[:blank:]]*RUN-SIM:[[:blank:]]*(.+) ]]; then
+    # RUN-SIM: only executed when --sim=on or --sim=only
+    run_command="${BASH_REMATCH[1]}"
+    run_sim=1
+    run_environ="shell"
+  elif [[ $line =~ [[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
     # Extract the command after "RUN:"
     run_command="${BASH_REMATCH[1]}"
     run_environ="shell"
@@ -1380,6 +1386,13 @@ for _entry in "${files_array[@]}"; do
 
     # Either execute or skip
     run_count=$(($run_count + 1))
+
+    # Skip RUN-SIM lines when sim mode is off
+    if [[ $run_sim -eq 1 && "$sim_mode" == "off" ]]; then
+      print_status_line "SKIP(sim=off):" "${file} ($run_count of $run_num)"
+      num_skiped=$(($num_skiped + 1));
+      continue;
+    fi
 
     # Check if the execution environment matches
     if [[ ("$run_environ" == "docker" && "$is_in_docker" == false) ||
