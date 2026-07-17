@@ -1,4 +1,4 @@
-// RUN: choreo -es -t cute %s 2>&1 | FileCheck %s
+// RUN: choreo -es %target %s 2>&1 | FileCheck %s
 
 __co__ auto check_bounded_symbolic_chunkat(f32 [2,4] a) {
   parallel wg by 3 {
@@ -11,7 +11,7 @@ __co__ auto check_bounded_symbolic_chunkat(f32 [2,4] a) {
   }
 }
 
-// CHECK: error: Index (::check_bounded_symbolic_chunkat::paraby_0::paraby_1::paraby_2::wg - 1) is out of bounds of the 1st dimension of array 'b', where the valid range is [0, 1)
+// CHECK: error: Index ({{.*}}wg - 1) is out of bounds of the 1st dimension of array 'b', where the valid range is [0, 1)
 // CHECK:         dma.copy a => b[idx];
 // CHECK:                         ^
 // CHECK: Totally 1 errors have been detected.

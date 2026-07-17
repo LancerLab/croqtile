@@ -129,6 +129,21 @@ make format
 - Do not use decorative separator-only lines (for example, lines made only of
    box-drawing characters). Use plain ASCII separators if needed.
 
+### Commit Message Conventions (MANDATORY)
+
+- Write messages that describe **what kind of change** was made, not the
+  specific implementation details (file names, variable names, function
+  names — these change over time). Future readers tracing history need to
+  understand the intent, not the mechanics.
+- Start with a conventional prefix: `fix:`, `feat:`, `refactor:`, `cleanup:`,
+  `docs:`, `test:`, `chore:`, `build:`.
+- Keep the subject line under 72 characters.
+- Use bullet points for body details describing categories of changes, not
+  specific files or symbols.
+- Example — GOOD: "fix: make check tests target-agnostic and relax arch
+  validation" | BAD: "fix: change hetero_target.cpp IsArchSupported to
+  return true".
+
 ### C++ Standard
 
 - **C++17** is required

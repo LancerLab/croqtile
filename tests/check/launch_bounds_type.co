@@ -1,4 +1,4 @@
-// RUN: not choreo -t cute %s 2>&1 | FileCheck %s
+// RUN: not choreo %target %s 2>&1 | FileCheck %s
 // CHECK: error: {{\[\[}}launch_bounds]] argument must be an integer but got 'f64'.
 // CHECK: Totally 1 errors have been detected.
 
