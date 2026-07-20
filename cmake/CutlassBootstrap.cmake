@@ -42,8 +42,13 @@ if(NOT _cutlass_present)
   message(STATUS "CUTLASS not found, downloading ${CUTLASS_VERSION}...")
   set(_CUTLASS_TAR_PATH "${CMAKE_SOURCE_DIR}/extern/${CUTLASS_TAR}")
 
-  if(NOT EXISTS "${_CUTLASS_TAR_PATH}")
-    set(_dl_args "${CUTLASS_URL}" "${_CUTLASS_TAR_PATH}"
+  include("${CMAKE_SOURCE_DIR}/cmake/DepMirror.cmake")
+  dep_validate_cached_archive(
+    _cached_archive_valid "${_CUTLASS_TAR_PATH}" "${CUTLASS_MD5}")
+  if(NOT _cached_archive_valid)
+    dep_download_order(_download_url _fallback_url
+      "${CUTLASS_URL}" "${CUTLASS_TAR}" cutlass)
+    set(_dl_args "${_download_url}" "${_CUTLASS_TAR_PATH}"
       SHOW_PROGRESS STATUS _dl_status TIMEOUT 300)
     file(DOWNLOAD ${_dl_args})
     list(GET _dl_status 0 _dl_code)
@@ -57,15 +62,21 @@ if(NOT _cutlass_present)
     endif()
     if(NOT _dl_code EQUAL 0)
       list(GET _dl_status 1 _dl_msg)
-      # Try FTP_SERVER mirror if set
-      include(cmake/DepMirror.cmake)
-      dep_mirror_fallback(_mirror_url "${CUTLASS_TAR}" cutlass)
-      if(_mirror_url)
-        message(STATUS "CUTLASS: trying mirror ${_mirror_url}")
-        set(_dl_args "${_mirror_url}" "${_CUTLASS_TAR_PATH}"
+      if(_fallback_url)
+        message(STATUS "CUTLASS: trying fallback ${_fallback_url}")
+        set(_dl_args "${_fallback_url}" "${_CUTLASS_TAR_PATH}"
           SHOW_PROGRESS STATUS _dl_status TIMEOUT 300)
         file(DOWNLOAD ${_dl_args})
         list(GET _dl_status 0 _dl_code)
+        if(_dl_code EQUAL 0 AND CUTLASS_MD5)
+          file(MD5 "${_CUTLASS_TAR_PATH}" _actual_md5)
+          if(NOT _actual_md5 STREQUAL CUTLASS_MD5)
+            file(REMOVE "${_CUTLASS_TAR_PATH}")
+            set(_dl_code 1)
+            set(_dl_msg
+              "MD5 mismatch: expected ${CUTLASS_MD5}, got ${_actual_md5}")
+          endif()
+        endif()
       endif()
     endif()
     if(NOT _dl_code EQUAL 0)

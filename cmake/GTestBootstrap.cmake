@@ -37,7 +37,10 @@ endif()
 
 set(_archive "${CMAKE_BINARY_DIR}/_gtest_download.tar.gz")
 
-set(_dl_args "${_GTEST_URL}" "${_archive}"
+include("${CMAKE_SOURCE_DIR}/cmake/DepMirror.cmake")
+dep_download_order(_download_url _fallback_url
+  "${_GTEST_URL}" "${_GTEST_TAR}" gtest)
+set(_dl_args "${_download_url}" "${_archive}"
   TIMEOUT 120
   STATUS _dl_status)
 
@@ -55,15 +58,21 @@ if(_dl_code EQUAL 0 AND _GTEST_MD5)
 endif()
 if(NOT _dl_code EQUAL 0)
   list(GET _dl_status 1 _dl_msg)
-  # Try FTP_SERVER mirror if set
-  include(cmake/DepMirror.cmake)
-  dep_mirror_fallback(_mirror_url "${_GTEST_TAR}" gtest)
-  if(_mirror_url)
-    message(STATUS "GTest: trying mirror ${_mirror_url}")
-    set(_dl_args "${_mirror_url}" "${_archive}"
+  if(_fallback_url)
+    message(STATUS "GTest: trying fallback ${_fallback_url}")
+    set(_dl_args "${_fallback_url}" "${_archive}"
       TIMEOUT 120 STATUS _dl_status)
     file(DOWNLOAD ${_dl_args})
     list(GET _dl_status 0 _dl_code)
+    if(_dl_code EQUAL 0 AND _GTEST_MD5)
+      file(MD5 "${_archive}" _actual_md5)
+      if(NOT _actual_md5 STREQUAL _GTEST_MD5)
+        file(REMOVE "${_archive}")
+        set(_dl_code 1)
+        set(_dl_msg
+          "MD5 mismatch: expected ${_GTEST_MD5}, got ${_actual_md5}")
+      endif()
+    endif()
   endif()
 endif()
 if(NOT _dl_code EQUAL 0)

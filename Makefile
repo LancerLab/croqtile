@@ -91,6 +91,7 @@ sdk-test: sdk-install
 
 .PHONY: cmake-test
 cmake-test:
+	$(CMAKE) -P tests/cmake/test_dep_mirror.cmake
 	bash tests/cmake/test_croq_options.sh
 
 

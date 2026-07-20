@@ -40,8 +40,13 @@ if(NOT EXISTS "${_PYBIND11_ROOT}/CMakeLists.txt")
   message(STATUS "co-py: pybind11 not found, downloading (${CROPY_PYBIND11_VERSION})...")
   set(_TAR_PATH "${CMAKE_SOURCE_DIR}/extern/${CROPY_PYBIND11_TAR}")
 
-  if(NOT EXISTS "${_TAR_PATH}")
-    set(_dl_args "${CROPY_PYBIND11_URL}" "${_TAR_PATH}"
+  include("${CMAKE_SOURCE_DIR}/cmake/DepMirror.cmake")
+  dep_validate_cached_archive(
+    _cached_archive_valid "${_TAR_PATH}" "${CROPY_PYBIND11_MD5}")
+  if(NOT _cached_archive_valid)
+    dep_download_order(_download_url _fallback_url
+      "${CROPY_PYBIND11_URL}" "${CROPY_PYBIND11_TAR}" pybind11)
+    set(_dl_args "${_download_url}" "${_TAR_PATH}"
       SHOW_PROGRESS STATUS _dl_status TIMEOUT 120)
     file(DOWNLOAD ${_dl_args})
     list(GET _dl_status 0 _dl_code)
@@ -55,15 +60,22 @@ if(NOT EXISTS "${_PYBIND11_ROOT}/CMakeLists.txt")
     endif()
     if(NOT _dl_code EQUAL 0)
       list(GET _dl_status 1 _dl_msg)
-      # Try FTP_SERVER mirror if set
-      include(cmake/DepMirror.cmake)
-      dep_mirror_fallback(_mirror_url "${CROPY_PYBIND11_TAR}" pybind11)
-      if(_mirror_url)
-        message(STATUS "pybind11: trying mirror ${_mirror_url}")
-        set(_dl_args "${_mirror_url}" "${_TAR_PATH}"
+      if(_fallback_url)
+        message(STATUS "pybind11: trying fallback ${_fallback_url}")
+        set(_dl_args "${_fallback_url}" "${_TAR_PATH}"
           SHOW_PROGRESS STATUS _dl_status TIMEOUT 120)
         file(DOWNLOAD ${_dl_args})
         list(GET _dl_status 0 _dl_code)
+        if(_dl_code EQUAL 0 AND CROPY_PYBIND11_MD5)
+          file(MD5 "${_TAR_PATH}" _actual_md5)
+          if(NOT _actual_md5 STREQUAL CROPY_PYBIND11_MD5)
+            file(REMOVE "${_TAR_PATH}")
+            set(_dl_code 1)
+            set(_dl_msg
+              "MD5 mismatch: expected ${CROPY_PYBIND11_MD5}, "
+              "got ${_actual_md5}")
+          endif()
+        endif()
       endif()
     endif()
     if(NOT _dl_code EQUAL 0)
@@ -83,6 +95,7 @@ if(NOT EXISTS "${_PYBIND11_ROOT}/CMakeLists.txt")
     WORKING_DIRECTORY "${_PYBIND11_ROOT}"
     RESULT_VARIABLE _extract_result)
   if(NOT _extract_result EQUAL 0)
+    file(REMOVE "${_TAR_PATH}")
     message(FATAL_ERROR "Failed to extract pybind11 tarball: ${_TAR_PATH}")
   endif()
 

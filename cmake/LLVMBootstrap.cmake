@@ -40,8 +40,13 @@ if(NOT EXISTS "${_LLVM_CMAKE_DIR}/mlir/MLIRConfig.cmake")
   message(STATUS "CoIR: LLVM/MLIR not found, downloading (${COIR_LLVM_SHASH})...")
   set(_TAR_PATH "${CMAKE_SOURCE_DIR}/extern/${COIR_LLVM_TAR}")
 
-  if(NOT EXISTS "${_TAR_PATH}")
-    set(_dl_args "${COIR_LLVM_URL}" "${_TAR_PATH}"
+  include("${CMAKE_SOURCE_DIR}/cmake/DepMirror.cmake")
+  dep_validate_cached_archive(
+    _cached_archive_valid "${_TAR_PATH}" "${COIR_LLVM_MD5}")
+  if(NOT _cached_archive_valid)
+    dep_download_order(_download_url _dependency_fallback_url
+      "${COIR_LLVM_URL}" "${COIR_LLVM_TAR}" llvm)
+    set(_dl_args "${_download_url}" "${_TAR_PATH}"
       SHOW_PROGRESS STATUS _dl_status TIMEOUT 600)
     file(DOWNLOAD ${_dl_args})
     list(GET _dl_status 0 _dl_code)
@@ -51,6 +56,29 @@ if(NOT EXISTS "${_LLVM_CMAKE_DIR}/mlir/MLIRConfig.cmake")
         file(REMOVE "${_TAR_PATH}")
         set(_dl_code 1)
         set(_dl_msg "MD5 mismatch: expected ${COIR_LLVM_MD5}, got ${_actual_md5}")
+      endif()
+    endif()
+    if(NOT _dl_code EQUAL 0)
+      # In FTP-first mode, retry the configured primary URL before its
+      # separately configured fallback URL.
+      if(NOT _download_url STREQUAL COIR_LLVM_URL
+          AND _dependency_fallback_url)
+        message(STATUS
+          "CoIR: trying configured URL ${_dependency_fallback_url}")
+        set(_dl_args "${_dependency_fallback_url}" "${_TAR_PATH}"
+          SHOW_PROGRESS STATUS _dl_status TIMEOUT 600)
+        file(DOWNLOAD ${_dl_args})
+        list(GET _dl_status 0 _dl_code)
+        if(_dl_code EQUAL 0 AND COIR_LLVM_MD5)
+          file(MD5 "${_TAR_PATH}" _actual_md5)
+          if(NOT _actual_md5 STREQUAL COIR_LLVM_MD5)
+            file(REMOVE "${_TAR_PATH}")
+            set(_dl_code 1)
+            set(_dl_msg
+              "MD5 mismatch: expected ${COIR_LLVM_MD5}, "
+              "got ${_actual_md5}")
+          endif()
+        endif()
       endif()
     endif()
     if(NOT _dl_code EQUAL 0)
@@ -77,15 +105,24 @@ if(NOT EXISTS "${_LLVM_CMAKE_DIR}/mlir/MLIRConfig.cmake")
         endif()
       endif()
       # Still failed -- try FTP_SERVER mirror if set
-      if(NOT _dl_code EQUAL 0)
-        include(cmake/DepMirror.cmake)
-        dep_mirror_fallback(_mirror_url "${COIR_LLVM_TAR}" llvm)
-        if(_mirror_url)
-          message(STATUS "CoIR: trying mirror ${_mirror_url}")
-          set(_dl_args "${_mirror_url}" "${_TAR_PATH}"
+      if(NOT _dl_code EQUAL 0 AND _download_url STREQUAL COIR_LLVM_URL)
+        if(_dependency_fallback_url)
+          message(STATUS
+            "CoIR: trying dependency fallback ${_dependency_fallback_url}")
+          set(_dl_args "${_dependency_fallback_url}" "${_TAR_PATH}"
             SHOW_PROGRESS STATUS _dl_status TIMEOUT 600)
           file(DOWNLOAD ${_dl_args})
           list(GET _dl_status 0 _dl_code)
+          if(_dl_code EQUAL 0 AND COIR_LLVM_MD5)
+            file(MD5 "${_TAR_PATH}" _actual_md5)
+            if(NOT _actual_md5 STREQUAL COIR_LLVM_MD5)
+              file(REMOVE "${_TAR_PATH}")
+              set(_dl_code 1)
+              set(_dl_msg
+                "MD5 mismatch: expected ${COIR_LLVM_MD5}, "
+                "got ${_actual_md5}")
+            endif()
+          endif()
         endif()
       endif()
     endif()
@@ -106,6 +143,7 @@ if(NOT EXISTS "${_LLVM_CMAKE_DIR}/mlir/MLIRConfig.cmake")
     WORKING_DIRECTORY "${_LLVM_ROOT}"
     RESULT_VARIABLE _extract_result)
   if(NOT _extract_result EQUAL 0)
+    file(REMOVE "${_TAR_PATH}")
     message(FATAL_ERROR "Failed to extract LLVM tarball: ${_TAR_PATH}")
   endif()
 
