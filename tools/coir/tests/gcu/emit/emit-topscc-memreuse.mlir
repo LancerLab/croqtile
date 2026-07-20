@@ -14,7 +14,7 @@ module attributes {"coir.target" = "topscc", "coir.arch" = "gcu300"} {
     coir.foreach %k in %c8 {
       // First reuse alloc triggers pool declaration.
       // CHECK: __shared__ unsigned char [[POOL:__spm_[0-9]+]][256];
-      // CHECK: __bf16* {{.+}} = (__bf16*)((unsigned char*)[[POOL]] + 0);
+      // CHECK: choreo::bf16* {{.+}} = (choreo::bf16*)((unsigned char*)[[POOL]] + 0);
       %buf1 = coir.tensor.alloc {
           reuse_spm = "pool0",
           reuse_offset = 0 : i64,
@@ -22,7 +22,7 @@ module attributes {"coir.target" = "topscc", "coir.arch" = "gcu300"} {
         : !coir.tensor<128xbf16, shared>
 
       // Second reuse alloc uses the same pool at offset 128.
-      // CHECK: __bf16* {{.+}} = (__bf16*)((unsigned char*)[[POOL]] + 128);
+      // CHECK: choreo::bf16* {{.+}} = (choreo::bf16*)((unsigned char*)[[POOL]] + 128);
       %buf2 = coir.tensor.alloc {
           reuse_spm = "pool0",
           reuse_offset = 128 : i64,
@@ -49,7 +49,7 @@ module attributes {"coir.target" = "topscc", "coir.arch" = "gcu300"} {
 
       // Pool B — half type.
       // CHECK: __shared__ unsigned char [[POOLB:__spm_[0-9]+]][128];
-      // CHECK: __fp16* {{.+}} = (__fp16*)((unsigned char*)[[POOLB]] + 0);
+      // CHECK: choreo::f16* {{.+}} = (choreo::f16*)((unsigned char*)[[POOLB]] + 0);
       %b1 = coir.tensor.alloc {
           reuse_spm = "poolB",
           reuse_offset = 0 : i64,
@@ -74,7 +74,7 @@ module attributes {"coir.target" = "topscc", "coir.arch" = "gcu300"} {
     coir.foreach %k in %c4 {
       // Dynamic offset: emit extern __shared__ and pointer alias.
       // CHECK: extern __shared__ unsigned char __dyn_smem[];
-      // CHECK: __bf16* {{.+}} = (__bf16*)((unsigned char*)__dyn_smem + mr_off_0);
+      // CHECK: choreo::bf16* {{.+}} = (choreo::bf16*)((unsigned char*)__dyn_smem + mr_off_0);
       %buf = coir.tensor.alloc {
           reuse_offset = -1 : i64,
           dyn_offset_arg = "mr_off_0"}
@@ -90,7 +90,7 @@ module attributes {"coir.target" = "topscc", "coir.arch" = "gcu300"} {
       %src: !coir.tensor<1024xbf16, global>) {
     %c4 = arith.constant 4 : index
     coir.foreach %k in %c4 {
-      // CHECK: __shared__ __bf16 {{.+}}[128]
+      // CHECK: __shared__ choreo::bf16 {{.+}}[128]
       // CHECK-NOT: __spm_
       // CHECK-NOT: __dyn_smem
       %buf = coir.tensor.alloc

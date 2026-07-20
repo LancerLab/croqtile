@@ -133,8 +133,8 @@ private:
       return emitType(tensorTy.getElementType()) + "*";
     if (ty.isIndex()) return "int";
     if (ty.isInteger(1)) return "bool";
-    if (ty.isF16()) return "__fp16";
-    if (ty.isBF16()) return "__bf16";
+    if (ty.isF16()) return "choreo::f16";
+    if (ty.isBF16()) return "choreo::bf16";
     if (ty.isF32()) return "float";
     if (ty.isF64()) return "double";
     if (isa<mlir::Float8E4M3FNType>(ty) || isa<mlir::Float8E5M2Type>(ty)) {
@@ -159,8 +159,8 @@ private:
   }
 
   std::string emitElementType(Type ty) override {
-    if (ty.isF16()) return "__fp16";
-    if (ty.isBF16()) return "__bf16";
+    if (ty.isF16()) return "choreo::f16";
+    if (ty.isBF16()) return "choreo::bf16";
     if (ty.isF32()) return "float";
     if (ty.isF64()) return "double";
     if (isa<mlir::Float8E4M3FNType>(ty) || isa<mlir::Float8E5M2Type>(ty)) {
