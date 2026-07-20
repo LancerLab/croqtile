@@ -105,7 +105,7 @@ fi
     // Match standalone topscc CFLAGS so hetero offload gets the same DMA
     // setup (GCU300+ needs TOPSCC_PRIVATE_DTE_AUTO_INIT for async DMA).
     out << R"script(
-export CFLAGS="-arch ${gcu_arch} -std=c++17 -ltops -lm -O3 -fPIC"
+export CFLAGS="-arch ${gcu_arch} -std=c++17 -D__TOPSCC__ -ltops -lm -O3 -fPIC"
 if [[ "${gcu_arch}" == gcu300* || "${gcu_arch}" == gcu400* || "${gcu_arch}" == gcu500* ]]; then
   export CFLAGS="${CFLAGS} -DTOPSCC_PRIVATE_DTE_AUTO_INIT"
 fi
