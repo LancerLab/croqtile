@@ -17,21 +17,23 @@ option(COIR_AUTO_DOWNLOAD_KURAMA
 if(NOT EXISTS "${_KURAMA_MARKER}" AND COIR_AUTO_DOWNLOAD_KURAMA AND _KUR_KURAMA_URL)
   set(_KUR_TAR "${CMAKE_SOURCE_DIR}/extern/${_KUR_KURAMA_TAR}")
 
-  if(NOT EXISTS "${_KUR_TAR}")
+  include("${CMAKE_SOURCE_DIR}/cmake/DepMirror.cmake")
+  dep_validate_cached_archive(
+    _kur_cached_archive_valid "${_KUR_TAR}" "${_KUR_KURAMA_MD5}")
+  if(NOT _kur_cached_archive_valid)
     message(STATUS "GCU native: kurama not found, downloading...")
-    file(DOWNLOAD "${_KUR_KURAMA_URL}" "${_KUR_TAR}"
+    dep_download_order(_kur_download_url _kur_fallback_url
+      "${_KUR_KURAMA_URL}" "${_KUR_KURAMA_TAR}" kurama)
+    file(DOWNLOAD "${_kur_download_url}" "${_KUR_TAR}"
       SHOW_PROGRESS
       STATUS _kur_dl_status
       TIMEOUT 300)
     list(GET _kur_dl_status 0 _kur_dl_code)
     if(NOT _kur_dl_code EQUAL 0)
       list(GET _kur_dl_status 1 _kur_dl_msg)
-      # Try FTP_SERVER mirror if set
-      include("${CMAKE_SOURCE_DIR}/cmake/DepMirror.cmake")
-      dep_mirror_fallback(_kur_mirror_url "${_KUR_KURAMA_TAR}" kurama)
-      if(_kur_mirror_url)
-        message(STATUS "Kurama: trying mirror ${_kur_mirror_url}")
-        file(DOWNLOAD "${_kur_mirror_url}" "${_KUR_TAR}"
+      if(_kur_fallback_url)
+        message(STATUS "Kurama: trying fallback ${_kur_fallback_url}")
+        file(DOWNLOAD "${_kur_fallback_url}" "${_KUR_TAR}"
           SHOW_PROGRESS
           STATUS _kur_dl_status
           TIMEOUT 300)
@@ -65,6 +67,7 @@ if(NOT EXISTS "${_KURAMA_MARKER}" AND COIR_AUTO_DOWNLOAD_KURAMA AND _KUR_KURAMA_
       WORKING_DIRECTORY "${_KURAMA_ROOT}"
       RESULT_VARIABLE _kur_extract_result)
     if(NOT _kur_extract_result EQUAL 0)
+      file(REMOVE "${_KUR_TAR}")
       message(WARNING "Failed to extract kurama tarball: ${_KUR_TAR}")
     else()
       file(REMOVE "${_KUR_TAR}")
