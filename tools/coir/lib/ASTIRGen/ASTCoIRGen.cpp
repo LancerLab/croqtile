@@ -339,6 +339,9 @@ bool ASTCoIRGen::BeforeVisitImpl(AST::Node &n) {
   } else if (isa<AST::ParallelBy>(&n) || isa<AST::ForeachBlock>(&n) ||
              isa<AST::WithBlock>(&n)) {
     PushScope();
+  } else if (auto *asgn = dyn_cast<AST::Assignment>(&n)) {
+    if (!asgn->AssignToDataElement())
+      pendingDmaAssignName = asgn->GetName();
   }
   EmitNodeAssertions(&n);
   return true;
@@ -1839,6 +1842,19 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
         return (mlir::Value)builder.create<mlir::arith::XOrIOp>(loc, operand,
                                                                  one);
       }
+      if (op == Op::DataOf || op == Op::MDataOf) {
+        // input_load_s.data parses as dataid_expr -> Unary "dataof" Expr.
+        // Resolve by first trying <name>.data, then falling back to <name>.
+        auto inner = expr->GetR();
+        if (auto name = AST::GetName(*inner)) {
+          auto dataName = *name + ".data";
+          auto v = LookupValue(dataName);
+          if (v) return v;
+          v = LookupValue(*name);
+          if (v) return v;
+        }
+        return EmitExpr(*inner);
+      }
       auto operand = EmitExpr(*expr->GetR());
       if (!operand) return nullptr;
       if (op == Op::Sub) {
@@ -2494,16 +2510,20 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
     token = dmaCopy.getToken();
   }
 
-  if (!dma.future.empty()) {
+  auto futureName = dma.future;
+  if (futureName.empty() && !pendingDmaAssignName.empty())
+    futureName = pendingDmaAssignName;
+  if (!futureName.empty()) {
     if (isAsync && token) {
-      MapValue(dma.future, token);
+      MapValue(futureName, token);
       if (dstVal)
-        MapValue(dma.future + ".data", dstVal);
+        MapValue(futureName + ".data", dstVal);
     } else if (dstVal) {
-      MapValue(dma.future, dstVal);
-      MapValue(dma.future + ".data", dstVal);
+      MapValue(futureName, dstVal);
+      MapValue(futureName + ".data", dstVal);
     }
   }
+  pendingDmaAssignName.clear();
 
   return true;
 }
@@ -2979,6 +2999,38 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
     if (!v) {
       if (auto name = AST::GetName(*arg))
         v = LookupValue(*name);
+      // .data fallback (null case): EmitExpr may return nullptr for Unary
+      // "dataof" expressions (e.g., input_load_s.data used as a call arg).
+      // AST::GetName also fails on dataid_expr nodes. Fall back to
+      // resolving the base name and looking up <name>.data directly.
+      if (!v) {
+        std::string baseName;
+        if (auto *expr = dyn_cast<AST::Expr>(arg.get())) {
+          if (expr->GetOp() == Op::DataOf || expr->GetOp() == Op::MDataOf) {
+            if (auto innerName = AST::GetName(*expr->GetR()))
+              baseName = *innerName;
+          }
+        } else if (auto *da = dyn_cast<AST::DataAccess>(arg.get())) {
+          baseName = da->GetDataName();
+        }
+        if (!baseName.empty()) {
+          v = LookupValue(baseName + ".data");
+          if (!v) v = LookupValue(baseName);
+        }
+      }
+    }
+    // .data fallback: for DMA results, the base name may resolve to a
+    // non-tensor (token or element count), while <name>.data holds the
+    // actual buffer.
+    if (v && !mlir::isa<coir::TensorType>(v.getType())) {
+      if (auto name = AST::GetName(*arg)) {
+        auto dataName = *name;
+        if (!llvm::StringRef(dataName).ends_with(".data"))
+          dataName += ".data";
+        auto bufVal = LookupValue(dataName);
+        if (bufVal && mlir::isa<coir::TensorType>(bufVal.getType()))
+          v = bufVal;
+      }
     }
     if (v) operands.push_back(v);
   }
