@@ -1394,6 +1394,13 @@ for _entry in "${files_array[@]}"; do
       continue;
     fi
 
+    # Skip non-RUN-SIM lines when sim mode is only
+    if [[ $run_sim -eq 0 && "$sim_mode" == "only" ]]; then
+      print_status_line "SKIP(sim=only):" "${file} ($run_count of $run_num)"
+      num_skiped=$(($num_skiped + 1));
+      continue;
+    fi
+
     # Check if the execution environment matches
     if [[ ("$run_environ" == "docker" && "$is_in_docker" == false) ||
           ("$run_environ" == "shell" && "$is_in_shell" == false) ]]; then
