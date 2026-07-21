@@ -22,8 +22,8 @@ __co__ void bmm(global bf16 [B, M, K] lhs,
         mc_k = mma.fill.f32 0.0f;
         // WGMMA requires 128 threads: 4 warps x 32 threads/warp
         foreach {iv_warp} in [cdiv(TILE_SIZE_K, WARP_K)] {
-          ma = mma.load.swizzle<128> lhs_load_s.span_as([WARP_M, TILE_SIZE_K]).chunkat(_, iv_warp);
-          mb = mma.load.swizzle<128> rhs_load_s.span_as([WARP_N, TILE_SIZE_K]).chunkat(_, iv_warp);
+          ma = mma.desc.swizzle<128> lhs_load_s.span_as([WARP_M, TILE_SIZE_K]).chunkat(_, iv_warp);
+          mb = mma.desc.swizzle<128> rhs_load_s.span_as([WARP_N, TILE_SIZE_K]).chunkat(_, iv_warp);
           mma.row.row mc_k, ma, mb;
         }
         mma.store mc_k, output_s;

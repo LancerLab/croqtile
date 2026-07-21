@@ -88,9 +88,9 @@ __co__ void spmm(global f16 [SPMM_DEFAULT_M, SPMM_DEFAULT_K / 2] lhs_packed,
           stage = iv_k % SPMM_STAGES;
           wait full[stage];
           foreach {iv_warp} in [cdiv(SPMM_TILE_K, SPMM_WARP_K)] {
-            ma = mma.load.swiz<128> lhs_load_s[stage].chunkat(_, iv_warp);
-            mb = mma.load.swiz<128> rhs_load_s[stage].chunkat(_, iv_warp);
-            me = mma.load lhs_meta.chunkat(block_m, iv_k#iv_warp);
+            ma = mma.desc.swiz<128> lhs_load_s[stage].chunkat(_, iv_warp);
+            mb = mma.desc.swiz<128> rhs_load_s[stage].chunkat(_, iv_warp);
+            me = mma.desc lhs_meta.chunkat(block_m, iv_k#iv_warp);
             mma.row.row.sp mc, ma, mb, me;
           }
           trigger empty[stage];

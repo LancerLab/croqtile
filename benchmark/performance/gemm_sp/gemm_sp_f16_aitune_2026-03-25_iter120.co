@@ -88,12 +88,12 @@ __co__ void spmm(global f16 [SPMM_DEFAULT_M, SPMM_DEFAULT_K / 2] lhs_packed,
           stage = iv_k % SPMM_STAGES;
           wait full[stage];
           foreach {iv_warp} in [cdiv(SPMM_TILE_K, SPMM_WARP_K)] {
-            ma = mma.load.swiz<64> lhs_load_s[stage]
+            ma = mma.desc.swiz<64> lhs_load_s[stage]
                 .subspan(SPMM_WARP_M, SPMM_PACKED_TILE_K)
                 .at(p1 - 1, 0)
                 .chunkat(_, iv_warp);
-            mb = mma.load.swiz<128> rhs_load_s[stage].chunkat(_, iv_warp);
-            me = mma.load lhs_meta
+            mb = mma.desc.swiz<128> rhs_load_s[stage].chunkat(_, iv_warp);
+            me = mma.desc lhs_meta
                 .subspan(SPMM_TILE_M, SPMM_META_TILE_COLS)
                 .at(block_m, iv_k)
                 .subspan(SPMM_WARP_M, SPMM_META_SUB_COLS)

@@ -99,11 +99,11 @@ __co__ void spmm(global f8_e4m3 [M, PACKED_K] lhs_packed,
           stage = iv_k % SPMM_STAGES;
           wait full[stage];
           foreach {iv_warp} in [cdiv(SPMM_TILE_K, SPMM_WARP_K)] {
-            ma = mma.load.swiz<SPMM_LHS_SWIZ> lhs_load_s[stage]
+            ma = mma.desc.swiz<SPMM_LHS_SWIZ> lhs_load_s[stage]
                 .view(SPMM_WARP_M, 32)
                 .from(0, iv_warp * 32);
-            mb = mma.load.swiz<SPMM_RHS_SWIZ> rhs_load_s[stage].chunkat(_, iv_warp);
-            me = mma.load lhs_meta.subspan(SPMM_WARP_M, SPMM_META_TILE_COLS)
+            mb = mma.desc.swiz<SPMM_RHS_SWIZ> rhs_load_s[stage].chunkat(_, iv_warp);
+            me = mma.desc lhs_meta.subspan(SPMM_WARP_M, SPMM_META_TILE_COLS)
                 .at(block_m, iv_k)
                 .chunkat(_, iv_warp);
             mma.row.row.sp mc, ma, mb, me;

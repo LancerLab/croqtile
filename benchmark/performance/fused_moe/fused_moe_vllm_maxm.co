@@ -742,8 +742,8 @@ __co__ void fused_moe_grouped_wgmma_fp8(
             => sA;
 
         foreach iv_warp in [QWEN35_TILE_K / QWEN35_WARP_K] {
-          ma = mma.load.swiz<QWEN35_SWIZZLE> sA.chunkat(_, iv_warp);
-          mb = mma.load.swiz<QWEN35_SWIZZLE> sB.chunkat(_, iv_warp);
+          ma = mma.desc.swiz<QWEN35_SWIZZLE> sA.chunkat(_, iv_warp);
+          mb = mma.desc.swiz<QWEN35_SWIZZLE> sB.chunkat(_, iv_warp);
           mma.row.row mc, ma, mb;
         }
 
@@ -846,8 +846,8 @@ __co__ void fused_moe_grouped_wgmma_fp8_noscat(
                 seg_start + iv_m * QWEN35_WARP_M, iv_k * QWEN35_TILE_K)
             => sA;
         foreach iv_warp in [QWEN35_TILE_K / QWEN35_WARP_K] {
-          ma = mma.load.swiz<QWEN35_SWIZZLE> sA.chunkat(_, iv_warp);
-          mb = mma.load.swiz<QWEN35_SWIZZLE> sB.chunkat(_, iv_warp);
+          ma = mma.desc.swiz<QWEN35_SWIZZLE> sA.chunkat(_, iv_warp);
+          mb = mma.desc.swiz<QWEN35_SWIZZLE> sB.chunkat(_, iv_warp);
           mma.row.row mc, ma, mb;
         }
         sc_a = scale_a.view(1, QWEN35_WARP_M).from(
@@ -1018,8 +1018,8 @@ __co__ void fused_moe_grouped_wgmma_fp8_k512(
             => sA;
 
         foreach iv_warp in [QWEN35_TILE_K / QWEN35_WARP_K] {
-          ma = mma.load.swiz<QWEN35_SWIZZLE> sA.chunkat(_, iv_warp);
-          mb = mma.load.swiz<QWEN35_SWIZZLE> sB.chunkat(_, iv_warp);
+          ma = mma.desc.swiz<QWEN35_SWIZZLE> sA.chunkat(_, iv_warp);
+          mb = mma.desc.swiz<QWEN35_SWIZZLE> sB.chunkat(_, iv_warp);
           mma.row.row mc, ma, mb;
         }
 
