@@ -985,6 +985,16 @@ public:
                             "but target is SM" +
                             std::to_string(arch) + ".");
 
+      // mma.desc denotes a WGMMA shared-memory descriptor.  Other MMA
+      // families consume register fragments, so accepting a shared operand
+      // here would leave the fragment unmaterialized in their codegen.
+      if (mma_ty != MMAType::WGMMA &&
+          (a_sty->GetStorage() == Storage::SHARED ||
+           b_sty->GetStorage() == Storage::SHARED))
+        Error1(n.LOC(),
+               "mma.desc is only valid for WGMMA shared-memory operands; "
+               "use mma.load for WMMA/mma.sync operands.");
+
       FCtx(fname).SetFragMMAType(InScopeName(a_sym), mma_ty);
       FCtx(fname).SetFragMMAType(InScopeName(b_sym), mma_ty);
       FCtx(fname).SetFragMMAType(InScopeName(c_sym), mma_ty);

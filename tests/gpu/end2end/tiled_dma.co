@@ -835,6 +835,125 @@ void Run28() {
 
   std::cout << "Test Foo28 Passed\n" << std::endl;
 }
+// copy_if_g2s
+#define TILE_M 64
+#define TILE_K 64
+
+#define M_TAIL 70
+#define K_FULL 64
+
+#define M_FULL 64
+#define K_TAIL 72
+
+#define M_BOTH 70
+#define K_BOTH 72
+
+__co__ auto copy_tail_m(f16 [M_TAIL, K_FULL] input) {
+  f16 [input.span] output {0.0f};
+
+  parallel block_m by cdiv(M_TAIL, TILE_M) : block
+  parallel t by 128 : thread {
+    shared f16 [TILE_M, TILE_K] tile;
+
+    base_m = block_m * TILE_M;
+    remain_m = M_TAIL - base_m;
+    TM = (TILE_M < remain_m) ? TILE_M : remain_m;
+
+    dma.copy.swiz<128>
+      input.view(TM, TILE_K).from(base_m, 0) => tile;
+    dma.copy tile.subspan(TM, TILE_K) => output.view(TM, TILE_K).from(base_m, 0);
+  }
+
+  return output;
+}
+
+__co__ auto copy_tail_k(f16 [M_FULL, K_TAIL] input) {
+  f16 [input.span] output {0.0f};
+
+  parallel block_k by cdiv(K_TAIL, TILE_K) : block
+  parallel t by 128 : thread {
+    shared f16 [TILE_M, TILE_K] tile;
+
+    base_k = block_k * TILE_K;
+    remain_k = K_TAIL - base_k;
+    TK = (TILE_K < remain_k) ? TILE_K : remain_k;
+
+    dma.copy.swiz<128>
+      input.view(TILE_M, TK).from(0, base_k) => tile;
+    dma.copy tile.subspan(TILE_M, TK) => output.view(TILE_M, TK).from(0, base_k);
+  }
+
+  return output;
+}
+
+__co__ auto copy_tail_mk(f16 [M_BOTH, K_BOTH] input) {
+  f16 [input.span] output {0.0f};
+
+  parallel {block_m, block_k} by [cdiv(M_BOTH, TILE_M), cdiv(K_BOTH, TILE_K)] : block
+  parallel t by 128 : thread {
+    shared f16 [TILE_M, TILE_K] tile;
+
+    base_m = block_m * TILE_M;
+    base_k = block_k * TILE_K;
+    remain_m = M_BOTH - base_m;
+    remain_k = K_BOTH - base_k;
+    TM = (TILE_M < remain_m) ? TILE_M : remain_m;
+    TK = (TILE_K < remain_k) ? TILE_K : remain_k;
+
+    dma.copy.swiz<128>
+      input.view(TM, TK).from(base_m, base_k) => tile;
+    dma.copy tile.subspan(TM, TK) => output.view(TM, TK).from(base_m, base_k);
+  }
+
+  return output;
+}
+
+template <size_t M, size_t K>
+void FillInput(choreo::spanned_data<choreo::f16, 2>& data) {
+  for (size_t i = 0; i < M; ++i)
+    for (size_t j = 0; j < K; ++j)
+      data[i][j] = choreo::f32_to_f16(static_cast<float>(((i * 3) + j) % 29 - 14));
+}
+
+template <size_t M, size_t K>
+void CheckEqual(choreo::spanned_data<choreo::f16, 2>& expect,
+                choreo::spanned_data<choreo::f16, 2>& got) {
+  for (size_t i = 0; i < M; ++i)
+    for (size_t j = 0; j < K; ++j)
+      choreo::choreo_assert(
+          choreo::f16_to_f32(expect[i][j]) == choreo::f16_to_f32(got[i][j]),
+          "values are not equal.");
+}
+
+void RunTailM() {
+  auto input = choreo::make_spandata<choreo::f16>(M_TAIL, K_FULL);
+  FillInput<M_TAIL, K_FULL>(input);
+
+  auto output = copy_tail_m(input.view());
+  CheckEqual<M_TAIL, K_FULL>(input, output);
+
+  std::cout << "Test Tail M Passed\n" << std::endl;
+}
+
+void RunTailK() {
+  auto input = choreo::make_spandata<choreo::f16>(M_FULL, K_TAIL);
+  FillInput<M_FULL, K_TAIL>(input);
+
+  auto output = copy_tail_k(input.view());
+  CheckEqual<M_FULL, K_TAIL>(input, output);
+
+  std::cout << "Test Tail K Passed\n" << std::endl;
+}
+
+void RunTailMK() {
+  auto input = choreo::make_spandata<choreo::f16>(M_BOTH, K_BOTH);
+  FillInput<M_BOTH, K_BOTH>(input);
+
+  auto output = copy_tail_mk(input.view());
+  CheckEqual<M_BOTH, K_BOTH>(input, output);
+
+  std::cout << "Test Tail MK Passed\n" << std::endl;
+}
 
 int main() {
   Run1();
@@ -865,6 +984,9 @@ int main() {
   Run26();
   Run27();
   Run28();
+  RunTailM();
+  RunTailK();
+  RunTailMK();
 }
 
 // CHECK: Test Foo1 Passed
@@ -895,3 +1017,6 @@ int main() {
 // CHECK: Test Foo26 Passed
 // CHECK: Test Foo27 Passed
 // CHECK: Test Foo28 Passed
+// CHECK: Test Tail M Passed
+// CHECK: Test Tail K Passed
+// CHECK: Test Tail MK Passed

@@ -1,0 +1,353 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+
+#include <cstdlib>
+__co__ void matmul_persis_hilbert_sm90(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, N] output,
+                                        global s32 [T] schedule_m, global s32 [T] schedule_n) {
+  int total_tiles = cdiv(M, 64) * cdiv(N, 128);
+  parallel block_id by 114 : block {
+    shared f16 [64, 64] lhs_load_s;
+    shared f16 [128, 64] rhs_load_s;
+    shared f16 [64, 128] output_s;
+    foreach {tile_iter} in [cdiv(total_tiles, 114)] {
+      tile_id = tile_iter # block_id;
+      if (tile_id < total_tiles) {
+        int block_m = schedule_m.at(tile_id);
+        int block_n = schedule_n.at(tile_id);
+        mc = mma.fill.f16 0.0f;
+        foreach {iv_k} in [cdiv(K, 64)] {
+          tma.copy.swiz<128> lhs.subspan(64, 64).step(64, 64).at(block_m, iv_k) => lhs_load_s;
+          tma.copy.swiz<128> rhs.subspan(128, 64).step(128, 64).at(block_n, iv_k) => rhs_load_s;
+          foreach {iv_warp} in [cdiv(64, 16)] {
+            parallel p by 1 : group-4 {
+              ma = mma.desc lhs_load_s.chunkat(_, iv_warp);
+              mb = mma.desc rhs_load_s.chunkat(_, iv_warp);
+              mma.row.row mc, ma, mb;
+            }
+          }
+        }
+        mma.store mc, output_s;
+        tma.copy output_s => output.subspan(64, 128).at(block_m, block_n);
+      }
+    }
+  }
+}
+
+__co__ void matmul_f16_ws_1p3c_persis(
+    global f16 [M, K] lhs, global f16 [N, K] rhs,
+    global f16 [M, N] output) {
+  int tiles_n = cdiv(N, 128);
+  int total_tiles = cdiv(M, 192) * tiles_n;
+
+  parallel block_id by 132 : block {
+    shared event full[2], empty[2];
+    shared f16 [192, 64] lhs_load_s[2];
+    shared f16 [128, 64] rhs_load_s[2];
+    shared f16 [64, 128] output_s[3];
+
+    foreach {tile_iter} in [cdiv(total_tiles, 132)] {
+      tile_id = tile_iter # block_id;
+      if (tile_id < total_tiles) {
+        block_m = tile_id / tiles_n;
+        block_n = tile_id % tiles_n;
+
+        parallel p1 by 4 : group-4, t by 128 : thread {
+          inthreads.async (p1 == 0) {
+            foreach {iv_k} in [cdiv(K, 64)] {
+              stage = iv_k % 2;
+              wait empty[stage];
+              tma.copy.async<full[stage]>.swiz<128>
+                  lhs.subspan(192, 64).at(block_m, iv_k)
+                  => lhs_load_s[stage];
+              tma.copy.async<full[stage]>.swiz<128>
+                  rhs.subspan(128, 64).at(block_n, iv_k)
+                  => rhs_load_s[stage];
+              trigger full[stage];
+            }
+          }
+          inthreads.async (p1 > 0) {
+            mc = mma.fill.f16 0.0f;
+            if (tile_iter == 0) {
+              foreach {stage} in [2] { trigger empty[stage]; }
+            }
+            foreach {iv_k} in [cdiv(K, 64)] {
+              stage = iv_k % 2;
+              wait full[stage];
+              foreach {iv_warp} in [cdiv(64, 16)] {
+                ma = mma.desc lhs_load_s[stage]
+                    .subspan(64, 64).at(p1 - 1, 0).chunkat(_, iv_warp);
+                mb = mma.desc rhs_load_s[stage].chunkat(_, iv_warp);
+                mma.row.row mc, ma, mb;
+              }
+              trigger empty[stage];
+            }
+            mma.store mc, output_s[p1 - 1];
+            tma.copy output_s[p1 - 1]
+                => output.subspan(64, 128)
+                    .at(block_m * 3 + (p1 - 1), block_n);
+          }
+        }
+      }
+    }
+  }
+}
+
+__co__ void blockscale_gemm_e4m3_ws_persis(
+    global f8_e4m3 [M, K] lhs,
+    global f32 [M, DIV_BLK_K] scale_lhs,
+    global f8_e4m3 [N, K] rhs,
+    global f32 [DIV_BLK_N, DIV_BLK_K] scale_rhs,
+    global f16 [M, N] output) {
+  int tiles_n = cdiv(N, 128);
+  int total_tiles = cdiv(M, 64) * tiles_n;
+
+  parallel block_id by 132 : block {
+    shared event full[4], empty[4];
+    shared f8_e4m3 [64, 128] lhs_load_s[4];
+    shared f8_e4m3 [128, 128] rhs_load_s[4];
+    shared f16 [64, 128] output_s;
+
+    foreach {tile_iter} in [cdiv(total_tiles, 132)] {
+      tile_id = tile_iter # block_id;
+      if (tile_id < total_tiles) {
+        block_m = tile_id / tiles_n;
+        block_n = tile_id % tiles_n;
+
+        parallel p1 by 2 : group-4, t by 128 : thread {
+          inthreads.async (p1 == 0) {
+            foreach {iv_k} in [cdiv(K, 128)] {
+              stage = iv_k % 4;
+              wait empty[stage];
+              tma.copy.async<full[stage]>.swiz<128>
+                  lhs.subspan(64, 128).at(block_m, iv_k)
+                  => lhs_load_s[stage];
+              tma.copy.async<full[stage]>.swiz<128>
+                  rhs.subspan(128, 128).at(block_n, iv_k)
+                  => rhs_load_s[stage];
+              trigger full[stage];
+            }
+          }
+          inthreads.async (p1 == 1) {
+            mc = mma.fill.f16 0.0f;
+            if (tile_iter == 0) {
+              foreach {stage} in [4] { trigger empty[stage]; }
+            }
+            foreach {iv_k} in [cdiv(K, 128)] {
+              stage = iv_k % 4;
+              wait full[stage];
+              foreach {iv_warp} in [cdiv(128, 32)] {
+                ma = mma.desc lhs_load_s[stage].chunkat(_, iv_warp);
+                mb = mma.desc rhs_load_s[stage].chunkat(_, iv_warp);
+                mma.row.row mc, ma, mb;
+              }
+              mma.scale mc, scale_lhs.subspan(64, 1).at(block_m, iv_k),
+                        scale_rhs.at(block_n, iv_k);
+              trigger empty[stage];
+            }
+            mma.store mc, output_s;
+            tma.copy output_s
+                => output.subspan(64, 128).at(block_m, block_n);
+          }
+        }
+      }
+    }
+  }
+}
+
+static void hilbert_rotate(int size, int& x, int& y, int rx, int ry) {
+  if (ry != 0) return;
+  if (rx == 1) {
+    x = size - 1 - x;
+    y = size - 1 - y;
+  }
+  int tmp = x;
+  x = y;
+  y = tmp;
+}
+
+static void hilbert_index_to_xy(int size, int index, int& x, int& y) {
+  x = 0;
+  y = 0;
+  for (int scale = 1; scale < size; scale *= 2) {
+    int rx = 1 & (index / 2);
+    int ry = 1 & (index ^ rx);
+    hilbert_rotate(scale, x, y, rx, ry);
+    x += scale * rx;
+    y += scale * ry;
+    index /= 4;
+  }
+}
+
+static int build_hilbert_schedule(int tiles_m, int tiles_n,
+                                  int* schedule_m, int* schedule_n) {
+  int size = 1;
+  int max_dim = tiles_m > tiles_n ? tiles_m : tiles_n;
+  while (size < max_dim) size *= 2;
+
+  int count = 0;
+  for (int index = 0; index < size * size; ++index) {
+    int x, y;
+    hilbert_index_to_xy(size, index, x, y);
+    if (x < tiles_m && y < tiles_n) {
+      schedule_m[count] = x;
+      schedule_n[count] = y;
+      ++count;
+    }
+  }
+  return count;
+}
+
+static void test_f16_persistent_kernels() {
+  constexpr size_t m = 384, n = 256, k = 64;
+  auto lhs_h = choreo::make_spandata<choreo::f16>(m, k);
+  auto rhs_h = choreo::make_spandata<choreo::f16>(n, k);
+  auto out_h = choreo::make_spandata<choreo::f16>(m, n);
+  lhs_h.fill_random(0, 2);
+  rhs_h.fill_random(0, 2);
+  out_h.fill(0.0f);
+
+  half *lhs_d = nullptr, *rhs_d = nullptr, *out_d = nullptr;
+  choreo::abend_true(cudaMalloc(&lhs_d, m * k * sizeof(half)));
+  choreo::abend_true(cudaMalloc(&rhs_d, n * k * sizeof(half)));
+  choreo::abend_true(cudaMalloc(&out_d, m * n * sizeof(half)));
+  choreo::abend_true(cudaMemcpy(lhs_d, lhs_h.data(), m * k * sizeof(half),
+                                cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(rhs_d, rhs_h.data(), n * k * sizeof(half),
+                                cudaMemcpyHostToDevice));
+
+  auto lhs = choreo::make_spanview<choreo::f16, 2>(lhs_d, {m, k});
+  auto rhs = choreo::make_spanview<choreo::f16, 2>(rhs_d, {n, k});
+  auto out = choreo::make_spanview<choreo::f16, 2>(out_d, {m, n});
+  auto lhs_ref = lhs_h.view();
+  auto rhs_ref = rhs_h.view();
+  auto out_ref = out_h.view();
+  choreo::SampledVerifierConfig config;
+  config.num_samples = 256;
+  config.base_tol = 0.5f;
+  config.rel_tol = 0.02f;
+
+  constexpr int tiles_m = m / 64;
+  constexpr int tiles_n = n / 128;
+  constexpr int total_tiles = tiles_m * tiles_n;
+  int schedule_m_h[total_tiles], schedule_n_h[total_tiles];
+  int *schedule_m_d = nullptr, *schedule_n_d = nullptr;
+  choreo::abend_true(cudaMalloc(&schedule_m_d, total_tiles * sizeof(int)));
+  choreo::abend_true(cudaMalloc(&schedule_n_d, total_tiles * sizeof(int)));
+
+  int count = build_hilbert_schedule(tiles_m, tiles_n, schedule_m_h,
+                                     schedule_n_h);
+  choreo::choreo_assert(count == total_tiles, "hilbert schedule mismatch");
+  choreo::abend_true(cudaMemcpy(schedule_m_d, schedule_m_h,
+                                total_tiles * sizeof(int),
+                                cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(schedule_n_d, schedule_n_h,
+                                total_tiles * sizeof(int),
+                                cudaMemcpyHostToDevice));
+  auto schedule_m =
+      choreo::make_spanview<choreo::s32, 1>(schedule_m_d, {total_tiles});
+  auto schedule_n =
+      choreo::make_spanview<choreo::s32, 1>(schedule_n_d, {total_tiles});
+
+  choreo::abend_true(cudaMemset(out_d, 0, m * n * sizeof(half)));
+  matmul_persis_hilbert_sm90(lhs, rhs, out, schedule_m, schedule_n);
+  choreo::abend_true(cudaMemcpy(out_h.data(), out_d, m * n * sizeof(half),
+                                cudaMemcpyDeviceToHost));
+  choreo::verify_matmul_row_row_sampled(lhs_ref, rhs_ref, out_ref, config);
+  std::cout << "Test persistent hilbert Passed\n";
+
+  choreo::abend_true(cudaMemset(out_d, 0, m * n * sizeof(half)));
+  matmul_f16_ws_1p3c_persis(lhs, rhs, out);
+  choreo::abend_true(cudaMemcpy(out_h.data(), out_d, m * n * sizeof(half),
+                                cudaMemcpyDeviceToHost));
+  choreo::verify_matmul_row_row_sampled(lhs_ref, rhs_ref, out_ref, config);
+  std::cout << "Test persistent warpspec 1p3c Passed\n";
+
+  cudaFree(schedule_m_d);
+  cudaFree(schedule_n_d);
+  cudaFree(lhs_d);
+  cudaFree(rhs_d);
+  cudaFree(out_d);
+}
+
+static void test_blockscale_persistent() {
+  constexpr size_t m = 128, n = 128, k = 128;
+  auto lhs_h = choreo::make_spandata<choreo::f8_e4m3>(m, k);
+  auto rhs_h = choreo::make_spandata<choreo::f8_e4m3>(n, k);
+  auto scale_lhs_h = choreo::make_spandata<choreo::f32>(m, 1);
+  auto scale_rhs_h = choreo::make_spandata<choreo::f32>(1, 1);
+  auto out_h = choreo::make_spandata<choreo::f16>(m, n);
+  lhs_h.fill_random(0, 2);
+  rhs_h.fill_random(0, 2);
+  scale_lhs_h.fill_random(1, 3);
+  scale_rhs_h.fill_random(1, 3);
+  out_h.fill(0.0f);
+
+  __nv_fp8_e4m3 *lhs_d = nullptr, *rhs_d = nullptr;
+  float *scale_lhs_d = nullptr, *scale_rhs_d = nullptr;
+  half *out_d = nullptr;
+  choreo::abend_true(
+      cudaMalloc(&lhs_d, m * k * sizeof(__nv_fp8_e4m3)));
+  choreo::abend_true(
+      cudaMalloc(&rhs_d, n * k * sizeof(__nv_fp8_e4m3)));
+  choreo::abend_true(cudaMalloc(&scale_lhs_d, m * sizeof(float)));
+  choreo::abend_true(cudaMalloc(&scale_rhs_d, sizeof(float)));
+  choreo::abend_true(cudaMalloc(&out_d, m * n * sizeof(half)));
+  choreo::abend_true(cudaMemcpy(lhs_d, lhs_h.data(),
+                                m * k * sizeof(__nv_fp8_e4m3),
+                                cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(rhs_d, rhs_h.data(),
+                                n * k * sizeof(__nv_fp8_e4m3),
+                                cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(scale_lhs_d, scale_lhs_h.data(),
+                                m * sizeof(float), cudaMemcpyHostToDevice));
+  choreo::abend_true(cudaMemcpy(scale_rhs_d, scale_rhs_h.data(),
+                                sizeof(float), cudaMemcpyHostToDevice));
+
+  blockscale_gemm_e4m3_ws_persis(
+      choreo::make_spanview<choreo::f8_e4m3, 2>(lhs_d, {m, k}),
+      choreo::make_spanview<choreo::f32, 2>(scale_lhs_d, {m, 1}),
+      choreo::make_spanview<choreo::f8_e4m3, 2>(rhs_d, {n, k}),
+      choreo::make_spanview<choreo::f32, 2>(scale_rhs_d, {1, 1}),
+      choreo::make_spanview<choreo::f16, 2>(out_d, {m, n}));
+  choreo::abend_true(cudaMemcpy(out_h.data(), out_d, m * n * sizeof(half),
+                                cudaMemcpyDeviceToHost));
+
+  auto lhs = lhs_h.view();
+  auto rhs = rhs_h.view();
+  auto scale_lhs = scale_lhs_h.view();
+  auto scale_rhs = scale_rhs_h.view();
+  auto out = out_h.view();
+  for (size_t sample = 0; sample < 256; ++sample) {
+    size_t row = (sample * 37) % m;
+    size_t col = (sample * 53) % n;
+    float ref = 0.0f;
+    for (size_t inner = 0; inner < k; ++inner) {
+      ref += static_cast<float>(lhs[row][inner]) *
+             static_cast<float>(scale_lhs[row][0]) *
+             static_cast<float>(rhs[col][inner]) *
+             static_cast<float>(scale_rhs[0][0]);
+    }
+    float got = __half2float(out[row][col]);
+    float tolerance = 0.5f + 0.08f * std::abs(ref);
+    choreo::choreo_assert(std::abs(got - ref) <= tolerance,
+                          "blockscale values are not equal.");
+  }
+  std::cout << "Test persistent blockscale e4m3 Passed\n";
+
+  cudaFree(lhs_d);
+  cudaFree(rhs_d);
+  cudaFree(scale_lhs_d);
+  cudaFree(scale_rhs_d);
+  cudaFree(out_d);
+}
+
+int main() {
+  test_f16_persistent_kernels();
+  test_blockscale_persistent();
+  std::cout << "All persistent WGMMA tests Passed\n";
+}
+
+// CHECK: Test persistent hilbert Passed
+// CHECK: Test persistent warpspec 1p3c Passed
+// CHECK: Test persistent blockscale e4m3 Passed
+// CHECK: All persistent WGMMA tests Passed
