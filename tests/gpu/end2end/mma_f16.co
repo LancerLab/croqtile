@@ -1,7 +1,7 @@
 // REQUIRES: TARGET-GPU
 // RUN: choreo -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
-// RUN: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // Consolidated from: mma.co, mma_v1.co, mma_v2.co, mma_fusion_scalar.co, mma_loadc.co
 
