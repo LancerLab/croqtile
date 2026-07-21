@@ -62,7 +62,7 @@ fi
 
 TOPSCC=${TOPSCC_INSTALL}/bin/topscc
 TOPSCC_LIB=${TOPSCC_INSTALL}/lib
-export LD_LIBRARY_PATH="${TOPSCC_LIB}:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}${LD_LIBRARY_PATH:+:}${TOPSCC_LIB}"
 
 # Detect GCU arch
 gcu_arch="${GCU_ARCH:-}"

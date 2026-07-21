@@ -121,7 +121,7 @@ install-gcu4-platform-kit:
 
 install-gcu4-platform-sim-kit:
 	mkdir -p $(GCU_SIM_DIR) ;\
-	$(GCU4_PLATFORM_PKG) -y -C topsruntime,topscc --install-dir $(GCU_SIM_DIR); \
+	$(GCU4_PLATFORM_PKG) -y -C topsruntime,topscc,topspti --install-dir $(GCU_SIM_DIR); \
 	rsync -av $(GCU_SIM_DIR)/opt/tops/* $(GCU_SIM_DIR); \
 	rm -fr $(GCU_SIM_DIR)/opt;
 
