@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GCUALL
 // SHELL-ONLY
-// RUN: choreo -gs -t topscc %s -o %s.topscc.result && bash %s.topscc.result --execute | FileCheck --check-prefix=CHKRUN --match-full-lines %s && rm -f %s.topscc.result
+// RUN: choreo -gs -t topscc %s | bash -s -- --execute | FileCheck --check-prefix=CHKRUN --match-full-lines %s
 
 #include <cmath>
 #include <algorithm>

@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-AMDGPU
-// RUN: choreo -gs %target %amdgpu_arch %s -o %s.hip.result && bash %s.hip.result --execute | FileCheck --match-full-lines %s && rm -f %s.hip.result
+// RUN: choreo -gs %target %amdgpu_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 __co__ s32 [6, 64] ele_add(s32 [6, 64] lhs, s32 [6, 64] rhs) {
   s32[lhs.span] output;

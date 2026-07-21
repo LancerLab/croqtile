@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-CPU
-// RUN: choreo -gs %target %s -o %s.cc.result && bash %s.cc.result --execute | FileCheck --match-full-lines %s && rm -f %s.cc.result
+// RUN: choreo -gs %target %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // --- Test 1: 2D parallel element-wise add ---
 __co__ void ele_add_2d(s32 [8, 64] a, s32 [8, 64] b, s32 [8, 64] c) {

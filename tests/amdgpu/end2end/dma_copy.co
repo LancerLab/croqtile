@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-AMDGPU
-// RUN: choreo -gs %target %amdgpu_arch %s -o %s.hip.result && bash %s.hip.result --execute | FileCheck --match-full-lines %s && rm -f %s.hip.result
+// RUN: choreo -gs %target %amdgpu_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // --- Test 1: sync DMA copy round-trip (G2S + S2G) ---
 __co__ auto dma_copy_sync(s32 [6, 17, 64] input) {
