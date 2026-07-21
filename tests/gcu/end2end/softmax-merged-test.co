@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GCUALL
 // RUN: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
-// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // Merged from: softmax-gcu-only-test.co, softmaxbw-gcu-only-test.co,
