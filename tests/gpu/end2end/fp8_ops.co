@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-SM_90+
 // RUN: choreo -t cute -gs %cuda_arch %s | bash -s -- --execute | FileCheck %s
-// RUN: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t cute -gs %s | bash -s -- --execute | FileCheck %s
 
 // Consolidated from: add_fp8_e4m3_to_f16.co, add_fp8_e5m2_to_f16.co, copy_fp8.co, async_copy_fp8.co
