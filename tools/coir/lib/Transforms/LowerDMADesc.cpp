@@ -64,6 +64,7 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
     // Extract base tensors and tile offsets.
     // Convention: TensorTileOp indices = [offsets..., dynDimVals...]
     // where offsets has `rank` elements and dynDimVals has numDynDims.
+    // Tile indices are multiplied by tile sizes to get element offsets.
     Value srcBase = op.getSource();
     Value dstBase = op.getDest();
     llvm::SmallVector<Value> offsets;
@@ -73,9 +74,19 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
       srcBase = tileOp.getSource();
       auto tileTy = llvm::cast<coir::TensorType>(tileOp.getResult().getType());
       unsigned rank = tileTy.getRank();
+      auto tileShape = tileTy.getShape();
       auto allIdx = tileOp.getIndices();
-      for (unsigned i = 0; i < std::min((unsigned)allIdx.size(), rank); ++i)
-        offsets.push_back(allIdx[i]);
+      for (unsigned i = 0; i < std::min((unsigned)allIdx.size(), rank); ++i) {
+        Value idx = allIdx[i];
+        // Multiply tile index by tile size to get element offset.
+        if (i < tileShape.size() && !mlir::ShapedType::isDynamic(tileShape[i]) &&
+            tileShape[i] > 1) {
+          auto tileSize = rewriter.create<mlir::arith::ConstantIndexOp>(
+              op.getLoc(), tileShape[i]);
+          idx = rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, tileSize);
+        }
+        offsets.push_back(idx);
+      }
       hasOffsets = true;
     }
     if (auto tileOp = dstBase.template getDefiningOp<TensorTileOp>()) {
@@ -84,9 +95,18 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
         auto tileTy =
             llvm::cast<coir::TensorType>(tileOp.getResult().getType());
         unsigned rank = tileTy.getRank();
+        auto tileShape = tileTy.getShape();
         auto allIdx = tileOp.getIndices();
-        for (unsigned i = 0; i < std::min((unsigned)allIdx.size(), rank); ++i)
-          offsets.push_back(allIdx[i]);
+        for (unsigned i = 0; i < std::min((unsigned)allIdx.size(), rank); ++i) {
+          Value idx = allIdx[i];
+          if (i < tileShape.size() && !mlir::ShapedType::isDynamic(tileShape[i]) &&
+              tileShape[i] > 1) {
+            auto tileSize = rewriter.create<mlir::arith::ConstantIndexOp>(
+                op.getLoc(), tileShape[i]);
+            idx = rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, tileSize);
+          }
+          offsets.push_back(idx);
+        }
         hasOffsets = true;
       }
     }
