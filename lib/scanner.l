@@ -598,6 +598,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "mma"      return Choreo::Parser::make_MMA(yytext, loc);
   ".fill"    return Choreo::Parser::make_FILL(yytext, loc);
   ".load"    return Choreo::Parser::make_LOAD(yytext, loc);
+  ".desc"    return Choreo::Parser::make_DESC(yytext, loc);
   ".store"   return Choreo::Parser::make_STORE(yytext, loc);
   ".row"     return Choreo::Parser::make_ROW(yytext, loc);
   ".col"     return Choreo::Parser::make_COLUMN(yytext, loc);
@@ -812,4 +813,3 @@ bool Choreo::Scanner::debug = false;
 bool Choreo::Scanner::keep_comments = true;
 bool Choreo::Scanner::loc_update = true;
 void Choreo::Scanner::Debug(std::string s) { if (debug) dbgs() << "[scanner] " << s << std::endl; }
-

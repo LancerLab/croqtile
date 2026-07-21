@@ -385,9 +385,8 @@ bool ShapeInference::Visit(AST::Expr& n) {
     // by earlysema/typeinfer; look up its value number from the operand
     // identifier and store it in Opts so ASTCoIRGen can materialize it.
     if (n.op == Op::DataOf || n.op == Op::MDataOf) {
-      if (auto *id = dyn_cast<AST::Identifier>(n.GetR().get())) {
-        std::string suffix =
-            (n.op == Op::DataOf) ? ".data" : ".mdata";
+      if (auto* id = dyn_cast<AST::Identifier>(n.GetR().get())) {
+        std::string suffix = (n.op == Op::DataOf) ? ".data" : ".mdata";
         auto scoped_name = SSTab().InScopeName(id->name + suffix);
         auto data_vn = vn.GetOrGenValueNumberFromSignature(s_sn(scoped_name));
         auto data_vi = vn.GenValueItemFromValueNumber(data_vn);
@@ -1283,6 +1282,19 @@ bool ShapeInference::Visit(AST::MMA& n) {
   } break;
   case AST::MMAOperation::LoadR: {
     // LoadR loads from shared into an existing fragment; no new symbol created
+  } break;
+  case AST::MMAOperation::Desc: {
+    std::string operand_sym = AST::FragName(op.DescTo());
+    auto source_ty = GetSpannedType(op.DescFrom()->GetType());
+    assert(source_ty && "expect a spanned type for mma.desc source");
+    auto operand_span = operand_sym + ".span";
+    SymbolAliasNum(SSTab().ScopedName(operand_span), cur_vn);
+    // A descriptor preserves the shared view's shape, strides, and storage;
+    // it does not materialize a dense register fragment.
+    auto operand_ty = cast<SpannedType>(source_ty->Clone());
+    DefineASymbol(operand_sym, operand_ty);
+    DefineASymbol(operand_span, operand_ty->GetMDSpanType()->Clone());
+    SetNodeType(n, operand_ty);
   } break;
   case AST::MMAOperation::Exec: {
     std::string op0_sym = AST::FragName(op.ExecOperand(0)); // mc

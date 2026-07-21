@@ -2119,6 +2119,19 @@ bool EarlySemantics::Visit(AST::MMA& n) {
     std::string dst_sym = AST::FragName(op.LoadTo());
     ReportErrorWhenUseBeforeDefine(n.LOC(), dst_sym);
   } break;
+  case AST::MMAOperation::Desc: {
+    auto sty = GetSpannedType(op.DescFrom()->GetType());
+    if (!sty || sty->GetStorage() != Storage::SHARED)
+      Error1(n.LOC(), "Expected a shared spanned buffer for MMA desc.");
+    std::string operand_sym = AST::FragName(op.DescTo());
+    ReportErrorWhenViolateODR(
+        n.LOC(), operand_sym, __FILE__, __LINE__,
+        sty ? cast<SpannedType>(sty->Clone())
+            : MakeUnRankedSpannedType(BaseType::UNKSCALAR, Storage::SHARED));
+    if (sty)
+      ReportErrorWhenViolateODR(n.LOC(), operand_sym + ".span", __FILE__,
+                                __LINE__, sty->GetMDSpanType()->Clone());
+  } break;
   case AST::MMAOperation::Exec: {
     std::string op0_sym = AST::FragName(op.ExecOperand(0));
     std::string op1_sym = AST::FragName(op.ExecOperand(1));

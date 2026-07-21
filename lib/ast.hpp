@@ -2837,7 +2837,7 @@ public:
 
 struct MMAOperation {
 public:
-  enum Kind { Fill, Load, LoadR, Exec, Store, Commit, Scale, Wait };
+  enum Kind { Fill, Load, LoadR, Desc, Exec, Store, Commit, Scale, Wait };
   enum ExecMethod { ROW_ROW, ROW_COL, COL_ROW, COL_COL };
 
   // NOTE: acc, lhs, rhs are not accepted in ast.cpp.
@@ -2908,6 +2908,12 @@ public:
                         bool explicit_swizzle = false)
       : tag(LoadR), info(LoadInfo{e, fu, a, swizzle, explicit_swizzle}) {}
 
+  struct DescTag {};
+  explicit MMAOperation(DescTag, const ptr<ChunkAt>& source,
+                        const ptr<Expr>& operand)
+      : tag(Desc),
+        info(LoadInfo{source, operand, false, SwizMode::NONE, false}) {}
+
   MMAOperation(ExecMethod m, const ptr<Expr>& o, const ptr<Expr>& l,
                const ptr<Expr>& r, bool sp = false)
       : tag(Exec),
@@ -2942,6 +2948,7 @@ public:
   bool IsKind(Kind k) const { return k == tag; }
   bool IsLoad() const { return tag == Load || tag == LoadR; }
   bool IsLoadR() const { return tag == LoadR; }
+  bool IsDesc() const { return tag == Desc; }
 
   const ptr<Expr> FillingTo() const {
     if (tag != Fill) choreo_unreachable("not a mma fill operation.");
@@ -2990,6 +2997,19 @@ public:
     if (!IsLoad()) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     return l_info.future;
+  }
+
+  ptr<ChunkAt> DescFrom() {
+    if (!IsDesc()) choreo_unreachable("not a mma desc operation.");
+    return std::get<1>(info).ld_expr;
+  }
+  const ptr<ChunkAt> DescFrom() const {
+    if (!IsDesc()) choreo_unreachable("not a mma desc operation.");
+    return std::get<1>(info).ld_expr;
+  }
+  const ptr<Expr> DescTo() const {
+    if (!IsDesc()) choreo_unreachable("not a mma desc operation.");
+    return std::get<1>(info).future;
   }
 
   ptr<ChunkAt> StoreTo() {
@@ -3111,6 +3131,7 @@ public:
   const ptr<Expr> GetFrag() const {
     if (tag == Fill) return FillingTo();
     if (IsLoad()) return LoadTo();
+    if (tag == Desc) return DescTo();
     if (tag == Exec) return ExecOperand(0);
     if (tag == Store) return StoreFrom();
     if (tag == Commit) return nullptr;
@@ -3157,6 +3178,9 @@ public:
                                 CloneP(l_info.future), l_info.async,
                                 l_info.swiz_mode, l_info.explicit_swizzle);
     }
+    case Desc:
+      return Make<MMAOperation>(DescTag{}, CloneP(DescFrom()),
+                                CloneP(DescTo()));
     case Exec: {
       auto e_info = std::get<2>(info);
       if (e_info.scale)
@@ -3195,6 +3219,9 @@ public:
       os << "MMA.LOAD" << ((l_info.async) ? ".ASYNC" : "") << " "
          << PSTR(l_info.ld_expr);
     } break;
+    case Desc:
+      os << PSTR(DescTo()) << " = MMA.DESC " << PSTR(DescFrom());
+      break;
     case Exec: {
       auto e_info = std::get<2>(info);
       os << "MMA.EXEC";

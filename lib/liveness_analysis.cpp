@@ -1369,6 +1369,9 @@ void LivenessAnalyzer::DumpMMA(const AST::MMA& mma, std::ostream& os) {
       os << "mma.load " << PSTR(op->LoadFrom());
       if (op->LoadTo()) os << ", " << PSTR(op->LoadTo());
     } break;
+    case AST::MMAOperation::Desc:
+      os << PSTR(op->DescTo()) << " = mma.desc " << PSTR(op->DescFrom());
+      break;
     case AST::MMAOperation::Exec: {
       os << "mma.exec";
       switch (op->GetMethod()) {
@@ -1973,6 +1976,9 @@ bool LivenessAnalyzer::Visit(AST::MMA& n) {
   case AST::MMAOperation::LoadR: {
     AddUse(current_stmt, GetAllSymbolicOperands(op->LoadFrom().get()));
   } break;
+  case AST::MMAOperation::Desc:
+    AddUse(current_stmt, GetAllSymbolicOperands(op->DescFrom().get()));
+    break;
   default: break;
   }
   return true;

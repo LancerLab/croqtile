@@ -44,8 +44,8 @@ __co__ void matmul_sp_e4m3(global f8_e4m3 [MATMUL_DEFAULT_M, MATMUL_DEFAULT_K / 
       dma.copy lhs_meta.chunkat(block_m, iv_k) => lhs_load_s_mdata;
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
-          ma = mma.load.swiz<SWIZ> lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.load.swiz<64> rhs_load_s.chunkat(_, iv_warp);
+          ma = mma.desc lhs_load_s.chunkat(_, iv_warp);
+          mb = mma.desc rhs_load_s.chunkat(_, iv_warp);
           me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
           mma.row.row.sp mc, ma, mb, me;
         }

@@ -880,6 +880,7 @@ public:
     } break;
     case AST::MMAOperation::Load: break;
     case AST::MMAOperation::LoadR: break;
+    case AST::MMAOperation::Desc: break;
     case AST::MMAOperation::Exec: {
       auto& a_sym = AST::FragName(op.ExecOperand(1));
       auto& b_sym = AST::FragName(op.ExecOperand(2));
@@ -1003,9 +1004,7 @@ public:
         if (op.IsSparse() && !e_sym.empty())
           FCtx(fname).SetMMAPolicyOfFrag(InScopeName(e_sym), mma_policy);
       } else if (mma_ty == MMAType::WGMMA) {
-        auto a_raw_ty = GetSymbolType(a_sym);
-        bool is_rs =
-            a_sty->GetStorage() == Storage::REG && !isa<FutureType>(a_raw_ty);
+        bool is_rs = a_sty->GetStorage() == Storage::REG;
         std::string mma_policy =
             is_rs ? MMALimit::MMAConfig2WGMMANameRS(mma_config)
                   : MMALimit::MMAConfig2WGMMAName(mma_config);
