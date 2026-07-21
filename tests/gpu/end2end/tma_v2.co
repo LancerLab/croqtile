@@ -1,6 +1,7 @@
 // REQUIRES: TARGET-GPU
 // NOTRUNYET: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
-// RUN: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 __co__ auto tma_ab_buffer(f32 [6, 16, 128] l, f32 [6, 16, 128] r) {
   f32 [l.span] output;
