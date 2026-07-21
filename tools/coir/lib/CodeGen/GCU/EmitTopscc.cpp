@@ -489,6 +489,49 @@ private:
     return n;
   }
 
+  /// Check if a tensor type has any dynamic dimensions.
+  bool hasDynamicDims(coir::TensorType tty) {
+    return tty.hasDynamicShape();
+  }
+
+  /// Emit a runtime expression string for the byte size of a dynamic tensor.
+  /// E.g. "p0.shape()[0] * 4" for a 1-D f32 tensor with dynamic dim.
+  /// Returns empty string if fully static (caller should use getTensorBytes).
+  std::string emitDynamicBytesExpr(coir::TensorType tty, unsigned paramIdx) {
+    if (!hasDynamicDims(tty)) return "";
+    unsigned elemBytes = tty.getElementType().getIntOrFloatBitWidth() / 8;
+    auto shape = tty.getShape();
+    std::string result;
+    for (unsigned d = 0; d < shape.size(); ++d) {
+      if (!result.empty()) result += " * ";
+      if (mlir::ShapedType::isDynamic(shape[d]))
+        result += "p" + std::to_string(paramIdx) + ".shape()[" +
+                  std::to_string(d) + "]";
+      else
+        result += std::to_string(shape[d]);
+    }
+    if (elemBytes > 1)
+      result += " * " + std::to_string(elemBytes);
+    return result;
+  }
+
+  /// Emit a runtime expression string for a dynamic shape initializer.
+  /// E.g. "{p0.shape()[0]}" for a 1-D tensor with dynamic dim.
+  std::string emitDynamicShapeStr(coir::TensorType tty, unsigned paramIdx) {
+    auto shape = tty.getShape();
+    std::string result = "{";
+    for (unsigned d = 0; d < shape.size(); ++d) {
+      if (d > 0) result += ", ";
+      if (mlir::ShapedType::isDynamic(shape[d]))
+        result += "p" + std::to_string(paramIdx) + ".shape()[" +
+                  std::to_string(d) + "]";
+      else
+        result += std::to_string(shape[d]);
+    }
+    result += "}";
+    return result;
+  }
+
   std::string hostReturnType(FunctionType fnType) {
     if (fnType.getNumResults() == 0) return "void";
     Type resTy = fnType.getResult(0);
@@ -818,25 +861,71 @@ private:
            << "__device = const_cast<" << inEType << "*>(p" << i
            << ".data());\n";
       } else if (tty) {
-        int64_t bytes = getTensorBytes(tty);
         std::string inEType = emitType(tty.getElementType());
+        std::string dynBytes = emitDynamicBytesExpr(tty, i);
         os() << "  " << inEType << "* p" << i << "__device = nullptr;\n";
-        os() << "  topsMalloc((void**)&p" << i << "__device, "
-           << bytes << "ULL);\n";
-        os() << "  topsMemcpy(p" << i << "__device, p" << i << ".data(), "
-           << bytes << "ULL, topsMemcpyHostToDevice);\n";
+        if (dynBytes.empty()) {
+          int64_t bytes = getTensorBytes(tty);
+          os() << "  topsMalloc((void**)&p" << i << "__device, "
+             << bytes << "ULL);\n";
+          os() << "  topsMemcpy(p" << i << "__device, p" << i << ".data(), "
+             << bytes << "ULL, topsMemcpyHostToDevice);\n";
+        } else {
+          os() << "  topsMalloc((void**)&p" << i << "__device, "
+             << dynBytes << ");\n";
+          os() << "  topsMemcpy(p" << i << "__device, p" << i << ".data(), "
+             << dynBytes << ", topsMemcpyHostToDevice);\n";
+        }
       }
     }
 
+    // Build shape string for result tensor; use dynamic expressions for
+    // dynamic dims via dimArgMeta.
     std::string shapeStr;
+    std::string resDynBytes;
     {
       llvm::raw_string_ostream ss(shapeStr);
       ss << "{";
       for (unsigned d = 0; d < resTy.getShape().size(); ++d) {
         if (d > 0) ss << ", ";
-        ss << resTy.getShape()[d];
+        if (mlir::ShapedType::isDynamic(resTy.getShape()[d])) {
+          bool found = false;
+          for (auto &da : dimArgMeta) {
+            if (da.dimIdx == (int64_t)d) {
+              ss << "p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+              found = true;
+              break;
+            }
+          }
+          if (!found) ss << "0";
+        } else {
+          ss << resTy.getShape()[d];
+        }
       }
       ss << "}";
+      if (hasDynamicDims(resTy)) {
+        unsigned elemBytes = resTy.getElementType().getIntOrFloatBitWidth() / 8;
+        resDynBytes = "";
+        for (unsigned d = 0; d < resTy.getShape().size(); ++d) {
+          if (!resDynBytes.empty()) resDynBytes += " * ";
+          if (mlir::ShapedType::isDynamic(resTy.getShape()[d])) {
+            bool found = false;
+            for (auto &da : dimArgMeta) {
+              if (da.dimIdx == (int64_t)d) {
+                resDynBytes += "p" + std::to_string(da.paramIdx) +
+                               ".shape()[" + std::to_string(da.dimIdx) + "]";
+                found = true;
+                break;
+              }
+            }
+            if (!found) resDynBytes += "0";
+          } else {
+            resDynBytes += std::to_string(resTy.getShape()[d]);
+          }
+        }
+        if (elemBytes > 1)
+          resDynBytes += " * " + std::to_string(elemBytes);
+      }
     }
 
     if (retInputIdx >= 0) {
@@ -851,9 +940,15 @@ private:
       emitMRLaunchArgs(mr);
       os() << ");\n";
       os() << "  topsDeviceSynchronize();\n";
-      os() << "  topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
-         << ".data()), p" << retInputIdx << "__device, "
-         << resBytes << "ULL, topsMemcpyDeviceToHost);\n";
+      if (resDynBytes.empty()) {
+        os() << "  topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
+           << ".data()), p" << retInputIdx << "__device, "
+           << resBytes << "ULL, topsMemcpyDeviceToHost);\n";
+      } else {
+        os() << "  topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
+           << ".data()), p" << retInputIdx << "__device, "
+           << resDynBytes << ", topsMemcpyDeviceToHost);\n";
+      }
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
         if (tty && isDeviceGlobal(tty)) continue;
@@ -865,8 +960,13 @@ private:
       os() << "  auto __result = choreo::make_spandata<" << choreoElem << ", "
          << ndim << ">(" << shapeStr << ");\n";
       os() << "  " << eType << "* __result__device = nullptr;\n";
-      os() << "  topsMalloc((void**)&__result__device, " << resBytes
-         << "ULL);\n";
+      if (resDynBytes.empty()) {
+        os() << "  topsMalloc((void**)&__result__device, " << resBytes
+           << "ULL);\n";
+      } else {
+        os() << "  topsMalloc((void**)&__result__device, " << resDynBytes
+           << ");\n";
+      }
       os() << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
          << bdims << ">>>(";
       for (unsigned i = 0; i < numOrigInputs; ++i) {
@@ -875,10 +975,28 @@ private:
       }
       for (auto &da : dimArgMeta)
         os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
-      os() << ", __result__device, " << resN << ");\n";
+      // Kernel N parameter: dynamic element count or static.
+      if (!resDynBytes.empty()) {
+        // Strip " * elemBytes" suffix to get element count.
+        unsigned elemBytes = resTy.getElementType().getIntOrFloatBitWidth() / 8;
+        std::string resDynN = resDynBytes;
+        if (elemBytes > 1) {
+          auto pos = resDynN.rfind(" * " + std::to_string(elemBytes));
+          if (pos != std::string::npos)
+            resDynN = resDynN.substr(0, pos);
+        }
+        os() << ", __result__device, (int)(" << resDynN << "));\n";
+      } else {
+        os() << ", __result__device, " << resN << ");\n";
+      }
       os() << "  topsDeviceSynchronize();\n";
-      os() << "  topsMemcpy(__result.data(), __result__device, "
-         << resBytes << "ULL, topsMemcpyDeviceToHost);\n";
+      if (resDynBytes.empty()) {
+        os() << "  topsMemcpy(__result.data(), __result__device, "
+           << resBytes << "ULL, topsMemcpyDeviceToHost);\n";
+      } else {
+        os() << "  topsMemcpy(__result.data(), __result__device, "
+           << resDynBytes << ", topsMemcpyDeviceToHost);\n";
+      }
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
         if (tty && isDeviceGlobal(tty)) continue;
@@ -912,12 +1030,20 @@ private:
            << ".data());\n";
       } else {
         std::string inEType = emitType(tty.getElementType());
-        int64_t bytes = getTensorBytes(tty);
+        std::string dynBytes = emitDynamicBytesExpr(tty, i);
         os() << "  " << inEType << "* p" << i << "__device = nullptr;\n";
-        os() << "  topsMalloc((void**)&p" << i << "__device, "
-           << bytes << "ULL);\n";
-        os() << "  topsMemcpy(p" << i << "__device, p" << i << ".data(), "
-           << bytes << "ULL, topsMemcpyHostToDevice);\n";
+        if (dynBytes.empty()) {
+          int64_t bytes = getTensorBytes(tty);
+          os() << "  topsMalloc((void**)&p" << i << "__device, "
+             << bytes << "ULL);\n";
+          os() << "  topsMemcpy(p" << i << "__device, p" << i << ".data(), "
+             << bytes << "ULL, topsMemcpyHostToDevice);\n";
+        } else {
+          os() << "  topsMalloc((void**)&p" << i << "__device, "
+             << dynBytes << ");\n";
+          os() << "  topsMemcpy(p" << i << "__device, p" << i << ".data(), "
+             << dynBytes << ", topsMemcpyHostToDevice);\n";
+        }
       }
     }
 
@@ -1943,10 +2069,87 @@ private:
 
     std::string result = "tops::mdspan(" + space + ", ("
       + emitType(tty.getElementType()) + "*)" + name;
-    for (auto d : shape)
-      result += ", " + std::to_string(d);
+    for (auto d : shape) {
+      if (mlir::ShapedType::isDynamic(d)) {
+        // Find the kernel dim arg that provides this dynamic dimension.
+        auto dimName = findDynamicDimName(tensor, tty, result);
+        result += ", " + dimName;
+      } else {
+        result += ", " + std::to_string(d);
+      }
+    }
     result += ")";
     return result;
+  }
+
+  // Find the kernel argument name for a dynamic dimension of a tensor.
+  // Walks back through TensorTileOp to the kernel block argument and
+  // uses dimArgMeta + dim_checks to map it to the corresponding dim arg.
+  std::string findDynamicDimName(Value tensor, coir::TensorType /*tty*/,
+                                 const std::string & /*mdspanSoFar*/) {
+    auto *kernel = tensor.getParentBlock()->getParentOp();
+    if (!kernel) return "0";
+    auto kOp = cast<KernelOp>(kernel);
+    auto dimArgMeta = getDimArgs(kOp);
+    auto fnType = kOp.getFunctionType();
+    unsigned numOrigInputs = fnType.getNumInputs() - dimArgMeta.size();
+
+    // Find which original param this tensor belongs to.
+    Value baseTensor = tensor;
+    if (auto tileOp = tensor.getDefiningOp<TensorTileOp>())
+      baseTensor = tileOp.getSource();
+    int64_t thisParam = -1;
+    if (auto blockArg = dyn_cast<BlockArgument>(baseTensor))
+      thisParam = blockArg.getArgNumber();
+
+    // If not a block argument (e.g., result tensor), use the first
+    // available dim arg since result typically shares dims with inputs.
+    if (thisParam < 0) {
+      if (!dimArgMeta.empty())
+        return "arg" + std::to_string(numOrigInputs);
+      return "0";
+    }
+
+    // Direct match: dim arg for this exact param.
+    for (unsigned i = 0; i < dimArgMeta.size(); ++i) {
+      if (dimArgMeta[i].paramIdx == thisParam)
+        return "arg" + std::to_string(numOrigInputs + i);
+    }
+
+    // Transitive match: use dim_checks to find a param that shares the
+    // same dynamic dim and has a dim arg. Follow chains up to 3 hops.
+    auto dimChecks = kOp->getAttrOfType<ArrayAttr>("coir.dim_checks");
+    if (dimChecks) {
+      llvm::SmallSetVector<int64_t, 8> visited;
+      llvm::SmallVector<int64_t, 8> worklist = {thisParam};
+      visited.insert(thisParam);
+      while (!worklist.empty()) {
+        int64_t curParam = worklist.pop_back_val();
+        // Check if this param has a dim arg.
+        for (unsigned i = 0; i < dimArgMeta.size(); ++i) {
+          if (dimArgMeta[i].paramIdx == curParam)
+            return "arg" + std::to_string(numOrigInputs + i);
+        }
+        // Follow dim_checks to find related params.
+        for (auto a : dimChecks) {
+          auto dict = dyn_cast<DictionaryAttr>(a);
+          if (!dict) continue;
+          auto p0 = dict.getAs<IntegerAttr>("param0").getInt();
+          auto p1 = dict.getAs<IntegerAttr>("param1").getInt();
+          int64_t otherParam = (p0 == curParam) ? p1
+                               : (p1 == curParam) ? p0 : -1;
+          if (otherParam >= 0 && !visited.count(otherParam)) {
+            visited.insert(otherParam);
+            worklist.push_back(otherParam);
+          }
+        }
+      }
+    }
+
+    // Fallback: use first dim arg if available.
+    if (!dimArgMeta.empty())
+      return "arg" + std::to_string(numOrigInputs);
+    return "0";
   }
 
   void emitDMAConstDesc(DMAConstDescOp op) override {
@@ -2302,13 +2505,39 @@ private:
 
   std::string emitExprInHostScope(
       Value v, KernelOp kernel,
-      DenseMap<Value, std::string> &hostNames) {
+      DenseMap<Value, std::string> &hostNames,
+      const llvm::SmallVectorImpl<DimArgMeta> &dimArgMeta) {
     auto it = hostNames.find(v);
     if (it != hostNames.end()) return it->second;
 
     if (auto arg = dyn_cast<BlockArgument>(v)) {
       if (arg.getOwner()->getParentOp() == kernel.getOperation()) {
         unsigned idx = arg.getArgNumber();
+        // Map dim arg block arguments to host expressions.
+        // Dim args come after original inputs; find matching metadata.
+        auto fnType = kernel.getFunctionType();
+        unsigned numInputs = fnType.getNumInputs();
+        if (idx < numInputs) {
+          auto inTy = fnType.getInput(idx);
+          if (inTy.isIndex() || inTy.isInteger(32) || inTy.isInteger(64)) {
+            // This is a dim arg — find its paramIdx/dimIdx.
+            unsigned dimArgIdx = 0;
+            for (unsigned i = 0; i < numInputs; ++i) {
+              auto ty = fnType.getInput(i);
+              if (ty.isIndex() || ty.isInteger(32) || ty.isInteger(64)) {
+                if (i == idx && dimArgIdx < dimArgMeta.size()) {
+                  auto &da = dimArgMeta[dimArgIdx];
+                  std::string name = "p" + std::to_string(da.paramIdx) +
+                                     ".shape()[" +
+                                     std::to_string(da.dimIdx) + "]";
+                  hostNames[v] = name;
+                  return name;
+                }
+                ++dimArgIdx;
+              }
+            }
+          }
+        }
         std::string name = "p" + std::to_string(idx);
         hostNames[v] = name;
         return name;
@@ -2326,11 +2555,11 @@ private:
       }
     }
     if (auto castOp = dyn_cast<arith::IndexCastOp>(defOp))
-      return emitExprInHostScope(castOp.getIn(), kernel, hostNames);
+      return emitExprInHostScope(castOp.getIn(), kernel, hostNames, dimArgMeta);
 
     if (auto cmpOp = dyn_cast<arith::CmpIOp>(defOp)) {
-      auto lhs = emitExprInHostScope(cmpOp.getLhs(), kernel, hostNames);
-      auto rhs = emitExprInHostScope(cmpOp.getRhs(), kernel, hostNames);
+      auto lhs = emitExprInHostScope(cmpOp.getLhs(), kernel, hostNames, dimArgMeta);
+      auto rhs = emitExprInHostScope(cmpOp.getRhs(), kernel, hostNames, dimArgMeta);
       const char *pred = "==";
       switch (cmpOp.getPredicate()) {
       case arith::CmpIPredicate::eq: pred = "=="; break;
@@ -2350,16 +2579,31 @@ private:
     }
 
     if (auto addOp = dyn_cast<arith::AddIOp>(defOp)) {
-      auto lhs = emitExprInHostScope(addOp.getLhs(), kernel, hostNames);
-      auto rhs = emitExprInHostScope(addOp.getRhs(), kernel, hostNames);
+      auto lhs = emitExprInHostScope(addOp.getLhs(), kernel, hostNames, dimArgMeta);
+      auto rhs = emitExprInHostScope(addOp.getRhs(), kernel, hostNames, dimArgMeta);
       std::string result = "(" + lhs + " + " + rhs + ")";
       hostNames[v] = result;
       return result;
     }
     if (auto mulOp = dyn_cast<arith::MulIOp>(defOp)) {
-      auto lhs = emitExprInHostScope(mulOp.getLhs(), kernel, hostNames);
-      auto rhs = emitExprInHostScope(mulOp.getRhs(), kernel, hostNames);
+      auto lhs = emitExprInHostScope(mulOp.getLhs(), kernel, hostNames, dimArgMeta);
+      auto rhs = emitExprInHostScope(mulOp.getRhs(), kernel, hostNames, dimArgMeta);
       std::string result = "(" + lhs + " * " + rhs + ")";
+      hostNames[v] = result;
+      return result;
+    }
+
+    if (auto divOp = dyn_cast<arith::DivSIOp>(defOp)) {
+      auto lhs = emitExprInHostScope(divOp.getLhs(), kernel, hostNames, dimArgMeta);
+      auto rhs = emitExprInHostScope(divOp.getRhs(), kernel, hostNames, dimArgMeta);
+      std::string result = "(" + lhs + " / " + rhs + ")";
+      hostNames[v] = result;
+      return result;
+    }
+    if (auto divOp = dyn_cast<arith::DivUIOp>(defOp)) {
+      auto lhs = emitExprInHostScope(divOp.getLhs(), kernel, hostNames, dimArgMeta);
+      auto rhs = emitExprInHostScope(divOp.getRhs(), kernel, hostNames, dimArgMeta);
+      std::string result = "(" + lhs + " / " + rhs + ")";
       hostNames[v] = result;
       return result;
     }
@@ -2368,9 +2612,11 @@ private:
   }
 
   void emitEntryAssertions(KernelOp kernel) {
+    auto dimArgMeta = getDimArgs(kernel);
     DenseMap<Value, std::string> hostNames;
     for (auto &ea : entryAssertions) {
-      auto cond = emitExprInHostScope(ea.op.getCondition(), kernel, hostNames);
+      auto cond = emitExprInHostScope(ea.op.getCondition(), kernel, hostNames,
+                                      dimArgMeta);
       os() << "  choreo::runtime_check(" << cond << ", \""
          << ea.op.getMessage().str() << "\");\n";
     }
