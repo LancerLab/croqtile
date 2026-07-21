@@ -276,9 +276,101 @@ struct future {
     ctx->config_memcpy(dst, src);
   }
 
-  // Set per-iteration offset on a dimension. Call after configure().
-  __device__ void set_offset(int dim, int offset) {
+  // Helper: ensure DTE is initialized before config calls.
+  __device__ void ensure_inited() {
+    if (s == ST_NONE) {
+  #if defined(__GCU_ARCH__) && __GCU_ARCH__ == 300
+      if (explicit_init) ctx->init_comm();
+  #else
+      tops_init_dte(ctx);
+  #endif
+      s = ST_INITED;
+    }
+  }
+
+  // Configure slice: copy a slice from src to dst at given offsets.
+  __device__ void configure_slice(const tops::mdspan_base& dst,
+                                  const tops::mdspan_base& src,
+                                  const int* offsets, int pad_value = 0) {
+    ensure_inited();
+    ctx->config_slice(dst, src, offsets, pad_value);
+  }
+
+  // Configure deslice: write src data into dst at given offsets.
+  __device__ void configure_deslice(const tops::mdspan_base& dst,
+                                    const tops::mdspan_base& src,
+                                    const int* offsets) {
+    ensure_inited();
+    ctx->config_deslice(dst, src, offsets);
+  }
+
+  // Configure slice+deslice: slice from src, write into dst at offsets.
+  __device__ void configure_slice_deslice(const tops::mdspan_base& dst,
+                                          const tops::mdspan_base& src,
+                                          const int* src_offsets,
+                                          const unsigned int* slice_shape,
+                                          const int* dst_offsets) {
+    ensure_inited();
+    ctx->config_slice_deslice(dst, src, src_offsets, slice_shape, dst_offsets);
+  }
+
+  // Configure transpose.
+  __device__ void configure_transpose(const tops::mdspan_base& dst,
+                                      const tops::mdspan_base& src,
+                                      const int* layout) {
+    ensure_inited();
+    ctx->config_transpose(dst, src, layout);
+  }
+
+  // Configure slice+transpose.
+  __device__ void configure_slice_transpose(const tops::mdspan_base& dst,
+                                            const tops::mdspan_base& src,
+                                            const int* offsets,
+                                            const int* layout,
+                                            int pad_value = 0) {
+    ensure_inited();
+    ctx->config_slice_transpose(dst, src, offsets, layout, pad_value);
+  }
+
+  // Configure transpose+deslice.
+  __device__ void configure_transpose_deslice(const tops::mdspan_base& dst,
+                                              const tops::mdspan_base& src,
+                                              const int* layout,
+                                              const int* offsets) {
+    ensure_inited();
+    ctx->config_transpose_deslice(dst, src, layout, offsets);
+  }
+
+  // Configure pad.
+  __device__ void configure_pad(const tops::mdspan_base& dst,
+                                const tops::mdspan_base& src,
+                                const unsigned int* pad_low,
+                                const unsigned int* pad_high,
+                                const unsigned int* pad_mid, int pad_value) {
+    ensure_inited();
+    ctx->config_pad(dst, src, pad_low, pad_high, pad_mid, pad_value);
+  }
+
+  // Configure slice+pad.
+  __device__ void
+  configure_slice_pad(const tops::mdspan_base& dst,
+                      const tops::mdspan_base& src, const int* src_offsets,
+                      const unsigned int* slice_shape,
+                      const unsigned int* pad_low, const unsigned int* pad_high,
+                      const unsigned int* pad_mid, int pad_value) {
+    ensure_inited();
+    ctx->config_slice_pad(dst, src, src_offsets, slice_shape, pad_low, pad_high,
+                          pad_mid, pad_value);
+  }
+
+  // Set per-iteration src offset on a dimension. Call after configure().
+  __device__ void set_src_offset(int dim, int offset) {
     ctx->set_src_offset(dim, offset);
+  }
+
+  // Set per-iteration offset on a dimension. Call after configure().
+  __device__ void set_dst_offset(int dim, int offset) {
+    ctx->set_dst_offset(dim, offset);
   }
 
   // Trigger transfer without re-configuring. Call after set_offset().

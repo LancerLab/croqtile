@@ -1964,18 +1964,143 @@ private:
     std::string srcMds = emitMdspan(op.getSource());
     std::string dstMds = emitMdspan(op.getDest());
 
+    bool srcTiled = op->hasAttr("src_tiled");
+    bool dstTiled = op->hasAttr("dst_tiled");
+
     auto kind = op.getKind();
-    if (kind == coir::DMAKind::Copy) {
-      os() << getIndent() << futName << ".configure(" << dstMds << ", "
-         << srcMds << ");\n";
-    } else if (kind == coir::DMAKind::Slice) {
-      os() << getIndent() << futName << ".configure(" << dstMds << ", "
-         << srcMds << ");\n";
-    } else if (kind == coir::DMAKind::Transpose) {
-      os() << getIndent() << futName << ".configure(" << dstMds << ", "
-         << srcMds << ");\n";
+
+    // Helper: generate inline zero-initialized offset list: (int[]){0, 0, ...}
+    auto inlineZeroOffsets = [&](unsigned rank) -> std::string {
+      std::string result = "(int[]){";
+      for (unsigned i = 0; i < rank; ++i) {
+        if (i) result += ", ";
+        result += "0";
+      }
+      result += "}";
+      return result;
+    };
+
+    // Helper: emit pad arrays from forwarded attributes.
+    auto emitDescPadArrays = [&](unsigned rank) {
+      auto emitArr = [&](const char *suffix, const char *attrName) {
+        os() << getIndent() << "unsigned int " << futName << suffix << "[] = {";
+        auto attr = op->getAttrOfType<DenseI64ArrayAttr>(attrName);
+        if (attr) {
+          for (unsigned i = 0; i < attr.size(); ++i) {
+            if (i) os() << ", ";
+            os() << attr[i];
+          }
+        } else {
+          for (unsigned i = 0; i < rank; ++i) {
+            if (i) os() << ", ";
+            os() << "0";
+          }
+        }
+        os() << "};\n";
+      };
+      emitArr("__pad_low__", "pad_low");
+      emitArr("__pad_high__", "pad_high");
+      emitArr("__pad_mid__", "pad_mid");
+    };
+
+    // Helper: emit pad value from forwarded attribute.
+    auto emitDescPadValue = [&]() -> std::string {
+      if (auto intAttr = op->getAttrOfType<IntegerAttr>("pad_value"))
+        return std::to_string(intAttr.getInt());
+      if (auto fpAttr = op->getAttrOfType<FloatAttr>("pad_value"))
+        return std::to_string(fpAttr.getValueAsDouble());
+      return "0";
+    };
+
+    // Helper: emit transpose layout from forwarded attribute.
+    auto emitDescTransposeLayout = [&]() {
+      os() << getIndent() << "int " << futName << "__layout__[] = {";
+      auto perm = op->getAttrOfType<DenseI64ArrayAttr>("transpose_perm");
+      if (perm) {
+        for (unsigned i = 0; i < perm.size(); ++i) {
+          if (i) os() << ", ";
+          os() << perm[i];
+        }
+      }
+      os() << "};\n";
+    };
+
+    if (kind == coir::DMAKind::Copy || kind == coir::DMAKind::Slice) {
+      if (srcTiled && !dstTiled) {
+        // configure_slice(dst, src, offsets, pad_value=0)
+        auto srcTy = cast<coir::TensorType>(op.getSource().getType());
+        os() << getIndent() << futName << ".configure_slice(" << dstMds << ", "
+           << srcMds << ", " << inlineZeroOffsets(srcTy.getRank()) << ");\n";
+      } else if (!srcTiled && dstTiled) {
+        // configure_deslice(dst, src, offsets)
+        auto dstTy = cast<coir::TensorType>(op.getDest().getType());
+        os() << getIndent() << futName << ".configure_deslice(" << dstMds << ", "
+           << srcMds << ", " << inlineZeroOffsets(dstTy.getRank()) << ");\n";
+      } else if (srcTiled && dstTiled) {
+        // configure_slice_deslice(dst, src, src_offsets, slice_shape, dst_offsets)
+        auto srcTy = cast<coir::TensorType>(op.getSource().getType());
+        unsigned rank = srcTy.getRank();
+        auto dstTy = cast<coir::TensorType>(op.getDest().getType());
+        os() << getIndent() << "unsigned int " << futName << "__slice__[] = {";
+        for (unsigned i = 0; i < rank; ++i) {
+          if (i) os() << ", ";
+          os() << dstTy.getShape()[i];
+        }
+        os() << "};\n";
+        os() << getIndent() << futName << ".configure_slice_deslice(" << dstMds
+           << ", " << srcMds << ", " << inlineZeroOffsets(rank) << ", " << futName
+           << "__slice__, " << inlineZeroOffsets(rank) << ");\n";
+      } else {
+        // Plain memcpy.
+        os() << getIndent() << futName << ".configure_memcpy(" << dstMds << ", "
+           << srcMds << ");\n";
+      }
     } else if (kind == coir::DMAKind::Pad) {
-      os() << getIndent() << futName << ".configure(" << dstMds << ", "
+      auto srcTy = cast<coir::TensorType>(op.getSource().getType());
+      unsigned rank = srcTy.getRank();
+      if (srcTiled) {
+        // configure_slice_pad(dst, src, offsets, slice_shape, pad_low, pad_high,
+        //                  pad_mid, pad_value)
+        emitDescPadArrays(rank);
+        auto dstTy = cast<coir::TensorType>(op.getDest().getType());
+        os() << getIndent() << "unsigned int " << futName << "__slice__[] = {";
+        for (unsigned i = 0; i < rank; ++i) {
+          if (i) os() << ", ";
+          os() << dstTy.getShape()[i];
+        }
+        os() << "};\n";
+        os() << getIndent() << futName << ".configure_slice_pad(" << dstMds << ", "
+           << srcMds << ", " << inlineZeroOffsets(rank) << ", " << futName << "__slice__, "
+           << futName << "__pad_low__, " << futName << "__pad_high__, "
+           << futName << "__pad_mid__, " << emitDescPadValue() << ");\n";
+      } else {
+        // configure_pad(dst, src, pad_low, pad_high, pad_mid, pad_value)
+        emitDescPadArrays(rank);
+        os() << getIndent() << futName << ".configure_pad(" << dstMds << ", "
+           << srcMds << ", " << futName << "__pad_low__, " << futName
+           << "__pad_high__, " << futName << "__pad_mid__, "
+           << emitDescPadValue() << ");\n";
+      }
+    } else if (kind == coir::DMAKind::Transpose) {
+      auto srcTy = cast<coir::TensorType>(op.getSource().getType());
+      unsigned rank = srcTy.getRank();
+      emitDescTransposeLayout();
+      if (srcTiled && !dstTiled) {
+        os() << getIndent() << futName << ".configure_slice_transpose(" << dstMds
+           << ", " << srcMds << ", " << inlineZeroOffsets(rank) << ", " << futName
+           << "__layout__);\n";
+      } else if (!srcTiled && dstTiled) {
+        auto dstTy = cast<coir::TensorType>(op.getDest().getType());
+        os() << getIndent() << futName << ".configure_transpose_deslice(" << dstMds
+           << ", " << srcMds << ", " << futName << "__layout__, "
+           << inlineZeroOffsets(dstTy.getRank()) << ");\n";
+      } else {
+        os() << getIndent() << futName << ".configure_transpose(" << dstMds << ", "
+           << srcMds << ", " << futName << "__layout__);\n";
+      }
+    } else {
+      // Fallback: plain memcpy.
+      os() << getIndent() << futName << ".configure_memcpy(" << dstMds << ", "
          << srcMds << ");\n";
     }
   }
@@ -1991,10 +2116,12 @@ private:
     std::string futName = (it != dmaCtxNames.end()) ? it->second : "__dma_?";
     dmaCtxNames[op.getOut()] = futName;
 
+    bool useDstOffset = op->hasAttr("dst_offsets");
     auto offsets = op.getOffsets();
     for (unsigned i = 0; i < offsets.size(); ++i) {
-      os() << getIndent() << futName << ".set_offset(" << i << ", "
-         << getName(offsets[i]) << ");\n";
+      os() << getIndent() << futName << "."
+         << (useDstOffset ? "set_dst_offset" : "set_src_offset")
+         << "(" << i << ", " << getName(offsets[i]) << ");\n";
     }
   }
 
