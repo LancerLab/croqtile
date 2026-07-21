@@ -308,6 +308,7 @@ private:
   std::vector<std::optional<HoistedScaleAccumInfo>> hoisted_scale_accum_scopes;
   std::vector<std::vector<ExplicitScaleAccumInfo>> explicit_scale_accum_scopes;
   std::unordered_map<std::string, ptr<AST::ChunkAt>> live_chunk_aliases;
+  std::unordered_set<std::string> explicit_mma_descs_;
   std::unordered_map<std::string, SwizMode> shared_buf_swiz_;
 
   struct TMAInnerSplit {
@@ -453,6 +454,7 @@ private:
     active_hoisted_scale_decls.clear();
     hoisted_scale_accum_scopes.clear();
     live_chunk_aliases.clear();
+    explicit_mma_descs_.clear();
     shared_buf_swiz_.clear();
     tma_inner_splits_.clear();
     frag_chunk_rs_aliases_.clear();

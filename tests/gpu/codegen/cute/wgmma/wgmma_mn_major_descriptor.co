@@ -18,8 +18,8 @@ __co__ auto row_col_case(f16 [M, K] lhs, f16 [K, N] rhs) {
       rhs_s = dma.copy rhs.chunkat(iv_k, block_n) => shared;
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
-          ma = mma.load lhs_s.chunkat(_, iv_warp);
-          mb = mma.load rhs_s.chunkat(iv_warp, _);
+          ma = mma.desc lhs_s.chunkat(_, iv_warp);
+          mb = mma.desc rhs_s.chunkat(iv_warp, _);
           mma.row.col mc, ma, mb;
         }
       }
@@ -42,8 +42,8 @@ __co__ auto row_row_case(f16 [M, K] lhs, f16 [N, K] rhs) {
       rhs_s = tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
-          ma = mma.load.swiz<128> lhs_s.chunkat(_, iv_warp);
-          mb = mma.load.swiz<128> rhs_s.chunkat(_, iv_warp);
+          ma = mma.desc lhs_s.chunkat(_, iv_warp);
+          mb = mma.desc rhs_s.chunkat(_, iv_warp);
           mma.row.row mc, ma, mb;
         }
       }

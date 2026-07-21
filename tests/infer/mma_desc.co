@@ -1,0 +1,14 @@
+// RUN: choreo -t cute -arch=sm_90a -i -sa=infer %s | FileCheck %s
+
+__co__ auto infer_mma_desc(f16[64, 16] input) {
+  f16[64, 16] output;
+
+  parallel block_id by 1 : block {
+    input_s = dma.copy input => shared;
+    rhs = mma.desc input_s;
+  }
+
+  return output;
+}
+
+// CHECK: Descriptor: {{.*}}::rhs, Type: shared f16 mdspan<2> [64, 16]

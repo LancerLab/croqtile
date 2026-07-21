@@ -118,3 +118,27 @@ __co__ auto rs_fp8(f8_e4m3 [64, 32] lhs, f8_e4m3 [64, 32] rhs) {
 }
 // CHECK-LABEL: __global__{{.*}}rs_fp8
 // CHECK: MMA_64x64x32_F32E4M3E4M3_RS_TN<>::fma(reinterpret_cast<const uint32_t*>(a_frag)
+
+// ---------------------------------------------------------------------------
+// 6. Assignment-form mma.load materializes an RS A fragment
+// ---------------------------------------------------------------------------
+__co__ auto rs_assignment_load(f16 [64, 16] lhs, f16 [64, 16] rhs) {
+  f16 [64, 64] output{0.0f};
+  parallel {bm, bn} by [1, 1] : block {
+    mc = mma.fill.f32 0.0f;
+    lhs_s = dma.copy lhs.chunkat(bm, _) => shared;
+    rhs_s = dma.copy rhs.chunkat(bn, _) => shared;
+    parallel p by 1 : group-4 {
+      ma = mma.load.frag lhs_s;
+      mb = mma.desc rhs_s;
+      mma.row.row mc, ma, mb;
+    }
+    mma.store mc, output.chunkat(bm, bn);
+  }
+  return output;
+}
+// CHECK-LABEL: __global__{{.*}}rs_assignment_load
+// CHECK: f16 ma[8];
+// CHECK: __mma_load_src
+// CHECK: uint64_t desc_mb = wgmma_make_smem_desc
+// CHECK: MMA_64x64x16_F32F16F16_RS<{{.*}}>::fma(reinterpret_cast<const uint32_t*>(ma)

@@ -244,6 +244,8 @@ void MMA::accept(Choreo::Visitor& v) {
     operation->LoadFrom()->accept(v);
     if (operation->IsLoadR() && operation->LoadTo())
       operation->LoadTo()->accept(v);
+  } else if (operation->IsDesc()) {
+    operation->DescFrom()->accept(v);
   } else if (operation->IsKind(MMAOperation::Exec)) {
     if (operation->ExecOperand(0)) operation->ExecOperand(0)->accept(v);
     if (operation->ExecOperand(1)) operation->ExecOperand(1)->accept(v);

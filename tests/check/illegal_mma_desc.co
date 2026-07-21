@@ -1,0 +1,13 @@
+// RUN: not choreo -t cute -arch=sm_90a -sa=sema %s 2>&1 | FileCheck %s
+
+__co__ auto reject_global_mma_desc(f16[64, 16] input) {
+  f16[64, 16] output;
+
+  parallel block_id by 1 : block {
+    rhs = mma.desc input;
+  }
+
+  return output;
+}
+
+// CHECK: error: Expected a shared spanned buffer for MMA desc.

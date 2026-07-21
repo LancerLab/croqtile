@@ -1,0 +1,16 @@
+// RUN: choreo -e %s | FileCheck %s
+
+__co__ auto mma_load_frag(f16 [16, 16] lhs, f16 [16, 16] rhs) {
+  f16 [16, 16] output;
+  parallel p by 1 : block {
+    mc = mma.fill 0.0;
+    ma = mma.load.frag lhs;
+    mb = mma.load.frag rhs;
+    mma.row.col mc, ma, mb;
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// CHECK: ma = MMA.LOAD lhs
+// CHECK: mb = MMA.LOAD rhs

@@ -102,6 +102,25 @@ bool FragmentLayoutPass::Visit(AST::NamedVariableDecl& n) {
 bool FragmentLayoutPass::Visit(AST::MMA& n) {
   auto& op = *n.operation;
 
+  if (op.IsKind(AST::MMAOperation::Load)) {
+    auto scoped = InScopeName(AST::FragName(op.LoadTo()));
+    auto sty = GetSpannedType(GetSymbolType(AST::FragName(op.LoadTo())));
+    if (sty) {
+      FragmentUsage usage;
+      usage.scoped_name = scoped;
+      usage.element_type = sty->ElementType();
+      usage.scope_thread_count = EffectiveThreadCount();
+      usage.scope_thread_count_expr = EffectiveThreadCountExpr();
+      auto& shape = sty->GetShape();
+      if (shape.IsValid()) {
+        for (size_t d = 0; d < shape.Rank(); ++d) {
+          if (auto v = VIInt(shape.ValueAt(d))) usage.shape.push_back(*v);
+        }
+      }
+      usages_[scoped] = std::move(usage);
+    }
+  }
+
   if (op.IsKind(AST::MMAOperation::Exec)) {
     // ExecOperand order: 0=C(acc), 1=A, 2=B (matches GPUAdaptor convention).
     auto c_sym = InScopeName(AST::FragName(op.ExecOperand(0)));

@@ -213,7 +213,7 @@ extern int yylex();
 %token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG
 %token DLBRAKT
 // MMA related builtin operations
-%token <std::string> MMA FILL LOAD STORE ROW COLUMN SCALE MASK MMAWAIT
+%token <std::string> MMA FILL LOAD DESC STORE ROW COLUMN SCALE MASK MMAWAIT
 %token <std::string> UNROLL
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXP2F EXPM1 FABS FMAF FRCP_RN FLOOR GELU ISFINITE FMAX FMIN ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA TOCAST
 %token <std::string> ATOMIC_ADD ATOMIC_SUB ATOMIC_EXCH ATOMIC_MIN ATOMIC_MAX ATOMIC_AND ATOMIC_OR ATOMIC_XOR ATOMIC_CAS
@@ -2182,14 +2182,37 @@ mma_stmt
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
+    | IDENTIFIER ASSIGN MMA LOAD DOT FRAG sync_type chunkat_expr {
+        // mma.load.frag is the explicit spelling of the existing
+        // memory-to-register fragment load. Keep the AST identical to
+        // mma.load so all current passes and targets share its semantics.
+        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
+        auto op = AST::Make<AST::MMAOperation>($8, fexpr, $7);
+        symtab.AddSymbol($1, MakeUnknownType());
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
     | IDENTIFIER ASSIGN MMA LOAD SWIZZLE swiz_mode sync_type chunkat_expr {
         auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
         auto op = AST::Make<AST::MMAOperation>($8, fexpr, $7, $6, true);
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
+    | IDENTIFIER ASSIGN MMA LOAD DOT FRAG SWIZZLE swiz_mode sync_type chunkat_expr {
+        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
+        auto op = AST::Make<AST::MMAOperation>($10, fexpr, $9, $8, true);
+        symtab.AddSymbol($1, MakeUnknownType());
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
     | MMA LOAD chunkat_expr COMMA frag_expr {
         auto op = AST::Make<AST::MMAOperation>(AST::MMAOperation::LoadRTag{}, $3, $5, false);
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
+    | IDENTIFIER ASSIGN MMA DESC chunkat_expr {
+        auto operand = AST::Make<AST::Expr>(
+            @1, AST::Make<AST::Identifier>(@1, $1));
+        auto op = AST::Make<AST::MMAOperation>(
+            AST::MMAOperation::DescTag{}, $5, operand);
+        symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
     | MMA mma_exec_method frag_expr COMMA mma_exec_operand_expr COMMA mma_exec_operand_expr {

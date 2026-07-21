@@ -3401,8 +3401,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
         auto oname = UnScopedName(item.name);
         if (item.attr != ParamAttr::GLOBAL_INPUT && item.IsReference())
           hs << h_indent << "choreo::abend_true(cudaMemcpy(" << oname
-             << ".data(), " << oname + "__device" << ", "
-             << UnScopedSizeExpr(*item.type) << ", cudaMemcpyDeviceToHost));\n";
+             << ".data(), " << oname + "__device"
+             << ", " << UnScopedSizeExpr(*item.type)
+             << ", cudaMemcpyDeviceToHost));\n";
       }
     }
 
@@ -4227,6 +4228,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
     if (t_sty->GetStorage() == Storage::SHARED &&
         swizzle_mode != SwizMode::NONE) {
+      if (has_future) shared_buf_swiz_[future_name] = swizzle_mode;
       shared_buf_swiz_[t_buf.first] = swizzle_mode;
       shared_buf_swiz_[InScopeName(t_sym)] = swizzle_mode;
     }
@@ -4707,13 +4709,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
       ++fill_cnt;
     } break;
-    case AST::MMAOperation::Load: {
+    case AST::MMAOperation::Desc: {
       // Check if loading from a buffer whose shape may not evenly divide
       // the MMA fragment. Static shared buffers are always tile-sized, but
       // dynamic-shaped buffers (e.g., global or runtime-sized) may have
       // dimensions that don't divide evenly by the MMA atom shape.
       {
-        auto ca = op.LoadFrom();
+        auto ca = op.DescFrom();
         auto parent_sym = ca->RefSymbol();
         auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
         switch (GetMmaLoadShapeWarningKind(ssmi, parent_ty)) {
@@ -4736,10 +4738,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       std::string elem_ty = NameBaseType(ssmi.ty);
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(sym));
       bool policy_is_sparse = mma_policy.find("SPARSE::") != std::string::npos;
+      if (ssmi.frag != MMAInfo::FRAG_A && ssmi.frag != MMAInfo::FRAG_B) {
+        Error1(n.LOC(), "mma.desc only supports WGMMA A and B operands");
+        break;
+      }
       if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_E) {
-        auto tile_addr = TileAddr(op.LoadFrom(), false);
-        auto strides = GenStrides(op.LoadFrom());
-        auto load_from_sty = dyn_cast<SpannedType>(op.LoadFrom()->GetType());
+        auto tile_addr = TileAddr(op.DescFrom(), false);
+        auto strides = GenStrides(op.DescFrom());
+        auto load_from_sty = dyn_cast<SpannedType>(op.DescFrom()->GetType());
         auto k_val = VIInt(ssmi.shape.at(2));
         bool policy_is_fp8 = mma_policy.find("E4M3") != std::string::npos ||
                              mma_policy.find("E5M2") != std::string::npos;
@@ -4761,7 +4767,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         // to the existing byte-by-byte assembly when detection fails.
         // The --use-prepack / --use-prepack-v2 flags force this path.
         bool v2_mode = use_prepack_v2.GetValue();
-        std::string ref_sym = op.LoadFrom()->RefSymbol();
+        std::string ref_sym = op.DescFrom()->RefSymbol();
         auto prepackInfo =
             resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue() || v2_mode);
 
@@ -4796,7 +4802,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           }
         } else if (prepackInfo.use_packed_u32 && v2_mode) {
           if (prepack_single_col) {
-            auto tile_off = GenOffset(op.LoadFrom());
+            auto tile_off = GenOffset(op.DescFrom());
             emitPrepackedV2TileLoadSnippet(sym, prepackInfo.device_name,
                                            ValueSTR(tile_addr), row_stride,
                                            ValueSTR(tile_off));
@@ -4859,7 +4865,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
         break;
       }
-      auto tile_addr = TileAddr(op.LoadFrom(), false);
+      auto tile_addr = TileAddr(op.DescFrom(), false);
       ds << d_indent << elem_ty << "* " << sym << "_smem_ptr = (" << elem_ty
          << "*)(" << ValueSTR(tile_addr) << ");\n";
       [[maybe_unused]] bool frag_is_fp8 =
@@ -4880,13 +4886,16 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           cute_major_order = "cute::SM90::GMMA::Major::K";
         }
       }
-      // Get swizzle value from MMA operation; infer from DMA if not explicit.
-      auto swizzle_val = op.GetSwizzleMode();
-      if (swizzle_val == SwizMode::NONE && !op.HasExplicitSwizzle()) {
-        auto src_sym = op.LoadFrom()->RefSymbol();
-        auto sit = shared_buf_swiz_.find(src_sym);
-        if (sit != shared_buf_swiz_.end()) swizzle_val = sit->second;
-      }
+      // Descriptor layout follows the shared-memory producer. Swizzle is a
+      // memory-layout property and is deliberately not part of mma.load.
+      auto swizzle_val = SwizMode::NONE;
+      auto src_sym = op.DescFrom()->RefSymbol();
+      auto sit = shared_buf_swiz_.find(src_sym);
+      if (sit == shared_buf_swiz_.end())
+        sit = shared_buf_swiz_.find(InScopeName(src_sym));
+      if (sit == shared_buf_swiz_.end())
+        sit = shared_buf_swiz_.find(UnScopedName(src_sym));
+      if (sit != shared_buf_swiz_.end()) swizzle_val = sit->second;
       std::string swizzle_enum;
       std::string sparse_layout_suffix;
       switch (swizzle_val) {
@@ -4941,7 +4950,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
            << "_smem_ptr);\n";
       }
       if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_A) {
-        std::string ref_sym = op.LoadFrom()->RefSymbol();
+        std::string ref_sym = op.DescFrom()->RefSymbol();
         if (!ref_sym.empty()) {
           auto mdata_sym_name = ref_sym + "_mdata";
           if (SSTab().IsDeclared(mdata_sym_name)) {
@@ -4959,7 +4968,83 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           }
         }
       }
+      explicit_mma_descs_.insert(sym);
+      explicit_mma_descs_.insert(InScopeName(sym));
       ssm.MapDeviceSymbol(InScopeName(sym), sym);
+    } break;
+    case AST::MMAOperation::Load: {
+      if (ssmi.frag != MMAInfo::FRAG_A) {
+        Error1(n.LOC(),
+               "WGMMA mma.load only supports a register A operand; use "
+               "mma.desc for shared-memory A/B operands");
+        break;
+      }
+      auto ca = op.LoadFrom();
+      auto source_sty = GetSpannedType(ca->GetType());
+      if (!source_sty) {
+        Error1(n.LOC(), "failed to infer mma.load source type");
+        break;
+      }
+      auto source_tensor =
+          GenTensorDecl(RemoveSuffix(ca->RefSymbol(), ".data()"),
+                        ValueSTR(TileAddr(ca, false)), source_sty->GetStorage(),
+                        source_sty->ElementType(), ca->GetBlockShape(), false,
+                        "0", ValueSTR(GenStrides(ca), false, true));
+      ds << source_tensor.second;
+
+      auto scoped = InScopeName(sym);
+      if (!FCtx(fname).HasFragmentLayout(scoped)) {
+        Error1(n.LOC(), "missing fragment layout for WGMMA mma.load result");
+        break;
+      }
+      auto& layout = FCtx(fname).GetFragmentLayout(scoped);
+      if (layout.kind != LayoutKind::WGMMA_RS_A ||
+          layout.regs_per_thread == 0) {
+        Error1(n.LOC(), "mma.load result does not have a WGMMA RS A layout");
+        break;
+      }
+      SwizMode source_swizzle = SwizMode::NONE;
+      for (const auto& name : {ca->RefSymbol(), InScopeName(ca->RefSymbol()),
+                               UnScopedName(ca->RefSymbol())}) {
+        if (auto it = shared_buf_swiz_.find(name);
+            it != shared_buf_swiz_.end()) {
+          source_swizzle = it->second;
+          break;
+        }
+      }
+      ds << d_indent << NameBaseType(source_sty->ElementType()) << " " << sym
+         << "[" << layout.regs_per_thread << "];\n";
+      ds << d_indent << "{\n";
+      ds << d_indent << "  auto* __mma_load_src = reinterpret_cast<const "
+         << NameBaseType(source_sty->ElementType()) << "*>("
+         << source_tensor.first << ".data().get());\n";
+      ds << d_indent << "  int __mma_load_lane = threadIdx.x % 128;\n";
+      ds << d_indent << "  #pragma unroll\n";
+      ds << d_indent << "  for (int __mma_load_i = 0; __mma_load_i < "
+         << layout.regs_per_thread << "; ++__mma_load_i) {\n";
+      ds << d_indent << "    size_t __mma_load_logical = "
+         << "((__mma_load_lane / 4) % 8 + (__mma_load_lane / 32) * 16 + "
+            "((__mma_load_i / 2) % 2) * 8) * "
+         << layout.logical_cols << " + (__mma_load_lane % 4) * 2 + "
+            "(__mma_load_i % 2) + (__mma_load_i / 4) * 8;\n";
+      if (source_swizzle != SwizMode::NONE) {
+        int swizzle_bits = source_swizzle == SwizMode::B32 ? 1
+                            : source_swizzle == SwizMode::B64 ? 2
+                                                                : 3;
+        size_t swizzle_mask = ((size_t{1} << swizzle_bits) - 1) << 7;
+        ds << d_indent << "    size_t __mma_load_byte = __mma_load_logical * "
+           << SizeOf(source_sty->ElementType()) << ";\n";
+        ds << d_indent << "    " << sym
+           << "[__mma_load_i] = __mma_load_src[(__mma_load_byte ^ "
+           << "((__mma_load_byte & " << swizzle_mask << ") >> 3)) / "
+           << SizeOf(source_sty->ElementType()) << "];\n";
+      } else {
+        ds << d_indent << "    " << sym
+           << "[__mma_load_i] = __mma_load_src[__mma_load_logical];\n";
+      }
+      ds << d_indent << "  }\n";
+      ds << d_indent << "}\n";
+      ssm.MapDeviceSymbol(scoped, sym);
     } break;
     case AST::MMAOperation::LoadR: {
       auto ca = op.LoadFrom();
@@ -5220,6 +5305,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                                ? AST::GetArrayBaseSymbol(*elemof_expr)
                                : nullptr;
         if (!ca && !sym && !elemof_base) return info;
+
+        if (sym) {
+          auto scoped = InScopeName(sym->name);
+          if (explicit_mma_descs_.count(sym->name) ||
+              explicit_mma_descs_.count(scoped))
+            return info;
+        }
 
         if (policy_is_sparse) {
           if (sym && !ca && !elemof_base) {
