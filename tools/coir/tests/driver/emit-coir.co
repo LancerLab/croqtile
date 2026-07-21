@@ -1,4 +1,5 @@
 // RUN: cocc -emit-coir %s | FileCheck %s
+// RUN: out=$(mktemp -p build coir-emit-ir-XXXXXX.mlir); cocc -emit-coir %s -o "$out" && FileCheck %s < "$out"; status=$?; rm -f "$out"; test "$status" -eq 0
 //
 // Test cocc -emit-coir: verify CoIR MLIR output from end-to-end driver
 

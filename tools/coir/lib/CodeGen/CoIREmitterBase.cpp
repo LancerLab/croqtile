@@ -8,11 +8,75 @@
 
 #include "mlir/IR/BuiltinTypes.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Program.h"
 
 using namespace mlir;
 using namespace coir;
 
 // ===== CodeGen static helpers (defined here to keep header-only) =====
+
+namespace {
+
+std::string shellQuote(llvm::StringRef value) {
+  std::string quoted = "'";
+  for (char c : value) {
+    if (c == '\'')
+      quoted += "'\\''";
+    else
+      quoted += c;
+  }
+  quoted += "'";
+  return quoted;
+}
+
+} // namespace
+
+int CoIR::CodeGen::Compile(mlir::ModuleOp module, llvm::StringRef arch,
+                           llvm::StringRef outputPath) {
+  int fd = -1;
+  llvm::SmallString<128> scriptPath;
+  std::error_code ec =
+      llvm::sys::fs::createUniqueFile(".cocc-build-%%%%%%.sh", fd, scriptPath);
+  if (ec) {
+    llvm::errs() << "error: cannot create temporary build script: "
+                 << ec.message() << "\n";
+    return 1;
+  }
+
+  {
+    llvm::raw_fd_ostream script(fd, /*shouldClose=*/true);
+    if (EmitScript(module, arch, script) != 0) {
+      script.close();
+      llvm::sys::fs::remove(scriptPath);
+      return 1;
+    }
+    std::string quotedOutput = shellQuote(outputPath);
+    script << "\ncp -- \"$BINFILE\" " << quotedOutput
+           << " && chmod +x -- " << quotedOutput << "\n";
+  }
+
+  auto bash = llvm::sys::findProgramByName("bash");
+  if (!bash) {
+    llvm::errs() << "error: cannot find bash to run generated build script\n";
+    llvm::sys::fs::remove(scriptPath);
+    return 1;
+  }
+
+  llvm::SmallVector<llvm::StringRef, 2> args{*bash, scriptPath};
+  std::string errMsg;
+  int rc = llvm::sys::ExecuteAndWait(*bash, args, /*Env=*/std::nullopt,
+                                     /*Redirects=*/{}, /*SecondsToWait=*/0,
+                                     /*MemoryLimit=*/0, &errMsg);
+  llvm::sys::fs::remove(scriptPath);
+  if (rc != 0) {
+    llvm::errs() << "error: target compilation failed";
+    if (!errMsg.empty()) llvm::errs() << ": " << errMsg;
+    llvm::errs() << "\n";
+    return 1;
+  }
+  return 0;
+}
 
 void CoIR::CodeGen::emitScriptPrologue(llvm::raw_ostream &os,
                                        llvm::StringRef comment,
