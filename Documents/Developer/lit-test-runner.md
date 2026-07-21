@@ -54,6 +54,16 @@ A `.cmt` file uses `#` as the comment marker:
 | `// RUN-DOCKER: ...` | Inside Docker only |
 | `// RUN-<mach>: ...` | Only when `mach` matches (e.g. `// RUN-mt100: ...`) |
 
+### `REQUIRES:` vs `RUN-<mach>`
+
+There are two methods to restrict tests to specific hardware:
+
+* **`REQUIRES:`** — skips the entire test when the condition is not met.
+* **`RUN-<mach>:`** — gates individual `RUN:` lines; only the matching
+  lines execute on the target hardware.
+
+Do not mix both methods in the same test file. Pick one per file.
+
 ### `REQUIRES:` directive
 
 Controls whether a test is skipped entirely:
