@@ -121,9 +121,11 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
     auto tokenType = coir::AsyncTokenType::get(rewriter.getContext());
     Location loc = op.getLoc();
 
-    auto kindAttr = coir::DMAKindAttr::get(
-        rewriter.getContext(),
-        hasOffsets ? coir::DMAKind::Slice : coir::DMAKind::Copy);
+    // Preserve original kind. TmaCopyOp has no kind attribute - always Copy.
+    auto kind = coir::DMAKind::Copy;
+    if constexpr (!isTMA)
+      kind = op.getKind();
+    auto kindAttr = coir::DMAKindAttr::get(rewriter.getContext(), kind);
 
     mlir::IntegerAttr swizAttr;
     mlir::UnitAttr zfillAttr;
@@ -136,6 +138,25 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
     auto constDesc = rewriter.create<DMAConstDescOp>(
         loc, descType, srcBase, dstBase, kindAttr,
         isTMA ? rewriter.getUnitAttr() : nullptr, swizAttr, zfillAttr);
+
+    // Record tile presence for emission-side config dispatch.
+    bool hasSrcTile =
+        op.getSource().template getDefiningOp<TensorTileOp>() != nullptr;
+    bool hasDstTile =
+        op.getDest().template getDefiningOp<TensorTileOp>() != nullptr;
+    if (hasSrcTile)
+      constDesc->setAttr("src_tiled", rewriter.getUnitAttr());
+    if (hasDstTile)
+      constDesc->setAttr("dst_tiled", rewriter.getUnitAttr());
+
+    // Forward pad/transpose attributes from the original DmaCopyOp.
+    if constexpr (!isTMA) {
+      for (const char *attrName :
+           {"pad_low", "pad_high", "pad_value", "transpose_perm"}) {
+        if (auto attr = op->getAttr(attrName))
+          constDesc->setAttr(attrName, attr);
+      }
+    }
     auto prefetch = rewriter.create<DMADescPrefetchOp>(
         loc, descRtType, constDesc.getOut());
 
@@ -143,6 +164,9 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
     if (hasOffsets && !offsets.empty()) {
       auto runtimeDesc = rewriter.create<DMADescRuntimeOp>(
           loc, descRtType, prefetch.getOut(), offsets);
+      // Mark offset semantics: deslice-like (dst tiled only) uses dst offsets.
+      if (hasDstTile && !hasSrcTile)
+        runtimeDesc->setAttr("dst_offsets", rewriter.getUnitAttr());
       invokeDesc = runtimeDesc.getOut();
     } else {
       invokeDesc = prefetch.getOut();
