@@ -385,8 +385,11 @@ void CoIREmitterBase::emitOp(Operation *op) {
 void CoIREmitterBase::emitConstant(arith::ConstantOp op) {
   std::string name = getName(op.getResult());
   if (auto intAttr = dyn_cast<IntegerAttr>(op.getValue())) {
-    os() << getIndent() << "const int " << name << " = "
-         << intAttr.getInt() << ";\n";
+    int64_t val = intAttr.getInt();
+    if (val >= INT32_MIN && val <= INT32_MAX)
+      os() << getIndent() << "const int " << name << " = " << val << ";\n";
+    else
+      os() << getIndent() << "const int64_t " << name << " = " << val << "LL;\n";
   } else if (auto floatAttr = dyn_cast<FloatAttr>(op.getValue())) {
     os() << getIndent() << "const " << emitElementType(op.getType())
          << " " << name << " = ";
