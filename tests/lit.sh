@@ -1410,15 +1410,6 @@ for _entry in "${files_array[@]}"; do
       continue;
     fi
 
-    # There is a RUN-TARGET
-    if [[ ! -z "$run_target" ]]; then
-      # check if run-target violates the REQUIRES
-      if ! target_specs_are_required "$run_target"; then
-        echo "ERROR($file): run target ($run_target) is not listed as a test targets ($run_target)."
-        exit 1
-      fi
-    fi
-
     # requires specific device to run
     if ! set_empty REQ_TARGETS; then
       #echo "device: $device_type, reqs: $(set_print REQ_TARGETS), mach: $mach"

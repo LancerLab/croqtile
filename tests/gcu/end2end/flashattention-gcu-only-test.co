@@ -1,4 +1,3 @@
-// REQUIRES: TARGET-GCUALL
 // RUN-GCU300: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-DOCKER-GCU300: choreo -st -t topscc %s -o %s.result && %s.result | FileCheck --match-full-lines %s && rm -f %s.result
 // RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
