@@ -2121,8 +2121,7 @@ bool EarlySemantics::Visit(AST::MMA& n) {
   } break;
   case AST::MMAOperation::Desc: {
     auto sty = GetSpannedType(op.DescFrom()->GetType());
-    if (!sty || sty->GetStorage() != Storage::SHARED)
-      Error1(n.LOC(), "Expected a shared spanned buffer for MMA desc.");
+    if (!sty) Error1(n.LOC(), "Expected a spanned buffer for MMA desc.");
     std::string operand_sym = AST::FragName(op.DescTo());
     ReportErrorWhenViolateODR(
         n.LOC(), operand_sym, __FILE__, __LINE__,

@@ -2,7 +2,7 @@
 // NOTE: Execution test disabled: shared-memory allocation bug causes q_s and
 //       k_s to get the same smem address when both are SS-mode WGMMA operands.
 //       Pre-existing allocator issue, not a syntax conversion problem.
-// DISABLED-RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
 // RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s --check-prefix=CODEGEN
 
 // CODEGEN: warpgroup_commit_batch();

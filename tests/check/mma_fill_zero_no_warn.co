@@ -1,0 +1,48 @@
+// RUN: choreo -es -t cute -arch=sm_90a %s -o /dev/null 2>&1 | FileCheck %s
+
+// Literal zero is exactly representable by the accumulator type, while a
+// nonzero narrowing conversion must retain the usual diagnostic.
+
+#define M 128
+#define N 256
+#define K 64
+
+__co__ auto mma_fill_cast_warnings(f16 [M, K] lhs, f16 [K, N] rhs) {
+  f16 [M, N] output;
+  int MMA_M = 8, MMA_N = 8, MMA_K = 4;
+  parallel {m, n} by [M / MMA_M / 4, N / MMA_N] : block {
+    mc = mma.fill 0;
+    parallel {g0, g1} by [4, 1] : group {
+      mma.fill mc, 0.0;
+      mma.fill mc, 1.5f;
+      foreach k in K / MMA_K {
+        ma = mma.load lhs.chunkat(m#g0, k);
+        mb = mma.load rhs.chunkat(k, n#g1);
+        mma.row.col mc, ma, mb;
+      }
+      mma.store mc, output.chunkat(m#g0, n#g1);
+    };
+  }
+  return output;
+}
+
+// Exercise the WGMMA fill path as well as the mma.sync path above.
+__co__ auto wgmma_zero_fill(f8_e4m3 [64, 128] lhs,
+                            f8_e4m3 [128, 128] rhs) {
+  f16 [64, 128] output;
+  parallel pb by 1 : block {
+    lhs_s = dma.copy.swiz<128> lhs => shared;
+    rhs_s = dma.copy.swiz<128> rhs => shared;
+    parallel g by 1 : group-4 {
+      mc = mma.fill.f16 0.0f;
+      mma.row.row mc, lhs_s, rhs_s;
+      mma.store mc, output;
+    }
+  }
+  return output;
+}
+
+// CHECK-NOT: warning:
+// CHECK: warning: The implicit type conversion may lose precision: 'f32' to 'f16'
+// CHECK: mma.fill mc, 1.5f;
+// CHECK-NOT: warning:

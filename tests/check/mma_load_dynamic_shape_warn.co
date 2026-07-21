@@ -23,7 +23,7 @@ __co__ void test_static_shared(global f16 [M, K] lhs, global f16 [N, K] rhs,
         .subspan(WARP_N, WARP_K).at(block_n, iv_k) => rhs_s;
       parallel p by 1 : group-4 {
         ma = mma.load.swiz<128> lhs_s;
-        mb = mma.load.swiz<128> rhs_s;
+        mb = mma.desc rhs_s;
         mma.row.row mc, ma, mb;
       }
     }
@@ -46,7 +46,7 @@ __co__ void test_static_shared_asym(global f16 [M, K] lhs,
         .subspan(WARP_N_ASYM, WARP_K).at(block_n, iv_k) => rhs_s;
       parallel p by 1 : group-4 {
         ma = mma.load.swiz<128> lhs_s;
-        mb = mma.load.swiz<128> rhs_s;
+        mb = mma.desc rhs_s;
         mma.row.row mc, ma, mb;
       }
     }
@@ -65,7 +65,7 @@ __co__ void test_load_from_global(global f16 [M, K] lhs, global f16 [N, K] rhs,
         .subspan(WARP_N, WARP_K).at(block_n, iv_k) => rhs_s;
       parallel p by 1 : group-4 {
         ma = mma.load lhs.subspan(WARP_M, WARP_K).at(block_m, iv_k);
-        mb = mma.load.swiz<128> rhs_s;
+        mb = mma.desc rhs_s;
         mma.row.row mc, ma, mb;
       }
     }

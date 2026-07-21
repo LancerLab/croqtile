@@ -44,6 +44,18 @@ static std::string StripOuterParens(const std::string& s) {
   return s.substr(1, s.size() - 2);
 }
 
+// Zero is exactly representable by every MMA accumulator type. Treat a
+// literal zero fill as an intentional conversion so the generic narrowing
+// diagnostics do not report a precision loss that cannot occur.
+static bool IsNumericZeroLiteral(const AST::ptr<AST::Node>& n) {
+  auto value = AST::Ref(n);
+  if (auto integer = dyn_cast<AST::IntLiteral>(value))
+    return integer->Val() == 0;
+  if (auto floating = dyn_cast<AST::FloatLiteral>(value))
+    return std::visit([](auto v) { return v == 0; }, floating->value);
+  return false;
+}
+
 // TMA_Swizzle enum and cuda_stringify helper for code generation
 enum class TMA_Swizzle {
   NONE = 0, // No swizzle
@@ -1797,10 +1809,6 @@ CuteCodeGen::resolvePrepackedU32Meta(const std::string& ref_sym,
         }
       }
     }
-    if (!info.use_packed_u32) {
-      info.device_name = ref_sym;
-      info.use_packed_u32 = true;
-    }
   }
 
   return info;
@@ -2133,6 +2141,7 @@ bool CuteCodeGen::Visit(AST::ChoreoFunction& n) {
 
   has_pending_wgmma_finalize = false;
   warpspec_wgmma_arrived = false;
+  pending_tma_prefetch_names_.clear();
 
   DecrHostIndent();
   hs << "}\n\n";
@@ -4677,7 +4686,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       // if ubound is large, may lead to low performance
       std::string scalar_init_val =
           ExprCastSTR(op.FillingValue(), std::nullopt, ssmi.ty,
-                      GetBaseType(*op.FillingValue()->GetType()), false);
+                      GetBaseType(*op.FillingValue()->GetType()), false,
+                      IsNumericZeroLiteral(op.FillingValue()));
       std::string frag_iv_str = "__frag_init_val" + std::to_string(fill_cnt);
       if (use_uint32) {
         std::string temp = "__fiv_temp" + std::to_string(fill_cnt);
@@ -4738,8 +4748,18 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       std::string elem_ty = NameBaseType(ssmi.ty);
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(sym));
       bool policy_is_sparse = mma_policy.find("SPARSE::") != std::string::npos;
-      if (ssmi.frag != MMAInfo::FRAG_A && ssmi.frag != MMAInfo::FRAG_B) {
-        Error1(n.LOC(), "mma.desc only supports WGMMA A and B operands");
+      if (ssmi.frag != MMAInfo::FRAG_A && ssmi.frag != MMAInfo::FRAG_B &&
+          !(policy_is_sparse && ssmi.frag == MMAInfo::FRAG_E)) {
+        Error1(n.LOC(),
+               "mma.desc only supports WGMMA A/B and sparse metadata "
+               "operands");
+        break;
+      }
+      auto desc_source_ty = GetSpannedType(op.DescFrom()->GetType());
+      if (ssmi.frag != MMAInfo::FRAG_E &&
+          (!desc_source_ty ||
+           desc_source_ty->GetStorage() != Storage::SHARED)) {
+        Error1(n.LOC(), "WGMMA A/B descriptors require shared memory");
         break;
       }
       if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_E) {
@@ -4980,6 +5000,24 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         break;
       }
       auto ca = op.LoadFrom();
+      auto parent_sym = ca->RefSymbol();
+      auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
+      switch (GetMmaLoadShapeWarningKind(ssmi, parent_ty)) {
+      case MmaLoadShapeWarningKind::Dynamic:
+        Warning(n.LOC(), "mma.load source buffer '" + parent_sym +
+                             "' has dynamic shape; ensure its dimensions are "
+                             "divisible by the MMA atom shape to avoid "
+                             "out-of-bounds access.");
+        break;
+      case MmaLoadShapeWarningKind::Misaligned:
+        Warning(n.LOC(),
+                "mma.load source buffer '" + parent_sym +
+                    "' has shape that does not evenly divide the MMA "
+                    "atom; this may cause out-of-bounds shared memory "
+                    "access.");
+        break;
+      case MmaLoadShapeWarningKind::None: break;
+      }
       auto source_sty = GetSpannedType(ca->GetType());
       if (!source_sty) {
         Error1(n.LOC(), "failed to infer mma.load source type");
@@ -6273,7 +6311,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       // if ubound is large, may lead to low performance
       std::string scalar_init_val =
           ExprCastSTR(op.FillingValue(), std::nullopt, ssmi.ty,
-                      GetBaseType(*op.FillingValue()->GetType()), false);
+                      GetBaseType(*op.FillingValue()->GetType()), false,
+                      IsNumericZeroLiteral(op.FillingValue()));
       std::string frag_iv_str = "__frag_init_val" + std::to_string(fill_cnt);
       if (use_uint32) {
         std::string temp = "__fiv_temp" + std::to_string(fill_cnt);
@@ -9937,7 +9976,7 @@ const std::string CuteCodeGen::ExprCastSTR(
     else if (IsFloatType(f)) {
       if (f != BT::F32 && f != BT::F64)
         res << "static_cast<" << nbt << ">("
-            << ExprCastSTR(n, val, BT::F32, f, is_host) << ")";
+            << ExprCastSTR(n, val, BT::F32, f, is_host, is_explicit) << ")";
       else
         res << "static_cast<" << nbt << ">(" << value << ")";
     }
@@ -9947,8 +9986,8 @@ const std::string CuteCodeGen::ExprCastSTR(
     if (IsIntegralType(f))
       res << "static_cast<double>(" << value << ")";
     else
-      res << "static_cast<double>(" << ExprCastSTR(n, val, BT::F32, f, is_host)
-          << ")";
+      res << "static_cast<double>("
+          << ExprCastSTR(n, val, BT::F32, f, is_host, is_explicit) << ")";
     break;
   }
   case BT::F32: {
@@ -9967,18 +10006,18 @@ const std::string CuteCodeGen::ExprCastSTR(
     break;
   }
   case BT::F16:
-    res << "choreo::f32_to_f16(" << ExprCastSTR(n, val, BT::F32, f, is_host)
-        << ")";
+    res << "choreo::f32_to_f16("
+        << ExprCastSTR(n, val, BT::F32, f, is_host, is_explicit) << ")";
     break;
   case BT::BF16:
-    res << "choreo::f32_to_bf16(" << ExprCastSTR(n, val, BT::F32, f, is_host)
-        << ")";
+    res << "choreo::f32_to_bf16("
+        << ExprCastSTR(n, val, BT::F32, f, is_host, is_explicit) << ")";
     break;
   case BT::F8_E4M3:
   case BT::F8_E5M2:
     res << "choreo::utils::from_f32<"
         << ((t == BT::F8_E4M3) ? "f8_e4m3" : "f8_e5m2") << ">("
-        << ExprCastSTR(n, val, BT::F32, f, is_host) << ")";
+        << ExprCastSTR(n, val, BT::F32, f, is_host, is_explicit) << ")";
     break;
   default:
     choreo_unreachable("unsupport cast: '" + STR(f) + "' to '" + STR(t) + "'");
