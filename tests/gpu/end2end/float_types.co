@@ -1,7 +1,8 @@
 // REQUIRES: TARGET-GPU
-// RUN: choreo -gs -t cute -use-cuda-type=false %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
-// RUN: choreo -gs -t cute -use-cuda-type=true %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
-// RUN-COCR: %cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: choreo -t cute -gs -use-cuda-type=false %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: choreo -t cute -gs -use-cuda-type=true %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 __co__ auto ele_add_f32(f32 [6, 64] lhs, f32 [6, 64] rhs) {
   f32[lhs.span] output;

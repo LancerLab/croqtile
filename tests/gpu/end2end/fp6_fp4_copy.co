@@ -1,6 +1,7 @@
 // REQUIRES: TARGET-SM_90+
-// RUN: choreo -gs -t cute %cuda_arch -use-cuda-type=false %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck %s && rm -f %s.cute.result
-// RUN-COCR: %cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: choreo -t cute -gs %cuda_arch -use-cuda-type=false %s | bash -s -- --execute | FileCheck %s
+// RUN: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 __co__ auto dma_copy_f6(f6_e2m3 [M, 17, 32] input) {
   f6_e2m3 [input.span] output;

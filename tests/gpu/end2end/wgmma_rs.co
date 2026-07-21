@@ -1,6 +1,7 @@
 // REQUIRES: TARGET-SM_90A
-// RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
-// RUN-COCR: %cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: choreo -t cute -gs %cuda_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 //
 // End-to-end tests for WGMMA RS mode (A from registers, B from shared memory).
 

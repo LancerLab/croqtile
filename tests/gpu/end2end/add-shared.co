@@ -1,7 +1,8 @@
 // REQUIRES: TARGET-GPU
 // TODO: delete --disable-runtime-check after fixing rt check of bv!
-// RUN: choreo -gs -t cute %s --disable-runtime-check -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
-// RUN-COCR: %cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: choreo -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 __co__ s32 [6, 17, 64] ele_add(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) {
   s32[lhs.span] output;

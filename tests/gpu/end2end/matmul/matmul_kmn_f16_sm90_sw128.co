@@ -1,7 +1,8 @@
 // REQUIRES: TARGET-SM_90A
 // RUN: choreo -es -t cute %cuda_arch %s -o - | FileCheck %s --check-prefix=CODEGEN
-// RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && CUDA_VISIBLE_DEVICES=1 CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
-
+// RUN: choreo -t cute -gs %cuda_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t cute -gs %s | bash -s -- --execute | FileCheck %s --check-prefix=CODEGEN
+// RUN-COCR: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck %s --check-prefix=CODEGEN
 #define M 64
 #define N 64
 #define K 64

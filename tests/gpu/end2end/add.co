@@ -1,7 +1,8 @@
 // REQUIRES: TARGET-GPU
-// RUN: choreo -gs -t cute %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
-// RUN: choreo -gs -t cute -dd=false %s -o %s.cute.ddfalse.result && bash %s.cute.ddfalse.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.ddfalse.result
-// RUN-COCR: %cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: choreo -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: choreo -t cute -gs -dd=false %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // Consolidated from: add.co, add-local.co
 

@@ -1,5 +1,7 @@
 // REQUIRES: TARGET-SM_90+
-// RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// RUN: choreo -t cute -gs %cuda_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 #define TILE_M 64
 #define TILE_K 64

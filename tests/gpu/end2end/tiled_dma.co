@@ -1,5 +1,7 @@
 // REQUIRES: TARGET-SM_90A
-// RUN: choreo -gs -t cute -arch=sm_90a %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
+// RUN: choreo -t cute -gs -arch=sm_90a %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 #include "choreo.h"
 

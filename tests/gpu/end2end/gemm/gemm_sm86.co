@@ -1,6 +1,7 @@
 // REQUIRES: TARGET-GPU
-// RUN: choreo -gs -t cute -arch=sm_86 %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
-
+// RUN: choreo -t cute -gs -arch=sm_86 %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // ============ gemm_rc_mma_sync: row*col mma.sync (M=N=K=256) ============
 #define M 256
 #define N 256

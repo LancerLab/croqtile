@@ -1,6 +1,7 @@
 // REQUIRES: TARGET-SM_90A
-// RUN: choreo -gs -t cute %cuda_arch %s -o %s.cute.result && CHOREO_DISABLE_TIMING=1 bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
-
+// RUN: choreo -t cute -gs %cuda_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // Tests: f16 sparse WGMMA with warpspec 1p1c + swizzle variants.
 // K=64 (single k-step). Tests swizzle<64,128> pattern with persistent TMA async.
 // Note: only ONE warpspec kernel per file (2+ warpspec kernels in one file
