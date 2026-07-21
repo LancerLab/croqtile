@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-SM_90
 // RUN: choreo -t cute -gs -arch=sm_90 %s | bash -s -- --execute | FileCheck --match-full-lines %s
-// RUN: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // Consolidated from: tma.co, tma_v1.co, tma_fp8.co

@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-SM_90
 // RUN: choreo -t cute -gs -arch=sm_90 -use-cuda-type=false %s | bash -s -- --execute | FileCheck --match-full-lines %s
-// RUN: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 __co__ auto tma_ab_buffer_f6(f6_e2m3 [16, 16, 128] l, f6_e2m3 [16, 16, 128] r) {
