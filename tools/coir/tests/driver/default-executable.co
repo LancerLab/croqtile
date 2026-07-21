@@ -1,0 +1,24 @@
+// RUN: out=$(mktemp -p build coir-default-executable-XXXXXX); cocc -t cc %s -o "$out" && "$out" | FileCheck --match-full-lines %s; status=$?; rm -f "$out"; test "$status" -eq 0
+//
+// Verify that cocc follows the choreo driver and produces an executable when
+// no explicit output-mode option (-es, -gs, or -emit-coir) is present.
+
+__co__ s32 [16] add_one(s32 [16] input) {
+  s32[input.span] output;
+  parallel i by 16
+    output.at(i) = input.at(i) + 1;
+  return output;
+}
+
+int main() {
+  auto input = choreo::make_spandata<choreo::s32>(16);
+  input.fill(41);
+  auto output = add_one(input.view());
+
+  for (size_t i = 0; i < output.shape()[0]; ++i)
+    choreo::choreo_assert(output[i] == 42, "default executable mismatch");
+
+  std::cout << "PASS: cocc default executable" << std::endl;
+}
+
+// CHECK: PASS: cocc default executable

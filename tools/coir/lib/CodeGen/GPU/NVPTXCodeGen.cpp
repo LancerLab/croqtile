@@ -8,11 +8,10 @@
 // EmitScript() -> self-contained bash script: PTX embedded as C string
 //                 + host stubs + user host code, compiled with g++/nvcc,
 //                 linked with -lcuda, executed on --execute.
-// Compile()    -> full in-memory pipeline to binary.
+// Compile()    -> default generated-script compilation to executable.
 //
 //===----------------------------------------------------------------------===//
 
-#include "CodeGen/GPU/CompilePipeline.h"
 #include "CodeGen/GPU/EmitHostStubs.h"
 #include "CodeGen/GPU/NativePipeline.h"
 #include "Dialect/CoIR/Passes.h"
@@ -109,13 +108,6 @@ public:
     return 0;
   }
 
-  int Compile(ModuleOp module, llvm::StringRef arch,
-              llvm::StringRef outputPath) override {
-    auto &sctx = CoIR::ScriptContext::Get();
-    return coir::gpu::compileToExecutable(module, arch, outputPath,
-                                          sctx.types_header,
-                                          sctx.runtime_header, sctx.cuda_home);
-  }
 };
 
 static bool registered = [] {

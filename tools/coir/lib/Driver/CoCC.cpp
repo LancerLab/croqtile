@@ -203,12 +203,8 @@ int main(int argc, char *argv[]) {
   std::string input_file = reg.GetInputFileName();
 
   if (!emit_source && !generate_script && !emit_coir && !dump_ast &&
-      !compile_binary) {
-    if (CCtx().GetTarget().IsBinaryOnlyCodeGen())
-      compile_binary = true;
-    else
-      generate_script = true;
-  }
+      !compile_binary)
+    compile_binary = true;
 
   if (CCtx().GetTarget().IsBinaryOnlyCodeGen()) {
     if (emit_source || generate_script) {
@@ -259,7 +255,18 @@ int main(int argc, char *argv[]) {
 
   // --- Emit IR early exit ---
   if (emit_coir) {
-    pipeline.EmitCoIR(llvm::outs());
+    if (!output.WasExplicitlySet() || output.GetValue() == "-") {
+      pipeline.EmitCoIR(llvm::outs());
+    } else {
+      std::error_code ec;
+      llvm::raw_fd_ostream os(output.GetValue(), ec);
+      if (ec) {
+        errs() << "error: cannot open '" << output.GetValue()
+               << "': " << ec.message() << "\n";
+        return 1;
+      }
+      pipeline.EmitCoIR(os);
+    }
     return 0;
   }
 

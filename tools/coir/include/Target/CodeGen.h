@@ -62,11 +62,11 @@ public:
     return EmitSource(module, arch, os);
   }
 
-  virtual int Compile(mlir::ModuleOp /*module*/, llvm::StringRef /*arch*/,
-                      llvm::StringRef /*outputPath*/) {
-    llvm::errs() << "Compile() not implemented for this target\n";
-    return 1;
-  }
+  /// Compile to an executable.  The default implementation uses the target's
+  /// generated build script and copies its BINFILE to outputPath.  Binary-only
+  /// targets may override this with a native compilation pipeline.
+  virtual int Compile(mlir::ModuleOp module, llvm::StringRef arch,
+                      llvm::StringRef outputPath);
 
   // -- Shared script helpers (used by all source-text targets) --
 
