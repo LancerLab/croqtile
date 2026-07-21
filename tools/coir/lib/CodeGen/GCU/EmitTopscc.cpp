@@ -187,10 +187,20 @@ private:
     return "choreo::s32";
   }
 
-  // Portable DTE context type that works across all target architectures.
-  // tops_dte_ctx_t is universally available; the choreo.h header typedefs
-  // it to the arch-appropriate underlying type when compiled with topscc.
-  std::string getDTEType() const { return "tops_dte_ctx_t"; }
+  // DTE context type depends on the memory spaces involved:
+  // - Global ↔ Shared: use collective DTE (private_cdte)
+  // - Anything involving Local/Register: use per-thread DTE (private_dte)
+  std::string getDTEType(Type srcType, Type dstType) const {
+    auto srcMS = 0, dstMS = 0;
+    if (auto tty = dyn_cast<coir::TensorType>(srcType))
+      srcMS = tty.getMemorySpace();
+    if (auto tty = dyn_cast<coir::TensorType>(dstType))
+      dstMS = tty.getMemorySpace();
+    bool bothGlobalOrShared =
+        srcMS <= (int)coir::TensorMemorySpace::Shared &&
+        dstMS <= (int)coir::TensorMemorySpace::Shared;
+    return bothGlobalOrShared ? "tops::private_cdte" : "tops::private_dte";
+  }
 
   // tops_dte_ctx_t requires explicit .init() on legacy targets (gcu210).
   // On gcu300/400 the type is RAII and init() is a no-op, so always calling
@@ -1714,7 +1724,9 @@ private:
     std::string ctxName = "__dte_" + std::to_string(id);
     std::string futName = "__fut_" + std::to_string(id);
 
-    os() << getIndent() << getDTEType() << " " << ctxName << ";\n";
+    os() << getIndent() << getDTEType(op.getSource().getType(),
+                                      op.getDest().getType())
+       << " " << ctxName << ";\n";
     os() << getIndent() << "choreo::future " << futName << "("
        << ctxName << ", \"dma_" << id << "\", 0, 0);\n";
 
@@ -1943,7 +1955,9 @@ private:
     std::string futName = "__fut_desc_" + std::to_string(id);
     dmaCtxNames[op.getOut()] = futName;
 
-    os() << getIndent() << getDTEType() << " " << ctxName << ";\n";
+    os() << getIndent() << getDTEType(op.getSource().getType(),
+                                      op.getDest().getType())
+       << " " << ctxName << ";\n";
     os() << getIndent() << "choreo::future " << futName << "("
        << ctxName << ", \"dma_desc_" << id << "\", 0, 0);\n";
 
@@ -2039,7 +2053,7 @@ private:
     std::string ctxName = "__dte_init_" + std::to_string(id);
     os() << getIndent() << "{\n";
     incIndent();
-    os() << getIndent() << getDTEType() << " " << ctxName << ";\n";
+    os() << getIndent() << "tops::private_dte " << ctxName << ";\n";
     if (needsExplicitInit())
       os() << getIndent() << ctxName << ".init();\n";
     os() << getIndent() << "tops::memset(" << ctxName << ", " << mds
@@ -2131,7 +2145,7 @@ private:
 
       os() << getIndent() << "{\n";
       incIndent();
-      os() << getIndent() << getDTEType() << " " << name << "__init;\n";
+      os() << getIndent() << "tops::private_dte " << name << "__init;\n";
       if (needsExplicitInit())
         os() << getIndent() << name << "__init.init();\n";
       os() << getIndent() << "tops::memset(" << name << "__init, "
