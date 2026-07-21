@@ -2068,6 +2068,9 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
     bool isDynReuse = false;
     std::string dynOffsetName;
     if (nvd.HasNote("reuse")) {
+      auto spmName = nvd.GetNote("reuse");
+      if (!spmName.empty())
+        reuseSpm = builder.getStringAttr(spmName);
       if (nvd.HasNote("offset")) {
         auto offStr = nvd.GetNote("offset");
         if (offStr.find("mr_offset") == 0) {
