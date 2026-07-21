@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-AMDGPU
-// RUN: choreo -gs %target %amdgpu_arch %s -o %s.hip.result && bash %s.hip.result --execute | FileCheck --match-full-lines %s && rm -f %s.hip.result
+// RUN: choreo -gs %target %amdgpu_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // --- Test 1: basic 2D transpose <1,0> ---
 __co__ auto transp_2d(s32 [64, 128] input) {

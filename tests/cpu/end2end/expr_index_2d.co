@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-CPU
-// RUN: choreo -gs %target %s -o %s.cc.result && bash %s.cc.result --execute | FileCheck --match-full-lines %s && rm -f %s.cc.result
+// RUN: choreo -gs %target %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // Regression test for 2D .at() with expression indices.
 // The cc codegen was missing the row stride multiplication when

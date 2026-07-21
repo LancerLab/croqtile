@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-AMDGPU
-// RUN: choreo -gs %target %amdgpu_arch %s -o %s.hip.result && bash %s.hip.result --execute | FileCheck --match-full-lines %s && rm -f %s.hip.result
+// RUN: choreo -gs %target %amdgpu_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // --- Test 1: S2G pad with static shape ---
 __co__ auto pad_s2g(s32 [32, 64] input) {
