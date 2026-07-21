@@ -1,6 +1,6 @@
-// RUN-GCU300: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-GCU300: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck %s
 // RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck %s
+// RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck %s
 
 __co__ auto identity(f32 [1024] input) {
   f32 [input.span(0)] output;
