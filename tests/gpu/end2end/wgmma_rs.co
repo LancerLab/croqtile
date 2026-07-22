@@ -9,16 +9,14 @@
 #define WARP_N 64
 #define WARP_K 16
 
-
 __co__ auto wgmma_rs1(f16 [WARP_N, WARP_K] rhs) {
   f32 [WARP_M, WARP_N] output{0.0f};
   parallel {bm, bn} by [1, 1] : block {
     mc = mma.fill.f32 0.0f;
     frag f16[WARP_M, WARP_K] a_frag {1.0f};
     rhs_s = tma.copy.swiz<32> rhs.subspan(WARP_N, WARP_K).at(bn, 0) => shared;
-    parallel p by 1 : group-4 {
-      mb = mma.desc rhs_s;
-      mma.row.row mc, a_frag, mb;
+    parallel by 1 : group-4 {
+      mma.row.row mc, a_frag, rhs_s;
     }
     mma.store mc, output.chunkat(bm, bn);
   }
@@ -31,65 +29,63 @@ __co__ auto wgmma_rs2(f16 [WARP_M, WARP_K] lhs, f16 [WARP_N, WARP_K] rhs) {
     mc = mma.fill.f32 0.0f;
     lhs_s = tma.copy.swiz<32> lhs.subspan(WARP_M, WARP_K).at(bm, 0) => shared;
     rhs_s = tma.copy.swiz<32> rhs.subspan(WARP_N, WARP_K).at(bn, 0) => shared;
-    parallel p by 1 : group-4 {
+    parallel by 1 : group-4 {
       ma = mma.load.frag lhs_s;
-      mb = mma.desc rhs_s;
-      mma.row.row mc, ma, mb;
+      mma.row.row mc, ma, rhs_s;
     }
     mma.store mc, output.chunkat(bm, bn);
   }
   return output;
 }
 
-int main(int argc, char** argv) {
+int main() {
   constexpr size_t M = WARP_M, N = WARP_N, K = WARP_K;
 
   auto h_lhs = choreo::make_spandata<choreo::f16>(M, K);
   auto h_rhs = choreo::make_spandata<choreo::f16>(N, K);
-  h_lhs.fill_random(0, 2);
-  h_rhs.fill_random(0, 2);
+  for (size_t m = 0; m < M; ++m)
+    for (size_t k = 0; k < K; ++k)
+      h_lhs[m][k] = float((m + 2 * k) % 3) * 0.5f;
+  for (size_t n = 0; n < N; ++n)
+    for (size_t k = 0; k < K; ++k)
+      h_rhs[n][k] = float((2 * n + k) % 3) * 0.5f;
 
-  // Test 2: wgmma_rs1 - ones fragment * B should give row sums of B
+  // Test 1: wgmma_rs1 - ones fragment * B should give row sums of B.
   {
     auto result = wgmma_rs1(h_rhs.view());
-    bool pass = true;
     for (size_t m = 0; m < M; m++) {
       for (size_t n = 0; n < N; n++) {
         float expected = 0.0f;
         for (size_t k = 0; k < K; ++k)
           expected += __half2float(h_rhs[n][k]);
         float val = result.data()[m * N + n];
-        if (fabsf(val - expected) > 0.5f) {
-          printf("FAIL wgmma_rs1: [%zu][%zu] = %f (exp %f)\n", m, n, val, expected);
-          pass = false;
-          break;
+        if (fabsf(val - expected) > 0.1f) {
+          printf("FAIL wgmma_rs1: [%zu][%zu] = %f (exp %f)\n", m, n,
+                 val, expected);
+          choreo::choreo_assert(false, "values are not equal");
         }
       }
-      if (!pass) break;
     }
-    if (pass) printf("PASS wgmma_rs1\n");
+    printf("PASS wgmma_rs1\n");
   }
 
-  // Test 2: wgmma_rs2 - shared-memory A * B should give row sums of B.
+  // Test 2: wgmma_rs2 - loaded A fragment times shared-memory B.
   {
     auto result = wgmma_rs2(h_lhs.view(), h_rhs.view());
-    bool pass = true;
     for (size_t m = 0; m < M; ++m) {
       for (size_t n = 0; n < N; ++n) {
         float expected = 0.0f;
         for (size_t k = 0; k < K; ++k)
           expected += __half2float(h_lhs[m][k]) * __half2float(h_rhs[n][k]);
         float val = result.data()[m * N + n];
-        if (fabsf(val - expected) > 0.5f) {
+        if (fabsf(val - expected) > 0.1f) {
           printf("FAIL wgmma_rs2: [%zu][%zu] = %f (exp %f)\n", m, n, val,
                  expected);
-          pass = false;
-          break;
+          choreo::choreo_assert(false, "values are not equal");
         }
       }
-      if (!pass) break;
     }
-    if (pass) printf("PASS wgmma_rs2\n");
+    printf("PASS wgmma_rs2\n");
   }
 
   return 0;

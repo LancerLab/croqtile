@@ -19,10 +19,9 @@ __co__ void matmul_persis_hilbert_sm90(global f16 [M, K] lhs, global f16 [N, K] 
           tma.copy.swiz<128> lhs.subspan(64, 64).step(64, 64).at(block_m, iv_k) => lhs_load_s;
           tma.copy.swiz<128> rhs.subspan(128, 64).step(128, 64).at(block_n, iv_k) => rhs_load_s;
           foreach {iv_warp} in [cdiv(64, 16)] {
-            parallel p by 1 : group-4 {
-              ma = mma.desc lhs_load_s.chunkat(_, iv_warp);
-              mb = mma.desc rhs_load_s.chunkat(_, iv_warp);
-              mma.row.row mc, ma, mb;
+            parallel by 1 : group-4 {
+              mma.row.row mc, lhs_load_s.chunkat(_, iv_warp),
+                              rhs_load_s.chunkat(_, iv_warp);
             }
           }
         }
@@ -51,8 +50,8 @@ __co__ void matmul_f16_ws_1p3c_persis(
         block_m = tile_id / tiles_n;
         block_n = tile_id % tiles_n;
 
-        parallel p1 by 4 : group-4, t by 128 : thread {
-          inthreads.async (p1 == 0) {
+        parallel wg by 4 : group-4, t by 128 : thread {
+          inthreads.async (wg == 0) {
             foreach {iv_k} in [cdiv(K, 64)] {
               stage = iv_k % 2;
               wait empty[stage];
@@ -65,7 +64,7 @@ __co__ void matmul_f16_ws_1p3c_persis(
               trigger full[stage];
             }
           }
-          inthreads.async (p1 > 0) {
+          inthreads.async (wg > 0) {
             mc = mma.fill.f16 0.0f;
             if (tile_iter == 0) {
               foreach {stage} in [2] { trigger empty[stage]; }
@@ -74,17 +73,17 @@ __co__ void matmul_f16_ws_1p3c_persis(
               stage = iv_k % 2;
               wait full[stage];
               foreach {iv_warp} in [cdiv(64, 16)] {
-                ma = mma.desc lhs_load_s[stage]
-                    .subspan(64, 64).at(p1 - 1, 0).chunkat(_, iv_warp);
-                mb = mma.desc rhs_load_s[stage].chunkat(_, iv_warp);
-                mma.row.row mc, ma, mb;
+                mma.row.row mc,
+                    lhs_load_s[stage]
+                        .subspan(64, 64).at(wg - 1, 0).chunkat(_, iv_warp),
+                    rhs_load_s[stage].chunkat(_, iv_warp);
               }
               trigger empty[stage];
             }
-            mma.store mc, output_s[p1 - 1];
-            tma.copy output_s[p1 - 1]
+            mma.store mc, output_s[wg - 1];
+            tma.copy output_s[wg - 1]
                 => output.subspan(64, 128)
-                    .at(block_m * 3 + (p1 - 1), block_n);
+                    .at(block_m * 3 + (wg - 1), block_n);
           }
         }
       }
@@ -113,8 +112,8 @@ __co__ void blockscale_gemm_e4m3_ws_persis(
         block_m = tile_id / tiles_n;
         block_n = tile_id % tiles_n;
 
-        parallel p1 by 2 : group-4, t by 128 : thread {
-          inthreads.async (p1 == 0) {
+        parallel wg by 2 : group-4, t by 128 : thread {
+          inthreads.async (wg == 0) {
             foreach {iv_k} in [cdiv(K, 128)] {
               stage = iv_k % 4;
               wait empty[stage];
@@ -127,7 +126,7 @@ __co__ void blockscale_gemm_e4m3_ws_persis(
               trigger full[stage];
             }
           }
-          inthreads.async (p1 == 1) {
+          inthreads.async (wg == 1) {
             mc = mma.fill.f16 0.0f;
             if (tile_iter == 0) {
               foreach {stage} in [4] { trigger empty[stage]; }
@@ -136,9 +135,9 @@ __co__ void blockscale_gemm_e4m3_ws_persis(
               stage = iv_k % 4;
               wait full[stage];
               foreach {iv_warp} in [cdiv(128, 32)] {
-                ma = mma.desc lhs_load_s[stage].chunkat(_, iv_warp);
-                mb = mma.desc rhs_load_s[stage].chunkat(_, iv_warp);
-                mma.row.row mc, ma, mb;
+                mma.row.row mc,
+                    lhs_load_s[stage].chunkat(_, iv_warp),
+                    rhs_load_s[stage].chunkat(_, iv_warp);
               }
               mma.scale mc, scale_lhs.subspan(64, 1).at(block_m, iv_k),
                         scale_rhs.at(block_n, iv_k);
@@ -198,7 +197,7 @@ static int build_hilbert_schedule(int tiles_m, int tiles_n,
 }
 
 static void test_f16_persistent_kernels() {
-  constexpr size_t m = 384, n = 256, k = 64;
+  constexpr size_t m = 1536, n = 2048, k = 128;
   auto lhs_h = choreo::make_spandata<choreo::f16>(m, k);
   auto rhs_h = choreo::make_spandata<choreo::f16>(n, k);
   auto out_h = choreo::make_spandata<choreo::f16>(m, n);
@@ -270,11 +269,11 @@ static void test_f16_persistent_kernels() {
 }
 
 static void test_blockscale_persistent() {
-  constexpr size_t m = 128, n = 128, k = 128;
+  constexpr size_t m = 512, n = 2048, k = 128;
   auto lhs_h = choreo::make_spandata<choreo::f8_e4m3>(m, k);
   auto rhs_h = choreo::make_spandata<choreo::f8_e4m3>(n, k);
   auto scale_lhs_h = choreo::make_spandata<choreo::f32>(m, 1);
-  auto scale_rhs_h = choreo::make_spandata<choreo::f32>(1, 1);
+  auto scale_rhs_h = choreo::make_spandata<choreo::f32>(n / 128, 1);
   auto out_h = choreo::make_spandata<choreo::f16>(m, n);
   lhs_h.fill_random(0, 2);
   rhs_h.fill_random(0, 2);
@@ -290,7 +289,8 @@ static void test_blockscale_persistent() {
   choreo::abend_true(
       cudaMalloc(&rhs_d, n * k * sizeof(__nv_fp8_e4m3)));
   choreo::abend_true(cudaMalloc(&scale_lhs_d, m * sizeof(float)));
-  choreo::abend_true(cudaMalloc(&scale_rhs_d, sizeof(float)));
+  choreo::abend_true(
+      cudaMalloc(&scale_rhs_d, (n / 128) * sizeof(float)));
   choreo::abend_true(cudaMalloc(&out_d, m * n * sizeof(half)));
   choreo::abend_true(cudaMemcpy(lhs_d, lhs_h.data(),
                                 m * k * sizeof(__nv_fp8_e4m3),
@@ -301,13 +301,14 @@ static void test_blockscale_persistent() {
   choreo::abend_true(cudaMemcpy(scale_lhs_d, scale_lhs_h.data(),
                                 m * sizeof(float), cudaMemcpyHostToDevice));
   choreo::abend_true(cudaMemcpy(scale_rhs_d, scale_rhs_h.data(),
-                                sizeof(float), cudaMemcpyHostToDevice));
+                                (n / 128) * sizeof(float),
+                                cudaMemcpyHostToDevice));
 
   blockscale_gemm_e4m3_ws_persis(
       choreo::make_spanview<choreo::f8_e4m3, 2>(lhs_d, {m, k}),
       choreo::make_spanview<choreo::f32, 2>(scale_lhs_d, {m, 1}),
       choreo::make_spanview<choreo::f8_e4m3, 2>(rhs_d, {n, k}),
-      choreo::make_spanview<choreo::f32, 2>(scale_rhs_d, {1, 1}),
+      choreo::make_spanview<choreo::f32, 2>(scale_rhs_d, {n / 128, 1}),
       choreo::make_spanview<choreo::f16, 2>(out_d, {m, n}));
   choreo::abend_true(cudaMemcpy(out_h.data(), out_d, m * n * sizeof(half),
                                 cudaMemcpyDeviceToHost));
@@ -325,7 +326,7 @@ static void test_blockscale_persistent() {
       ref += static_cast<float>(lhs[row][inner]) *
              static_cast<float>(scale_lhs[row][0]) *
              static_cast<float>(rhs[col][inner]) *
-             static_cast<float>(scale_rhs[0][0]);
+             static_cast<float>(scale_rhs[col / 128][0]);
     }
     float got = __half2float(out[row][col]);
     float tolerance = 0.5f + 0.08f * std::abs(ref);

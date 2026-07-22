@@ -2331,6 +2331,52 @@ __device__ static __forceinline__ uint64_t wgmma_make_smem_desc(T* ptr) {
   return desc;
 }
 
+// Pack one warpgroup's sparse metadata bytes into the register descriptor
+// consumed by sparse WGMMA. K is the logical (uncompressed) MMA K dimension.
+template <int K, bool IsFP8, typename T, typename RowStride, typename ColStride>
+__device__ static __forceinline__ auto
+wgmma_make_sparse_metadata_desc(T* ptr, RowStride row_stride,
+                                ColStride col_stride) {
+  static_assert(K > 0 && K % 8 == 0,
+                "sparse WGMMA metadata K must be a positive multiple of 8");
+  constexpr bool fp8_k64 = IsFP8 && K == 64;
+  using descriptor_type =
+      std::conditional_t<(K > 32 && !fp8_k64), uint64_t, uint32_t>;
+
+  auto* metadata = reinterpret_cast<const uint8_t*>(ptr);
+  int tid = threadIdx.x % 128;
+  descriptor_type desc = 0;
+  auto load_byte = [&](int row, int col) {
+    return metadata[row * row_stride + col * col_stride];
+  };
+
+  if constexpr (fp8_k64) {
+    int row = ((tid >> 2) & 7) + ((tid & 1) << 3) + ((tid >> 5) << 4);
+    int byte_col = ((tid >> 1) & 1) << 2;
+  #pragma unroll
+    for (int byte_idx = 0; byte_idx < 4; ++byte_idx)
+      desc |= static_cast<descriptor_type>(load_byte(row, byte_col + byte_idx))
+              << (8 * byte_idx);
+  } else if constexpr (!IsFP8 && (K == 32 || K == 64)) {
+    int row = ((tid >> 5) * 16) + ((tid >> 2) & 7);
+    int byte_col = ((tid & (K == 32 ? 1 : 3)) << 1);
+    desc |= static_cast<descriptor_type>(load_byte(row, byte_col)) << 0;
+    desc |= static_cast<descriptor_type>(load_byte(row, byte_col + 1)) << 8;
+    desc |= static_cast<descriptor_type>(load_byte(row + 8, byte_col)) << 16;
+    desc |= static_cast<descriptor_type>(load_byte(row + 8, byte_col + 1))
+            << 24;
+  } else {
+    int lane = tid % 32;
+    int warp = tid / 32;
+    int row = warp * 16 + lane / 4;
+  #pragma unroll
+    for (int byte_idx = 0; byte_idx < K / 8; ++byte_idx)
+      desc |= static_cast<descriptor_type>(load_byte(row, byte_idx))
+              << (8 * byte_idx);
+  }
+  return desc;
+}
+
 // WGMMA fence/sync primitives
 __device__ static __forceinline__ void warpgroup_arrive() {
   #if defined(CUTE_ARCH_MMA_SM90A_ENABLED)
