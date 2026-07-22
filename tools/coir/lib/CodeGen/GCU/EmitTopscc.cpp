@@ -419,6 +419,28 @@ private:
     os() << ") {\n";
     incIndent();
 
+    // Pre-scan: collect all SPM pool names and emit pool declarations
+    // at the function level to ensure they're in scope for all uses.
+    spmNames_.clear();
+    kernel.walk([&](TensorAllocOp allocOp) {
+      if (!allocOp.getReuseOffsetAttr()) return;
+      if (allocOp->getAttrOfType<mlir::StringAttr>("dyn_offset_arg")) return;
+      auto poolNameOpt = allocOp.getReuseSpm();
+      llvm::StringRef poolName =
+          poolNameOpt.has_value() ? *poolNameOpt : "__default_spm";
+      if (spmNames_.count(poolName)) return;
+      std::string spmVar = "__spm_" + std::to_string(nextId++);
+      spmNames_[poolName] = spmVar;
+      int64_t spmBytes = 0;
+      if (auto spmSizeAttr =
+              allocOp->getAttrOfType<mlir::IntegerAttr>("spm_size"))
+        spmBytes = spmSizeAttr.getInt();
+      auto tensorTy = cast<coir::TensorType>(allocOp.getResult().getType());
+      std::string qual = getAllocQualifier(tensorTy);
+      os() << getIndent() << qual << "unsigned char "
+           << spmVar << "[" << spmBytes << "];\n";
+    });
+
     for (auto &op : body.front().getOperations()) {
       if (auto ret = dyn_cast<KernelReturnOp>(op)) {
         for (unsigned i = 0; i < ret.getOperands().size(); ++i) {

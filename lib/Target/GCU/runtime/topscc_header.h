@@ -260,6 +260,19 @@ struct future {
     #endif // __GCU_ARCH__
   #endif   // __CHOREO_DMA_DIAGNOSIS__
 
+  // Default constructor for async.undef — creates an uninitialized future
+  // that can be assigned later via rotate or other operations.
+  __device__ future() : ctx(nullptr), d(nullptr), md(nullptr), s(ST_NONE) {
+  #if defined(__GCU_ARCH__) && __GCU_ARCH__ == 300
+    explicit_init = false;
+  #endif
+  #ifdef __CHOREO_DMA_DIAGNOSIS__
+    name = nullptr;
+    line = 0;
+    column = 0;
+  #endif
+  }
+
   // Configure DMA descriptor without triggering. For use with hoisted
   // DMA config: call configure() once outside the loop, then set_offset()
   // + trigger_only() per iteration.
@@ -274,6 +287,12 @@ struct future {
       s = ST_INITED;
     }
     ctx->config_memcpy(dst, src);
+  }
+
+  // Alias for configure() — used by descriptor DMA emission.
+  __device__ void configure_memcpy(const tops::mdspan_base& dst,
+                                   const tops::mdspan_base& src) {
+    configure(dst, src);
   }
 
   // Helper: ensure DTE is initialized before config calls.
