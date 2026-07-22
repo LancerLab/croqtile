@@ -109,9 +109,9 @@ __co__ auto matmul_f16_n32_k64(f16 [64, 32] lhs_packed, u8 [64, 8] lhs_meta, f16
       lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
-          ma = mma.desc lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.desc rhs_load_s.chunkat(_, iv_warp);
-          me = mma.desc lhs_load_s_mdata.chunkat(_, iv_warp);
+          ma = lhs_load_s.chunkat(_, iv_warp);
+          mb = rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
           mma.row.row.sp mc, ma, mb, me;
         }
       }
@@ -133,9 +133,9 @@ __co__ auto matmul_f16_n32_k32(f16 [64, 16] lhs_packed, u8 [64, 4] lhs_meta, f16
       lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
-          ma = mma.desc lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.desc rhs_load_s.chunkat(_, iv_warp);
-          me = mma.desc lhs_load_s_mdata.chunkat(_, iv_warp);
+          ma = lhs_load_s.chunkat(_, iv_warp);
+          mb = rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
           mma.row.row.sp mc, ma, mb, me;
         }
       }
@@ -157,9 +157,9 @@ __co__ auto matmul_fp8_n32(f8_e4m3 [64, 32] lhs_packed, u8 [64, 8] lhs_meta, f8_
       lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
-          ma = mma.desc lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.desc rhs_load_s.chunkat(_, iv_warp);
-          me = mma.desc lhs_load_s_mdata.chunkat(_, iv_warp);
+          ma = lhs_load_s.chunkat(_, iv_warp);
+          mb = rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
           mma.row.row.sp mc, ma, mb, me;
         }
       }
@@ -181,9 +181,9 @@ __co__ auto matmul_fp8_n64(f8_e4m3 [64, 32] lhs_packed, u8 [64, 8] lhs_meta, f8_
       lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
-          ma = mma.desc lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.desc rhs_load_s.chunkat(_, iv_warp);
-          me = mma.desc lhs_load_s_mdata.chunkat(_, iv_warp);
+          ma = lhs_load_s.chunkat(_, iv_warp);
+          mb = rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
           mma.row.row.sp mc, ma, mb, me;
         }
       }
@@ -205,9 +205,9 @@ __co__ auto matmul_fp8_n8(f8_e4m3 [64, 32] lhs_packed, u8 [64, 8] lhs_meta, f8_e
       lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
-          ma = mma.desc lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.desc rhs_load_s.chunkat(_, iv_warp);
-          me = mma.desc lhs_load_s_mdata.chunkat(_, iv_warp);
+          ma = lhs_load_s.chunkat(_, iv_warp);
+          mb = rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
           mma.row.row.sp mc, ma, mb, me;
         }
       }
@@ -229,9 +229,9 @@ __co__ auto matmul_f16_n8k64(f16 [64, 32] lhs_packed, u8 [64, 8] lhs_meta, f16 [
       lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
-          ma = mma.desc lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.desc rhs_load_s.chunkat(_, iv_warp);
-          me = mma.desc lhs_load_s_mdata.chunkat(_, iv_warp);
+          ma = lhs_load_s.chunkat(_, iv_warp);
+          mb = rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
           mma.row.row.sp mc, ma, mb, me;
         }
       }
@@ -253,9 +253,9 @@ __co__ auto matmul_bf16_n8k64(bf16 [64, 32] lhs_packed, u8 [64, 8] lhs_meta, bf1
       lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
-          ma = mma.desc lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.desc rhs_load_s.chunkat(_, iv_warp);
-          me = mma.desc lhs_load_s_mdata.chunkat(_, iv_warp);
+          ma = lhs_load_s.chunkat(_, iv_warp);
+          mb = rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
           mma.row.row.sp mc, ma, mb, me;
         }
       }
@@ -277,9 +277,9 @@ __co__ auto matmul_f16_n16_k64(f16 [64, 32] lhs_packed, u8 [64, 8] lhs_meta, f16
       lhs_load_s_mdata = dma.copy lhs_meta.chunkat(block_m, iv_k) => shared;
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
-          ma = mma.desc lhs_load_s.chunkat(_, iv_warp);
-          mb = mma.desc rhs_load_s.chunkat(_, iv_warp);
-          me = mma.desc lhs_load_s_mdata.chunkat(_, iv_warp);
+          ma = lhs_load_s.chunkat(_, iv_warp);
+          mb = rhs_load_s.chunkat(_, iv_warp);
+          me = mma.load lhs_load_s_mdata.chunkat(_, iv_warp);
           mma.row.row.sp mc, ma, mb, me;
         }
       }

@@ -1,0 +1,19 @@
+// RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+__co__ auto reject_direct_sparse_metadata(
+    f16 [64, 32] lhs_packed, u8 [64, 4] lhs_meta, f16 [8, 32] rhs) {
+  f32 [64, 8] output{0.0f};
+  parallel by 1 : block {
+    lhs_s = dma.copy lhs_packed => shared;
+    rhs_s = dma.copy rhs => shared;
+    metadata_s = dma.copy lhs_meta => shared;
+    mc = mma.fill.f32 0.0f;
+    parallel by 1 : group-4 {
+      mma.row.row.sp mc, lhs_s, rhs_s, metadata_s;
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// CHECK: error: sparse WGMMA metadata must be loaded into a register with mma.load before use

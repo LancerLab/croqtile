@@ -4724,7 +4724,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       // the MMA fragment. Static shared buffers are always tile-sized, but
       // dynamic-shaped buffers (e.g., global or runtime-sized) may have
       // dimensions that don't divide evenly by the MMA atom shape.
-      {
+      if (ssmi.frag != MMAInfo::FRAG_E) {
         auto ca = op.DescFrom();
         auto parent_sym = ca->RefSymbol();
         auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
@@ -4770,8 +4770,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         bool policy_is_fp8 = mma_policy.find("E4M3") != std::string::npos ||
                              mma_policy.find("E5M2") != std::string::npos;
         bool fp8_sparse_k64 = policy_is_fp8 && k_val && *k_val == 64;
-        bool sparse_k32_16bit = !policy_is_fp8 && k_val && *k_val == 32;
-        bool sparse_k64_16bit = !policy_is_fp8 && k_val && *k_val == 64;
         bool prepack_single_col = false;
         if (load_from_sty && load_from_sty->Dims() >= 2) {
           if (auto meta_cols = VIInt(load_from_sty->GetShape().ValueAt(1)))
@@ -4781,7 +4779,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
         std::string row_stride = ValueSTR(strides.at(0));
         std::string col_stride = ValueSTR(strides.at(1));
-        ds << d_indent << meta_ty << " " << sym << " = 0;\n";
         // Detect host prepacked-u32 metadata and emit device-side indexing
         // that reads the host-provided prepacked u32 array directly. Fallback
         // to the existing byte-by-byte assembly when detection fails.
@@ -4791,36 +4788,29 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         auto prepackInfo =
             resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue() || v2_mode);
 
+        if (!prepackInfo.use_packed_u32) {
+          ds << d_indent << "auto " << sym
+             << " = wgmma_make_sparse_metadata_desc<" << STR(ssmi.shape.at(2))
+             << ", " << (policy_is_fp8 ? "true" : "false") << ">((uint8_t*)("
+             << ValueSTR(tile_addr) << "), " << row_stride << ", " << col_stride
+             << ");\n";
+          ssm.MapDeviceSymbol(InScopeName(sym), sym);
+          break;
+        }
+
+        ds << d_indent << meta_ty << " " << sym << " = 0;\n";
         ds << d_indent << "{\n";
         ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
-        if (!prepackInfo.use_packed_u32)
-          ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)("
-             << ValueSTR(tile_addr) << ");\n";
         if (fp8_sparse_k64) {
-          if (prepackInfo.use_packed_u32 && v2_mode) {
+          if (v2_mode) {
             emitFp8PrepackedV2TileLoadSnippet(sym, prepackInfo.device_name,
                                               ValueSTR(tile_addr), row_stride,
                                               col_stride);
-          } else if (prepackInfo.use_packed_u32) {
+          } else {
             emitFp8PrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr),
                                                row_stride, col_stride);
-          } else {
-            ds << d_indent
-               << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << "
-                  "3) + ((__sp_tid >> 5) << 4);\n";
-            ds << d_indent
-               << "  int __sp_byte_col = ((__sp_tid >> 1) & 1) << 2;\n";
-            ds << d_indent << "  #pragma unroll\n";
-            ds << d_indent
-               << "  for (int byte_idx = 0; byte_idx < 4; ++byte_idx) {\n";
-            ds << d_indent << "    uint8_t packed = __sp_meta_ptr[__sp_row * ("
-               << row_stride << ") + (__sp_byte_col + byte_idx) * ("
-               << col_stride << ")];\n";
-            ds << d_indent << "    " << sym << " |= (static_cast<" << meta_ty
-               << ">(packed) << (8 * byte_idx));\n";
-            ds << d_indent << "  }\n";
           }
-        } else if (prepackInfo.use_packed_u32 && v2_mode) {
+        } else if (v2_mode) {
           if (prepack_single_col) {
             auto tile_off = GenOffset(op.DescFrom());
             emitPrepackedV2TileLoadSnippet(sym, prepackInfo.device_name,
@@ -4830,56 +4820,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             emitPrepackedV2Snippet(sym, prepackInfo.device_name,
                                    prepackInfo.device_name, row_stride,
                                    col_stride);
-        } else if (prepackInfo.use_packed_u32) {
+        } else {
           if (prepack_single_col)
             emitPrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr),
                                             row_stride);
           else
             emitPrepackedU32Snippet(sym, prepackInfo.device_name, row_stride,
                                     col_stride);
-        } else if (sparse_k32_16bit || sparse_k64_16bit) {
-          ds << d_indent
-             << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & "
-                "7);\n";
-          ds << d_indent << "  int __sp_byte_col = ((__sp_tid & "
-             << (sparse_k32_16bit ? "1" : "3") << ") << 1);\n";
-          ds << d_indent << "  uint8_t __sp_b0 = __sp_meta_ptr[__sp_row * ("
-             << row_stride << ") + __sp_byte_col * (" << col_stride << ")];\n";
-          ds << d_indent << "  uint8_t __sp_b1 = __sp_meta_ptr[__sp_row * ("
-             << row_stride << ") + (__sp_byte_col + 1) * (" << col_stride
-             << ")];\n";
-          ds << d_indent
-             << "  uint8_t __sp_b2 = __sp_meta_ptr[(__sp_row + 8) * ("
-             << row_stride << ") + __sp_byte_col * (" << col_stride << ")];\n";
-          ds << d_indent
-             << "  uint8_t __sp_b3 = __sp_meta_ptr[(__sp_row + 8) * ("
-             << row_stride << ") + (__sp_byte_col + 1) * (" << col_stride
-             << ")];\n";
-          ds << d_indent << "  " << sym << " |= (static_cast<" << meta_ty
-             << ">(__sp_b0) << 0);\n";
-          ds << d_indent << "  " << sym << " |= (static_cast<" << meta_ty
-             << ">(__sp_b1) << 8);\n";
-          ds << d_indent << "  " << sym << " |= (static_cast<" << meta_ty
-             << ">(__sp_b2) << 16);\n";
-          ds << d_indent << "  " << sym << " |= (static_cast<" << meta_ty
-             << ">(__sp_b3) << 24);\n";
-        } else {
-          ds << d_indent << "  int __sp_lane = __sp_tid % 32;\n";
-          ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
-          ds << d_indent
-             << "  int __sp_row = __sp_warp * 16 + (__sp_lane / 4);\n";
-          ds << d_indent
-             << "  constexpr int __sp_meta_bytes = " << STR(ssmi.shape.at(2))
-             << " / 8;\n";
-          ds << d_indent << "  #pragma unroll\n";
-          ds << d_indent
-             << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; "
-                "++byte_idx) {\n";
-          ds << d_indent << "    uint8_t packed = __sp_meta_ptr[__sp_row * ("
-             << row_stride << ") + byte_idx * (" << col_stride << ")];\n";
-          ds << d_indent << "    " << sym << " |= (static_cast<" << meta_ty
-             << ">(packed) << (8 * byte_idx));\n";
-          ds << d_indent << "  }\n";
         }
         ds << d_indent << "}\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
@@ -4993,6 +4940,77 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       ssm.MapDeviceSymbol(InScopeName(sym), sym);
     } break;
     case AST::MMAOperation::Load: {
+      explicit_mma_loads_.insert(sym);
+      explicit_mma_loads_.insert(InScopeName(sym));
+      std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(sym));
+      bool policy_is_sparse = mma_policy.find("SPARSE::") != std::string::npos;
+      if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_E) {
+        auto tile_addr = TileAddr(op.LoadFrom(), false);
+        auto strides = GenStrides(op.LoadFrom());
+        auto load_from_sty = dyn_cast<SpannedType>(op.LoadFrom()->GetType());
+        auto k_val = VIInt(ssmi.shape.at(2));
+        bool policy_is_fp8 = mma_policy.find("E4M3") != std::string::npos ||
+                             mma_policy.find("E5M2") != std::string::npos;
+        bool fp8_sparse_k64 = policy_is_fp8 && k_val && *k_val == 64;
+        bool prepack_single_col = false;
+        if (load_from_sty && load_from_sty->Dims() >= 2) {
+          if (auto meta_cols = VIInt(load_from_sty->GetShape().ValueAt(1)))
+            prepack_single_col = (*meta_cols == 1);
+        }
+        bool meta_64 = k_val && *k_val > 32 && !fp8_sparse_k64;
+        std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
+        std::string row_stride = ValueSTR(strides.at(0));
+        std::string col_stride = ValueSTR(strides.at(1));
+        bool v2_mode = use_prepack_v2.GetValue();
+        std::string ref_sym = op.LoadFrom()->RefSymbol();
+        auto prepackInfo =
+            resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue() || v2_mode);
+
+        if (!prepackInfo.use_packed_u32) {
+          ds << d_indent << "auto " << sym
+             << " = wgmma_make_sparse_metadata_desc<" << STR(ssmi.shape.at(2))
+             << ", " << (policy_is_fp8 ? "true" : "false") << ">((uint8_t*)("
+             << ValueSTR(tile_addr) << "), " << row_stride << ", " << col_stride
+             << ");\n";
+          ssm.MapDeviceSymbol(InScopeName(sym), sym);
+          break;
+        }
+
+        ds << d_indent << meta_ty << " " << sym << " = 0;\n";
+        ds << d_indent << "{\n";
+        ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
+        if (fp8_sparse_k64) {
+          if (v2_mode) {
+            emitFp8PrepackedV2TileLoadSnippet(sym, prepackInfo.device_name,
+                                              ValueSTR(tile_addr), row_stride,
+                                              col_stride);
+          } else {
+            emitFp8PrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr),
+                                               row_stride, col_stride);
+          }
+        } else if (v2_mode) {
+          if (prepack_single_col) {
+            auto tile_off = GenOffset(op.LoadFrom());
+            emitPrepackedV2TileLoadSnippet(sym, prepackInfo.device_name,
+                                           ValueSTR(tile_addr), row_stride,
+                                           ValueSTR(tile_off));
+          } else {
+            emitPrepackedV2Snippet(sym, prepackInfo.device_name,
+                                   prepackInfo.device_name, row_stride,
+                                   col_stride);
+          }
+        } else {
+          if (prepack_single_col)
+            emitPrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr),
+                                            row_stride);
+          else
+            emitPrepackedU32Snippet(sym, prepackInfo.device_name, row_stride,
+                                    col_stride);
+        }
+        ds << d_indent << "}\n";
+        ssm.MapDeviceSymbol(InScopeName(sym), sym);
+        break;
+      }
       if (ssmi.frag != MMAInfo::FRAG_A) {
         Error1(n.LOC(),
                "WGMMA mma.load only supports a register A operand; use "
@@ -5165,85 +5183,31 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           auto k_val = VIInt(ssmi_a.shape.at(2));
           bool policy_is_fp8 = mma_policy.find("E4M3") != std::string::npos ||
                                mma_policy.find("E5M2") != std::string::npos;
-          bool fp8_sparse_k64 = policy_is_fp8 && k_val && *k_val == 64;
-          bool sparse_k32_16bit = !policy_is_fp8 && k_val && *k_val == 32;
-          bool sparse_k64_16bit = !policy_is_fp8 && k_val && *k_val == 64;
-          bool meta_64 = true;
-          if (k_val) meta_64 = (*k_val > 32) && !fp8_sparse_k64;
-          std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
-          ds << d_indent << meta_ty << " " << meta_var << " = 0;\n";
-          ds << d_indent << "{\n";
-          ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
           // Detect host prepacked-u32 metadata for the exec site
           bool v2_mode_exec = use_prepack_v2.GetValue();
           auto prepackInfo = resolvePrepackedU32Meta(
               a_sym, use_prepack.GetValue() || v2_mode_exec);
           if (!prepackInfo.use_packed_u32) {
-            ds << d_indent
-               << "  constexpr int __sp_K = " << STR(ssmi_a.shape.at(2))
-               << ";\n";
-            ds << d_indent << "  " << meta_ty << " __sp_meta = 0;\n";
-          } else if (v2_mode_exec) {
-            emitPrepackedV2Snippet(meta_var, prepackInfo.device_name,
-                                   prepackInfo.device_name, "128", "1");
+            ds << d_indent << "auto " << meta_var
+               << " = wgmma_make_sparse_metadata_desc<"
+               << STR(ssmi_a.shape.at(2)) << ", "
+               << (policy_is_fp8 ? "true" : "false") << ">(" << meta_ptr << ", "
+               << STR(ssmi_a.shape.at(2)) << " / 8, 1);\n";
           } else {
-            emitPrepackedU32Snippet(meta_var, prepackInfo.device_name, "128",
-                                    "1");
+            bool fp8_sparse_k64 = policy_is_fp8 && k_val && *k_val == 64;
+            bool meta_64 = k_val && *k_val > 32 && !fp8_sparse_k64;
+            std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
+            ds << d_indent << meta_ty << " " << meta_var << " = 0;\n";
+            ds << d_indent << "{\n";
+            ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
+            if (v2_mode_exec)
+              emitPrepackedV2Snippet(meta_var, prepackInfo.device_name,
+                                     prepackInfo.device_name, "128", "1");
+            else
+              emitPrepackedU32Snippet(meta_var, prepackInfo.device_name, "128",
+                                      "1");
+            ds << d_indent << "}\n";
           }
-          if (fp8_sparse_k64) {
-            ds << d_indent
-               << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << "
-                  "3) + ((__sp_tid >> 5) << 4);\n";
-            ds << d_indent
-               << "  int __sp_byte_col = ((__sp_tid >> 1) & 1) << 2;\n";
-            ds << d_indent << "  #pragma unroll\n";
-            ds << d_indent
-               << "  for (int byte_idx = 0; byte_idx < 4; ++byte_idx) {\n";
-            ds << d_indent << "    uint8_t packed = " << meta_ptr
-               << "[__sp_row * (__sp_K / 8) + (__sp_byte_col + byte_idx)];\n";
-            ds << d_indent << "    __sp_meta |= (static_cast<" << meta_ty
-               << ">(packed) << (8 * byte_idx));\n";
-            ds << d_indent << "  }\n";
-          } else if (sparse_k32_16bit || sparse_k64_16bit) {
-            ds << d_indent
-               << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) "
-                  "& 7);\n";
-            ds << d_indent << "  int __sp_byte_col = ((__sp_tid & "
-               << (sparse_k32_16bit ? "1" : "3") << ") << 1);\n";
-            ds << d_indent << "  uint8_t __sp_b0 = " << meta_ptr
-               << "[__sp_row * (__sp_K / 8) + __sp_byte_col];\n";
-            ds << d_indent << "  uint8_t __sp_b1 = " << meta_ptr
-               << "[__sp_row * (__sp_K / 8) + (__sp_byte_col + 1)];\n";
-            ds << d_indent << "  uint8_t __sp_b2 = " << meta_ptr
-               << "[(__sp_row + 8) * (__sp_K / 8) + __sp_byte_col];\n";
-            ds << d_indent << "  uint8_t __sp_b3 = " << meta_ptr
-               << "[(__sp_row + 8) * (__sp_K / 8) + (__sp_byte_col + 1)];\n";
-            ds << d_indent << "  __sp_meta |= (static_cast<" << meta_ty
-               << ">(__sp_b0) << 0);\n";
-            ds << d_indent << "  __sp_meta |= (static_cast<" << meta_ty
-               << ">(__sp_b1) << 8);\n";
-            ds << d_indent << "  __sp_meta |= (static_cast<" << meta_ty
-               << ">(__sp_b2) << 16);\n";
-            ds << d_indent << "  __sp_meta |= (static_cast<" << meta_ty
-               << ">(__sp_b3) << 24);\n";
-          } else {
-            ds << d_indent << "  int __sp_lane = __sp_tid % 32;\n";
-            ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
-            ds << d_indent
-               << "  int __sp_row = __sp_warp * 16 + (__sp_lane / 4);\n";
-            ds << d_indent << "  constexpr int __sp_meta_bytes = __sp_K / 8;\n";
-            ds << d_indent << "  #pragma unroll\n";
-            ds << d_indent
-               << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; "
-                  "++byte_idx) {\n";
-            ds << d_indent << "    uint8_t packed = " << meta_ptr
-               << "[__sp_row * __sp_meta_bytes + byte_idx];\n";
-            ds << d_indent << "    __sp_meta |= (static_cast<" << meta_ty
-               << ">(packed) << (8 * byte_idx));\n";
-            ds << d_indent << "  }\n";
-          }
-          ds << d_indent << "  " << meta_var << " = __sp_meta;\n";
-          ds << d_indent << "}\n";
         }
       }
       auto& ssmi_c = cgi.GetSymbolMMA(InScopeName(c_sym));
@@ -5288,6 +5252,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         bool supported = false;
         bool is_rs_direct = false;
         bool is_shared_direct = false;
+        bool use_sparse_fp8_a_desc = false;
         size_t k_iters = 1;
         size_t regs_per_step = 0;
         int lbo_override_bytes = 0;
@@ -5300,6 +5265,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         std::string shared_iter_ptr_var;
         std::string shared_iter_desc_var;
         std::string shared_major_order;
+        std::string shared_cute_major_order;
+        std::string shared_sparse_layout_atom;
+        std::string shared_mma_m;
+        std::string shared_mma_k;
         std::string shared_swizzle_enum;
         std::string shared_iter_elem_offset_expr;
         std::string error;
@@ -5351,18 +5320,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             return info;
         }
 
-        if (policy_is_sparse) {
-          if (sym && !ca && !elemof_base) {
-            if (auto sym_sty = GetSpannedType(GetSymbolType(sym->name));
-                sym_sty && sym_sty->GetStorage() == Storage::REG)
-              return info;
-          }
-          info.is_direct = true;
-          info.error =
-              "direct sparse WGMMA operands still require explicit mma.load";
-          return info;
-        }
-
         auto resolve_operand_spanned_type = [&]() -> ptr<SpannedType> {
           if (ca)
             if (auto ca_ty = GetSpannedType(ca->GetType())) return ca_ty;
@@ -5387,6 +5344,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           info.error = "WGMMA atom K must be a compile-time constant";
           return info;
         }
+        int storage_atom_k = *atom_k;
+        if (policy_is_sparse && operand_info.frag == MMAInfo::FRAG_A)
+          storage_atom_k /= 2;
+        if (storage_atom_k <= 0) {
+          info.is_direct = true;
+          info.error = "invalid sparse WGMMA storage K dimension";
+          return info;
+        }
 
         size_t k_axis = GetWGMMAKAxis(operand_info);
         auto shape = sty->GetShape();
@@ -5397,7 +5362,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         }
 
         auto full_k = VIInt(shape.ValueAt(k_axis));
-        if (!full_k || *full_k <= 0 || (*full_k % *atom_k) != 0) {
+        if (!full_k || *full_k <= 0 || (*full_k % storage_atom_k) != 0) {
           info.is_direct = true;
           info.error = "direct WGMMA operand K dimension must be a static "
                        "multiple of the atom K";
@@ -5455,7 +5420,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                 "unsupported fragment layout for direct RS WGMMA operand";
             return info;
           }
-          size_t num_chunks = fl.logical_cols / *atom_k;
+          size_t num_chunks = fl.logical_cols / storage_atom_k;
           if (num_chunks == 0 || (fl.regs_per_thread % num_chunks) != 0) {
             info.is_direct = true;
             info.error = "failed to derive register chunk layout for direct RS "
@@ -5464,7 +5429,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           }
           info.is_direct = true;
           info.is_rs_direct = true;
-          info.k_iters = static_cast<size_t>(*full_k / *atom_k);
+          info.k_iters = static_cast<size_t>(*full_k / storage_atom_k);
           info.regs_per_step = fl.regs_per_thread / num_chunks;
           info.rs_base_expr = source_sym;
           info.supported = true;
@@ -5604,11 +5569,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         //             (col & (atom_cols-1)) +
         //             (col / atom_cols) * full_nonk * atom_cols
         //   MN-major: k_iter * atom_k * atom_cols
-        size_t local_k_iters = static_cast<size_t>(*full_k / *atom_k);
+        size_t local_k_iters = static_cast<size_t>(*full_k / storage_atom_k);
         auto iter_offset = [&]() -> std::string {
           if (swiz_atom_cols > 0 && local_k_iters > 1) {
             if (is_mn_major) {
-              int step = *atom_k * swiz_atom_cols;
+              int step = storage_atom_k * swiz_atom_cols;
               return "((" + iter_expr + ") * " + std::to_string(step) + ")";
             }
             // K-major: need the full non-K dimension of the parent tensor
@@ -5626,15 +5591,16 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             }
             if (full_nonk > 0) {
               int col_group_elems = full_nonk * swiz_atom_cols;
-              return "(((" + iter_expr + ") * " + std::to_string(*atom_k) +
-                     " & " + std::to_string(swiz_atom_cols - 1) + ") + ((" +
-                     iter_expr + ") * " + std::to_string(*atom_k) + " / " +
+              return "(((" + iter_expr + ") * " +
+                     std::to_string(storage_atom_k) + " & " +
+                     std::to_string(swiz_atom_cols - 1) + ") + ((" + iter_expr +
+                     ") * " + std::to_string(storage_atom_k) + " / " +
                      std::to_string(swiz_atom_cols) + ") * " +
                      std::to_string(col_group_elems) + ")";
             }
           }
-          return "((" + iter_expr + ") * " + std::to_string(*atom_k) + " * (" +
-                 stride_expr + "))";
+          return "((" + iter_expr + ") * " + std::to_string(storage_atom_k) +
+                 " * (" + stride_expr + "))";
         }();
 
         // LBO override: when MN-major and the non-K dimension exceeds one
@@ -5652,14 +5618,40 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
 
         info.is_direct = true;
         info.is_shared_direct = true;
-        info.k_iters = static_cast<size_t>(*full_k / *atom_k);
+        info.k_iters = static_cast<size_t>(*full_k / storage_atom_k);
         info.shared_elem_ty = elem_ty;
         info.shared_major_order = major_order_for(operand_info);
+        info.shared_cute_major_order =
+            info.shared_major_order == "WGMMA_MajorOrder::K_MAJOR"
+                ? "cute::SM90::GMMA::Major::K"
+                : "cute::SM90::GMMA::Major::MN";
         info.shared_swizzle_enum = swizzle_to_enum(swizzle);
         info.shared_ptr_expr =
             std::string("(") + elem_ty + "*)(" + phys_base_expr + ")";
         info.shared_iter_elem_offset_expr = iter_offset;
         info.lbo_override_bytes = lbo_override;
+        info.use_sparse_fp8_a_desc =
+            policy_is_sparse && operand_info.frag == MMAInfo::FRAG_A &&
+            (operand_info.ty == BaseType::F8_E4M3 ||
+             operand_info.ty == BaseType::F8_E5M2) &&
+            swizzle != SwizMode::B64 && swizzle != SwizMode::B128;
+        if (info.use_sparse_fp8_a_desc) {
+          std::string suffix;
+          switch (swizzle) {
+          case SwizMode::NONE: suffix = "INTER"; break;
+          case SwizMode::B32: suffix = "SW32"; break;
+          case SwizMode::B64: suffix = "SW64"; break;
+          case SwizMode::B128: suffix = "SW128"; break;
+          default: suffix = "INTER"; break;
+          }
+          info.shared_sparse_layout_atom =
+              (info.shared_major_order == "WGMMA_MajorOrder::K_MAJOR"
+                   ? "cute::SM90::GMMA::Layout_K_"
+                   : "cute::SM90::GMMA::Layout_MN_") +
+              suffix + "_SpAtom";
+          info.shared_mma_m = STR(operand_info.shape.at(0));
+          info.shared_mma_k = STR(operand_info.shape.at(2));
+        }
         {
           int desc_id = direct_wgmma_desc_cnt++;
           auto suffix = std::to_string(desc_id);
@@ -5685,6 +5677,20 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                             ? direct_a.error
                             : direct_b.error);
         return false;
+      }
+
+      if (policy_is_sparse) {
+        auto metadata = op.ExecOperand(3);
+        auto metadata_sym = metadata ? metadata->GetSymbol() : nullptr;
+        auto metadata_name = metadata_sym ? metadata_sym->name : "";
+        if (metadata_name.empty() ||
+            (!explicit_mma_loads_.count(metadata_name) &&
+             !explicit_mma_loads_.count(InScopeName(metadata_name)))) {
+          Error1(n.LOC(),
+                 "sparse WGMMA metadata must be loaded into a register with "
+                 "mma.load before use");
+          return false;
+        }
       }
 
       size_t wgmma_k_iters = 1;
@@ -5714,14 +5720,35 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         if (info.lbo_override_bytes > 0) os << ", " << info.lbo_override_bytes;
         os << ">(" << ptr_var << ")";
       };
+      auto emit_shared_desc = [&](const DirectWGMMAOperandInfo& info,
+                                  const std::string& ptr_var,
+                                  const std::string& desc_var) {
+        if (!info.use_sparse_fp8_a_desc) {
+          ds << d_indent << "uint64_t " << desc_var << " = ";
+          emit_wgmma_desc_call(ds, info, ptr_var);
+          ds << ";\n";
+          return;
+        }
+        ds << d_indent << "auto " << desc_var
+           << "_tensor = cute::make_tensor("
+              "cute::make_smem_ptr(cute::recast_ptr<cute::sparse_elem<2, "
+           << info.shared_elem_ty << ">>(" << ptr_var << ")), "
+           << "cute::tile_to_shape(" << info.shared_sparse_layout_atom << "<"
+           << info.shared_elem_ty << ", 2>{}, cute::make_shape(cute::Int<"
+           << info.shared_mma_m << ">{}, cute::Int<" << info.shared_mma_k
+           << ">{})));\n";
+        ds << d_indent << "auto " << desc_var
+           << "_obj = cute::SM90::GMMA::make_gmma_desc<"
+           << info.shared_cute_major_order << ">(" << desc_var << "_tensor);\n";
+        ds << d_indent << "uint64_t " << desc_var << " = " << desc_var
+           << "_obj.desc_;\n";
+      };
       auto emit_shared_direct_setup = [&](DirectWGMMAOperandInfo& info) {
         if (!info.is_shared_direct) return;
         if (wgmma_k_iters > 1) return;
         ds << d_indent << "auto* " << info.shared_ptr_var << " = "
            << info.shared_ptr_expr << ";\n";
-        ds << d_indent << "uint64_t " << info.shared_desc_var << " = ";
-        emit_wgmma_desc_call(ds, info, info.shared_ptr_var);
-        ds << ";\n";
+        emit_shared_desc(info, info.shared_ptr_var, info.shared_desc_var);
       };
       auto emit_shared_direct_iter_update =
           [&](const DirectWGMMAOperandInfo& info) {
@@ -5729,9 +5756,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             ds << d_indent << "auto* " << info.shared_iter_ptr_var << " = ("
                << info.shared_elem_ty << "*)(" << info.shared_ptr_expr << " + "
                << info.shared_iter_elem_offset_expr << ");\n";
-            ds << d_indent << "uint64_t " << info.shared_iter_desc_var << " = ";
-            emit_wgmma_desc_call(ds, info, info.shared_iter_ptr_var);
-            ds << ";\n";
+            emit_shared_desc(info, info.shared_iter_ptr_var,
+                             info.shared_iter_desc_var);
           };
       auto desc_expr_for = [&](const DirectWGMMAOperandInfo& info,
                                const std::string& fallback) {
@@ -5740,7 +5766,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           return info.shared_iter_desc_var;
         return info.desc_expr;
       };
-
       emit_shared_direct_setup(direct_a);
       emit_shared_direct_setup(direct_b);
 
