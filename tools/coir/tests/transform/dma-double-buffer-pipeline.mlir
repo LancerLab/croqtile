@@ -55,7 +55,8 @@ coir.kernel @double_buffer_full(
       : !coir.tensor<256xf32, global> -> !coir.tensor<256xf32, shared>
 
     // --- Design 5: inside loop only runtime.desc + invoke for fb ---
-    // CHECK: %[[FB_RT:.*]] = coir.dma.runtime.desc %[[FB_PRE]] offsets(%[[IV]])
+    // CHECK: %[[OFFSET:.*]] = arith.muli %[[IV]],
+    // CHECK: %[[FB_RT:.*]] = coir.dma.runtime.desc %[[FB_PRE]] offsets(%[[OFFSET]])
     // CHECK: %[[FB_INV:.*]] = coir.dma.invoke %[[FB_RT]]
 
     // wait fa
