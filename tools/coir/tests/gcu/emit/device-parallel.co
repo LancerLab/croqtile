@@ -6,11 +6,11 @@
 __co__ s32 [8] test_device(s32 [8] input) {
   s32 [8] output;
   parallel d by 2 : device {
-    parallel p by 4 : block {
+    parallel p by 2 : block {
       f = dma.copy.async input.chunkat(p) => local;
       wait f;
-      local s32 [2] tmp;
-      foreach i in [2] {
+      local s32 [4] tmp;
+      foreach i in [4] {
         tmp.at(i) = f.data.at(i) * 2;
       }
       dma.copy tmp => output.chunkat(p);

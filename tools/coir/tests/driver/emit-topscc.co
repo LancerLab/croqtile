@@ -4,8 +4,7 @@
 
 __co__ s32 [64] ele_add(s32 [64] a, s32 [64] b) {
   s32[a.span] c;
-  parallel p by 64
-    c.at(p) = a.at(p) + b.at(p);
+  parallel p by 12 : thread {}
   return c;
 }
 
