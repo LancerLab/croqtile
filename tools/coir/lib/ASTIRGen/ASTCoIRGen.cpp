@@ -1813,6 +1813,31 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
         cond = builder.create<mlir::arith::CmpIOp>(
             loc, mlir::arith::CmpIPredicate::ne, cond, zero);
       }
+      // Unify trueVal and falseVal types for arith.select.
+      if (trueVal.getType() != falseVal.getType()) {
+        auto indexTy = mlir::IndexType::get(&IRContext());
+        if (mlir::isa<mlir::IndexType>(trueVal.getType())) {
+          falseVal = builder.create<mlir::arith::IndexCastOp>(
+              loc, indexTy, falseVal);
+        } else if (mlir::isa<mlir::IndexType>(falseVal.getType())) {
+          trueVal = builder.create<mlir::arith::IndexCastOp>(
+              loc, indexTy, trueVal);
+        } else {
+          // Both are integer types with different widths; widen to the
+          // wider type.
+          auto trueWidth = mlir::cast<mlir::IntegerType>(trueVal.getType())
+                               .getWidth();
+          auto falseWidth = mlir::cast<mlir::IntegerType>(falseVal.getType())
+                                .getWidth();
+          if (trueWidth > falseWidth) {
+            falseVal = builder.create<mlir::arith::ExtSIOp>(
+                loc, trueVal.getType(), falseVal);
+          } else {
+            trueVal = builder.create<mlir::arith::ExtSIOp>(
+                loc, falseVal.getType(), trueVal);
+          }
+        }
+      }
       return builder.create<mlir::arith::SelectOp>(loc, cond, trueVal,
                                                     falseVal);
     }
