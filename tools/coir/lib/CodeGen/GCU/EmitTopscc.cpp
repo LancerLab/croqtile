@@ -188,8 +188,10 @@ private:
   }
 
   // DTE context type depends on the memory spaces involved:
-  // - Global ↔ Shared: use collective DTE (private_cdte)
-  // - Anything involving Local/Register: use per-thread DTE (private_dte)
+  // - Global ↔ Shared: use collective DTE (choreo_cdte_priv)
+  // - Anything involving Local/Register: use per-thread DTE (choreo_sdte)
+  // Uses portable aliases from choreo.h so generated code compiles on
+  // all architectures (gcu200 maps both to tops_dte_ctx_t).
   std::string getDTEType(Type srcType, Type dstType) const {
     auto srcMS = 0, dstMS = 0;
     if (auto tty = dyn_cast<coir::TensorType>(srcType))
@@ -199,7 +201,7 @@ private:
     bool bothGlobalOrShared =
         srcMS <= (int)coir::TensorMemorySpace::Shared &&
         dstMS <= (int)coir::TensorMemorySpace::Shared;
-    return bothGlobalOrShared ? "tops::private_cdte" : "tops::private_dte";
+    return bothGlobalOrShared ? "choreo::choreo_cdte_priv" : "choreo::choreo_sdte";
   }
 
   // tops_dte_ctx_t requires explicit .init() on legacy targets (gcu210).
@@ -2405,7 +2407,7 @@ private:
     std::string ctxName = "__dte_init_" + std::to_string(id);
     os() << getIndent() << "{\n";
     incIndent();
-    os() << getIndent() << "tops::private_dte " << ctxName << ";\n";
+    os() << getIndent() << "choreo::choreo_sdte " << ctxName << ";\n";
     if (needsExplicitInit())
       os() << getIndent() << ctxName << ".init();\n";
     os() << getIndent() << "tops::memset(" << ctxName << ", " << mds
@@ -2497,7 +2499,7 @@ private:
 
       os() << getIndent() << "{\n";
       incIndent();
-      os() << getIndent() << "tops::private_dte " << name << "__init;\n";
+      os() << getIndent() << "choreo::choreo_sdte " << name << "__init;\n";
       if (needsExplicitInit())
         os() << getIndent() << name << "__init.init();\n";
       os() << getIndent() << "tops::memset(" << name << "__init, "

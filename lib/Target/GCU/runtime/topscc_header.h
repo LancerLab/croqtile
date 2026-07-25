@@ -323,7 +323,11 @@ struct future {
     ctx->config_deslice(dst, src, offsets);
   }
 
+  #if __GCU_ARCH__ >= 300
   // Configure slice+deslice: slice from src, write into dst at offsets.
+  // NOTE: config_slice_deslice, config_slice_transpose (5-arg), and
+  // config_slice_pad are only available on gcu300+ (guarded by
+  // #if __GCU_ARCH__ >= 300 in __tops_dte.h).
   __device__ void configure_slice_deslice(const tops::mdspan_base& dst,
                                           const tops::mdspan_base& src,
                                           const int* src_offsets,
@@ -332,6 +336,7 @@ struct future {
     ensure_inited();
     ctx->config_slice_deslice(dst, src, src_offsets, slice_shape, dst_offsets);
   }
+  #endif
 
   // Configure transpose.
   __device__ void configure_transpose(const tops::mdspan_base& dst,
@@ -341,7 +346,8 @@ struct future {
     ctx->config_transpose(dst, src, layout);
   }
 
-  // Configure slice+transpose.
+  #if __GCU_ARCH__ >= 300
+  // Configure slice+transpose (with pad_value). Only gcu300+.
   __device__ void configure_slice_transpose(const tops::mdspan_base& dst,
                                             const tops::mdspan_base& src,
                                             const int* offsets,
@@ -350,6 +356,7 @@ struct future {
     ensure_inited();
     ctx->config_slice_transpose(dst, src, offsets, layout, pad_value);
   }
+  #endif
 
   // Configure transpose+deslice.
   __device__ void configure_transpose_deslice(const tops::mdspan_base& dst,
@@ -370,7 +377,8 @@ struct future {
     ctx->config_pad(dst, src, pad_low, pad_high, pad_mid, pad_value);
   }
 
-  // Configure slice+pad.
+  #if __GCU_ARCH__ >= 300
+  // Configure slice+pad. Only gcu300+.
   __device__ void
   configure_slice_pad(const tops::mdspan_base& dst,
                       const tops::mdspan_base& src, const int* src_offsets,
@@ -381,6 +389,7 @@ struct future {
     ctx->config_slice_pad(dst, src, src_offsets, slice_shape, pad_low, pad_high,
                           pad_mid, pad_value);
   }
+  #endif
 
   // Set per-iteration src offset on a dimension. Call after configure().
   __device__ void set_src_offset(int dim, int offset) {
