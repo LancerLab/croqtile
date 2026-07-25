@@ -36,11 +36,11 @@ coir.kernel @double_buffer_full(
   // CHECK: %[[FB_TOK:.*]] = coir.async.undef : !coir.async
 
   // --- Design 3: fb's const.desc + prefetch HOISTED above loop ---
-  // CHECK: %[[FB_DESC:.*]] = coir.dma.const.desc %{{.*}}, %[[BUF_B]] {kind = #coir.dma_kind<slice>}
+  // CHECK: %[[FB_DESC:.*]] = coir.dma.const.desc %{{.*}}, %[[BUF_B]] {kind = #coir.dma_kind<slice>, src_tiled}
   // CHECK: %[[FB_PRE:.*]] = coir.dma.prefetch.desc %[[FB_DESC]]
 
   // --- Design 3b: output copy's const.desc + prefetch HOISTED above loop ---
-  // CHECK: %[[OUT_DESC:.*]] = coir.dma.const.desc %[[BUF_A]], %{{.*}} {kind = #coir.dma_kind<slice>}
+  // CHECK: %[[OUT_DESC:.*]] = coir.dma.const.desc %[[BUF_A]], %{{.*}} {dst_tiled, kind = #coir.dma_kind<slice>}
   // CHECK: %[[OUT_PRE:.*]] = coir.dma.prefetch.desc %[[OUT_DESC]]
 
   // --- Design 4: foreach with iter_args carrying both tokens ---

@@ -121,10 +121,14 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
     auto tokenType = coir::AsyncTokenType::get(rewriter.getContext());
     Location loc = op.getLoc();
 
-    // Preserve original kind. TmaCopyOp has no kind attribute - always Copy.
+    // Determine kind: tile offsets imply Slice (sub-region access).
+    // TmaCopyOp has no kind attribute - derive entirely from structure.
+    // DmaCopyOp carries a kind attr (default Copy) - override to Slice when tiled.
     auto kind = coir::DMAKind::Copy;
     if constexpr (!isTMA)
       kind = op.getKind();
+    if (hasOffsets && kind == coir::DMAKind::Copy)
+      kind = coir::DMAKind::Slice;
     auto kindAttr = coir::DMAKindAttr::get(rewriter.getContext(), kind);
 
     mlir::IntegerAttr swizAttr;

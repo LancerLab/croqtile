@@ -4,7 +4,7 @@
 
 // CHECK: __local__ int [[BUF:v[0-9]+]][128];
 // CHECK-NEXT: {
-// CHECK-NEXT:   tops::private_dte [[BUF]]__init;
+// CHECK-NEXT:   choreo::choreo_sdte [[BUF]]__init;
 // CHECK-NEXT:   [[BUF]]__init.init();
 // CHECK-NEXT:   tops::memset([[BUF]]__init, tops::mdspan(tops::Private, (int*)[[BUF]], 32, 4), -5);
 // CHECK-NEXT: }
