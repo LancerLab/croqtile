@@ -2010,7 +2010,7 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
           spmBytes *= EvalToInt(v);
       auto elemTy = LowerBaseType(sty->ElementType());
       spmBytes *= (elemTy.getIntOrFloatBitWidth() / 8);
-      pendingSpmSize = spmBytes;
+      pendingSpmSizes[nvd.name_str] = spmBytes;
       return true;
     }
 
@@ -2087,9 +2087,12 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
     }
     auto allocOp = builder.create<coir::TensorAllocOp>(
         loc, tty, dynDimVals, initAttr, reuseSpm, reuseOffset);
-    if (reuseOffset && pendingSpmSize > 0) {
-      allocOp->setAttr("spm_size",
-                       builder.getI64IntegerAttr(pendingSpmSize));
+    if (reuseOffset && reuseSpm) {
+      auto it = pendingSpmSizes.find(reuseSpm.str());
+      if (it != pendingSpmSizes.end() && it->second > 0) {
+        allocOp->setAttr("spm_size",
+                         builder.getI64IntegerAttr(it->second));
+      }
     }
     if (isDynReuse) {
       allocOp->setAttr("dyn_offset_arg",
