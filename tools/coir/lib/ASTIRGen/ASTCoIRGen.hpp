@@ -69,7 +69,7 @@ private:
 
   llvm::SmallVector<std::pair<std::string, mlir::Value>> pendingYields;
   unsigned foreachNestDepth = 0;
-  int64_t pendingSpmSize = 0;
+  llvm::StringMap<int64_t> pendingSpmSizes;
   std::string pendingDmaAssignName;  // enclosing Assignment LHS for sync DMA
   mlir::Value lastSpanAsResult;
 
