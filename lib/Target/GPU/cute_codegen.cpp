@@ -3410,9 +3410,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
         auto oname = UnScopedName(item.name);
         if (item.attr != ParamAttr::GLOBAL_INPUT && item.IsReference())
           hs << h_indent << "choreo::abend_true(cudaMemcpy(" << oname
-             << ".data(), " << oname + "__device"
-             << ", " << UnScopedSizeExpr(*item.type)
-             << ", cudaMemcpyDeviceToHost));\n";
+             << ".data(), " << oname + "__device" << ", "
+             << UnScopedSizeExpr(*item.type) << ", cudaMemcpyDeviceToHost));\n";
       }
     }
 
@@ -4750,9 +4749,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       bool policy_is_sparse = mma_policy.find("SPARSE::") != std::string::npos;
       if (ssmi.frag != MMAInfo::FRAG_A && ssmi.frag != MMAInfo::FRAG_B &&
           !(policy_is_sparse && ssmi.frag == MMAInfo::FRAG_E)) {
-        Error1(n.LOC(),
-               "mma.desc only supports WGMMA A/B and sparse metadata "
-               "operands");
+        Error1(n.LOC(), "mma.desc only supports WGMMA A/B and sparse metadata "
+                        "operands");
         break;
       }
       auto desc_source_ty = GetSpannedType(op.DescFrom()->GetType());
@@ -5028,11 +5026,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                              "out-of-bounds access.");
         break;
       case MmaLoadShapeWarningKind::Misaligned:
-        Warning(n.LOC(),
-                "mma.load source buffer '" + parent_sym +
-                    "' has shape that does not evenly divide the MMA "
-                    "atom; this may cause out-of-bounds shared memory "
-                    "access.");
+        Warning(n.LOC(), "mma.load source buffer '" + parent_sym +
+                             "' has shape that does not evenly divide the MMA "
+                             "atom; this may cause out-of-bounds shared memory "
+                             "access.");
         break;
       case MmaLoadShapeWarningKind::None: break;
       }
@@ -5081,12 +5078,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       ds << d_indent << "    size_t __mma_load_logical = "
          << "((__mma_load_lane / 4) % 8 + (__mma_load_lane / 32) * 16 + "
             "((__mma_load_i / 2) % 2) * 8) * "
-         << layout.logical_cols << " + (__mma_load_lane % 4) * 2 + "
+         << layout.logical_cols
+         << " + (__mma_load_lane % 4) * 2 + "
             "(__mma_load_i % 2) + (__mma_load_i / 4) * 8;\n";
       if (source_swizzle != SwizMode::NONE) {
-        int swizzle_bits = source_swizzle == SwizMode::B32 ? 1
-                            : source_swizzle == SwizMode::B64 ? 2
-                                                                : 3;
+        int swizzle_bits = source_swizzle == SwizMode::B32   ? 1
+                           : source_swizzle == SwizMode::B64 ? 2
+                                                             : 3;
         size_t swizzle_mask = ((size_t{1} << swizzle_bits) - 1) << 7;
         ds << d_indent << "    size_t __mma_load_byte = __mma_load_logical * "
            << SizeOf(source_sty->ElementType()) << ";\n";
