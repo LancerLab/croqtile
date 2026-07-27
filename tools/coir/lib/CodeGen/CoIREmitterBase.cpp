@@ -412,6 +412,11 @@ bool CoIREmitterBase::emitArithBinOp(Operation *op) {
   else if (isa<arith::MulIOp>(op) || isa<arith::MulFOp>(op)) opStr = "*";
   else if (isa<arith::DivSIOp>(op) || isa<arith::DivFOp>(op)) opStr = "/";
   else if (isa<arith::RemSIOp>(op)) opStr = "%";
+  else if (isa<arith::AndIOp>(op)) opStr = "&";
+  else if (isa<arith::OrIOp>(op)) opStr = "|";
+  else if (isa<arith::XOrIOp>(op)) opStr = "^";
+  else if (isa<arith::ShLIOp>(op)) opStr = "<<";
+  else if (isa<arith::ShRSIOp>(op) || isa<arith::ShRUIOp>(op)) opStr = ">>";
   else return false;
 
   std::string name = getName(op->getResult(0));
