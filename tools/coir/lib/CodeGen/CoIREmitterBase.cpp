@@ -342,8 +342,23 @@ void CoIREmitterBase::emitOp(Operation *op) {
     emitYield(yield);
   else if (auto constOp = dyn_cast<arith::ConstantOp>(op))
     emitConstant(constOp);
-  else if (auto indexCast = dyn_cast<arith::IndexCastOp>(op))
-    valueNames[indexCast.getResult()] = getName(indexCast.getIn());
+  else if (auto indexCast = dyn_cast<arith::IndexCastOp>(op)) {
+    auto inTy = indexCast.getIn().getType();
+    auto resTy = indexCast.getResult().getType();
+    if (emitType(inTy) == emitType(resTy))
+      // Same C spelling (e.g. index -> i32 on 32-bit-index targets): alias.
+      valueNames[indexCast.getResult()] = getName(indexCast.getIn());
+    else
+      os() << getIndent() << emitType(resTy) << " "
+           << getName(indexCast.getResult()) << " = (" << emitType(resTy)
+           << ")" << getName(indexCast.getIn()) << ";\n";
+  }
+  else if (auto extSI = dyn_cast<arith::ExtSIOp>(op)) {
+    auto resTy = extSI.getResult().getType();
+    os() << getIndent() << emitType(resTy) << " "
+         << getName(extSI.getResult()) << " = (" << emitType(resTy) << ")"
+         << getName(extSI.getIn()) << ";\n";
+  }
   else if (auto extF = dyn_cast<arith::ExtFOp>(op)) {
     auto resTy = extF.getResult().getType();
     os() << getIndent() << emitType(resTy) << " " << getName(extF.getResult())

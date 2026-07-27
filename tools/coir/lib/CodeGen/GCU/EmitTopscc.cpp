@@ -54,6 +54,13 @@ public:
     if (hasAcoreCall)
       os() << "#include <common/acore_op.h>\n\n";
 
+    // GCU local (private) memory requires a compile-time-sized definition for
+    // the dynamic memory-reuse pool.  Kernels can override the default via
+    // the cocc CFLAGS hook: CFLAGS='-D__CO_DYN_SMEM_SIZE=<bytes>'.
+    os() << "#ifndef __CO_DYN_SMEM_SIZE\n"
+            "#define __CO_DYN_SMEM_SIZE 262144\n"
+            "#endif\n\n";
+
     emitExplicitDeviceCode(module, out);
 
     for (auto &op : module.getBody()->getOperations()) {
@@ -1838,7 +1845,14 @@ private:
       if (i) os() << ", ";
       if (i < indices.size()) {
         int64_t chunkDim = (i < tileShape.size()) ? tileShape[i] : 1;
+        auto idxTy = indices[i].getType();
+        // Index-typed values may be 64-bit; braced-init into the int array
+        // would then be ill-formed (narrowing), so cast explicitly.  The DTE
+        // slice API takes const int*, so offsets must be int anyway.
+        bool needCast = !idxTy.isInteger(32);
+        if (needCast) os() << "(int)(";
         os() << getName(indices[i]) << " * " << chunkDim;
+        if (needCast) os() << ")";
       } else {
         os() << "0";
       }
@@ -2432,9 +2446,28 @@ private:
       if (auto dynArgAttr =
               op->getAttrOfType<mlir::StringAttr>("dyn_offset_arg")) {
         if (!dynSpmEmitted_) {
-          std::string qual = getAllocQualifier(tensorTy);
-          os() << getIndent() << "extern " << qual
-               << "unsigned char __dyn_smem[];\n";
+          bool isLocal =
+              (tensorTy.getMemorySpace() ==
+               static_cast<int32_t>(coir::TensorMemorySpace::Local));
+          if (isLocal) {
+            // GCU local memory is a real address space with static
+            // allocation: an extern array is not allowed there, and a
+            // runtime-sized (VLA) local array is rejected as well.  Emit a
+            // fixed-size definition instead; the kernel-entry launch bound
+            // (__co__local_spm_size) guarantees the dynamic reuse offsets
+            // fit within it.
+            os() << getIndent()
+                 << "__local__ unsigned char __dyn_smem[__CO_DYN_SMEM_SIZE];"
+                    "\n";
+            os() << getIndent()
+                 << "choreo::choreo_assert(__co__local_spm_size <= "
+                    "__CO_DYN_SMEM_SIZE, \"dynamic local memory reuse "
+                    "exceeds __CO_DYN_SMEM_SIZE\");\n";
+          } else {
+            std::string qual = getAllocQualifier(tensorTy);
+            os() << getIndent() << "extern " << qual
+                 << "unsigned char __dyn_smem[];\n";
+          }
           dynSpmEmitted_ = true;
         }
         std::string offName = dynArgAttr.getValue().str();
