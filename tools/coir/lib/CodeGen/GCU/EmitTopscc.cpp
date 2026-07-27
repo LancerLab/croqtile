@@ -890,15 +890,15 @@ private:
         os() << "  " << inEType << "* p" << i << "__device = nullptr;\n";
         if (dynBytes.empty()) {
           int64_t bytes = getTensorBytes(tty);
-          os() << "  topsMalloc((void**)&p" << i << "__device, "
-             << bytes << "ULL);\n";
-          os() << "  topsMemcpy(p" << i << "__device, p" << i << ".data(), "
-             << bytes << "ULL, topsMemcpyHostToDevice);\n";
+          os() << "  choreo::abend_true(topsMalloc((void**)&p" << i << "__device, "
+             << bytes << "ULL));\n";
+          os() << "  choreo::abend_true(topsMemcpy(p" << i << "__device, p" << i << ".data(), "
+             << bytes << "ULL, topsMemcpyHostToDevice));\n";
         } else {
-          os() << "  topsMalloc((void**)&p" << i << "__device, "
-             << dynBytes << ");\n";
-          os() << "  topsMemcpy(p" << i << "__device, p" << i << ".data(), "
-             << dynBytes << ", topsMemcpyHostToDevice);\n";
+          os() << "  choreo::abend_true(topsMalloc((void**)&p" << i << "__device, "
+             << dynBytes << "));\n";
+          os() << "  choreo::abend_true(topsMemcpy(p" << i << "__device, p" << i << ".data(), "
+             << dynBytes << ", topsMemcpyHostToDevice));\n";
         }
       }
     }
@@ -963,20 +963,20 @@ private:
         os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
       emitMRLaunchArgs(mr);
       os() << ");\n";
-      os() << "  topsDeviceSynchronize();\n";
+      os() << "  choreo::abend_true(topsDeviceSynchronize());\n";
       if (resDynBytes.empty()) {
-        os() << "  topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
+        os() << "  choreo::abend_true(topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
            << ".data()), p" << retInputIdx << "__device, "
-           << resBytes << "ULL, topsMemcpyDeviceToHost);\n";
+           << resBytes << "ULL, topsMemcpyDeviceToHost));\n";
       } else {
-        os() << "  topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
+        os() << "  choreo::abend_true(topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
            << ".data()), p" << retInputIdx << "__device, "
-           << resDynBytes << ", topsMemcpyDeviceToHost);\n";
+           << resDynBytes << ", topsMemcpyDeviceToHost));\n";
       }
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
         if (tty && isDeviceGlobal(tty)) continue;
-        os() << "  topsFree(p" << i << "__device);\n";
+        os() << "  choreo::abend_true(topsFree(p" << i << "__device));\n";
       }
       os() << "  return choreo::copy_as_spanned(p" << retInputIdx
          << ".data(), p" << retInputIdx << ".shape());\n";
@@ -985,11 +985,11 @@ private:
          << ndim << ">(" << shapeStr << ");\n";
       os() << "  " << eType << "* __result__device = nullptr;\n";
       if (resDynBytes.empty()) {
-        os() << "  topsMalloc((void**)&__result__device, " << resBytes
-           << "ULL);\n";
+        os() << "  choreo::abend_true(topsMalloc((void**)&__result__device, " << resBytes
+           << "ULL));\n";
       } else {
-        os() << "  topsMalloc((void**)&__result__device, " << resDynBytes
-           << ");\n";
+        os() << "  choreo::abend_true(topsMalloc((void**)&__result__device, " << resDynBytes
+           << "));\n";
       }
       os() << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
          << bdims << ">>>(";
@@ -1013,20 +1013,20 @@ private:
       } else {
         os() << ", __result__device, " << resN << ");\n";
       }
-      os() << "  topsDeviceSynchronize();\n";
+      os() << "  choreo::abend_true(topsDeviceSynchronize());\n";
       if (resDynBytes.empty()) {
-        os() << "  topsMemcpy(__result.data(), __result__device, "
-           << resBytes << "ULL, topsMemcpyDeviceToHost);\n";
+        os() << "  choreo::abend_true(topsMemcpy(__result.data(), __result__device, "
+           << resBytes << "ULL, topsMemcpyDeviceToHost));\n";
       } else {
-        os() << "  topsMemcpy(__result.data(), __result__device, "
-           << resDynBytes << ", topsMemcpyDeviceToHost);\n";
+        os() << "  choreo::abend_true(topsMemcpy(__result.data(), __result__device, "
+           << resDynBytes << ", topsMemcpyDeviceToHost));\n";
       }
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
         if (tty && isDeviceGlobal(tty)) continue;
-        os() << "  topsFree(p" << i << "__device);\n";
+        os() << "  choreo::abend_true(topsFree(p" << i << "__device));\n";
       }
-      os() << "  topsFree(__result__device);\n";
+      os() << "  choreo::abend_true(topsFree(__result__device));\n";
       os() << "  return __result;\n";
     }
   }
@@ -1058,15 +1058,15 @@ private:
         os() << "  " << inEType << "* p" << i << "__device = nullptr;\n";
         if (dynBytes.empty()) {
           int64_t bytes = getTensorBytes(tty);
-          os() << "  topsMalloc((void**)&p" << i << "__device, "
-             << bytes << "ULL);\n";
-          os() << "  topsMemcpy(p" << i << "__device, p" << i << ".data(), "
-             << bytes << "ULL, topsMemcpyHostToDevice);\n";
+          os() << "  choreo::abend_true(topsMalloc((void**)&p" << i << "__device, "
+             << bytes << "ULL));\n";
+          os() << "  choreo::abend_true(topsMemcpy(p" << i << "__device, p" << i << ".data(), "
+             << bytes << "ULL, topsMemcpyHostToDevice));\n";
         } else {
-          os() << "  topsMalloc((void**)&p" << i << "__device, "
-             << dynBytes << ");\n";
-          os() << "  topsMemcpy(p" << i << "__device, p" << i << ".data(), "
-             << dynBytes << ", topsMemcpyHostToDevice);\n";
+          os() << "  choreo::abend_true(topsMalloc((void**)&p" << i << "__device, "
+             << dynBytes << "));\n";
+          os() << "  choreo::abend_true(topsMemcpy(p" << i << "__device, p" << i << ".data(), "
+             << dynBytes << ", topsMemcpyHostToDevice));\n";
         }
       }
     }
@@ -1087,12 +1087,12 @@ private:
       os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
     emitMRLaunchArgs(mr);
     os() << ");\n";
-    os() << "  topsDeviceSynchronize();\n";
+    os() << "  choreo::abend_true(topsDeviceSynchronize());\n";
 
     for (unsigned i = 0; i < numOrigInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (!tty || isDeviceGlobal(tty)) continue;
-      os() << "  topsFree(p" << i << "__device);\n";
+      os() << "  choreo::abend_true(topsFree(p" << i << "__device));\n";
     }
   }
 
@@ -1133,29 +1133,29 @@ private:
     if (retInputIdx < 0) {
       os() << "  " << eType << "* __result_buf = (" << eType
          << "*)malloc(" << resBytes << "ULL);\n";
-      os() << "  topsHostRegister(__result_buf, " << resBytes
-         << "ULL, topsHostRegisterPortable);\n";
+      os() << "  choreo::abend_true(topsHostRegister(__result_buf, " << resBytes
+         << "ULL, topsHostRegisterPortable));\n";
       os() << "  std::vector<" << eType << "*> __result__device_vec("
          << dc << ", nullptr);\n";
     }
 
     // Device loop: topsSetDevice + malloc + H2D + launch
     os() << "  for (int __d = 0; __d < " << dc << "; ++__d) {\n";
-    os() << "    topsSetDevice(__d);\n";
+    os() << "    choreo::abend_true(topsSetDevice(__d));\n";
 
     for (unsigned i = 0; i < numInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (tty && isDeviceGlobal(tty)) continue;
       int64_t bytes = tty ? getTensorBytes(tty) : resBytes;
-      os() << "    topsMalloc((void**)&p" << i << "__device_vec[__d], "
-         << bytes << "ULL);\n";
-      os() << "    topsMemcpy(p" << i << "__device_vec[__d], p" << i
-         << ".data(), " << bytes << "ULL, topsMemcpyHostToDevice);\n";
+      os() << "    choreo::abend_true(topsMalloc((void**)&p" << i << "__device_vec[__d], "
+         << bytes << "ULL));\n";
+      os() << "    choreo::abend_true(topsMemcpy(p" << i << "__device_vec[__d], p" << i
+         << ".data(), " << bytes << "ULL, topsMemcpyHostToDevice));\n";
     }
 
     if (retInputIdx < 0) {
-      os() << "    topsMalloc((void**)&__result__device_vec[__d], "
-         << resBytes << "ULL);\n";
+      os() << "    choreo::abend_true(topsMalloc((void**)&__result__device_vec[__d], "
+         << resBytes << "ULL));\n";
     }
 
     // Kernel launch with device ID
@@ -1185,28 +1185,28 @@ private:
     int64_t portionElems = resN / devCount;
     int64_t portionBytes = resBytes / devCount;
     os() << "  for (int __sync_d = 0; __sync_d < " << dc << "; ++__sync_d) {\n";
-    os() << "    topsSetDevice(__sync_d);\n";
-    os() << "    topsDeviceSynchronize();\n";
+    os() << "    choreo::abend_true(topsSetDevice(__sync_d));\n";
+    os() << "    choreo::abend_true(topsDeviceSynchronize());\n";
 
     if (retInputIdx >= 0) {
-      os() << "    topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
+      os() << "    choreo::abend_true(topsMemcpy(const_cast<" << eType << "*>(p" << retInputIdx
          << ".data()) + __sync_d * " << portionElems << ", p" << retInputIdx
          << "__device_vec[__sync_d] + __sync_d * " << portionElems << ", "
-         << portionBytes << "ULL, topsMemcpyDeviceToHost);\n";
+         << portionBytes << "ULL, topsMemcpyDeviceToHost));\n";
     } else {
-      os() << "    topsMemcpy(__result_buf + __sync_d * " << portionElems
+      os() << "    choreo::abend_true(topsMemcpy(__result_buf + __sync_d * " << portionElems
          << ", __result__device_vec[__sync_d] + __sync_d * " << portionElems
          << ", " << portionBytes
-         << "ULL, topsMemcpyDeviceToHost);\n";
+         << "ULL, topsMemcpyDeviceToHost));\n";
     }
 
     for (unsigned i = 0; i < numInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (tty && isDeviceGlobal(tty)) continue;
-      os() << "    topsFree(p" << i << "__device_vec[__sync_d]);\n";
+      os() << "    choreo::abend_true(topsFree(p" << i << "__device_vec[__sync_d]));\n";
     }
     if (retInputIdx < 0)
-      os() << "    topsFree(__result__device_vec[__sync_d]);\n";
+      os() << "    choreo::abend_true(topsFree(__result__device_vec[__sync_d]));\n";
 
     os() << "  }\n";
 
@@ -1216,7 +1216,7 @@ private:
     } else {
       os() << "  auto __result = choreo::copy_as_spanned<" << ndim
          << ">(__result_buf, " << shapeStr << ");\n";
-      os() << "  topsHostUnregister(__result_buf);\n";
+      os() << "  choreo::abend_true(topsHostUnregister(__result_buf));\n";
       os() << "  free(__result_buf);\n";
       os() << "  return __result;\n";
     }
@@ -2519,7 +2519,7 @@ private:
       os() << getIndent() << "__syncsubthreads();\n";
       break;
     case coir::ParallelLevel::DEVICE:
-      os() << getIndent() << "topsDeviceSynchronize();\n";
+      os() << getIndent() << "choreo::abend_true(topsDeviceSynchronize());\n";
       break;
     default:
       os() << getIndent() << "__syncthreads();\n";
