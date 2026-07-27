@@ -91,6 +91,7 @@ public:
     os << "\n__COIR_TOPSCC_SOURCE__\n\n";
     auto &sctx = CoIR::ScriptContext::Get();
     os << "\"$TOPSCC\" ${CFLAGS} -D__CHOREO_DMA_DIAGNOSIS__"
+          " -Wno-implicitly-unsigned-literal"
           " -I\"$TMPDIR\" -I\"$TMPDIR/topscc\"";
     if (!sctx.source_dir.empty())
       os << " -I\"" << sctx.source_dir << "\"";
