@@ -3,7 +3,7 @@
 // RUN: choreo -t topscc -gs -dd=false %s | bash -s -- --execute 2>&1 | FileCheck --match-full-lines %s
 // RUN-DOCKER: choreo -t topscc -gs -st %s | bash -s | FileCheck --match-full-lines %s
 // RUN: choreo -c %s -o /dev/null 2>&1 | wc -l | FileCheck --check-prefix=CHKNO --match-full-lines %s
-// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 __cok__ { /// kernel program
