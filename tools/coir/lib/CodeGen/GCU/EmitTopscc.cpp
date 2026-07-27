@@ -2842,7 +2842,12 @@ private:
     if (isBif) {
       llvm::StringRef ref(callee);
       if (ref.starts_with("__")) ref = ref.drop_front(2);
-      funcName = ref.str();
+      if (ref == "log")
+        funcName = "tcle::ln";
+      else if (ref == "pow")
+        funcName = "tcle::power";
+      else
+        funcName = ("tcle::" + ref).str();
     }
 
     os() << getIndent();
