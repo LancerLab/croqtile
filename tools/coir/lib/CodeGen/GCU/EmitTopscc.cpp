@@ -89,9 +89,12 @@ public:
     EmitSource(module, "", os);
 
     os << "\n__COIR_TOPSCC_SOURCE__\n\n";
+    auto &sctx = CoIR::ScriptContext::Get();
     os << "\"$TOPSCC\" ${CFLAGS} -D__CHOREO_DMA_DIAGNOSIS__"
-          " -I\"$TMPDIR\" -I\"$TMPDIR/topscc\" "
-          "-o \"$BINFILE\" \"$TMPFILE\" -lpthread -ldl -lrt 2>&1\n";
+          " -I\"$TMPDIR\" -I\"$TMPDIR/topscc\"";
+    if (!sctx.source_dir.empty())
+      os << " -I\"" << sctx.source_dir << "\"";
+    os << " -o \"$BINFILE\" \"$TMPFILE\" -lpthread -ldl -lrt 2>&1\n";
     emitScriptExecuteBlock(os);
     return 0;
   }

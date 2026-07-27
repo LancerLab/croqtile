@@ -40,6 +40,7 @@ struct ScriptContext {
   std::string target_setup;
   std::string arch_override;
   std::string cuda_home;
+  std::string source_dir;
 
   static ScriptContext &Get() {
     static ScriptContext ctx;
