@@ -16,7 +16,7 @@ coir.kernel @test_tma_copy_desc(
       : !coir.tensor<64xf32, global> -> !coir.tensor<64xf32, shared>
     coir.wait %tok : !coir.async
 
-    // CHECK: coir.dma.const.desc %{{.*}}, %{{.*}} {kind = #coir.dma_kind<slice>, src_tiled, tma}
+    // CHECK: coir.dma.const.desc %{{.*}}, %{{.*}} {kind = #coir.dma_kind<slice>, src_tiled, tile_shape = array<i64: 64>, tma}
     // CHECK: coir.dma.prefetch.desc
     // CHECK: coir.dma.runtime.desc %{{.*}} offsets(%{{.*}})
     // CHECK: coir.dma.invoke
@@ -56,7 +56,7 @@ coir.kernel @test_dma_tiled_copy_desc(
       : !coir.tensor<64xf32, global> -> !coir.tensor<64xf32, shared>
     coir.wait %tok : !coir.async
 
-    // CHECK: coir.dma.const.desc %{{.*}}, %{{.*}} {kind = #coir.dma_kind<slice>, src_tiled}
+    // CHECK: coir.dma.const.desc %{{.*}}, %{{.*}} {kind = #coir.dma_kind<slice>, src_tiled, tile_shape = array<i64: 64>}
     // CHECK: coir.dma.prefetch.desc
     // CHECK: coir.dma.runtime.desc %{{.*}} offsets(%{{.*}})
     // CHECK: coir.dma.invoke
