@@ -38,8 +38,17 @@ mlir::Value ASTCoIRGen::MaterializeSBE(mlir::Location loc,
   using namespace sbe;
   auto indexType = mlir::IndexType::get(&IRContext());
 
-  if (auto nv = dyn_cast<NumericValue>(expr))
-    return builder.create<mlir::arith::ConstantIndexOp>(loc, nv->Value());
+  if (auto nv = dyn_cast<NumericValue>(expr)) {
+    // Constants outside the int32 range must keep an explicit 64-bit type;
+    // materializing them as `index` (emitted as 32-bit `int` on some
+    // targets) would truncate and turn e.g. `x < 2^32` comparisons into
+    // tautologies in the emitted C++.
+    if (nv->Value() >= INT32_MIN && nv->Value() <= INT32_MAX)
+      return builder.create<mlir::arith::ConstantIndexOp>(loc, nv->Value());
+    auto i64 = mlir::IntegerType::get(&IRContext(), 64);
+    return builder.create<mlir::arith::ConstantOp>(
+        loc, mlir::IntegerAttr::get(i64, nv->Value()));
+  }
 
   if (auto bv = dyn_cast<BooleanValue>(expr)) {
     auto i1Type = mlir::IntegerType::get(&IRContext(), 1);
@@ -78,23 +87,46 @@ mlir::Value ASTCoIRGen::MaterializeSBE(mlir::Location loc,
     case OpCode::IRES:
       return builder.create<mlir::arith::RemSIOp>(loc, lhs, rhs);
     case OpCode::GE:
-      return builder.create<mlir::arith::CmpIOp>(
-          loc, mlir::arith::CmpIPredicate::sge, lhs, rhs);
     case OpCode::GT:
-      return builder.create<mlir::arith::CmpIOp>(
-          loc, mlir::arith::CmpIPredicate::sgt, lhs, rhs);
     case OpCode::LT:
-      return builder.create<mlir::arith::CmpIOp>(
-          loc, mlir::arith::CmpIPredicate::slt, lhs, rhs);
     case OpCode::LE:
-      return builder.create<mlir::arith::CmpIOp>(
-          loc, mlir::arith::CmpIPredicate::sle, lhs, rhs);
     case OpCode::EQ:
-      return builder.create<mlir::arith::CmpIOp>(
-          loc, mlir::arith::CmpIPredicate::eq, lhs, rhs);
-    case OpCode::NE:
-      return builder.create<mlir::arith::CmpIOp>(
-          loc, mlir::arith::CmpIPredicate::ne, lhs, rhs);
+    case OpCode::NE: {
+      // Comparisons must be evaluated in a width that can represent both
+      // sides; index is emitted as 32-bit int on some targets, which would
+      // make e.g. `x < 2^32` comparisons tautological in the emitted C++.
+      mlir::Type cmpTy = indexType;
+      if (auto nv = dyn_cast<NumericValue>(bo->GetLeft()))
+        if (nv->Value() > INT32_MAX || nv->Value() < INT32_MIN)
+          cmpTy = mlir::IntegerType::get(&IRContext(), 64);
+      if (auto nv = dyn_cast<NumericValue>(bo->GetRight()))
+        if (nv->Value() > INT32_MAX || nv->Value() < INT32_MIN)
+          cmpTy = mlir::IntegerType::get(&IRContext(), 64);
+      if (lhs.getType() != cmpTy) {
+        if (mlir::isa<mlir::IndexType>(lhs.getType()) &&
+            !mlir::isa<mlir::IndexType>(cmpTy))
+          lhs = builder.create<mlir::arith::IndexCastOp>(loc, cmpTy, lhs);
+        else
+          lhs = builder.create<mlir::arith::ExtSIOp>(loc, cmpTy, lhs);
+      }
+      if (rhs.getType() != cmpTy) {
+        if (mlir::isa<mlir::IndexType>(rhs.getType()) &&
+            !mlir::isa<mlir::IndexType>(cmpTy))
+          rhs = builder.create<mlir::arith::IndexCastOp>(loc, cmpTy, rhs);
+        else
+          rhs = builder.create<mlir::arith::ExtSIOp>(loc, cmpTy, rhs);
+      }
+      mlir::arith::CmpIPredicate pred;
+      switch (bo->GetOpCode()) {
+      case OpCode::GE: pred = mlir::arith::CmpIPredicate::sge; break;
+      case OpCode::GT: pred = mlir::arith::CmpIPredicate::sgt; break;
+      case OpCode::LT: pred = mlir::arith::CmpIPredicate::slt; break;
+      case OpCode::LE: pred = mlir::arith::CmpIPredicate::sle; break;
+      case OpCode::EQ: pred = mlir::arith::CmpIPredicate::eq; break;
+      default:       pred = mlir::arith::CmpIPredicate::ne;  break;
+      }
+      return builder.create<mlir::arith::CmpIOp>(loc, pred, lhs, rhs);
+    }
     case OpCode::AND: {
       auto i1 = mlir::IntegerType::get(&IRContext(), 1);
       auto l1 = builder.create<mlir::arith::TruncIOp>(loc, i1, lhs);
