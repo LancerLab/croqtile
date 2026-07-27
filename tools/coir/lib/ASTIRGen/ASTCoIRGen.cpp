@@ -1779,9 +1779,9 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
       }
 
       if (op == Op::SizeOf) {
-        if (!expr->Opts().HasVal())
-          choreo_unreachable("SizeOf: no optimized value available");
-        return MaterializeSBE(loc, expr->Opts().GetVal());
+        if (!expr->Opts().HasSize())
+          choreo_unreachable("SizeOf: no size value available");
+        return MaterializeSBE(loc, expr->Opts().GetSize());
       }
 
       if (op == Op::DataOf || op == Op::MDataOf) {
@@ -1865,6 +1865,11 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
           if (v) return v;
         }
         return EmitExpr(*inner);
+      }
+      if (op == Op::SizeOf) {
+        if (!expr->Opts().HasSize())
+          choreo_unreachable("SizeOf: no size value available");
+        return MaterializeSBE(loc, expr->Opts().GetSize());
       }
       auto operand = EmitExpr(*expr->GetR());
       if (!operand) return nullptr;
