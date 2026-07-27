@@ -1779,8 +1779,19 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
       }
 
       if (op == Op::SizeOf) {
-        if (!expr->Opts().HasSize())
+        if (!expr->Opts().HasSize()) {
+          // Fallback: compute size from the operand's type shape.
+          // This covers cases where shape inference did not set Opts().Size()
+          // (e.g. |l| where l is a DMA assigned local, or |x.span| where the
+          // SizeOf node itself is not typed as a spanned type).
+          if (auto name = AST::GetName(*expr->GetR())) {
+            auto var = RemoveSuffix(*name, ".span");
+            auto symType = GetSymbolType(var);
+            if (auto mdsTy = GetSpannedType(symType))
+              return MaterializeSBE(loc, mdsTy->ElementCountValue());
+          }
           choreo_unreachable("SizeOf: no size value available");
+        }
         return MaterializeSBE(loc, expr->Opts().GetSize());
       }
 
@@ -1867,8 +1878,19 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
         return EmitExpr(*inner);
       }
       if (op == Op::SizeOf) {
-        if (!expr->Opts().HasSize())
+        if (!expr->Opts().HasSize()) {
+          // Fallback: compute size from the operand's type shape.
+          // This covers cases where shape inference did not set Opts().Size()
+          // (e.g. |l| where l is a DMA assigned local, or |x.span| where the
+          // SizeOf node itself is not typed as a spanned type).
+          if (auto name = AST::GetName(*expr->GetR())) {
+            auto var = RemoveSuffix(*name, ".span");
+            auto symType = GetSymbolType(var);
+            if (auto mdsTy = GetSpannedType(symType))
+              return MaterializeSBE(loc, mdsTy->ElementCountValue());
+          }
           choreo_unreachable("SizeOf: no size value available");
+        }
         return MaterializeSBE(loc, expr->Opts().GetSize());
       }
       auto operand = EmitExpr(*expr->GetR());
