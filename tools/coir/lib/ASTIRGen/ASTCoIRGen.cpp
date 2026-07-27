@@ -3234,6 +3234,12 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
           sv = sl->Val();
         }
         printFormatStr += escapeForC(sv);
+      } else if (isa<ITupleType>(argType) ||
+                 (argType && (argType->GetBaseType() == BaseType::ITUPLE ||
+                              argType->GetBaseType() == BaseType::BOUNDED_INT ||
+                              argType->GetBaseType() == BaseType::BOUNDED_ITUPLE))) {
+        // ITuple/BoundedInt (parallel variables): wrap with braces.
+        printFormatStr += "{%lld}";
       } else {
         printFormatStr += "%lld";
       }

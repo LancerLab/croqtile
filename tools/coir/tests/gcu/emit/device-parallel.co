@@ -20,7 +20,7 @@ __co__ s32 [8] test_device(s32 [8] input) {
 }
 
 // Device function accepts __device_id parameter
-// CHECK: __device__ void test_device({{.*}}, int __device_id)
+// CHECK: __device__ void __choreo_device_test_device({{.*}}, int __device_id)
 // CHECK: // parallel level=device
 // CHECK: // parallel level=block
 // CHECK: __tops_bid_x()

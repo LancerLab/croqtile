@@ -379,7 +379,7 @@ private:
           os() << "/* maxnreg(" << nr.getValue() << ") unsupported */ ";
       }
     }
-    os() << "void " << kernel.getSymName() << "(";
+    os() << "void __choreo_device_" << kernel.getSymName() << "(";
 
     auto &body = kernel.getBody();
     unsigned paramIdx = 0;
@@ -769,28 +769,42 @@ private:
            << ")\n";
       }
       os() << "__global__ void __coir_global_" << name.str() << "(";
+      bool hasPrevParam = false;
       for (unsigned i = 0; i < numInputs; ++i) {
-        if (i > 0) os() << ", ";
+        if (hasPrevParam) os() << ", ";
         os() << emitType(fnType.getInput(i)) << " g_in" << i;
+        hasPrevParam = true;
       }
       if (resTy) {
         int retInputIdx = getReturnInputArgIdx(kernel, 0);
         std::string eType = emitType(resTy.getElementType());
-        if (retInputIdx < 0)
-          os() << ", " << eType << "* g_out, int N";
+        if (retInputIdx < 0) {
+          if (hasPrevParam) os() << ", ";
+          os() << eType << "* g_out, int N";
+          hasPrevParam = true;
+        }
       }
-      if (isMultiDevice)
-        os() << ", int __device_id";
+      if (isMultiDevice) {
+        if (hasPrevParam) os() << ", ";
+        os() << "int __device_id";
+      }
       os() << ") {\n";
-      os() << "  " << name.str() << "(";
+      os() << "  __choreo_device_" << name.str() << "(";
+      bool hasArg = false;
       for (unsigned i = 0; i < numInputs; ++i) {
-        if (i > 0) os() << ", ";
+        if (hasArg) os() << ", ";
         os() << "g_in" << i;
+        hasArg = true;
       }
-      if (resTy && getReturnInputArgIdx(kernel, 0) < 0)
-        os() << ", g_out";
-      if (isMultiDevice)
-        os() << ", __device_id";
+      if (resTy && getReturnInputArgIdx(kernel, 0) < 0) {
+        if (hasArg) os() << ", ";
+        os() << "g_out";
+        hasArg = true;
+      }
+      if (isMultiDevice) {
+        if (hasArg) os() << ", ";
+        os() << "__device_id";
+      }
       os() << ");\n";
       os() << "}\n\n";
     }
@@ -1054,6 +1068,86 @@ private:
     std::string bdims = hasGroupLevel()
                             ? emitDim3(lc.groupDims)
                             : emitDim3(lc.threadDims);
+    bool isMultiDevice = hasDeviceParallel(kernel);
+    int64_t devCount = isMultiDevice ? getDeviceBound(kernel) : 1;
+
+    // Multi-device void kernel: loop over devices with topsSetDevice.
+    if (isMultiDevice) {
+      std::string dc = std::to_string(devCount);
+
+      // Allocate per-device buffer vectors for tensor inputs
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
+        auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+        if (!tty || isDeviceGlobal(tty)) continue;
+        std::string inEType = emitType(tty.getElementType());
+        os() << "  std::vector<" << inEType << "*> p" << i
+           << "__device_vec(" << dc << ", nullptr);\n";
+      }
+
+      // Device loop: set device, alloc, H2D, launch
+      os() << "  for (int __d = 0; __d < " << dc << "; ++__d) {\n";
+      os() << "    choreo::abend_true(topsSetDevice(__d));\n";
+
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
+        auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+        if (!tty || isDeviceGlobal(tty)) continue;
+        int64_t bytes = getTensorBytes(tty);
+        os() << "    choreo::abend_true(topsMalloc((void**)&p" << i
+           << "__device_vec[__d], " << bytes << "ULL));\n";
+        os() << "    choreo::abend_true(topsMemcpy(p" << i
+           << "__device_vec[__d], p" << i << ".data(), "
+           << bytes << "ULL, topsMemcpyHostToDevice));\n";
+      }
+
+      os() << "    __coir_global_" << name.str() << "<<<" << gdims << ", "
+         << bdims << ">>>(";
+      bool first = true;
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
+        if (!first) os() << ", ";
+        first = false;
+        auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+        if (tty && !isDeviceGlobal(tty))
+          os() << "p" << i << "__device_vec[__d]";
+        else if (tty)
+          os() << "const_cast<" << emitType(tty.getElementType())
+             << "*>(p" << i << ".data())";
+        else
+          os() << "p" << i;
+      }
+      if (!first) os() << ", ";
+      os() << "__d);\n";
+      os() << "  }\n";
+
+      // Sync loop: set device, sync, D2H for ref outputs, free
+      os() << "  for (int __sync_d = 0; __sync_d < " << dc << "; ++__sync_d) {\n";
+      os() << "    choreo::abend_true(topsSetDevice(__sync_d));\n";
+      os() << "    choreo::abend_true(topsDeviceSynchronize());\n";
+
+      // D2H for reference output parameters
+      auto paramRefs = kernel->getAttrOfType<mlir::ArrayAttr>("coir.param_refs");
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
+        auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+        if (!tty || isDeviceGlobal(tty)) continue;
+        bool isRef = false;
+        if (paramRefs && i < paramRefs.size())
+          if (auto ba = mlir::dyn_cast<mlir::BoolAttr>(paramRefs[i]))
+            isRef = ba.getValue();
+        if (!isRef) continue;
+        int64_t bytes = getTensorBytes(tty);
+        os() << "    choreo::abend_true(topsMemcpy(p" << i << ".data(), p" << i
+           << "__device_vec[__sync_d], " << bytes
+           << "ULL, topsMemcpyDeviceToHost));\n";
+      }
+
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
+        auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+        if (!tty || isDeviceGlobal(tty)) continue;
+        os() << "    choreo::abend_true(topsFree(p" << i
+           << "__device_vec[__sync_d]));\n";
+      }
+      os() << "  }\n";
+      return;
+    }
 
     for (unsigned i = 0; i < numOrigInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));

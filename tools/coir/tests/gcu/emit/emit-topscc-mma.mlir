@@ -6,7 +6,7 @@ module attributes { "coir.mma_target" = "ukernel" } {
 
 // Test: simple MMA kernel emits stub declaration and call
 // CHECK: __device__ void __choreo_mma_f16_f32_M16_MK_KN(
-// CHECK: __device__ void mma_simple(
+// CHECK: __device__ void __choreo_device_mma_simple(
 // CHECK: int __mma_ws_{{.*}}[2048]
 // CHECK: __choreo_mma_f16_f32_M16_MK_KN(
 // CHECK: 0, 1, 0, 0)
@@ -26,7 +26,7 @@ coir.kernel @mma_simple(
 
 // Test: K-loop accumulation with deferred exec+store pattern
 // CHECK: __device__ void __choreo_mma_f16_f32_M128_MK_KN(
-// CHECK: __device__ void mma_kloop(
+// CHECK: __device__ void __choreo_device_mma_kloop(
 // CHECK: int __mma_ws_{{.*}}[2048]
 // CHECK: void* __mma_ws_{{.*}}_last_lhs
 // CHECK: void* __mma_ws_{{.*}}_last_rhs

@@ -13,7 +13,7 @@ __co__ s32 [8] test_thread(s32 [8] input) {
 }
 
 // CHECK-NOT: __thread_dims__
-// CHECK: __device__ void test_thread(
+// CHECK: __device__ void __choreo_device_test_thread(
 // CHECK: int pid_{{[0-9]+}} = __tops_bid_x();
 // CHECK: int pid_{{[0-9]+}} = __tops_tid_x();
 
