@@ -37,6 +37,10 @@
   #include "private_target0_defines.h"
 #endif
 
+#ifndef __co_abort__
+  #define __co_abort__() __builtin_trap()
+#endif
+
 #ifdef __CHOREO_PRIVATE_TGT0__
 
   #define __CHOREO_TARGET_NATIVE_F16_SUPPORT__
@@ -216,16 +220,24 @@ inline void __co_any__ choreo_assert(bool p, const char* msg,
                                      const char* file = __FILE__,
                                      int line = __LINE__) {
   if (!p) {
-#ifdef __CHOREO_PRIVATE_TGT0__
-    std::cerr << file << ":" << line << ": choreo assertion abort: " << msg
-              << std::endl;
-    std::abort();
+#if defined(__CHOREO_PRIVATE_TGT0__)
+    // Private target: abort via target-provided macro; private_target0_*.h
+    // defines __co_abort__ for both host and device.
+    __co_abort__();
+#elif defined(__CUDA_ARCH__)
+    // CUDA device: printf + trap works on device.
+    printf("%s:%d: choreo assertion failed: %s\n", file, line, msg);
+    __builtin_trap();
+#elif defined(__HIP_DEVICE_COMPILE__)
+    // AMDGPU device: printf + trap works on device.
+    printf("%s:%d: choreo assertion failed: %s\n", file, line, msg);
+    __builtin_trap();
 #else
-    printf("%s:%d: choreo assertion abort: %s\n", file, line, msg);
-    assert(false);
+    // Host or CPU-only target.
+    printf("%s:%d: choreo assertion failed: %s\n", file, line, msg);
+    abort();
 #endif
   }
-  return;
 }
 
 inline void runtime_check(bool p, const char* msg) {
