@@ -2602,10 +2602,8 @@ private:
                           "_tensor_map";
 
     // Compute TMA coordinates from runtime offsets.
-    // Offsets are tile indices; multiply by tile dimensions to get element coords.
-    // TMA expects coordinates in innermost-first order.
-    auto tileShape = desc.isLoad ? desc.dstType.getShape()
-                                 : desc.srcType.getShape();
+    // Offsets from DMADescRuntimeOp are already element coordinates
+    // (pre-multiplied by tile dims in LowerDMADesc). Emit them directly.
     auto globalShape = desc.isLoad ? desc.srcType.getShape()
                                    : desc.dstType.getShape();
     unsigned rank = globalShape.size();
@@ -2636,18 +2634,15 @@ private:
       os() << getIndent() << loadFunc << "((void*)(" << dstName
          << "), (const void*)&" << mapName << ", "
          << atomName << ".ptx_barrier()";
-      // Emit coordinates (innermost-first)
+      // Emit coordinates (innermost-first).
+      // Offsets from DMADescRuntimeOp are already element coordinates
+      // (pre-multiplied by tile dims in LowerDMADesc).
       for (int d = (int)rank - 1; d >= 0; --d) {
         os() << ", ";
-        if (d < (int)offsets.size()) {
-          int64_t tileDim = tileShape[d];
-          if (tileDim > 1)
-            os() << getName(offsets[d]) << " * " << tileDim;
-          else
-            os() << getName(offsets[d]);
-        } else {
+        if (d < (int)offsets.size())
+          os() << getName(offsets[d]);
+        else
           os() << "0";
-        }
       }
       os() << ");\n";
       decIndent();
@@ -2677,18 +2672,15 @@ private:
           : "cde::cp_async_bulk_tensor_3d_shared_to_global";
 
       os() << getIndent() << storeFunc << "(&" << mapName;
-      // Emit coordinates (innermost-first)
+      // Emit coordinates (innermost-first).
+      // Offsets from DMADescRuntimeOp are already element coordinates
+      // (pre-multiplied by tile dims in LowerDMADesc).
       for (int d = (int)rank - 1; d >= 0; --d) {
         os() << ", ";
-        if (d < (int)offsets.size()) {
-          int64_t tileDim = tileShape[d];
-          if (tileDim > 1)
-            os() << getName(offsets[d]) << " * " << tileDim;
-          else
-            os() << getName(offsets[d]);
-        } else {
+        if (d < (int)offsets.size())
+          os() << getName(offsets[d]);
+        else
           os() << "0";
-        }
       }
       os() << ", " << srcName << ");\n";
       os() << getIndent() << "cde::cp_async_bulk_commit_group();\n";
