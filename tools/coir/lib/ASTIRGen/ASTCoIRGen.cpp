@@ -1738,6 +1738,17 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
                    : (mlir::Value)builder.create<mlir::arith::CmpIOp>(
                          loc, mlir::arith::CmpIPredicate::ne, lhs, rhs);
 
+      if (op == Op::BitAnd)
+        return (mlir::Value)builder.create<mlir::arith::AndIOp>(loc, lhs, rhs);
+      if (op == Op::BitOr)
+        return (mlir::Value)builder.create<mlir::arith::OrIOp>(loc, lhs, rhs);
+      if (op == Op::BitXor)
+        return (mlir::Value)builder.create<mlir::arith::XOrIOp>(loc, lhs, rhs);
+      if (op == Op::Shl)
+        return (mlir::Value)builder.create<mlir::arith::ShLIOp>(loc, lhs, rhs);
+      if (op == Op::Shr)
+        return (mlir::Value)builder.create<mlir::arith::ShRSIOp>(loc, lhs, rhs);
+
       if (op == Op::UBound) {
         // m # g0 = m * upperBound(g0) + g0
         int64_t ub = 0;
@@ -1868,6 +1879,23 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
               loc, 0, operand.getType());
           return builder.create<mlir::arith::SubIOp>(loc, zero, operand);
         }
+      }
+      if (op == Op::BitNot) {
+        auto opTy = operand.getType();
+        if (mlir::isa<mlir::IndexType>(opTy)) {
+          auto i32Ty = mlir::IntegerType::get(&IRContext(), 32,
+                                               mlir::IntegerType::Signless);
+          auto castOp = builder.create<mlir::arith::IndexCastOp>(loc, i32Ty,
+                                                                   operand);
+          auto mask = builder.create<mlir::arith::ConstantIntOp>(loc, -1, i32Ty);
+          auto result = builder.create<mlir::arith::XOrIOp>(loc, castOp, mask);
+          return (mlir::Value)builder.create<mlir::arith::IndexCastOp>(
+              loc, opTy, result);
+        }
+        auto mask = builder.create<mlir::arith::ConstantIntOp>(
+            loc, -1, opTy);
+        return (mlir::Value)builder.create<mlir::arith::XOrIOp>(loc, operand,
+                                                                 mask);
       }
     }
 
@@ -3001,7 +3029,48 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
   // Emit arguments as operands
   llvm::SmallVector<mlir::Value> operands;
   for (auto &arg : args) {
-    mlir::Value v = EmitExpr(*arg);
+    mlir::Value v = nullptr;
+
+    // Handle ChunkAt arguments (e.g., lhs_load.data.chunkat(_, _, r))
+    // by creating a tensor.tile op and using its result as the operand.
+    // ChunkAt may be wrapped in a Reference Expr.
+    AST::Node *argNode = arg.get();
+    if (auto *expr = dyn_cast<AST::Expr>(argNode))
+      if (expr->GetForm() == AST::Expr::Reference && expr->GetR())
+        argNode = expr->GetR().get();
+
+    if (auto *chunk = dyn_cast<AST::ChunkAt>(argNode)) {
+      auto baseName = chunk->data->name;
+      auto baseVal = LookupValue(baseName);
+      // For DMA futures, the base name resolves to the async token.
+      // The actual buffer is mapped under baseName + ".data".
+      if (baseVal && !mlir::isa<coir::TensorType>(baseVal.getType())) {
+        auto dataVal = LookupValue(baseName + ".data");
+        if (dataVal && mlir::isa<coir::TensorType>(dataVal.getType()))
+          baseVal = dataVal;
+      }
+      if (!baseVal) {
+        if (!llvm::StringRef(baseName).ends_with(".data"))
+          baseVal = LookupValue(baseName + ".data");
+      }
+      if (baseVal)
+        v = EmitChunkAtTile(*chunk, baseVal);
+    }
+
+    if (!v)
+      v = EmitExpr(*arg);
+    // Fallback: if EmitExpr failed but the expression has a compile-time
+    // optimized value (e.g., |span| / #r), materialize it as a constant.
+    if (!v) {
+      if (auto *expr = dyn_cast<AST::Expr>(arg.get())) {
+        if (expr->Opts().HasVal()) {
+          int64_t val = EvalToInt(expr->Opts().GetVal());
+          auto ty = mlir::IntegerType::get(&IRContext(), 32,
+                                           mlir::IntegerType::Signless);
+          v = builder.create<mlir::arith::ConstantIntOp>(loc, val, ty);
+        }
+      }
+    }
     if (!v) {
       if (auto name = AST::GetName(*arg))
         v = LookupValue(*name);
@@ -3067,6 +3136,56 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
       tplStrs.push_back(s);
   }
 
+  // For print/println, build a format string from AST arguments.
+  // String literals become part of the format string; numeric values
+  // become %lld placeholders and are kept as operands.
+  std::string printFormatStr;
+  bool isPrint = (fname == "print" || fname == "println");
+  if (isPrint) {
+    llvm::SmallVector<mlir::Value> numericOps;
+    for (auto &arg : args) {
+      auto argType = NodeType(*arg);
+      if (isa<StringType>(argType)) {
+        // String literal: extract the raw string value.
+        std::string sv;
+        if (auto *expr = dyn_cast<AST::Expr>(arg.get())) {
+          if (auto sl = expr->GetString())
+            sv = sl->Val();
+        } else if (auto *sl = dyn_cast<AST::StringLiteral>(arg.get())) {
+          sv = sl->Val();
+        }
+        printFormatStr += sv;
+      } else {
+        printFormatStr += "%lld";
+      }
+    }
+    if (fname == "println")
+      printFormatStr += "\\n";
+
+    // Re-emit only non-string operands
+    operands.clear();
+    for (auto &arg : args) {
+      auto argType = NodeType(*arg);
+      if (isa<StringType>(argType)) continue;
+      mlir::Value v = EmitExpr(*arg);
+      if (!v) {
+        if (auto name = AST::GetName(*arg))
+          v = LookupValue(*name);
+      }
+      if (!v) {
+        if (auto *expr = dyn_cast<AST::Expr>(arg.get())) {
+          if (expr->Opts().HasVal()) {
+            int64_t val = EvalToInt(expr->Opts().GetVal());
+            auto ty = mlir::IntegerType::get(&IRContext(), 32,
+                                             mlir::IntegerType::Signless);
+            v = builder.create<mlir::arith::ConstantIntOp>(loc, val, ty);
+          }
+        }
+      }
+      if (v) operands.push_back(v);
+    }
+  }
+
   auto callOp = builder.create<coir::CallOp>(
       loc,
       /*result=*/mlir::Type{},
@@ -3077,6 +3196,8 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
       call.IsLibCall() ? builder.getBoolAttr(true) : nullptr,
       call.IsBIF() ? builder.getBoolAttr(true) : nullptr,
       call.IsExpr() ? builder.getBoolAttr(true) : nullptr);
+  if (!printFormatStr.empty())
+    callOp->setAttr("format_str", builder.getStringAttr(printFormatStr));
   (void)callOp;
 
   return true;

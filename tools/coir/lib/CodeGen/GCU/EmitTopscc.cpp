@@ -2841,13 +2841,51 @@ private:
     std::string funcName = callee;
     if (isBif) {
       llvm::StringRef ref(callee);
-      if (ref.starts_with("__")) ref = ref.drop_front(2);
-      if (ref == "log")
-        funcName = "tcle::ln";
-      else if (ref == "pow")
-        funcName = "tcle::power";
-      else
-        funcName = ("tcle::" + ref).str();
+      if (ref.starts_with("__")) {
+        // Arithmetic builtins: strip __ prefix and map to tcle:: namespace.
+        ref = ref.drop_front(2);
+        if (ref == "log")
+          funcName = "tcle::ln";
+        else if (ref == "pow")
+          funcName = "tcle::power";
+        else
+          funcName = ("tcle::" + ref).str();
+      }
+      // Non-arith builtins (println, assert, etc.): use name as-is.
+    }
+
+    // Handle println/print: map to printf with format string for device code.
+    if (callee == "println" || callee == "print") {
+      auto args = op.getOperands_();
+      std::string fmt;
+
+      // Use the format_str attribute if available (built from AST string
+      // literals). Otherwise fall back to a generic type-based format.
+      if (auto fmtAttr = op->getAttrOfType<mlir::StringAttr>("format_str")) {
+        fmt = fmtAttr.getValue().str();
+      } else {
+        for (size_t i = 0; i < args.size(); ++i) {
+          if (i > 0) fmt += " ";
+          auto ty = args[i].getType();
+          if (mlir::isa<mlir::FloatType>(ty))
+            fmt += "%f";
+          else
+            fmt += "%lld";
+        }
+        if (callee == "println") fmt += "\\n";
+      }
+
+      os() << getIndent() << "printf(\"" << fmt << "\"";
+      for (auto arg : args) {
+        auto ty = arg.getType();
+        os() << ", ";
+        if (mlir::isa<mlir::FloatType>(ty))
+          os() << "(double)" << getName(arg);
+        else
+          os() << "(long long)" << getName(arg);
+      }
+      os() << ");\n";
+      return;
     }
 
     os() << getIndent();
