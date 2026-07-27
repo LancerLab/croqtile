@@ -27,6 +27,8 @@
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <cstdlib>
@@ -60,10 +62,16 @@ bool ShouldEmitSource() { return emit_source || generate_script; }
 bool ShouldGenerateBinary() { return compile_binary; }
 bool ShouldGenerateAssembly() { return false; /* TODO */ }
 
-void SetupScriptContext() {
+void SetupScriptContext(const std::string &input_file) {
   auto &sctx = CoIR::ScriptContext::Get();
   sctx.types_header = __choreo_types_header_as_string;
   sctx.runtime_header = __choreo_header_as_string;
+  // Resolve to absolute path so that relative inputs (e.g. "foo.co")
+  // still yield a valid source directory for -I flags.
+  llvm::SmallString<256> abs_path(input_file);
+  if (!input_file.empty() && input_file != "-")
+    llvm::sys::fs::make_absolute(abs_path);
+  sctx.source_dir = llvm::sys::path::parent_path(abs_path).str();
   auto tname = CCtx().TargetName();
   if (tname == "cute" || tname == "nvptx") {
     sctx.types_cute_header = __choreo_types_cute_header_as_string;
@@ -304,13 +312,13 @@ int main(int argc, char *argv[]) {
   int result = 0;
   if (ShouldEmitSource()) {
     bool is_script = generate_script;
-    if (is_script) SetupScriptContext();
+    if (is_script) SetupScriptContext(input_file);
     std::string out_path =
         output.WasExplicitlySet() ? output.GetValue() : "";
     std::string arch = CCtx().GetArch();
     result = pipeline.EmitSource(CCtx().TargetName(), is_script, out_path, arch);
   } else if (ShouldGenerateBinary()) {
-    SetupScriptContext();
+    SetupScriptContext(input_file);
     std::string out_path =
         output.WasExplicitlySet() ? output.GetValue() : "a.out";
     std::string arch = CCtx().GetArch();
