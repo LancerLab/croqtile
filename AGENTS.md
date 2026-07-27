@@ -248,11 +248,17 @@ public:
 
 ## Git Push and OSS Sync Rules (MANDATORY)
 
-### Never push without explicit instruction
+### Never push without explicit instruction (one-time permission, never assumed)
 
-**Do NOT run `git push` to any remote unless the user explicitly asks.**
-`git commit` (local) is fine when the user asks to commit. `git push` requires
-the user to say "push", "push to origin", "push to remote", etc.
+**Do NOT run `git push` to any remote unless the user explicitly asks for
+that specific operation.** `git commit` (local) is fine when the user asks
+to commit. `git push` requires the user to say "push", "push to origin",
+"push to remote", etc.
+
+**Permission is ALWAYS one-time.** Even if the user has asked you to push
+earlier in the same conversation, you must get a fresh, explicit push
+instruction every time. Never assume prior permission carries over. Stop
+after committing and ask the user whether they want to push.
 
 ### Every main commit needs an oss/main counterpart
 
