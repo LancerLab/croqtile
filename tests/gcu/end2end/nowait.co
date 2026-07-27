@@ -1,7 +1,7 @@
 // REQUIRES: TARGET-GCUALL SHELL-ONLY
 // RUN: choreo -t topscc %s -gs | bash -s | FileCheck %s
-// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck %s
-// RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck %s
+// RUN: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 __co__ void nowait(f32 [15] input) {
   parallel p by 1 {

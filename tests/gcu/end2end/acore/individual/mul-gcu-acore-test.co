@@ -1,8 +1,8 @@
 // SKIP: merged into acore-lib-merged-test.co
 // REQUIRES: TARGET-GCU300 LIBCALL
 // RUN: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
-// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
-// RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // Binary __lib_mul end-to-end test on GCU3.
 
 __co__ f32 [6, 128] lib_mul_test(f32 [6, 128] A, f32 [6, 128] B) {
