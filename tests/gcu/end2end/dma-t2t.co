@@ -1,6 +1,6 @@
 // RUN-GCU300: choreo -t topscc -es %s -o - | FileCheck %s --check-prefix=CODEGEN
 // RUN-GCU300: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines --check-prefix=END2END %s
-// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines --check-prefix=END2END %s
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines --check-prefix=END2END %s
 // RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines --check-prefix=END2END %s
 
 #include <functional>

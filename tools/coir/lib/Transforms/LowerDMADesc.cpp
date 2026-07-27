@@ -67,8 +67,8 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
     // Tile indices are multiplied by tile sizes to get element offsets.
     Value srcBase = op.getSource();
     Value dstBase = op.getDest();
-    llvm::SmallVector<Value> offsets;
-    bool hasOffsets = false;
+    llvm::SmallVector<Value> srcOffsets;
+    llvm::SmallVector<Value> dstOffsets;
 
     if (auto tileOp = srcBase.template getDefiningOp<TensorTileOp>()) {
       srcBase = tileOp.getSource();
@@ -85,31 +85,27 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
               op.getLoc(), tileShape[i]);
           idx = rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, tileSize);
         }
-        offsets.push_back(idx);
+        srcOffsets.push_back(idx);
       }
-      hasOffsets = true;
     }
     if (auto tileOp = dstBase.template getDefiningOp<TensorTileOp>()) {
       dstBase = tileOp.getSource();
-      if (!hasOffsets) {
-        auto tileTy =
-            llvm::cast<coir::TensorType>(tileOp.getResult().getType());
-        unsigned rank = tileTy.getRank();
-        auto tileShape = tileTy.getShape();
-        auto allIdx = tileOp.getIndices();
-        for (unsigned i = 0; i < std::min((unsigned)allIdx.size(), rank); ++i) {
-          Value idx = allIdx[i];
-          if (i < tileShape.size() && !mlir::ShapedType::isDynamic(tileShape[i]) &&
-              tileShape[i] > 1) {
-            auto tileSize = rewriter.create<mlir::arith::ConstantIndexOp>(
-                op.getLoc(), tileShape[i]);
-            idx = rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, tileSize);
-          }
-          offsets.push_back(idx);
+      auto tileTy = llvm::cast<coir::TensorType>(tileOp.getResult().getType());
+      unsigned rank = tileTy.getRank();
+      auto tileShape = tileTy.getShape();
+      auto allIdx = tileOp.getIndices();
+      for (unsigned i = 0; i < std::min((unsigned)allIdx.size(), rank); ++i) {
+        Value idx = allIdx[i];
+        if (i < tileShape.size() && !mlir::ShapedType::isDynamic(tileShape[i]) &&
+            tileShape[i] > 1) {
+          auto tileSize = rewriter.create<mlir::arith::ConstantIndexOp>(
+              op.getLoc(), tileShape[i]);
+          idx = rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, tileSize);
         }
-        hasOffsets = true;
+        dstOffsets.push_back(idx);
       }
     }
+    bool hasOffsets = !srcOffsets.empty() || !dstOffsets.empty();
 
     // For TMA copies, tile offsets become runtime.desc coordinates.
     // For DMA copies with tile offsets, also decompose: the base geometry
@@ -152,6 +148,15 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
       constDesc->setAttr("src_tiled", rewriter.getUnitAttr());
     if (hasDstTile)
       constDesc->setAttr("dst_tiled", rewriter.getUnitAttr());
+    // Store tile shape for slice_deslice emission (the actual data transfer size).
+    if (hasSrcTile || hasDstTile) {
+      auto tileOp = hasSrcTile
+          ? op.getSource().template getDefiningOp<TensorTileOp>()
+          : op.getDest().template getDefiningOp<TensorTileOp>();
+      auto tileShape = llvm::cast<coir::TensorType>(tileOp.getResult().getType()).getShape();
+      llvm::SmallVector<int64_t> shapeVec(tileShape.begin(), tileShape.end());
+      constDesc->setAttr("tile_shape", rewriter.getDenseI64ArrayAttr(shapeVec));
+    }
 
     // Forward pad/transpose attributes from the original DmaCopyOp.
     if constexpr (!isTMA) {
@@ -165,13 +170,21 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
         loc, descRtType, constDesc.getOut());
 
     Value invokeDesc;
-    if (hasOffsets && !offsets.empty()) {
-      auto runtimeDesc = rewriter.create<DMADescRuntimeOp>(
-          loc, descRtType, prefetch.getOut(), offsets);
-      // Mark offset semantics: deslice-like (dst tiled only) uses dst offsets.
-      if (hasDstTile && !hasSrcTile)
-        runtimeDesc->setAttr("dst_offsets", rewriter.getUnitAttr());
-      invokeDesc = runtimeDesc.getOut();
+    if (hasOffsets) {
+      // Chain: prefetch -> [src_runtime_desc] -> [dst_runtime_desc] -> invoke
+      Value chain = prefetch.getOut();
+      if (!srcOffsets.empty()) {
+        auto srcRt = rewriter.create<DMADescRuntimeOp>(
+            loc, descRtType, chain, srcOffsets);
+        chain = srcRt.getOut();
+      }
+      if (!dstOffsets.empty()) {
+        auto dstRt = rewriter.create<DMADescRuntimeOp>(
+            loc, descRtType, chain, dstOffsets);
+        dstRt->setAttr("dst_offsets", rewriter.getUnitAttr());
+        chain = dstRt.getOut();
+      }
+      invokeDesc = chain;
     } else {
       invokeDesc = prefetch.getOut();
     }

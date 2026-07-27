@@ -2383,11 +2383,20 @@ private:
         // configure_slice_deslice(dst, src, src_offsets, slice_shape, dst_offsets)
         auto srcTy = cast<coir::TensorType>(op.getSource().getType());
         unsigned rank = srcTy.getRank();
-        auto dstTy = cast<coir::TensorType>(op.getDest().getType());
+        // Use tile_shape attribute (actual transfer size) if available,
+        // otherwise fall back to source tensor shape.
+        llvm::ArrayRef<int64_t> sliceShape;
+        llvm::SmallVector<int64_t> sliceShapeBuf;
+        if (auto tsAttr = op->getAttrOfType<mlir::DenseI64ArrayAttr>("tile_shape")) {
+          sliceShape = tsAttr.asArrayRef();
+        } else {
+          sliceShapeBuf.assign(srcTy.getShape().begin(), srcTy.getShape().end());
+          sliceShape = sliceShapeBuf;
+        }
         os() << getIndent() << "unsigned int " << futName << "__slice__[] = {";
         for (unsigned i = 0; i < rank; ++i) {
           if (i) os() << ", ";
-          os() << dstTy.getShape()[i];
+          os() << (i < sliceShape.size() ? sliceShape[i] : 0);
         }
         os() << "};\n";
         os() << getIndent() << futName << ".configure_slice_deslice(" << dstMds
