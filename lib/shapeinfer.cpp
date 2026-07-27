@@ -338,6 +338,24 @@ bool ShapeInference::Visit(AST::Expr& n) {
     if (!IsValidValueList(vl)) return false;
     return true;
   };
+  // SizeOf: the node type is Integer (set by typeinfer), so
+  // NodeValNoKind returns VNK_VALUE rather than VNK_MDSPAN, but we
+  // still need the element count recorded as the "size" for codegen.
+  // Compute it from the operand's type shape, matching GetSign().
+  if (n.op == Op::SizeOf) {
+    if (auto rhsTy = NodeType(*n.GetR())) {
+      auto shape = GetShape(rhsTy);
+      if (shape.IsValid()) {
+        auto sz = shape.ElementCountValue();
+        if (sz && IsValidValueItem(sz)) {
+          n.Opts().SetSize(sz);
+          VST_DEBUG(dbgs() << " |-<exprsize> <" << PSTR(nty) << "> "
+                           << STR(n) << ": " << STR(sz) << "\n");
+        }
+      }
+    }
+  }
+
   // decide the optimized values
   switch (NodeValNoKind(n)) {
   case VNKind::VNK_VALUE: {
@@ -346,23 +364,6 @@ bool ShapeInference::Visit(AST::Expr& n) {
       n.Opts().SetVals(vl);
       VST_DEBUG(dbgs() << " |-<exprval> <" << PSTR(nty) << "> " << STR(n)
                        << ": " << STR(vl) << "\n");
-    }
-    // SizeOf: the node type is Integer (set by typeinfer), so
-    // NodeValNoKind returns VNK_VALUE rather than VNK_MDSPAN, but we
-    // still need the element count recorded as the "size" for codegen.
-    // Compute it from the operand's type shape, matching GetSign().
-    if (n.op == Op::SizeOf) {
-      if (auto rhsTy = NodeType(*n.GetR())) {
-        auto shape = GetShape(rhsTy);
-        if (shape.IsValid()) {
-          auto sz = shape.ElementCountValue();
-          if (sz && IsValidValueItem(sz)) {
-            n.Opts().SetSize(sz);
-            VST_DEBUG(dbgs() << " |-<exprsize> <" << PSTR(nty) << "> "
-                             << STR(n) << ": " << STR(sz) << "\n");
-          }
-        }
-      }
     }
   } break;
   case VNKind::VNK_UBOUND: {
