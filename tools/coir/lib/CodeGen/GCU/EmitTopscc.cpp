@@ -222,10 +222,15 @@ private:
 
   void emitHeader() {
     os() << "#include <stdint.h>\n";
+    os() << "#include <cstdio>\n";
     os() << "#include <tops.h>\n";
     os() << "#include \"tops/tops_runtime.h\"\n";
     os() << "#include \"choreo.h\"\n";
     os() << "using namespace choreo;\n\n";
+    // Force line-buffered stdout so host printf output merges correctly
+    // with device stderr when piped (e.g. `2>&1 | FileCheck`).
+    os() << "__attribute__((constructor))\n"
+            "static void __co_init_stdout() { setvbuf(stdout, NULL, _IOLBF, 0); }\n\n";
   }
 
   void preCollectStubs(KernelOp kernel) {

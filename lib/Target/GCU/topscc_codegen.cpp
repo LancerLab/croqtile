@@ -874,6 +874,11 @@ void TopsccCodeGen::EmitFixedHostHead() {
 
 using namespace choreo;
 
+// Force line-buffered stdout so host printf output merges correctly
+// with device output when piped (e.g. `2>&1 | FileCheck`).
+__attribute__((constructor))
+static void __co_init_stdout() { setvbuf(stdout, NULL, _IOLBF, 0); }
+
 )";
 
   code_segments.push_back(oss.str());

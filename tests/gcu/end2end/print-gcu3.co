@@ -1,10 +1,10 @@
 // REQUIRES: TARGET-GCU300
 // RUN: choreo -t topscc -gs -arch=gcu300 %s | bash -s -- --execute 2>&1 | FileCheck %s
 // RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
-// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck %s
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute 2>&1 | FileCheck --check-prefix=COCC %s
 
 __co__ void foo(s32 [N, M] i) {
-  println("aaa");
+  println("foo begin");
   int a = 100;
   bool b = false;
   float f = 1.3f;
@@ -17,7 +17,10 @@ __co__ void foo(s32 [N, M] i) {
   println("&i: ", &i);
   println("&ii: ", &ii);
 
+  // sync.global;
+
   parallel p by 1 {
+    println("foo dev begin");
     mds : [1,2,3];
     it = {4, M};
     nit = {a, 5};
@@ -36,8 +39,10 @@ __co__ void foo(s32 [N, M] i) {
       foreach bi in 4
         println("bi: ", bi+N);
     }
+    println("foo dev ends");
   }
-  print("bbb\n");
+
+  print("foo end\n");
 }
 
 __co__ void bar() {
@@ -45,20 +50,22 @@ __co__ void bar() {
     println("p: ", p);
     shared event e;
     println("e: ", e);
+    sync.shared;
+    
     inthreads.async (p == 1) {
       println("e before wait: ", e);
       wait e;
       // println("e after  wait: ", e);
       println("second");
     }
-                                          
+    
     inthreads.async (p == 0) {
       println("e before trigger: ", e);
       println("first");
       trigger e;
       println("e after  trigger: ", e);
     }
-                                          
+
     sync.shared;
   }
 }
@@ -96,6 +103,8 @@ int main()
 
   bar();
 
+  printf("host print after the two dev begins\n");
+
   auto f16_in = choreo::make_spandata<choreo::f16>(4, 8);
   f16_in.fill(1.987654f);
   printf("f16_in[0,0] in host: %f\n", f16_to_f32(f16_in[0][0]));
@@ -124,42 +133,116 @@ int main()
   return 0;
 }
 
-// foo() parallel by 1 (single-threaded, ordered; device output appears first)
+// CHECK: foo begin
+// CHECK: scalar:
+// CHECK: a: 100
+// CHECK: M: 64
+// CHECK: f: 1.300000
+// CHECK: d: 2.600000
+// CHECK: b: false
+// CHECK: d+dd: 6.500000
+// CHECK: &i: 0x{{.*}}
+// CHECK: &ii: 0x{{.*}}
+// CHECK: [0, 0] foo dev begin
 // CHECK: [0, 0] b: false
 // CHECK: [0, 0] d: 4.100000
 // CHECK: [0, 0] i.span: [128, 64]
 // CHECK: [0, 0] mds: [1, 2, 3]
 // CHECK: [0, 0] it: {4, 64}
 // CHECK: [0, 0] nit: {100, 5}
+// CHECK: [0, 0] &i: 0x{{.*}}
+// CHECK: [0, 0] &ii: 0x{{.*}}
 // CHECK: [0, 0] &is: 0x{{.*}}
 // CHECK: [0, 0] idx: {0, 0, 0}
+// CHECK: [0, 0] bi: {128}
+// CHECK: [0, 0] bi: {129}
+// CHECK: [0, 0] bi: {130}
+// CHECK: [0, 0] bi: {131}
 // CHECK: [0, 0] idx: {0, 1, 0}
-// foo() non-parallel output (stdout, appears after device output)
-// CHECK: aaa
-// CHECK: scalar:
-// CHECK: d+dd: 6.500000
-// bar() parallel by 2 (multi-threaded, non-deterministic order)
+// CHECK: [0, 0] bi: {128}
+// CHECK: [0, 0] bi: {129}
+// CHECK: [0, 0] bi: {130}
+// CHECK: [0, 0] bi: {131}
+// CHECK: [0, 0] foo dev ends
+// CHECK: foo end
+
 // CHECK-DAG: [0, 1] p: {1}
 // CHECK-DAG: [0, 0] p: {0}
 // CHECK-DAG: [0, 1] e: false
 // CHECK-DAG: [0, 0] e: false
+
 // CHECK-DAG: [0, 1] e before wait: false
 // CHECK-DAG: [0, 0] e before trigger: false
-// CHECK-DAG: [0, 0] first
-// CHECK-DAG: [0, 1] second
+// CHECK: [0, 0] first
+// CHECK: [0, 1] second
 // CHECK-DAG: [0, 0] e after  trigger: true
-// foo() non-parallel after parallel (stdout)
-// CHECK: bbb
-// foo1() parallel by 1 (device output appears before host output)
-// CHECK: [0, 0] f16_in[0,0] in device: [[F16_VAL:.*]]
-// CHECK: [0, 0] bf16_in[0,0] in device: [[BF16_VAL:.*]]
-// CHECK: [0, 0] u8_in[0,0] in device: [[U8_VAL:.*]]
-// CHECK: [0, 0] s8_in[0,0] in device: [[S8_VAL:.*]]
-// CHECK: [0, 0] half_scalar in device: [[HALF_VAL:.*]]
-// host output follows
-// CHECK: f16_in[0,0] in host: [[F16_VAL]]
-// CHECK: bf16_in[0,0] in host: [[BF16_VAL]]
-// CHECK: u8_in[0,0] in host: [[U8_VAL]]
-// CHECK: s8_in[0,0] in host: [[S8_VAL]]
-// CHECK: half_scalar in host: [[HALF_VAL]]
+
+// CHECK: host print after the two dev begins
+// CHECK: f16_in[0,0] in host: [[F16_VAL:.*]]
+// CHECK: bf16_in[0,0] in host: [[BF16_VAL:.*]]
+// CHECK: u8_in[0,0] in host: [[U8_VAL:.*]]
+// CHECK: s8_in[0,0] in host: [[S8_VAL:.*]]
+// CHECK: half_scalar in host: [[HALF_VAL:.*]]
+// CHECK: [0, 0] f16_in[0,0] in device: [[F16_VAL]]
+// CHECK: [0, 0] bf16_in[0,0] in device: [[BF16_VAL]]
+// CHECK: [0, 0] u8_in[0,0] in device: [[U8_VAL]]
+// CHECK: [0, 0] s8_in[0,0] in device: [[S8_VAL]]
+// CHECK: [0, 0] half_scalar in device: [[HALF_VAL]]
 // CHECK: passed
+
+// cocc-specific checks: sequential output
+// COCC: [0, 0] foo begin
+// COCC: [0, 0] scalar:
+// COCC: a: 100
+// COCC: M: 64
+// COCC: f: 1.300000
+// COCC: d: 2.600000
+// COCC: b: false
+// COCC: d+dd: 6.500000
+// COCC: [0, 0] &i: 0x{{.*}}
+// COCC: [0, 0] &ii: 0x{{.*}}
+// COCC: [0, 0] foo dev begin
+// COCC: [0, 0] b: false
+// COCC: [0, 0] d: 4.100000
+// COCC: [0, 0] i.span: [128, 64]
+// COCC: [0, 0] mds: [1, 2, 3]
+// COCC: [0, 0] it: {4, 64}
+// COCC: [0, 0] nit: {100, 5}
+// COCC: [0, 0] &i: 0x{{.*}}
+// COCC: [0, 0] &ii: 0x{{.*}}
+// COCC: [0, 0] &is: 0x{{.*}}
+// COCC: [0, 0] idx: {0, 0, 0}
+// COCC: [0, 0] bi: {128}
+// COCC: [0, 0] bi: {129}
+// COCC: [0, 0] bi: {130}
+// COCC: [0, 0] bi: {131}
+// COCC: [0, 0] idx: {0, 1, 0}
+// COCC: [0, 0] bi: {128}
+// COCC: [0, 0] bi: {129}
+// COCC: [0, 0] bi: {130}
+// COCC: [0, 0] bi: {131}
+// COCC: [0, 0] foo dev ends
+// COCC: [0, 0] foo end
+
+// COCC-DAG: [0, 1] p: {1}
+// COCC-DAG: [0, 0] p: {0}
+// COCC-DAG: [0, 1] e: false
+// COCC-DAG: [0, 0] e: false
+
+// COCC-DAG: [0, 1] e before wait: false
+// COCC-DAG: [0, 0] e before trigger: false
+// COCC: [0, 0] first
+// COCC: [0, 1] second
+// COCC-DAG: e after  trigger:
+// COCC: host print after the two dev begins
+// COCC: f16_in[0,0] in host: [[COCC_F16:.*]]
+// COCC: bf16_in[0,0] in host: [[COCC_BF16:.*]]
+// COCC: u8_in[0,0] in host: [[COCC_U8:.*]]
+// COCC: s8_in[0,0] in host: [[COCC_S8:.*]]
+// COCC: half_scalar in host: [[COCC_HALF:.*]]
+// COCC: [0, 0] f16_in[0,0] in device: [[COCC_F16]]
+// COCC: [0, 0] bf16_in[0,0] in device: [[COCC_BF16]]
+// COCC: [0, 0] u8_in[0,0] in device: [[COCC_U8]]
+// COCC: [0, 0] s8_in[0,0] in device: [[COCC_S8]]
+// COCC: [0, 0] half_scalar in device: [[COCC_HALF]]
+// COCC: passed
