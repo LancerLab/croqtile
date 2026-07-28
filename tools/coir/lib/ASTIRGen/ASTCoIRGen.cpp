@@ -3205,10 +3205,27 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
   bool isPrint = (fname == "print" || fname == "println");
   if (isPrint) {
     llvm::SmallVector<mlir::Value> numericOps;
+    // Helper: re-escape control characters for C++ string literal emission.
+    auto escapeForC = [](const std::string &s) -> std::string {
+      std::string out;
+      out.reserve(s.size());
+      for (char c : s) {
+        switch (c) {
+        case '\n': out += "\\n"; break;
+        case '\t': out += "\\t"; break;
+        case '\r': out += "\\r"; break;
+        case '\\': out += "\\\\"; break;
+        case '"':  out += "\\\""; break;
+        case '\0': out += "\\0"; break;
+        default:   out += c; break;
+        }
+      }
+      return out;
+    };
     for (auto &arg : args) {
       auto argType = NodeType(*arg);
       if (isa<StringType>(argType)) {
-        // String literal: extract the raw string value.
+        // String literal: extract the raw string value and re-escape.
         std::string sv;
         if (auto *expr = dyn_cast<AST::Expr>(arg.get())) {
           if (auto sl = expr->GetString())
@@ -3216,7 +3233,7 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
         } else if (auto *sl = dyn_cast<AST::StringLiteral>(arg.get())) {
           sv = sl->Val();
         }
-        printFormatStr += sv;
+        printFormatStr += escapeForC(sv);
       } else {
         printFormatStr += "%lld";
       }
