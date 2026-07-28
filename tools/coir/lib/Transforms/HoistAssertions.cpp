@@ -138,7 +138,11 @@ static HoistTarget computeHoistTarget(AssertOp assertOp, KernelOp kernel) {
   return target;
 }
 
-static void collectDefChain(Value root, Region *boundary,
+/// Collect the def-chain of @p root within @p boundary.
+/// Returns false if the chain crosses a TensorAllocOp, meaning the assertion
+/// depends on DMA-loaded data and cannot be safely hoisted (the alloc cannot
+/// be cloned or moved past its external users like dma.copy).
+static bool collectDefChain(Value root, Region *boundary,
                             SmallVectorImpl<Operation *> &opsToMove) {
   SmallVector<Value> worklist;
   DenseSet<Operation *> visited;
@@ -149,9 +153,16 @@ static void collectDefChain(Value root, Region *boundary,
     if (!defOp) continue;
     if (!boundary->isAncestor(defOp->getParentRegion())) continue;
     if (!visited.insert(defOp).second) continue;
+    // Tensor allocs are memory allocations that cannot be safely cloned
+    // (the clone is a separate buffer) or moved (external users like
+    // dma.copy write to the original).  If the assertion's def-chain
+    // crosses an alloc, the assertion depends on DMA-loaded data and
+    // must not be hoisted.
+    if (isa<TensorAllocOp>(defOp)) return false;
     opsToMove.push_back(defOp);
     for (Value operand : defOp->getOperands()) worklist.push_back(operand);
   }
+  return true;
 }
 
 /// Check that every operand of `op` dominates `op` in its new position.
@@ -303,7 +314,9 @@ struct HoistAssertionsPass
       if (target.site == AssertSite::ENTRY) {
         auto &entryBlock = kernel.getBody().front();
         SmallVector<Operation *> chain;
-        collectDefChain(assertOp.getCondition(), &kernel.getBody(), chain);
+        if (!collectDefChain(assertOp.getCondition(), &kernel.getBody(),
+                             chain))
+          continue;  // def-chain crosses a tensor alloc; cannot hoist
         chain.push_back(assertOp);
 
         // If all ops in the chain are already in the entry block, there
@@ -323,7 +336,9 @@ struct HoistAssertionsPass
         }
       } else if (target.site == AssertSite::HOIST && target.insertBefore) {
         SmallVector<Operation *> chain;
-        collectDefChain(assertOp.getCondition(), &kernel.getBody(), chain);
+        if (!collectDefChain(assertOp.getCondition(), &kernel.getBody(),
+                             chain))
+          continue;  // def-chain crosses a tensor alloc; cannot hoist
         chain.push_back(assertOp);
 
         // Same guard: if everything is already in the right block and
