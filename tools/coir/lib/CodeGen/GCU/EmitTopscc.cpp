@@ -1366,6 +1366,35 @@ private:
     os() << getIndent() << "// parallel level="
        << stringifyParallelLevel(level) << "\n";
 
+    // Pre-scan for event ops and declare all events at this scope.
+    if (level == ParallelLevel::THREAD) {
+      llvm::SmallVector<std::string> eventNames;
+      op->walk([&](Operation *innerOp) {
+        if (auto ew = dyn_cast<EventWaitOp>(innerOp))
+          eventNames.push_back(ew.getEventName().str());
+        else if (auto et = dyn_cast<EventTriggerOp>(innerOp))
+          eventNames.push_back(et.getEventName().str());
+      });
+      llvm::DenseSet<StringRef> seen;
+      for (auto &name : eventNames) {
+        if (declaredEvents.insert(name).second) {
+          os() << getIndent() << "__shared__ __volatile__ bool " << name << ";\n";
+        }
+      }
+      if (!eventNames.empty()) {
+        os() << getIndent() << "if (__tops_tid_x() == 0) {\n";
+        incIndent();
+        llvm::DenseSet<StringRef> inited;
+        for (auto &name : eventNames) {
+          if (inited.insert(name).second)
+            os() << getIndent() << name << " = false;\n";
+        }
+        decIndent();
+        os() << getIndent() << "}\n";
+        os() << getIndent() << "__syncthreads();\n";
+      }
+    }
+
     if (level == ParallelLevel::DEVICE) {
       for (unsigned i = 0; i < args.size(); ++i) {
         valueNames[args[i]] = "__device_id";
@@ -2865,6 +2894,7 @@ private:
 
   void emitEventTrigger(EventTriggerOp op) {
     auto name = op.getEventName().str();
+    ensureEventDeclared(name);
     os() << getIndent() << name;
     if (auto sub = op.getSubscript())
       os() << "[" << sub->str() << "]";
@@ -2873,11 +2903,24 @@ private:
 
   void emitEventWait(EventWaitOp op) {
     auto name = op.getEventName().str();
+    ensureEventDeclared(name);
     std::string ref = name;
     if (auto sub = op.getSubscript())
       ref += "[" + sub->str() + "]";
     os() << getIndent() << "while (" << ref << " == false) continue;\n";
     os() << getIndent() << ref << " = false;\n";
+  }
+
+  // Lazily declare event variables on first use (fallback if not pre-scanned).
+  DenseSet<StringRef> declaredEvents;
+  void ensureEventDeclared(const std::string &name) {
+    // Events should already be declared by the parallel block pre-scan.
+    // This is a fallback for events used outside parallel blocks.
+    if (declaredEvents.insert(name).second) {
+      os() << getIndent() << "__shared__ __volatile__ bool " << name << ";\n";
+      os() << getIndent() << "if (__tops_tid_x() == 0) " << name << " = false;\n";
+      os() << getIndent() << "__syncthreads();\n";
+    }
   }
 
 
@@ -3019,11 +3062,57 @@ private:
         if (callee == "println") fmt += "\\n";
       }
 
+      // gcu200/210 printf doesn't support %s; use %d with 1/0 instead.
+      bool noStringPrintf = (archNum < 300);
+      if (noStringPrintf) {
+        std::string newFmt;
+        for (size_t i = 0; i < fmt.size(); ++i) {
+          if (fmt[i] == '%' && i + 1 < fmt.size() && fmt[i + 1] == 's') {
+            newFmt += "%d";
+            ++i; // skip 's'
+          } else {
+            newFmt += fmt[i];
+          }
+        }
+        fmt = newFmt;
+      }
+
       os() << getIndent() << "printf(\"" << fmt << "\"";
+      // Parse format specifiers to emit type-appropriate casts.
+      size_t fmtPos = 0;
       for (auto arg : args) {
         auto ty = arg.getType();
         os() << ", ";
-        if (mlir::isa<mlir::FloatType>(ty))
+        // Find the next format specifier in the format string.
+        while (fmtPos < fmt.size() && fmt[fmtPos] != '%') fmtPos++;
+        bool isBoolFmt = false;
+        bool isFloatFmt = false;
+        bool isPtrFmt = false;
+        if (fmtPos < fmt.size()) {
+          if (fmtPos + 1 < fmt.size() && fmt[fmtPos + 1] == 'd' && noStringPrintf)
+            isBoolFmt = true; // %d was originally %s for bool
+          else if (fmtPos + 1 < fmt.size() && fmt[fmtPos + 1] == 's')
+            isBoolFmt = true;
+          else if (fmtPos + 1 < fmt.size() && fmt[fmtPos + 1] == 'f')
+            isFloatFmt = true;
+          else if (fmtPos + 1 < fmt.size() && fmt[fmtPos + 1] == 'p')
+            isPtrFmt = true;
+          fmtPos += 2; // skip %X
+        }
+        if (isBoolFmt) {
+          if (noStringPrintf)
+            os() << "(" << getName(arg) << " ? 1 : 0)";
+          else if (args.empty() || !arg)
+            os() << "\"false\"";
+          else
+            os() << "(" << getName(arg) << " ? \"true\" : \"false\")";
+        } else if (isPtrFmt)
+          os() << "(void*)" << getName(arg);
+        else if (ty.isF16())
+          os() << "f16_to_f32(" << getName(arg) << ")";
+        else if (ty.isBF16())
+          os() << "(float)" << getName(arg);
+        else if (mlir::isa<mlir::FloatType>(ty) || isFloatFmt)
           os() << "(double)" << getName(arg);
         else
           os() << "(long long)" << getName(arg);

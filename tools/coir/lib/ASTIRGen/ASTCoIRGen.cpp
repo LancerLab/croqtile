@@ -1344,6 +1344,53 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
       if (lbValue)
         mappedIV = builder.create<mlir::arith::AddIOp>(loc, ivArg, lbValue);
       MapValue(lr->GetIVName(), mappedIV);
+
+      // For multi-dim foreach: decompose flat IV into per-dimension IVs.
+      // e.g., foreach idx in [1,2,1] -> idx__elem__0, idx__elem__1, idx__elem__2
+      auto rvName = lr->GetRVName();
+      auto symType = GetSymbolType(rvName);
+      if (auto bty = dyn_cast<BoundedType>(symType)) {
+        if (bty->HasValidBound()) {
+          auto ubs = bty->GetUpperBounds();
+          if (ubs.IsValid() && ubs.Value().size() > 1) {
+            auto dims = ubs.Value();
+            size_t numDims = dims.size();
+            std::string baseName = lr->GetIVName();
+            // Compute strides: stride[i] = product of dims[i+1..end]
+            llvm::SmallVector<int64_t> strides(numDims, 1);
+            for (int d = (int)numDims - 2; d >= 0; --d) {
+              int64_t dimVal = 1;
+              if (dims[d + 1] && dims[d + 1]->IsNumeric())
+                dimVal = EvalToInt(dims[d + 1]);
+              strides[d] = strides[d + 1] * dimVal;
+            }
+            for (size_t d = 0; d < numDims; ++d) {
+              std::string elemName = baseName + "__elem__" + std::to_string(d);
+              mlir::Value elemVal = mappedIV;
+              // elem_d = (flat / stride_d) % dim_d
+              if (strides[d] > 1) {
+                auto strideConst = builder.create<mlir::arith::ConstantIndexOp>(
+                    loc, strides[d]);
+                elemVal = builder.create<mlir::arith::DivSIOp>(
+                    loc, elemVal, strideConst);
+              }
+              int64_t dimVal = 1;
+              if (dims[d] && dims[d]->IsNumeric())
+                dimVal = EvalToInt(dims[d]);
+              if (dimVal > 1) {
+                auto dimConst = builder.create<mlir::arith::ConstantIndexOp>(
+                    loc, dimVal);
+                elemVal = builder.create<mlir::arith::RemSIOp>(
+                    loc, elemVal, dimConst);
+              } else {
+                // dim is 1, so index is always 0
+                elemVal = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
+              }
+              MapValue(elemName, elemVal);
+            }
+          }
+        }
+      }
     }
   }
 
@@ -3204,6 +3251,7 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
   std::string printFormatStr;
   bool isPrint = (fname == "print" || fname == "println");
   if (isPrint) {
+    operands.clear(); // Rebuild operands from scratch for print.
     llvm::SmallVector<mlir::Value> numericOps;
     // Helper: re-escape control characters for C++ string literal emission.
     auto escapeForC = [](const std::string &s) -> std::string {
@@ -3222,24 +3270,101 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
       }
       return out;
     };
+    // Build format string and collect numeric operands.
+    // For compound types (ITuple, MDSpan), expand to multiple %lld args.
+    auto emitValueListFormat = [&](const ValueList &vl, char open,
+                                   char close) {
+      // First, try to materialize all values.
+      llvm::SmallVector<mlir::Value> vals;
+      for (size_t i = 0; i < vl.size(); ++i) {
+        auto v = MaterializeSBE(loc, vl[i]);
+        if (!v) {
+          // Fallback: try LookupValue for symbolic values (foreach IVs).
+          if (auto symVal = Choreo::dyn_cast<sbe::SymbolicValue>(vl[i])) {
+            auto name = UnScopedName(symVal->Value());
+            v = LookupValue(name);
+            if (!v)
+              v = LookupValue(symVal->Value());
+            // For multi-dim foreach: idx__elem__N -> try base name "idx"
+            if (!v) {
+              auto elemPos = name.find("__elem__");
+              if (elemPos != std::string::npos) {
+                auto baseName = name.substr(0, elemPos);
+                v = LookupValue(baseName);
+              }
+            }
+          }
+        }
+        if (v) {
+          if (!mlir::isa<mlir::IntegerType>(v.getType()) ||
+              v.getType().getIntOrFloatBitWidth() != 32) {
+            auto i32Ty = mlir::IntegerType::get(&IRContext(), 32,
+                                                 mlir::IntegerType::Signless);
+            v = builder.create<mlir::arith::IndexCastOp>(loc, i32Ty, v);
+          }
+        } else {
+          // Try to evaluate as compile-time constant.
+          if (auto nv = dyn_cast<sbe::NumericValue>(vl[i])) {
+            auto i32Ty = mlir::IntegerType::get(&IRContext(), 32,
+                                                 mlir::IntegerType::Signless);
+            v = builder.create<mlir::arith::ConstantIntOp>(
+                loc, nv->Value(), i32Ty);
+          }
+        }
+        vals.push_back(v);
+      }
+      // Build format string matching only materialized values.
+      printFormatStr += open;
+      bool first = true;
+      for (auto v : vals) {
+        if (!v) continue;
+        if (!first) printFormatStr += ", ";
+        printFormatStr += "%lld";
+        first = false;
+        operands.push_back(v);
+      }
+      printFormatStr += close;
+    };
+
     for (auto &arg : args) {
       auto argType = NodeType(*arg);
+      auto *expr = dyn_cast<AST::Expr>(arg.get());
       if (isa<StringType>(argType)) {
         // String literal: extract the raw string value and re-escape.
         std::string sv;
-        if (auto *expr = dyn_cast<AST::Expr>(arg.get())) {
+        if (expr) {
           if (auto sl = expr->GetString())
             sv = sl->Val();
         } else if (auto *sl = dyn_cast<AST::StringLiteral>(arg.get())) {
           sv = sl->Val();
         }
         printFormatStr += escapeForC(sv);
-      } else if (isa<ITupleType>(argType) ||
-                 (argType && (argType->GetBaseType() == BaseType::ITUPLE ||
-                              argType->GetBaseType() == BaseType::BOUNDED_INT ||
-                              argType->GetBaseType() == BaseType::BOUNDED_ITUPLE))) {
-        // ITuple/BoundedInt (parallel variables): wrap with braces.
-        printFormatStr += "{%lld}";
+      } else if (isa<MDSpanType>(argType) && expr && expr->Opts().HasVals()) {
+        // MDSpan (e.g., mds : [1,2,3]): expand to [%lld, %lld, %lld]
+        emitValueListFormat(expr->Opts().GetVals(), '[', ']');
+      } else if (isa<ITupleType>(argType) && expr && expr->Opts().HasVals()) {
+        // ITuple with multiple values: expand to {%lld, %lld, ...}
+        auto &vals = expr->Opts().GetVals();
+        if (vals.size() > 1)
+          emitValueListFormat(vals, '{', '}');
+        else
+          printFormatStr += "{%lld}";
+      } else if (argType &&
+                 (argType->GetBaseType() == BaseType::BOUNDED_INT ||
+                  argType->GetBaseType() == BaseType::BOUNDED_ITUPLE) &&
+                 expr && expr->Opts().HasVals()) {
+        // BoundedInt/BoundedITuple: parallel variables or tuples.
+        auto &vals = expr->Opts().GetVals();
+        if (vals.size() > 1)
+          emitValueListFormat(vals, '{', '}');
+        else
+          printFormatStr += "{%lld}";
+      } else if (isa<BooleanType>(argType) || isa<EventType>(argType)) {
+        printFormatStr += "%s";
+      } else if (isa<AddrType>(argType)) {
+        printFormatStr += "%p";
+      } else if (argType && IsFloatType(argType->GetBaseType())) {
+        printFormatStr += "%f";
       } else {
         printFormatStr += "%lld";
       }
@@ -3247,24 +3372,54 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
     if (fname == "println")
       printFormatStr += "\\n";
 
-    // Re-emit only non-string operands
-    operands.clear();
+    // Emit remaining non-string, non-compound operands.
+    // (Compound types were already handled by emitValueListFormat above.)
+    auto isCompoundPrintArg = [](const ptr<Type> &ty, AST::Expr *expr) -> bool {
+      if (!ty) return false;
+      if (isa<MDSpanType>(ty)) return true;
+      if (expr && expr->Opts().HasVals()) {
+        auto bt = ty->GetBaseType();
+        if (bt == BaseType::ITUPLE || bt == BaseType::BOUNDED_INT ||
+            bt == BaseType::BOUNDED_ITUPLE)
+          return expr->Opts().GetVals().size() > 1;
+      }
+      return false;
+    };
     for (auto &arg : args) {
       auto argType = NodeType(*arg);
+      auto *expr = dyn_cast<AST::Expr>(arg.get());
       if (isa<StringType>(argType)) continue;
+      if (isCompoundPrintArg(argType, expr)) continue;
       mlir::Value v = EmitExpr(*arg);
       if (!v) {
         if (auto name = AST::GetName(*arg))
           v = LookupValue(*name);
       }
+      // AddrType: resolve &tensor to the tensor's base pointer.
+      if (!v && isa<AddrType>(argType)) {
+        if (expr && expr->GetOp() == Op::AddrOf) {
+          if (auto innerName = AST::GetName(*expr->GetR()))
+            v = LookupValue(*innerName);
+        }
+      }
+      // EventType/BooleanType: resolve to i1 value.
+      if (!v && (isa<EventType>(argType) || isa<BooleanType>(argType))) {
+        if (expr && expr->IsReference()) {
+          if (auto *id = dyn_cast<AST::Identifier>(expr->GetR().get()))
+            v = LookupValue(id->name);
+        }
+        // Fallback: emit constant false for unresolved events.
+        if (!v) {
+          auto i1Ty = mlir::IntegerType::get(&IRContext(), 1);
+          v = builder.create<mlir::arith::ConstantIntOp>(loc, 0, i1Ty);
+        }
+      }
       if (!v) {
-        if (auto *expr = dyn_cast<AST::Expr>(arg.get())) {
-          if (expr->Opts().HasVal()) {
-            int64_t val = EvalToInt(expr->Opts().GetVal());
-            auto ty = mlir::IntegerType::get(&IRContext(), 32,
-                                             mlir::IntegerType::Signless);
-            v = builder.create<mlir::arith::ConstantIntOp>(loc, val, ty);
-          }
+        if (expr && expr->Opts().HasVal()) {
+          int64_t val = EvalToInt(expr->Opts().GetVal());
+          auto ty = mlir::IntegerType::get(&IRContext(), 32,
+                                           mlir::IntegerType::Signless);
+          v = builder.create<mlir::arith::ConstantIntOp>(loc, val, ty);
         }
       }
       if (v) operands.push_back(v);
