@@ -2129,9 +2129,13 @@ private:
   // uses dimArgMeta + dim_checks to map it to the corresponding dim arg.
   std::string findDynamicDimName(Value tensor, coir::TensorType /*tty*/,
                                  const std::string & /*mdspanSoFar*/) {
-    auto *kernel = tensor.getParentBlock()->getParentOp();
-    if (!kernel) return "0";
-    auto kOp = cast<KernelOp>(kernel);
+    // Walk up through nested region ops (e.g. coir.foreach) to find
+    // the enclosing KernelOp.
+    auto *parentOp = tensor.getParentBlock()->getParentOp();
+    auto kOp = dyn_cast<KernelOp>(parentOp);
+    if (!kOp)
+      kOp = parentOp->getParentOfType<KernelOp>();
+    if (!kOp) return "0";
     auto dimArgMeta = getDimArgs(kOp);
     auto fnType = kOp.getFunctionType();
     unsigned numOrigInputs = fnType.getNumInputs() - dimArgMeta.size();

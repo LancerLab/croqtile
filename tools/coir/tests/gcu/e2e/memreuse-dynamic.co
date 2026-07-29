@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GCU
-// RUN-COCR: cocc -t topscc -es %s | FileCheck --check-prefix=DEV %s
-// RUN-COCR: cocc -t topscc -gs %s | FileCheck --check-prefix=HOST %s
+// RUN: cocc -t topscc -es %s | FileCheck --check-prefix=DEV %s
+// RUN: cocc -t topscc -gs %s | FileCheck --check-prefix=HOST %s
 //
 // DEV checks: device code uses extern __shared__ + mr_offset_* kernel args.
 // HOST checks: host wrapper emits HeapSimulator with const interference matrix.
