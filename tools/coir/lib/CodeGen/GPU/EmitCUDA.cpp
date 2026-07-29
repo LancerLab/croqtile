@@ -2581,9 +2581,22 @@ private:
       return;
     }
 
-    // Collect runtime offsets if any
+    // Collect runtime offsets for the global-memory side of the copy.
+    // For loads (global->shared): use source-side offsets.
+    // For stores (shared->global): use dest-side offsets.
+    // When both sides have TensorTileOps, the chain has two DMADescRuntimeOps
+    // (src then dst); descVal points to the last one. Walk back for loads.
     SmallVector<Value, 4> offsets;
-    auto offsIt = descRuntimeOffsets.find(descVal);
+    Value lookupVal = descVal;
+    if (desc.isLoad) {
+      // Walk back past any dst-side DMADescRuntimeOp to find the src-side one
+      while (lookupVal) {
+        auto rtOp = lookupVal.getDefiningOp<DMADescRuntimeOp>();
+        if (!rtOp || !rtOp->getAttr("dst_offsets")) break;
+        lookupVal = rtOp.getIn();
+      }
+    }
+    auto offsIt = descRuntimeOffsets.find(lookupVal);
     if (offsIt != descRuntimeOffsets.end())
       offsets = offsIt->second;
 
