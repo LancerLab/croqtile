@@ -1,7 +1,7 @@
 // REQUIRES: TARGET-GCU300
-// RUN: choreo -t topscc -gs -arch=gcu300 %s | bash -s -- --execute 2>&1 | FileCheck %s
+// RUN: choreo -t topscc -gs -arch=gcu300 %s | bash -s -- --execute 2>&1 | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
-// RUN: cocc -t topscc -gs %s | bash -s -- --execute 2>&1 | FileCheck --check-prefix=COCC %s
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute 2>&1 | FileCheck --check-prefix=COCC --match-full-lines %s
 
 __co__ void foo(s32 [N, M] i) {
   println("foo begin");
@@ -191,16 +191,16 @@ int main()
 // CHECK: passed
 
 // cocc-specific checks: sequential output
-// COCC: [0, 0] foo begin
-// COCC: [0, 0] scalar:
+// COCC: foo begin
+// COCC: scalar:
 // COCC: a: 100
 // COCC: M: 64
 // COCC: f: 1.300000
 // COCC: d: 2.600000
 // COCC: b: false
 // COCC: d+dd: 6.500000
-// COCC: [0, 0] &i: 0x{{.*}}
-// COCC: [0, 0] &ii: 0x{{.*}}
+// COCC: &i: 0x{{.*}}
+// COCC: &ii: {{.*}}
 // COCC: [0, 0] foo dev begin
 // COCC: [0, 0] b: false
 // COCC: [0, 0] d: 4.100000
@@ -222,7 +222,7 @@ int main()
 // COCC: [0, 0] bi: {130}
 // COCC: [0, 0] bi: {131}
 // COCC: [0, 0] foo dev ends
-// COCC: [0, 0] foo end
+// COCC: foo end
 
 // COCC-DAG: [0, 1] p: {1}
 // COCC-DAG: [0, 0] p: {0}
@@ -233,7 +233,7 @@ int main()
 // COCC-DAG: [0, 0] e before trigger: false
 // COCC: [0, 0] first
 // COCC: [0, 1] second
-// COCC-DAG: e after  trigger:
+// COCC-DAG: [0, 0] e after  trigger: true
 // COCC: host print after the two dev begins
 // COCC: f16_in[0,0] in host: [[COCC_F16:.*]]
 // COCC: bf16_in[0,0] in host: [[COCC_BF16:.*]]

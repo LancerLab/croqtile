@@ -455,6 +455,19 @@ def EventWaitOp : CoIR_Op<"event.wait", []> {
   let assemblyFormat = "$event_name (`[` $subscript^ `]`)? attr-dict";
 }
 
+def EventRefOp : CoIR_Op<"event.ref", [Pure]> {
+  let summary = "Read the current value of a named event variable";
+  let description = [{
+    Returns the current boolean value of a shared event variable.
+    The code generator emits the event variable name directly (e.g., `e`)
+    rather than a constant, so the value reflects runtime state changes
+    from trigger/wait operations.
+  }];
+  let arguments = (ins StrAttr:$event_name);
+  let results = (outs I1:$result);
+  let assemblyFormat = "$event_name attr-dict";
+}
+
 def AsyncUndefOp : CoIR_Op<"async.undef", [NoMemoryEffect]> {
   let summary = "Placeholder async token for uninitialized futures";
   let description = [{

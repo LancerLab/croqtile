@@ -3408,7 +3408,15 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
           if (auto *id = dyn_cast<AST::Identifier>(expr->GetR().get()))
             v = LookupValue(id->name);
         }
-        // Fallback: emit constant false for unresolved events.
+        // Mutable event: create a named reference so the code generator
+        // emits the event variable name instead of a constant.
+        if (!v && isa<EventType>(argType) && expr && expr->IsReference()) {
+          if (auto *id = dyn_cast<AST::Identifier>(expr->GetR().get())) {
+            v = builder.create<coir::EventRefOp>(
+                    loc, builder.getStringAttr(id->name)).getResult();
+          }
+        }
+        // Fallback: emit constant false for unresolved booleans.
         if (!v) {
           auto i1Ty = mlir::IntegerType::get(&IRContext(), 1);
           v = builder.create<mlir::arith::ConstantIntOp>(loc, 0, i1Ty);

@@ -122,6 +122,14 @@ private:
   /// Whether the dynamic shared-memory extern declaration has been emitted.
   bool dynSpmEmitted_ = false;
 
+  /// When true, emitOp emits host-side code: skips parallel blocks,
+  /// emits tensor.alloc as nullptr, etc.
+  bool isEmittingHost_ = false;
+
+  /// Values from host-side tensor.alloc (emitted as nullptr).
+  /// These should NOT have .data() appended in host print calls.
+  llvm::DenseSet<mlir::Value> hostTensorAllocs_;
+
   bool hasGroupLevel() const override { return archNum >= 400; }
   bool supportsFP8() const override { return archNum >= 400; }
   bool supportsFP6() const override { return false; }
@@ -339,6 +347,52 @@ private:
     return s;
   }
 
+  /// Check if an op is a pure computation with no side effects.
+  /// Pure ops can be safely emitted in both host and device contexts.
+  static bool isPureOp(Operation *op) {
+    return isa<arith::ConstantOp, arith::IndexCastOp, arith::SelectOp,
+               arith::ExtSIOp, arith::ExtFOp, arith::TruncIOp,
+               arith::TruncFOp>(op) ||
+           op->hasTrait<mlir::OpTrait::IsCommutative>() ||
+           // All standard arith binary/unary ops:
+           isa<arith::AddIOp, arith::AddFOp, arith::SubIOp, arith::SubFOp,
+               arith::MulIOp, arith::MulFOp, arith::DivSIOp, arith::DivFOp,
+               arith::RemSIOp, arith::AndIOp, arith::OrIOp, arith::XOrIOp,
+               arith::ShLIOp, arith::ShRSIOp, arith::ShRUIOp,
+               arith::CmpIOp, arith::CmpFOp, arith::NegFOp>(op);
+  }
+
+  /// Collect top-level kernel ops that are reachable from parallel blocks
+  /// through operand chains. These "device-needed" ops must be emitted in
+  /// the device function (if pure) so that parallel-block code can use them.
+  llvm::DenseSet<Operation *>
+  collectDeviceNeededOps(KernelOp kernel) {
+    llvm::DenseSet<Operation *> needed;
+    llvm::SmallVector<Value> worklist;
+
+    // Seed: all values used by any op nested inside a parallel block.
+    kernel.walk([&](ParallelOp par) {
+      par.walk([&](Operation *innerOp) {
+        for (auto operand : innerOp->getOperands())
+          worklist.push_back(operand);
+      });
+    });
+
+    // BFS: follow defining ops to top-level kernel body ops.
+    while (!worklist.empty()) {
+      Value v = worklist.pop_back_val();
+      if (!v) continue;
+      if (auto *defOp = v.getDefiningOp()) {
+        if (defOp->getBlock() == &kernel.getBody().front() &&
+            !isa<ParallelOp>(defOp) && needed.insert(defOp).second) {
+          for (auto operand : defOp->getOperands())
+            worklist.push_back(operand);
+        }
+      }
+    }
+    return needed;
+  }
+
   void emitDeviceFunction(KernelOp kernel) {
     entryAssertions.clear();
     preCollectStubs(kernel);
@@ -437,6 +491,31 @@ private:
     os() << ") {\n";
     incIndent();
 
+    // Emit dimension variable aliases so hoisted constants can reference
+    // them by name (e.g., "L", "N", "M").
+    auto dimArgMeta = getDimArgs(kernel);
+    if (!body.empty()) {
+      auto bodyArgs = body.getArguments();
+      auto mrOffsets =
+          kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_offset_args");
+      auto mrSpmSize =
+          kernel->getAttrOfType<mlir::StringAttr>("coir.mr_spm_size_arg");
+      unsigned numMrOffsets = mrOffsets ? mrOffsets.size() : 0;
+      unsigned mrBaseIdx =
+          bodyArgs.size() - numMrOffsets - (mrSpmSize ? 1 : 0);
+      unsigned numOrigInputs = mrBaseIdx - dimArgMeta.size();
+      for (unsigned i = 0; i < dimArgMeta.size(); ++i) {
+        unsigned argIdx = numOrigInputs + i;
+        if (argIdx < bodyArgs.size()) {
+          std::string argName = valueNames.count(bodyArgs[argIdx])
+                                    ? valueNames[bodyArgs[argIdx]]
+                                    : "arg" + std::to_string(argIdx);
+          os() << getIndent() << "const int " << dimArgMeta[i].name
+               << " = " << argName << ";\n";
+        }
+      }
+    }
+
     // Pre-scan: collect all SPM pool names and emit pool declarations
     // at the function level to ensure they're in scope for all uses.
     spmNames_.clear();
@@ -469,8 +548,29 @@ private:
       }
     }
 
-    for (auto &op : body.front().getOperations())
-      emitOp(&op);
+    // Only emit: (1) parallel blocks, and (2) pure top-level ops that are
+    // reachable from parallel blocks (hoisted constants, arithmetic, etc.).
+    // Side-effecting host ops (print, tensor.alloc) are skipped — they
+    // belong to the host function.
+    auto deviceNeeded = collectDeviceNeededOps(kernel);
+    for (auto &op : body.front().getOperations()) {
+      if (isa<ParallelOp>(&op) || isa<KernelReturnOp>(&op))
+        emitOp(&op);
+      else if (deviceNeeded.count(&op) && isPureOp(&op))
+        emitOp(&op);
+      else if (deviceNeeded.count(&op) && isa<TensorAllocOp>(&op)) {
+        // Device-needed tensor alloc: emit as a zero-size array for
+        // address-taking purposes (e.g. println("&ii: ", &ii)).
+        // Skip return values — they're mapped to output parameters.
+        if (!returnValues.count(op.getResult(0))) {
+          auto tty = cast<coir::TensorType>(op.getResult(0).getType());
+          std::string name = getName(op.getResult(0));
+          os() << getIndent() << emitType(tty.getElementType())
+               << " " << name << "[0];\n";
+        }
+      }
+      // else: host-only op — skip in device function
+    }
 
     decIndent();
     os() << "}\n\n";
@@ -706,11 +806,6 @@ private:
 
   void emitHeapSimulator(const MRInfo &mr,
                          llvm::SmallVectorImpl<DimArgMeta> &dimArgMeta) {
-    // Emit dimension aliases so chunk size exprs can reference them.
-    for (auto &da : dimArgMeta) {
-      os() << "  unsigned " << da.name << " = (int)p" << da.paramIdx
-           << ".shape()[" << da.dimIdx << "];\n";
-    }
     os() << "  // JIT memory reuse\n";
     os() << "  HeapSimulator::Chunks " << mr.chunksName << ";\n";
     for (auto chunkAttr : mr.chunks) {
@@ -745,6 +840,41 @@ private:
     os() << "    for (const auto& [id, off] : " << mr.resultName
          << ".chunk_offsets)\n";
     os() << "      " << mr.offsetsName << "[__idx++] = off; }\n";
+  }
+
+  /// Emit non-parallel operations from the kernel body as host code.
+  /// When \p preOnly is true, emit only ops before the first parallel block.
+  /// When \p preOnly is false, emit only ops after the first parallel block.
+  void emitHostBodyOps(KernelOp kernel, unsigned numOrigInputs,
+                       const llvm::SmallVectorImpl<DimArgMeta> &dimArgMeta,
+                       bool preOnly) {
+    isEmittingHost_ = true;
+    auto &body = kernel.getBody();
+    if (body.empty()) { isEmittingHost_ = false; return; }
+
+    // Map kernel block arguments to host parameter names (p0, p1, ...).
+    auto args = body.getArguments();
+    for (unsigned i = 0; i < numOrigInputs && i < args.size(); ++i)
+      valueNames[args[i]] = "p" + std::to_string(i);
+    // Map dimension arguments to local variable names (N, M, ...).
+    for (unsigned i = 0; i < dimArgMeta.size(); ++i) {
+      unsigned argIdx = numOrigInputs + i;
+      if (argIdx < args.size())
+        valueNames[args[argIdx]] = dimArgMeta[i].name;
+    }
+
+    bool seenParallel = false;
+    for (auto &op : body.front().getOperations()) {
+      if (isa<ParallelOp>(&op)) {
+        seenParallel = true;
+        continue;
+      }
+      if (preOnly && seenParallel) break;
+      if (!preOnly && !seenParallel) continue;
+      if (isa<KernelReturnOp>(&op)) continue;
+      emitOp(&op);
+    }
+    isEmittingHost_ = false;
   }
 
   void emitHostEntry(KernelOp kernel) override {
@@ -841,30 +971,46 @@ private:
     if (!lcForHost.streamName.empty())
       os() << ", topsStream_t " << lcForHost.streamName;
     os() << ") {\n";
+    incIndent();
     emitDimChecks(kernel);
+
+    // Always declare dimension variables (N, M, L, ...) in the host function
+    // so hoisted constants can reference them by name.
+    for (auto &da : dimArgMeta) {
+      os() << getIndent() << "unsigned " << da.name << " = (int)p"
+           << da.paramIdx << ".shape()[" << da.dimIdx << "];\n";
+    }
+
     if (mrInfo.hasDynamicMR)
       emitHeapSimulator(mrInfo, dimArgMeta);
 
     if (needsDevice && resTy) {
+      // Emit pre-parallel host code (constants, prints, etc.)
+      emitHostBodyOps(kernel, numOrigInputs, dimArgMeta, /*preOnly=*/true);
       emitEntryAssertions(kernel);
       emitDeviceOffloadBody(kernel, resTy, mrInfo);
+      // Emit post-parallel host code
+      emitHostBodyOps(kernel, numOrigInputs, dimArgMeta, /*preOnly=*/false);
     } else if (needsDevice && !resTy) {
+      // Emit pre-parallel host code (constants, prints, etc.)
+      emitHostBodyOps(kernel, numOrigInputs, dimArgMeta, /*preOnly=*/true);
       emitEntryAssertions(kernel);
       emitVoidDeviceOffloadBody(kernel, mrInfo);
+      // Emit post-parallel host code
+      emitHostBodyOps(kernel, numOrigInputs, dimArgMeta, /*preOnly=*/false);
     } else {
       // No device offload: emit the body directly (the function IS the
       // host function, just like how the AST codegen handles __co__
       // functions without parallel-by).
       auto &body = kernel.getBody();
       if (!body.empty()) {
-        incIndent();
         for (auto &op : body.front().getOperations())
           emitOp(&op);
-        decIndent();
       }
       emitEntryAssertions(kernel);
     }
 
+    decIndent();
     os() << "}\n\n";
   }
 
@@ -1349,6 +1495,12 @@ private:
       emitEventTrigger(evtTrig);
     else if (auto evtWait = dyn_cast<EventWaitOp>(op))
       emitEventWait(evtWait);
+    else if (auto evtRef = dyn_cast<EventRefOp>(op)) {
+      // Emit event ref as an alias to the event variable name.
+      std::string name = getName(evtRef.getResult());
+      os() << getIndent() << "bool " << name << " = "
+           << evtRef.getEventName() << ";\n";
+    }
     else if (auto assertOp = dyn_cast<AssertOp>(op))
       emitAssert(assertOp);
     else if (auto elemCopy = dyn_cast<ElementCopyOp>(op))
@@ -1362,6 +1514,9 @@ private:
   }
 
   void emitParallel(ParallelOp op) override {
+    // In host mode, parallel blocks are handled by the kernel launch
+    // in emitVoidDeviceOffloadBody/emitDeviceOffloadBody — skip here.
+    if (isEmittingHost_) return;
     auto level = op.getLevel();
     auto bounds = op.getBounds();
     auto &body = op.getBody();
@@ -2581,6 +2736,14 @@ private:
     auto tensorTy = cast<coir::TensorType>(op.getResult().getType());
     std::string name = getName(op.getResult());
 
+    // Host-side tensor alloc: emit as nullptr (used only for address printing).
+    if (isEmittingHost_) {
+      os() << getIndent() << emitType(tensorTy.getElementType()) << "* "
+           << name << " = nullptr;\n";
+      hostTensorAllocs_.insert(op.getResult());
+      return;
+    }
+
     // -- Memory reuse: buffer is aliased into a shared SPM at a given offset --
     if (op.getReuseOffsetAttr()) {
       // Dynamic offset: use kernel parameter instead of constant.
@@ -3111,9 +3274,13 @@ private:
             os() << "\"false\"";
           else
             os() << "(" << getName(arg) << " ? \"true\" : \"false\")";
-        } else if (isPtrFmt)
-          os() << "(void*)" << getName(arg);
-        else if (ty.isF16())
+        } else if (isPtrFmt) {
+          if (isEmittingHost_ && mlir::isa<coir::TensorType>(ty) &&
+              !hostTensorAllocs_.count(arg))
+            os() << "(void*)" << getName(arg) << ".data()";
+          else
+            os() << "(void*)" << getName(arg);
+        } else if (ty.isF16())
           os() << "f16_to_f32(" << getName(arg) << ")";
         else if (ty.isBF16())
           os() << "(float)" << getName(arg);
@@ -3156,6 +3323,7 @@ private:
       if (auto tty = mlir::dyn_cast<coir::TensorType>(ty)) {
         os() << "(" << emitType(tty.getElementType()) << "*)"
            << getName(arg);
+        if (isEmittingHost_ && !hostTensorAllocs_.count(arg)) os() << ".data()";
       } else {
         os() << getName(arg);
       }
