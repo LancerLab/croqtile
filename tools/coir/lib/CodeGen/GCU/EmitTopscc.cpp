@@ -1345,6 +1345,27 @@ private:
     os() << ");\n";
     os() << "  choreo::abend_true(topsDeviceSynchronize());\n";
 
+    // D2H for reference output parameters (e.g. &C)
+    auto paramRefs = kernel->getAttrOfType<mlir::ArrayAttr>("coir.param_refs");
+    for (unsigned i = 0; i < numOrigInputs; ++i) {
+      auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+      if (!tty || isDeviceGlobal(tty)) continue;
+      bool isRef = false;
+      if (paramRefs && i < paramRefs.size())
+        if (auto ba = mlir::dyn_cast<mlir::BoolAttr>(paramRefs[i]))
+          isRef = ba.getValue();
+      if (!isRef) continue;
+      std::string dynBytes = emitDynamicBytesExpr(tty, i);
+      if (dynBytes.empty()) {
+        int64_t bytes = getTensorBytes(tty);
+        os() << "  choreo::abend_true(topsMemcpy(p" << i << ".data(), p" << i
+           << "__device, " << bytes << "ULL, topsMemcpyDeviceToHost));\n";
+      } else {
+        os() << "  choreo::abend_true(topsMemcpy(p" << i << ".data(), p" << i
+           << "__device, " << dynBytes << ", topsMemcpyDeviceToHost));\n";
+      }
+    }
+
     for (unsigned i = 0; i < numOrigInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (!tty || isDeviceGlobal(tty)) continue;
