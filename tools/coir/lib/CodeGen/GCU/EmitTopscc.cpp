@@ -347,8 +347,15 @@ private:
     return s;
   }
 
-  /// Check if an op is a pure computation with no side effects.
-  /// Pure ops can be safely emitted in both host and device contexts.
+  /// Check if a region contains any ParallelOp (recursively).
+  static bool regionHasParallel(Region &region) {
+    bool found = false;
+    region.walk([&](ParallelOp) { found = true; });
+    return found;
+  }
+
+  /// Check if an op is a pure computation (no side effects).
+  /// Pure ops are safe to emit in both host and device functions.
   static bool isPureOp(Operation *op) {
     return isa<arith::ConstantOp, arith::IndexCastOp, arith::SelectOp,
                arith::ExtSIOp, arith::ExtFOp, arith::TruncIOp,
@@ -360,37 +367,6 @@ private:
                arith::RemSIOp, arith::AndIOp, arith::OrIOp, arith::XOrIOp,
                arith::ShLIOp, arith::ShRSIOp, arith::ShRUIOp,
                arith::CmpIOp, arith::CmpFOp, arith::NegFOp>(op);
-  }
-
-  /// Collect top-level kernel ops that are reachable from parallel blocks
-  /// through operand chains. These "device-needed" ops must be emitted in
-  /// the device function (if pure) so that parallel-block code can use them.
-  llvm::DenseSet<Operation *>
-  collectDeviceNeededOps(KernelOp kernel) {
-    llvm::DenseSet<Operation *> needed;
-    llvm::SmallVector<Value> worklist;
-
-    // Seed: all values used by any op nested inside a parallel block.
-    kernel.walk([&](ParallelOp par) {
-      par.walk([&](Operation *innerOp) {
-        for (auto operand : innerOp->getOperands())
-          worklist.push_back(operand);
-      });
-    });
-
-    // BFS: follow defining ops to top-level kernel body ops.
-    while (!worklist.empty()) {
-      Value v = worklist.pop_back_val();
-      if (!v) continue;
-      if (auto *defOp = v.getDefiningOp()) {
-        if (defOp->getBlock() == &kernel.getBody().front() &&
-            !isa<ParallelOp>(defOp) && needed.insert(defOp).second) {
-          for (auto operand : defOp->getOperands())
-            worklist.push_back(operand);
-        }
-      }
-    }
-    return needed;
   }
 
   void emitDeviceFunction(KernelOp kernel) {
@@ -548,28 +524,21 @@ private:
       }
     }
 
-    // Only emit: (1) parallel blocks, and (2) pure top-level ops that are
-    // reachable from parallel blocks (hoisted constants, arithmetic, etc.).
-    // Side-effecting host ops (print, tensor.alloc) are skipped — they
-    // belong to the host function.
-    auto deviceNeeded = collectDeviceNeededOps(kernel);
+    // Device-side emission: parallel blocks, control-flow containing
+    // parallel blocks, and pure computations (hoisted by lowering).
+    // All other top-level ops are host code and skipped.
     for (auto &op : body.front().getOperations()) {
-      if (isa<ParallelOp>(&op) || isa<KernelReturnOp>(&op))
+      if (isa<KernelReturnOp>(&op)) continue;
+      if (isa<ParallelOp>(&op)) {
         emitOp(&op);
-      else if (deviceNeeded.count(&op) && isPureOp(&op))
+      } else if (op.getNumRegions() > 0) {
+        bool hasPar = false;
+        for (auto &region : op.getRegions())
+          if (regionHasParallel(region)) { hasPar = true; break; }
+        if (hasPar) emitOp(&op);
+      } else if (isPureOp(&op) || isa<TensorAllocOp>(&op)) {
         emitOp(&op);
-      else if (deviceNeeded.count(&op) && isa<TensorAllocOp>(&op)) {
-        // Device-needed tensor alloc: emit as a zero-size array for
-        // address-taking purposes (e.g. println("&ii: ", &ii)).
-        // Skip return values — they're mapped to output parameters.
-        if (!returnValues.count(op.getResult(0))) {
-          auto tty = cast<coir::TensorType>(op.getResult(0).getType());
-          std::string name = getName(op.getResult(0));
-          os() << getIndent() << emitType(tty.getElementType())
-               << " " << name << "[0];\n";
-        }
       }
-      // else: host-only op — skip in device function
     }
 
     decIndent();
@@ -914,41 +883,6 @@ private:
     os() << "      " << mr.offsetsName << "[__idx++] = off; }\n";
   }
 
-  /// Emit non-parallel operations from the kernel body as host code.
-  /// When \p preOnly is true, emit only ops before the first parallel block.
-  /// When \p preOnly is false, emit only ops after the first parallel block.
-  void emitHostBodyOps(KernelOp kernel, unsigned numOrigInputs,
-                       const llvm::SmallVectorImpl<DimArgMeta> &dimArgMeta,
-                       bool preOnly) {
-    isEmittingHost_ = true;
-    auto &body = kernel.getBody();
-    if (body.empty()) { isEmittingHost_ = false; return; }
-
-    // Map kernel block arguments to host parameter names (p0, p1, ...).
-    auto args = body.getArguments();
-    for (unsigned i = 0; i < numOrigInputs && i < args.size(); ++i)
-      valueNames[args[i]] = "p" + std::to_string(i);
-    // Map dimension arguments to local variable names (N, M, ...).
-    for (unsigned i = 0; i < dimArgMeta.size(); ++i) {
-      unsigned argIdx = numOrigInputs + i;
-      if (argIdx < args.size())
-        valueNames[args[argIdx]] = dimArgMeta[i].name;
-    }
-
-    bool seenParallel = false;
-    for (auto &op : body.front().getOperations()) {
-      if (isa<ParallelOp>(&op)) {
-        seenParallel = true;
-        continue;
-      }
-      if (preOnly && seenParallel) break;
-      if (!preOnly && !seenParallel) continue;
-      if (isa<KernelReturnOp>(&op)) continue;
-      emitOp(&op);
-    }
-    isEmittingHost_ = false;
-  }
-
   void emitHostEntry(KernelOp kernel) override {
     auto fnType = kernel.getFunctionType();
     auto name = kernel.getSymName();
@@ -1056,20 +990,50 @@ private:
     if (mrInfo.hasDynamicMR)
       emitHeapSimulator(mrInfo);
 
-    if (needsDevice && resTy) {
-      // Emit pre-parallel host code (constants, prints, etc.)
-      emitHostBodyOps(kernel, numOrigInputs, dimArgMeta, /*preOnly=*/true);
+    if (needsDevice) {
+      // Map block args → host param names for host-side op emission.
+      auto &body = kernel.getBody();
+      auto args = body.getArguments();
+      for (unsigned i = 0; i < numOrigInputs && i < args.size(); ++i)
+        valueNames[args[i]] = "p" + std::to_string(i);
+      for (unsigned i = 0; i < dimArgMeta.size(); ++i) {
+        unsigned argIdx = numOrigInputs + i;
+        if (argIdx < args.size())
+          valueNames[args[argIdx]] = dimArgMeta[i].name;
+      }
+
+      // Emit host ops in two phases: pre-parallel, then kernel launch,
+      // then post-parallel. This preserves the source ordering.
+      isEmittingHost_ = true;
+      if (!body.empty()) {
+        bool seenParallel = false;
+        // Phase 1: emit ops before the first parallel block.
+        for (auto &op : body.front().getOperations()) {
+          if (isa<KernelReturnOp>(&op)) continue;
+          if (isa<ParallelOp>(&op)) { seenParallel = true; break; }
+          emitOp(&op);
+        }
+      }
+      isEmittingHost_ = false;
+
       emitEntryAssertions(kernel);
-      emitDeviceOffloadBody(kernel, resTy, mrInfo);
-      // Emit post-parallel host code
-      emitHostBodyOps(kernel, numOrigInputs, dimArgMeta, /*preOnly=*/false);
-    } else if (needsDevice && !resTy) {
-      // Emit pre-parallel host code (constants, prints, etc.)
-      emitHostBodyOps(kernel, numOrigInputs, dimArgMeta, /*preOnly=*/true);
-      emitEntryAssertions(kernel);
-      emitVoidDeviceOffloadBody(kernel, mrInfo);
-      // Emit post-parallel host code
-      emitHostBodyOps(kernel, numOrigInputs, dimArgMeta, /*preOnly=*/false);
+      if (resTy)
+        emitDeviceOffloadBody(kernel, resTy, mrInfo);
+      else
+        emitVoidDeviceOffloadBody(kernel, mrInfo);
+
+      // Phase 2: emit ops after the first parallel block.
+      isEmittingHost_ = true;
+      if (!body.empty()) {
+        bool seenParallel = false;
+        for (auto &op : body.front().getOperations()) {
+          if (isa<ParallelOp>(&op)) { seenParallel = true; continue; }
+          if (!seenParallel) continue;
+          if (isa<KernelReturnOp>(&op)) continue;
+          emitOp(&op);
+        }
+      }
+      isEmittingHost_ = false;
     } else {
       // No device offload: emit the body directly (the function IS the
       // host function, just like how the AST codegen handles __co__
