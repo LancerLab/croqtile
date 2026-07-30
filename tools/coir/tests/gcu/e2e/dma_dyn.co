@@ -1,0 +1,78 @@
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// REQUIRES: TARGET-GCUALL
+
+// Minimal test: DMA copy with a dynamic (runtime-computed) shape dimension.
+// Tests that cocc correctly emits computed variables (not kDynamic sentinels)
+// for dynamic transfer sizes.
+
+__co__ void dma_dynamic_copy(
+    global f32[T, 64] Src,
+    global f32[T, 64] Dst,
+    global s32[2] Bounds,
+    stream _s
+) {
+    parallel<_s> p by 1 : block
+    parallel q by 1 : thread {
+        b0_f = dma.copy.async Bounds.subspan(1).at(0) => local;
+        b1_f = dma.copy.async Bounds.subspan(1).at(1) => local;
+        wait b0_f, b1_f;
+
+        s32 start = __to<s32>(b0_f.data.at(0));
+        s32 end_v = __to<s32>(b1_f.data.at(0));
+        s32 n = end_v - start;
+
+        local f32[32, 64] buf;
+
+        chunk_f = dma.copy.async Src.view(n, 64).from(start, 0) => buf.subspan(n, 64);
+        wait chunk_f;
+
+        dma.copy buf.subspan(n, 64) => Dst.view(n, 64).from(start, 0);
+    }
+}
+
+int main() {
+    const int T = 64;
+    const int N = 64;
+    const int start = 8;
+    const int end_v = 24;
+    const int n = end_v - start;
+
+    auto src = choreo::make_spandata<float>(T, N);
+    auto dst = choreo::make_spandata<float>(T, N);
+    auto bounds = choreo::make_spandata<int32_t>(2);
+
+    // Fill src with sequential data: src[i][j] = i * N + j
+    for (int i = 0; i < T; i++)
+        for (int j = 0; j < N; j++)
+            src[i][j] = (float)(i * N + j);
+
+    // Zero dst
+    for (int i = 0; i < T; i++)
+        for (int j = 0; j < N; j++)
+            dst[i][j] = 0.0f;
+
+    bounds[0] = (int32_t)start;
+    bounds[1] = (int32_t)end_v;
+
+    dma_dynamic_copy(src.view(), dst.view(), bounds.view(), nullptr);
+
+    // Verify: Dst[start..end) should match Src, rest should be zero
+    bool pass = true;
+    for (int i = 0; i < T; i++) {
+        for (int j = 0; j < N; j++) {
+            float expected = (i >= start && i < end_v) ? (float)(i * N + j) : 0.0f;
+            if (dst[i][j] != expected) {
+                pass = false;
+            }
+        }
+    }
+
+    if (pass)
+        std::cout << "Test dma_dynamic_copy Passed" << std::endl;
+    else
+        std::cout << "Test dma_dynamic_copy FAILED" << std::endl;
+
+    return pass ? 0 : 1;
+}
+
+// CHECK: Test dma_dynamic_copy Passed

@@ -583,6 +583,89 @@ private:
     return tensor.getDefiningOp<TensorAllocOp>();
   }
 
+  /// Resolve the C++ variable name for a dynamic dimension of a tensor.
+  /// For kernel block arguments, walks dim_args + dim_checks to find the
+  /// kernel parameter that carries the runtime value.  For alloc-backed
+  /// tensors, reads the alloc's dynamicDims operand.
+  std::string resolveDynamicDimName(Value tensor, unsigned dimIdx) {
+    // Walk through tiles to the base tensor.
+    Value base = tensor;
+    while (auto tile = base.getDefiningOp<TensorTileOp>())
+      base = tile.getSource();
+
+    // Case 1: base is a tensor.alloc — use its dynamicDims.
+    if (auto alloc = base.getDefiningOp<TensorAllocOp>()) {
+      auto dynDims = alloc.getDynamicDims();
+      auto baseTy = cast<coir::TensorType>(base.getType());
+      unsigned dynIdx = 0;
+      for (unsigned i = 0; i < baseTy.getShape().size(); ++i) {
+        if (baseTy.isDynamicDim(i)) {
+          if (i == dimIdx && dynIdx < dynDims.size())
+            return getName(dynDims[dynIdx]);
+          dynIdx++;
+        }
+      }
+    }
+
+    // Case 2: base is a kernel block argument — use dim_args metadata.
+    if (auto blockArg = dyn_cast<BlockArgument>(base)) {
+      auto kOp = blockArg.getOwner()->getParent()->getParentOfType<KernelOp>();
+      if (!kOp) return "0";
+
+      auto dimArgMeta = getDimArgs(kOp);
+      int64_t paramIdx = blockArg.getArgNumber();
+
+      // Direct match.
+      for (auto &da : dimArgMeta) {
+        if (da.paramIdx == paramIdx && da.dimIdx == (int64_t)dimIdx)
+          return da.name;
+      }
+
+      // Transitive match via dim_checks.
+      auto fnType = kOp.getFunctionType();
+      unsigned numOrigInputs = fnType.getNumInputs() - dimArgMeta.size();
+      auto dimChecks = kOp->getAttrOfType<ArrayAttr>("coir.dim_checks");
+      if (dimChecks) {
+        llvm::SmallSetVector<int64_t, 8> visited;
+        llvm::SmallVector<std::pair<int64_t, int64_t>, 8> worklist;
+        visited.insert(paramIdx);
+        worklist.push_back({paramIdx, (int64_t)dimIdx});
+        while (!worklist.empty()) {
+          auto [curParam, curDim] = worklist.pop_back_val();
+          for (auto a : dimChecks) {
+            auto dict = dyn_cast<DictionaryAttr>(a);
+            if (!dict) continue;
+            auto p0 = dict.getAs<IntegerAttr>("param0").getInt();
+            auto p1 = dict.getAs<IntegerAttr>("param1").getInt();
+            auto d0 = dict.getAs<IntegerAttr>("dim0").getInt();
+            auto d1 = dict.getAs<IntegerAttr>("dim1").getInt();
+            int64_t otherParam = -1;
+            int64_t otherDim = -1;
+            if (p0 == curParam && d0 == curDim) {
+              otherParam = p1; otherDim = d1;
+            } else if (p1 == curParam && d1 == curDim) {
+              otherParam = p0; otherDim = d0;
+            }
+            if (otherParam >= 0 && !visited.count(otherParam)) {
+              visited.insert(otherParam);
+              worklist.push_back({otherParam, otherDim});
+              for (auto &da : dimArgMeta) {
+                if (da.paramIdx == otherParam && da.dimIdx == otherDim)
+                  return da.name;
+              }
+            }
+          }
+        }
+      }
+
+      // Fallback: return first dim arg (backward-compatible).
+      if (!dimArgMeta.empty())
+        return "arg" + std::to_string(numOrigInputs);
+    }
+
+    return "0";
+  }
+
   /// Emit a single dimension expression.  Returns the static value as a
   /// string or the name of the dynamic SSA value.
   std::string emitDimExpr(Value tensor, unsigned dimIdx) {
@@ -593,10 +676,10 @@ private:
 
     auto alloc = getTensorAllocDef(tensor);
     if (!alloc) {
-      // No tensor.alloc defining op (e.g. kernel argument).
-      // For mdspan shapes we fall back to emitting the kDynamic sentinel;
-      // the caller is responsible for resolving dynamic sizes from the
-      // other tensor in the copy pair.
+      // No tensor.alloc — try resolving from kernel dim args.
+      std::string resolved = resolveDynamicDimName(tensor, dimIdx);
+      if (resolved != "0") return resolved;
+      // Last resort: emit the kDynamic sentinel.
       return std::to_string(staticDim);
     }
 
@@ -1740,10 +1823,26 @@ private:
     for (unsigned i = 0; i < indices.size(); ++i) {
       if (i > 0) os() << " + ";
       os() << getName(indices[i]);
-      int64_t stride = perIdxTileSize[i];
-      for (unsigned j = i + 1; j < srcShape.size(); ++j)
-        stride *= srcShape[j];
-      os() << " * " << stride;
+      // Compute stride = perIdxTileSize[i] * product(srcShape[i+1..])
+      // For dynamic dims, emit the runtime variable name instead of
+      // the kDynamic sentinel.
+      llvm::SmallVector<std::string> factors;
+      if (perIdxTileSize[i] != 1)
+        factors.push_back(std::to_string(perIdxTileSize[i]));
+      for (unsigned j = i + 1; j < srcShape.size(); ++j) {
+        if (mlir::ShapedType::isDynamic(srcShape[j])) {
+          factors.push_back(resolveDynamicDimName(op.getSource(), j));
+        } else if (srcShape[j] != 1) {
+          factors.push_back(std::to_string(srcShape[j]));
+        }
+      }
+      if (!factors.empty()) {
+        os() << " * ";
+        for (unsigned fi = 0; fi < factors.size(); ++fi) {
+          if (fi > 0) os() << " * ";
+          os() << factors[fi];
+        }
+      }
     }
     os() << ");\n";
   }
@@ -2154,9 +2253,18 @@ private:
         // would then be ill-formed (narrowing), so cast explicitly.  The DTE
         // slice API takes const int*, so offsets must be int anyway.
         bool needCast = !idxTy.isInteger(32);
-        if (needCast) os() << "(int)(";
-        os() << getName(indices[i]) << " * " << chunkDim;
-        if (needCast) os() << ")";
+        if (mlir::ShapedType::isDynamic(chunkDim)) {
+          // Dynamic chunk dimension: the runtime value is not known at
+          // compile time.  Emit the tile index directly — the DMA runtime
+          // resolves the actual dimension size.
+          if (needCast) os() << "(int)(";
+          os() << getName(indices[i]);
+          if (needCast) os() << ")";
+        } else {
+          if (needCast) os() << "(int)(";
+          os() << getName(indices[i]) << " * " << chunkDim;
+          if (needCast) os() << ")";
+        }
       } else {
         os() << "0";
       }
@@ -2167,15 +2275,29 @@ private:
 
   std::string emitSliceShape(TensorTileOp tile, const std::string &prefix) {
     auto tileTy = cast<coir::TensorType>(tile.getResult().getType());
+    auto baseTy = cast<coir::TensorType>(tile.getSource().getType());
     std::string arrName = prefix + "__sshape__";
     os() << getIndent() << "unsigned int " << arrName << "[] = {";
+    auto indices = tile.getIndices();
+    unsigned baseRank = baseTy.getShape().size();
+    unsigned dynIdx = 0;
     for (unsigned i = 0; i < tileTy.getShape().size(); ++i) {
       if (i) os() << ", ";
       int64_t d = tileTy.getShape()[i];
-      if (mlir::ShapedType::isDynamic(d))
-        os() << emitDimExpr(tile.getResult(), i);
-      else
+      if (mlir::ShapedType::isDynamic(d)) {
+        // Dynamic dim: the size value lives in the tile's extra indices
+        // (those beyond the base tensor's rank).  The Nth dynamic result
+        // dim corresponds to indices[baseRank + N].
+        unsigned idxPos = baseRank + dynIdx;
+        if (idxPos < indices.size()) {
+          // Cast to unsigned int to avoid narrowing in braced-init.
+          os() << "(unsigned int)(" << getName(indices[idxPos]) << ")";
+        } else
+          os() << d; // fallback
+        dynIdx++;
+      } else {
         os() << d;
+      }
     }
     os() << "};\n";
     return arrName;
