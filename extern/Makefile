@@ -59,10 +59,10 @@ setup-gcu-platform-kit: check-gcu-platform-kit
 	fi
 
 #------------------------- GCU-3.x -------------------------#
-GCU3_REL_PATH=260420/gcu30
-GCU3_PLATFORM_NAME=TopsPlatform_1.8.20260319.113917_tmp-20260319113917-32db2a_deb_amd64.run
+GCU3_REL_PATH=260723/GCU300
+GCU3_PLATFORM_NAME=TopsPlatform_1.10.20260723.193112-48ec03_deb_amd64.run
 GCU3_PLATFORM_PKG=$(TOOLCHAIN_DIR)/$(GCU3_PLATFORM_NAME)
-GCU3_PLATFORM_PKG_MD5:=bf1ac35b2d6d05cfe0f1254597c4fca9
+GCU3_PLATFORM_PKG_MD5:=ba034ed2ce2775678f36471f3c571d85
 CUR_GCU3_PLATFORM_PKG_MD5:=$(shell md5sum $(GCU3_PLATFORM_PKG) 2>/dev/null| cut -d ' ' -f 1)
 
 check-gcu3-platform-kit:
@@ -94,10 +94,10 @@ setup-gcu3-platform-kit: check-gcu3-platform-kit
 	fi
 
 #------------------------- GCU-4.x -------------------------#
-GCU4_REL_PATH=251103/gcu400
-GCU4_PLATFORM_NAME=TopsPlatform_1.6.1.216-3aea03_deb_amd64.run
+GCU4_REL_PATH=260727/GCU400
+GCU4_PLATFORM_NAME=TopsPlatform_4.0.20260728.175722-ef7787_deb_amd64.run
 GCU4_PLATFORM_PKG=$(TOOLCHAIN_DIR)/$(GCU4_PLATFORM_NAME)
-GCU4_PLATFORM_PKG_MD5:=c42fccec6ec4d5b472ed91e51d0c4772
+GCU4_PLATFORM_PKG_MD5:=c5a7bfd2ac63ab09bd629e5b0feb20ba
 CUR_GCU4_PLATFORM_PKG_MD5:=$(shell md5sum $(GCU4_PLATFORM_PKG) 2>/dev/null| cut -d ' ' -f 1)
 
 check-gcu4-platform-kit:
