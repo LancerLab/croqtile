@@ -60,15 +60,3 @@ coir.kernel @bind_dims_preserves_type(
   %tile = coir.tensor.tile %bound[%c0] : !coir.tensor<64x?x?xf32, default> -> !coir.tensor<16x16xf32, default>
   coir.return
 }
-
-// --- test backward-compat with `?` in the type -------------------------
-// CHECK-LABEL: coir.kernel @bind_dims_backward_compat
-coir.kernel @bind_dims_backward_compat(
-    %t: !coir.tensor<?x?xf32, default>,
-    %m: index,
-    %n: index) {
-  // This uses `?` in the type -- the parser handles `?` as a dynamic dim.
-  // CHECK: coir.tensor.bind_dims(%{{.*}}, %{{.*}}) %{{.*}} : tensor<%{{.*}},%{{.*}},f32, default>
-  %bound = coir.tensor.bind_dims(%m, %n) %t : tensor<?,?,f32, default>
-  coir.return
-}

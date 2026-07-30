@@ -762,7 +762,7 @@ void TensorAllocOp::print(OpAsmPrinter &printer) {
 /// Parse the dimensions of a tensor type in bind_dims context.
 /// Dimensions are separated by commas (`,`), not `x`, to avoid ambiguity
 /// with SSA value names that may contain `x`.
-/// Accepts: integer (static), `?` (unbound dynamic), or `%name` (bound SSA).
+/// Accepts: integer (static) or `%name` (bound SSA).
 /// Returns the shape (with kDynamic for dynamic dims) and collects SSA dims.
 static ParseResult parseBindDimsShape(
     OpAsmParser &parser, SmallVectorImpl<int64_t> &shape,
@@ -782,11 +782,6 @@ static ParseResult parseBindDimsShape(
     if (ssaRes.has_value() && succeeded(*ssaRes)) {
       shape.push_back(ShapedType::kDynamic);
       ssaDims.push_back(ssaOp);
-      continue;
-    }
-    // Try parsing ?
-    if (succeeded(parser.parseOptionalQuestion())) {
-      shape.push_back(ShapedType::kDynamic);
       continue;
     }
     // Try parsing integer
