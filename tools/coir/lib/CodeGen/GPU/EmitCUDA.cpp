@@ -2370,6 +2370,30 @@ private:
       return result;
     }
 
+    // Handle TensorBindDimsOp: dynamic dims are explicit operands
+    // (SSA-pure kernel input tensor dim resolution)
+    if (auto bindOp = srcVal.getDefiningOp<coir::TensorBindDimsOp>()) {
+      auto dynOperands = bindOp.getDynamicDims();
+      unsigned dynIdx = 0;
+      auto shape = tty.getShape();
+      for (unsigned i = 0; i < shape.size(); ++i) {
+        if (mlir::ShapedType::isDynamic(shape[i])) {
+          unsigned srcDim = (unsigned)dimMapping[i];
+          auto srcTy = dyn_cast<coir::TensorType>(bindOp.getType());
+          unsigned srcDynIdx = 0;
+          for (unsigned d = 0; d < srcDim && srcTy; ++d)
+            if (mlir::ShapedType::isDynamic(srcTy.getShape()[d]))
+              srcDynIdx++;
+          if (srcDynIdx < dynOperands.size())
+            result.push_back(getName(dynOperands[srcDynIdx]));
+          else
+            result.push_back("1");
+          dynIdx++;
+        }
+      }
+      return result;
+    }
+
     // Now srcVal should be a kernel block argument (the original tensor param)
     int64_t paramIdx = -1;
     if (auto blockArg = dyn_cast<BlockArgument>(srcVal)) {
@@ -2985,6 +3009,21 @@ private:
                 gDimNames.push_back(std::to_string(globalShape[d]));
               }
             }
+          } else if (auto gBind = gBase.getDefiningOp<coir::TensorBindDimsOp>()) {
+            // SSA-pure: dynamic dims from bind_dims operands
+            auto dynOps = gBind.getDynamicDims();
+            unsigned dynIdx = 0;
+            for (unsigned d = 0; d < globalShape.size(); ++d) {
+              if (mlir::ShapedType::isDynamic(globalShape[d])) {
+                if (dynIdx < dynOps.size())
+                  gDimNames.push_back(getName(dynOps[dynIdx]));
+                else
+                  gDimNames.push_back("1");
+                dynIdx++;
+              } else {
+                gDimNames.push_back(std::to_string(globalShape[d]));
+              }
+            }
           } else {
             int64_t gParamIdx = -1;
             if (auto blk = dyn_cast<BlockArgument>(gBase))
@@ -3131,6 +3170,22 @@ private:
                     }
                   }
                 }
+              }
+            } else if (auto bindOp =
+                           baseVal.getDefiningOp<coir::TensorBindDimsOp>()) {
+              // SSA-pure: use bind_dims operands
+              auto dynOps = bindOp.getDynamicDims();
+              auto bindTy = dyn_cast<coir::TensorType>(bindOp.getType());
+              unsigned dynIdx = 0;
+              for (unsigned d = 0; d < copyShape.size() && bindTy; ++d) {
+                if (!mlir::ShapedType::isDynamic(copyShape[d])) continue;
+                unsigned bindDynIdx = 0;
+                for (unsigned bd = 0; bd < d; ++bd)
+                  if (mlir::ShapedType::isDynamic(bindTy.getShape()[bd]))
+                    bindDynIdx++;
+                if (bindDynIdx < dynOps.size())
+                  positionedNames[d] = getName(dynOps[bindDynIdx]);
+                dynIdx++;
               }
             } else if (auto allocOp =
                            baseVal.getDefiningOp<coir::TensorAllocOp>()) {

@@ -263,6 +263,29 @@ def TensorAllocOp : CoIR_Op<"tensor.alloc", [NoMemoryEffect]> {
   let hasCustomAssemblyFormat = 1;
 }
 
+def TensorBindDimsOp : CoIR_Op<"tensor.bind_dims", [NoMemoryEffect]> {
+  let summary = "Bind dynamic dimension SSA values to a tensor";
+  let description = [{
+    Wraps a tensor value and binds explicit `index` SSA values to its
+    dynamic (`?`) dimensions, in left-to-right order.  The result is a
+    new SSA tensor value whose dynamic dimensions are resolvable through
+    pure def-use chains without inspecting kernel-level metadata.
+
+    Downstream `coir.tensor.tile` ops and codegen helpers (e.g.
+    `emitDimExpr`) walk through this op to obtain the dynamic dimension
+    expressions directly from the provided `index` operands.
+
+    Example:
+      %t = coir.tensor.bind_dims %input, %N, %M
+            : !coir.tensor<?x?xf32, global>
+  }];
+  let arguments = (ins Variadic<Index>:$dynamicDims,
+                       CoIR_TensorTypeC:$source);
+  let results = (outs CoIR_TensorTypeC:$result);
+
+  let hasCustomAssemblyFormat = 1;
+}
+
 def TensorTileOp : CoIR_Op<"tensor.tile", [NoMemoryEffect]> {
   let summary = "Extract a tile from a tensor at given coordinates";
   let description = [{

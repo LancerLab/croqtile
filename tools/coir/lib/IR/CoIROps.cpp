@@ -756,5 +756,234 @@ void TensorAllocOp::print(OpAsmPrinter &printer) {
 }
 
 //===----------------------------------------------------------------------===//
+// TensorBindDimsOp
+//===----------------------------------------------------------------------===//
+
+/// Parse the dimensions of a tensor type in bind_dims context.
+/// Dimensions are separated by commas (`,`), not `x`, to avoid ambiguity
+/// with SSA value names that may contain `x`.
+/// Accepts: integer (static), `?` (unbound dynamic), or `%name` (bound SSA).
+/// Returns the shape (with kDynamic for dynamic dims) and collects SSA dims.
+static ParseResult parseBindDimsShape(
+    OpAsmParser &parser, SmallVectorImpl<int64_t> &shape,
+    SmallVectorImpl<OpAsmParser::UnresolvedOperand> &ssaDims) {
+  // Parse the first dimension (required).
+  bool isFirst = true;
+  while (true) {
+    if (!isFirst) {
+      if (parser.parseComma())
+        return failure();
+    }
+    isFirst = false;
+
+    OpAsmParser::UnresolvedOperand ssaOp;
+    // Try parsing %ssa_ref
+    auto ssaRes = parser.parseOptionalOperand(ssaOp);
+    if (ssaRes.has_value() && succeeded(*ssaRes)) {
+      shape.push_back(ShapedType::kDynamic);
+      ssaDims.push_back(ssaOp);
+      continue;
+    }
+    // Try parsing ?
+    if (succeeded(parser.parseOptionalQuestion())) {
+      shape.push_back(ShapedType::kDynamic);
+      continue;
+    }
+    // Try parsing integer
+    int64_t dim;
+    auto intRes = parser.parseOptionalInteger(dim);
+    if (intRes.has_value() && succeeded(*intRes)) {
+      shape.push_back(dim);
+      continue;
+    }
+    // No more dimensions -- break (caller will parse elemType).
+    break;
+  }
+  return success();
+}
+
+/// Parse a memory-space keyword.  Returns -1 (default) or -2 (invalid).
+static int32_t parseMemSpace(AsmParser &parser, llvm::StringRef kw) {
+  if (kw == "default")  return -1;
+  if (kw == "global")   return (int32_t)TensorMemorySpace::Global;
+  if (kw == "shared")   return (int32_t)TensorMemorySpace::Shared;
+  if (kw == "local")    return (int32_t)TensorMemorySpace::Local;
+  if (kw == "register") return (int32_t)TensorMemorySpace::Register;
+  return -2;
+}
+
+ParseResult TensorBindDimsOp::parse(OpAsmParser &parser,
+                                    OperationState &result) {
+  // ---- parse the (dynamic-dims) prefix                          ---- //
+  SmallVector<OpAsmParser::UnresolvedOperand> prefixDims;
+  if (parser.parseLParen())
+    return failure();
+  if (succeeded(parser.parseOptionalRParen())) {
+    // Empty parens -- dynamic dims will be parsed from the type.
+  } else {
+    if (parser.parseOperandList(prefixDims) || parser.parseRParen())
+      return failure();
+  }
+
+  // ---- parse source operand                                     ---- //
+  OpAsmParser::UnresolvedOperand source;
+  if (parser.parseOperand(source))
+    return failure();
+
+  if (parser.parseOptionalAttrDict(result.attributes) ||
+      parser.parseColon())
+    return failure();
+
+  // ---- parse !coir.tensor<shape x elemTy, memSpace>             ---- //
+  // We manually parse the tensor type so that SSA value references
+  // (%name) inside the shape are recognised.
+  StringRef tensorKw;
+  if (parser.parseKeyword(&tensorKw))
+    return failure();
+  if (tensorKw != "tensor") {
+    parser.emitError(parser.getCurrentLocation(),
+                     "expected tensor type for bind_dims result");
+    return failure();
+  }
+  if (parser.parseLess())
+    return failure();
+
+  // shape (with optional SSA dim refs, comma-separated)
+  SmallVector<int64_t> shape;
+  SmallVector<OpAsmParser::UnresolvedOperand> typeSsaDims;
+  if (failed(parseBindDimsShape(parser, shape, typeSsaDims)))
+    return failure();
+
+  // element type
+  Type elemType;
+  if (parser.parseType(elemType))
+    return failure();
+
+  // optional memory space + strides
+  int32_t memSpace = -1;
+  SmallVector<int64_t> strides;
+  if (succeeded(parser.parseOptionalComma())) {
+    StringRef kw;
+    if (parser.parseKeyword(&kw))
+      return failure();
+    if (kw == "strides") {
+      // strides without memspace
+      if (parser.parseColon() || parser.parseLSquare())
+        return failure();
+      int64_t s;
+      auto res = parser.parseOptionalInteger(s);
+      if (res.has_value() && succeeded(*res)) {
+        strides.push_back(s);
+        while (succeeded(parser.parseOptionalComma())) {
+          if (parser.parseInteger(s))
+            return failure();
+          strides.push_back(s);
+        }
+      }
+      if (parser.parseRSquare())
+        return failure();
+    } else {
+      memSpace = parseMemSpace(parser, kw);
+      if (memSpace == -2) {
+        parser.emitError(parser.getCurrentLocation(),
+                         "unknown memory space: " + kw);
+        return failure();
+      }
+      if (succeeded(parser.parseOptionalComma())) {
+        StringRef stKw;
+        if (parser.parseKeyword(&stKw) || stKw != "strides")
+          return failure();
+        if (parser.parseColon() || parser.parseLSquare())
+          return failure();
+        int64_t s;
+        auto res2 = parser.parseOptionalInteger(s);
+        if (res2.has_value() && succeeded(*res2)) {
+          strides.push_back(s);
+          while (succeeded(parser.parseOptionalComma())) {
+            if (parser.parseInteger(s))
+              return failure();
+            strides.push_back(s);
+          }
+        }
+        if (parser.parseRSquare())
+          return failure();
+      }
+    }
+  }
+
+  if (parser.parseGreater())
+    return failure();
+
+  // ---- build the result type (with kDynamic sentinels)          ---- //
+  auto resultType = TensorType::get(parser.getContext(), elemType, shape,
+                                    memSpace, strides);
+  result.addTypes(resultType);
+
+  // ---- resolve operands                                         ---- //
+  auto indexTy = parser.getBuilder().getIndexType();
+
+  // Use type-parsed SSA dims if present; otherwise fall back to prefix.
+  auto &finalDims = typeSsaDims.empty() ? prefixDims : typeSsaDims;
+  SmallVector<Type> dimTypes(finalDims.size(), indexTy);
+  if (!finalDims.empty() &&
+      parser.resolveOperands(finalDims, dimTypes, parser.getNameLoc(),
+                             result.operands))
+    return failure();
+
+  if (parser.resolveOperand(source, resultType, result.operands))
+    return failure();
+
+  return success();
+}
+
+void TensorBindDimsOp::print(OpAsmPrinter &printer) {
+  // prefix: (dynamic-dim SSA values)
+  printer << "(";
+  printer.printOperands(getDynamicDims());
+  printer << ") ";
+  printer.printOperand(getSource());
+  printer.printOptionalAttrDict((*this)->getAttrs());
+  printer << " : ";
+
+  // Print tensor type with SSA values inlined for dynamic dims.
+  auto resultTy = getResult().getType().cast<TensorType>();
+  auto shape = resultTy.getShape();
+  auto dynDims = getDynamicDims();
+
+  printer << "tensor<";
+  unsigned dynIdx = 0;
+  for (unsigned i = 0; i < shape.size(); ++i) {
+    if (i > 0)
+      printer << ",";
+    if (ShapedType::isDynamic(shape[i])) {
+      printer.printOperand(dynDims[dynIdx++]);
+    } else {
+      printer << shape[i];
+    }
+  }
+  printer << "," << resultTy.getElementType();
+
+  int32_t ms = resultTy.getMemorySpace();
+  printer << ", ";
+  if (ms < 0) {
+    printer << "default";
+  } else {
+    switch (static_cast<TensorMemorySpace>(ms)) {
+    case TensorMemorySpace::Global:   printer << "global";   break;
+    case TensorMemorySpace::Shared:   printer << "shared";   break;
+    case TensorMemorySpace::Local:    printer << "local";    break;
+    case TensorMemorySpace::Register: printer << "register"; break;
+    }
+  }
+  auto stridesArr = resultTy.getStrides();
+  if (!stridesArr.empty()) {
+    printer << ", strides: [";
+    llvm::interleaveComma(stridesArr, printer.getStream());
+    printer << "]";
+  }
+  printer << ">";
+}
+
+//===----------------------------------------------------------------------===//
 // ElementCopyOp (uses declarative format, no custom parse/print needed)
 //===----------------------------------------------------------------------===//

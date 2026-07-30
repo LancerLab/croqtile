@@ -210,7 +210,8 @@ int64_t CoIREmitterBase::getTensorBytes(TensorType tty) {
   return n * elemSize;
 }
 
-void CoIREmitterBase::emitLinearIndex(ValueRange indices, TensorType tty) {
+void CoIREmitterBase::emitLinearIndex(ValueRange indices, TensorType tty,
+                                     Value tensor) {
   auto strides = tty.getStrides();
   auto shape = tty.getShape();
   if (indices.empty()) {
@@ -223,19 +224,40 @@ void CoIREmitterBase::emitLinearIndex(ValueRange indices, TensorType tty) {
   }
 
   // For dynamic shapes without explicit strides, emit row-major linearization
-  // using runtime dim expressions from the kernel's index block arguments.
+  // using runtime dim expressions from the tensor's defining op
+  // (tensor.alloc or tensor.bind_dims) when available, falling back to
+  // kernel index block arguments.
   if (strides.empty() && tty.hasDynamicShape()) {
-    // Collect dim arg names from enclosing kernel
-    llvm::SmallVector<std::string> dimArgNames;
-    if (auto *block = indices[0].getParentBlock()) {
-      if (auto kernelOp = block->getParent()->getParentOfType<KernelOp>()) {
-        auto fnTy = kernelOp.getFunctionType();
-        for (unsigned a = 0; a < fnTy.getNumInputs(); ++a) {
-          if (fnTy.getInput(a).isIndex())
-            dimArgNames.push_back(getName(kernelOp.getBody().getArgument(a)));
+    // Try SSA-based resolution first when a tensor value is provided.
+    llvm::SmallVector<std::string> dimNames;
+    if (tensor) {
+      // Walk through tile ops to find the defining op.
+      Value defVal = tensor;
+      while (auto tileOp = defVal.getDefiningOp<TensorTileOp>())
+        defVal = tileOp.getSource();
+
+      auto resolveFromDynDims = [&](mlir::OperandRange dynDims) {
+        unsigned dynIdx = 0;
+        for (unsigned i = 0; i < shape.size(); ++i) {
+          if (mlir::ShapedType::isDynamic(shape[i])) {
+            assert(dynIdx < dynDims.size() &&
+                   "bind_dims operand count mismatch");
+            dimNames.push_back(getName(dynDims[dynIdx]));
+            dynIdx++;
+          }
         }
-      }
+      };
+
+      if (auto alloc = defVal.getDefiningOp<TensorAllocOp>())
+        resolveFromDynDims(alloc.getDynamicDims());
+      else if (auto bind = defVal.getDefiningOp<TensorBindDimsOp>())
+        resolveFromDynDims(bind.getDynamicDims());
     }
+
+    if (dimNames.empty())
+      llvm_unreachable(
+          "emitLinearIndex: dynamic tensor has no tensor.alloc "
+          "or tensor.bind_dims defining op");
 
     for (unsigned i = 0; i < indices.size(); ++i) {
       if (i > 0) os() << " + ";
@@ -247,8 +269,8 @@ void CoIREmitterBase::emitLinearIndex(ValueRange indices, TensorType tty) {
           unsigned dj = 0;
           for (unsigned k = 0; k < j; ++k)
             if (mlir::ShapedType::isDynamic(shape[k])) ++dj;
-          if (dj < dimArgNames.size())
-            os() << " * " << dimArgNames[dj];
+          if (dj < dimNames.size())
+            os() << " * " << dimNames[dj];
         } else {
           os() << " * " << shape[j];
         }
@@ -336,6 +358,8 @@ void CoIREmitterBase::emitOp(Operation *op) {
     emitTensorAlloc(alloc);
   else if (auto tile = dyn_cast<TensorTileOp>(op))
     emitTensorTile(tile);
+  else if (auto bindDims = dyn_cast<TensorBindDimsOp>(op))
+    emitTensorBindDims(bindDims);
   else if (auto ret = dyn_cast<KernelReturnOp>(op))
     emitKernelReturn(ret);
   else if (auto yield = dyn_cast<YieldOp>(op))
@@ -550,7 +574,7 @@ void CoIREmitterBase::emitTensorLoadElem(TensorLoadElemOp op) {
   auto tty = cast<TensorType>(op.getSource().getType());
   os() << getIndent() << emitType(op.getResult().getType()) << " " << name
        << " = " << src << "[";
-  emitLinearIndex(op.getIndices(), tty);
+  emitLinearIndex(op.getIndices(), tty, op.getSource());
   os() << "];\n";
 }
 
@@ -559,7 +583,7 @@ void CoIREmitterBase::emitTensorStoreElem(TensorStoreElemOp op) {
   std::string val = getName(op.getValue());
   auto tty = cast<TensorType>(op.getDest().getType());
   os() << getIndent() << dst << "[";
-  emitLinearIndex(op.getIndices(), tty);
+  emitLinearIndex(op.getIndices(), tty, op.getDest());
   os() << "] = " << val << ";\n";
 }
 
@@ -808,8 +832,14 @@ void CoIREmitterBase::emitTensorTile(TensorTileOp op) {
   std::string name = getName(op.getResult());
   auto tty = cast<TensorType>(op.getSource().getType());
   os() << getIndent() << "auto* " << name << " = &" << base << "[";
-  emitLinearIndex(op.getIndices(), tty);
+  emitLinearIndex(op.getIndices(), tty, op.getSource());
   os() << "];\n";
+}
+
+void CoIREmitterBase::emitTensorBindDims(TensorBindDimsOp op) {
+  // bind_dims is a pure SSA annotation -- no code to emit.
+  // Alias the source name so downstream uses resolve correctly.
+  valueNames[op.getResult()] = getName(op.getSource());
 }
 
 // ===== Fallback =====
