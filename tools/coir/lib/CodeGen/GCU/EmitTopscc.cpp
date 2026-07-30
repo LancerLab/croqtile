@@ -580,6 +580,8 @@ private:
   Value getTensorDefOp(Value tensor) const {
     while (auto tile = tensor.getDefiningOp<TensorTileOp>())
       tensor = tile.getSource();
+    if (auto bind = tensor.getDefiningOp<TensorBindDimsOp>())
+      tensor = bind.getSource();
     return tensor;
   }
 
@@ -2164,8 +2166,9 @@ private:
   }
 
   std::string emitMdspanWithShape(Value tensor) {
+    auto base = getTensorDefOp(tensor);
     auto tty = cast<coir::TensorType>(tensor.getType());
-    std::string name = getName(tensor);
+    std::string name = getName(base);
     std::string space;
     int32_t ms = tty.getMemorySpace();
     if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Local))
@@ -2180,8 +2183,9 @@ private:
   }
 
   std::string emitCopyMdspan(Value tensor, const std::string &sizeStr) {
+    auto base = getTensorDefOp(tensor);
     auto tty = cast<coir::TensorType>(tensor.getType());
-    std::string name = getName(tensor);
+    std::string name = getName(base);
     std::string space;
     int32_t ms = tty.getMemorySpace();
     if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Local))
@@ -2207,7 +2211,7 @@ private:
   }
 
   std::string emitFullBaseMdspan(TensorTileOp tile) {
-    Value base = tile.getSource();
+    Value base = getTensorDefOp(tile.getSource());
     auto baseTy = cast<coir::TensorType>(base.getType());
     std::string name = getName(base);
     std::string space;
@@ -3303,11 +3307,17 @@ private:
           else
             os() << "(" << getName(arg) << " ? \"true\" : \"false\")";
         } else if (isPtrFmt) {
-          if (isEmittingHost_ && mlir::isa<coir::TensorType>(ty) &&
-              !hostTensorAllocs_.count(arg))
-            os() << "(void*)" << getName(arg) << ".data()";
-          else
+          if (isEmittingHost_ && mlir::isa<coir::TensorType>(ty)) {
+            auto base = getTensorDefOp(arg);
+            if (!hostTensorAllocs_.count(base))
+              os() << "(void*)" << getName(base) << ".data()";
+            else
+              os() << "(void*)" << getName(base);
+          } else if (mlir::isa<coir::TensorType>(ty)) {
+            os() << "(void*)" << getName(getTensorDefOp(arg));
+          } else {
             os() << "(void*)" << getName(arg);
+          }
         } else if (ty.isF16())
           os() << "f16_to_f32(" << getName(arg) << ")";
         else if (ty.isBF16())
@@ -3349,9 +3359,11 @@ private:
       first = false;
       auto ty = arg.getType();
       if (auto tty = mlir::dyn_cast<coir::TensorType>(ty)) {
+        auto base = getTensorDefOp(arg);
         os() << "(" << emitType(tty.getElementType()) << "*)"
-           << getName(arg);
-        if (isEmittingHost_ && !hostTensorAllocs_.count(arg)) os() << ".data()";
+           << getName(base);
+        if (isEmittingHost_ && !hostTensorAllocs_.count(base))
+          os() << ".data()";
       } else {
         os() << getName(arg);
       }
