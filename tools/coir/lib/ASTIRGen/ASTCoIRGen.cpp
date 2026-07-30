@@ -754,6 +754,46 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
     kernelOp->setAttr("coir.dim_args",
                        mlir::ArrayAttr::get(&IRContext(), dimArgAttrs));
 
+  // Emit coir.tensor.bind_dims for each input tensor that has dynamic
+  // dimensions, so device-side dim resolution is purely SSA-based.
+  // This replaces the legacy findDynamicDimName / dim_checks traversal
+  // that previously walked back to kernel-level metadata.
+  if (!dimArgs.empty() && cf.f_decl.params) {
+    // Group dim args by param index.
+    llvm::DenseMap<unsigned,
+                   llvm::SmallVector<std::pair<unsigned, mlir::Value>>>
+        paramDims;
+    for (unsigned i = 0; i < dimArgs.size(); ++i) {
+      auto &da = dimArgs[i];
+      paramDims[da.paramIdx].push_back(
+          {da.dimIdx, entryBlock->getArgument(baseArgCount + i)});
+    }
+    for (auto &[pIdx, dims] : paramDims) {
+      // Sort by dimIdx for left-to-right order.
+      llvm::sort(dims, [](auto &a, auto &b) { return a.first < b.first; });
+      llvm::SmallVector<mlir::Value> dynDimVals;
+      for (auto &[dIdx, val] : dims)
+        dynDimVals.push_back(val);
+
+      auto tensorArg = entryBlock->getArgument(pIdx);
+      auto tensorTy = tensorArg.getType();
+      auto bindOp = builder.create<coir::TensorBindDimsOp>(
+          loc, tensorTy, dynDimVals, tensorArg);
+
+      // Remap the parameter symbol to the bind_dims result so all
+      // downstream references use the SSA-bound tensor.
+      unsigned pp = 0;
+      for (auto &param : cf.f_decl.params->values) {
+        if (isa<StreamType>(param->type->GetType())) { ++pp; continue; }
+        if (pp == pIdx && param->HasSymbol()) {
+          MapValue(param->sym->name, bindOp.getResult());
+          break;
+        }
+        ++pp;
+      }
+    }
+  }
+
   // Emit cross-parameter symbolic dimension consistency checks.
   // For each symbolic dim appearing in 2+ parameters, record pair-wise
   // equality checks so EmitCUDA/EmitHIP can emit host-side runtime_check.

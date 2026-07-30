@@ -83,7 +83,8 @@ protected:
 
   // -- Tensor helpers --
   int64_t getTensorBytes(coir::TensorType tty);
-  void emitLinearIndex(mlir::ValueRange indices, coir::TensorType tty);
+  void emitLinearIndex(mlir::ValueRange indices, coir::TensorType tty,
+                       mlir::Value tensor = {});
 
   // -- Return value prescan --
   void prescanReturnValues(KernelOp kernel);
@@ -109,6 +110,7 @@ protected:
   virtual void emitYield(YieldOp op);
   virtual void emitTensorAlloc(TensorAllocOp op);
   virtual void emitTensorTile(TensorTileOp op);
+  virtual void emitTensorBindDims(TensorBindDimsOp op);
 
   // -- Pure virtual target-specific ops --
   virtual void emitParallel(ParallelOp op) = 0;
