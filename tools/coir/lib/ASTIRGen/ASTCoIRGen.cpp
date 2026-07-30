@@ -2653,6 +2653,13 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
     token = dmaCopy.getToken();
   }
 
+  // All coir.dma.copy / coir.tma.copy produce an async token.
+  // For synchronous frontend DMA (no .async), insert an immediate
+  // coir.wait so the MLIR explicitly synchronises before any
+  // subsequent read of the destination buffer.
+  if (!isAsync && token)
+    builder.create<coir::WaitOp>(loc, token);
+
   auto futureName = dma.future;
   if (futureName.empty() && !pendingDmaAssignName.empty())
     futureName = pendingDmaAssignName;
