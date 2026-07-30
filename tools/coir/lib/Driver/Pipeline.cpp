@@ -86,10 +86,10 @@ bool Pipeline::Lower() {
 
   auto targetAttr =
       module_->getAttrOfType<mlir::StringAttr>("coir.target");
-  bool isGPU = !targetAttr || targetAttr.getValue() != "cc";
+  bool not_cc = !targetAttr || targetAttr.getValue() != "cc";
 
   pm.addPass(coir::createClassifyCopiesPass());
-  if (isGPU) {
+  if (not_cc) {
     pm.addPass(coir::createLowerDMADescPass());
     pm.addPass(coir::createHoistDMAConfigPass());
     pm.addPass(coir::createLowerMMAPass());
