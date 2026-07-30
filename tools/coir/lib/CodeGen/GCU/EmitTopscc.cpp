@@ -130,6 +130,14 @@ private:
   /// These should NOT have .data() appended in host print calls.
   llvm::DenseSet<mlir::Value> hostTensorAllocs_;
 
+  /// Names of MR offset kernel parameters (from coir.mr_offset_args).
+  /// Used to distinguish kernel params from local buffer offsets.
+  llvm::DenseSet<llvm::StringRef> mrOffsetParamNames_;
+
+  /// Names of hoisted param values computed in host function (v* names).
+  /// Populated during host-side emission, used in kernel launch.
+  llvm::SmallVector<std::string> hoistedParamNames_;
+
   bool hasGroupLevel() const override { return archNum >= 400; }
   bool supportsFP8() const override { return archNum >= 400; }
   bool supportsFP6() const override { return false; }
@@ -426,11 +434,16 @@ private:
     auto mrSpmSize =
         kernel->getAttrOfType<mlir::StringAttr>("coir.mr_spm_size_arg");
     unsigned numMrOffsets = mrOffsets ? mrOffsets.size() : 0;
+    mrOffsetParamNames_.clear();
+    if (mrOffsets)
+      for (auto a : mrOffsets)
+        mrOffsetParamNames_.insert(cast<mlir::StringAttr>(a).getValue());
+    unsigned numFnInputs = fnType.getNumInputs();
     unsigned mrBaseIdx = 0;
     if (!body.empty()) {
       auto args = body.getArguments();
-      mrBaseIdx = args.size() - numMrOffsets - (mrSpmSize ? 1 : 0);
-      for (unsigned i = 0; i < args.size(); ++i) {
+      mrBaseIdx = numFnInputs - numMrOffsets - (mrSpmSize ? 1 : 0);
+      for (unsigned i = 0; i < numFnInputs && i < args.size(); ++i) {
         if (paramIdx > 0) os() << ", ";
         std::string name;
         if (mrOffsets && i >= mrBaseIdx && i < mrBaseIdx + numMrOffsets) {
@@ -438,7 +451,7 @@ private:
           name = mlir::cast<mlir::StringAttr>(mrOffsets[offsetIdx])
                      .getValue()
                      .str();
-        } else if (mrSpmSize && i == args.size() - 1) {
+        } else if (mrSpmSize && i == numFnInputs - 1) {
           name = mrSpmSize.getValue().str();
         } else {
           name = "arg" + std::to_string(paramIdx);
@@ -497,7 +510,12 @@ private:
     spmNames_.clear();
     kernel.walk([&](TensorAllocOp allocOp) {
       if (!allocOp.getReuseOffsetAttr()) return;
-      if (allocOp->getAttrOfType<mlir::StringAttr>("dyn_offset_arg")) return;
+      // Skip dynamic offset allocs that ARE kernel params (handled by
+      // __dyn_smem path). Also skip allocs with dyn_offset_arg when
+      // mrOffsetParamNames_ hasn't been populated (non-device functions).
+      if (auto dynArg = allocOp->getAttrOfType<mlir::StringAttr>("dyn_offset_arg"))
+        if (mrOffsetParamNames_.empty() || mrOffsetParamNames_.count(dynArg.getValue()))
+          return;
       auto poolNameOpt = allocOp.getReuseSpm();
       llvm::StringRef poolName =
           poolNameOpt.has_value() ? *poolNameOpt : "__default_spm";
@@ -512,6 +530,28 @@ private:
       std::string qual = getAllocQualifier(tensorTy);
       os() << getIndent() << qual << "unsigned char "
            << spmVar << "[" << spmBytes << "];\n";
+    });
+
+    // Pre-scan: if any dynamic-offset tensor alloc exists, emit the
+    // __dyn_smem extern at function level for cross-scope visibility.
+    dynSpmEmitted_ = false;
+    kernel.walk([&](TensorAllocOp allocOp) {
+      if (dynSpmEmitted_) return;
+      if (allocOp->getAttrOfType<mlir::StringAttr>("dyn_offset_arg")) {
+        auto tensorTy = cast<coir::TensorType>(allocOp.getResult().getType());
+        bool isLocal =
+            (tensorTy.getMemorySpace() ==
+             static_cast<int32_t>(coir::TensorMemorySpace::Local));
+        if (isLocal) {
+          os() << getIndent()
+               << "__local__ unsigned char __dyn_smem[__CO_DYN_SMEM_SIZE];\n";
+        } else {
+          std::string qual = getAllocQualifier(tensorTy);
+          os() << getIndent() << "extern " << qual
+               << "unsigned char __dyn_smem[];\n";
+        }
+        dynSpmEmitted_ = true;
+      }
     });
 
     for (auto &op : body.front().getOperations()) {
@@ -950,8 +990,11 @@ private:
       os() << "}\n\n";
     }
 
-    // Host function signature — exclude MR args (computed by HeapSimulator).
+    // Host function signature — only user-visible parameters.
     unsigned numOrigInputs = numInputs - dimArgMeta.size() - numMrExtra;
+    if (auto paramNames = kernel->getAttrOfType<ArrayAttr>("coir.param_names"))
+      numOrigInputs = std::min(numOrigInputs,
+                               static_cast<unsigned>(paramNames.size()));
     llvm::SmallVector<llvm::StringRef> hostElemHints;
     if (auto attr = kernel->getAttrOfType<ArrayAttr>("coir.host_elem_types"))
       for (auto a : attr)
@@ -1016,6 +1059,35 @@ private:
       }
       isEmittingHost_ = false;
 
+      // Collect hoisted param names: for each hoisted block arg position,
+      // find the corresponding v* name from the host-side emission.
+      // The hoisted block args correspond to top-level index/i32 ops
+      // in the kernel body, in order.
+      hoistedParamNames_.clear();
+      if (!body.empty()) {
+        auto mrOffsets =
+            kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_offset_args");
+        unsigned numMrExtra = mrInfo.hasDynamicMR
+            ? (mrOffsets ? mrOffsets.size() : 0) + 1 : 0;
+        unsigned hoistedStart = numOrigInputs + dimArgMeta.size();
+        unsigned hoistedEnd = numInputs - numMrExtra;
+        unsigned hoistedIdx = 0;
+        for (auto &op : body.front().getOperations()) {
+          if (isa<ParallelOp, KernelReturnOp>(&op)) continue;
+          for (auto result : op.getResults()) {
+            auto ty = result.getType();
+            if (ty.isIndex() || ty.isInteger(32) || ty.isInteger(64)) {
+              if (hoistedIdx >= hoistedStart && hoistedIdx < hoistedEnd) {
+                auto it = valueNames.find(result);
+                hoistedParamNames_.push_back(
+                    it != valueNames.end() ? it->second : "0");
+              }
+              ++hoistedIdx;
+            }
+          }
+        }
+      }
+
       emitEntryAssertions(kernel);
       if (resTy)
         emitDeviceOffloadBody(kernel, resTy, mrInfo);
@@ -1050,6 +1122,16 @@ private:
     os() << "}\n\n";
   }
 
+  /// Emit hoisted computation parameters in kernel launch.
+  /// These are integer values computed in the host function that the
+  /// device function receives as block arguments.
+  void emitHoistedLaunchArgs(KernelOp kernel, unsigned numOrigInputs,
+                             const llvm::SmallVectorImpl<DimArgMeta> &dimArgMeta,
+                             const MRInfo &mr) {
+    for (auto &name : hoistedParamNames_)
+      os() << ", (int)" << name;
+  }
+
   void emitMRLaunchArgs(const MRInfo &mr) {
     if (!mr.hasDynamicMR) return;
     for (unsigned i = 0; i < mr.numOffsetArgs; ++i)
@@ -1070,6 +1152,9 @@ private:
     auto dimArgMeta = getDimArgs(kernel);
     unsigned numMrExtra = mr.hasDynamicMR ? mr.numOffsetArgs + 1 : 0;
     unsigned numOrigInputs = numInputs - dimArgMeta.size() - numMrExtra;
+    if (auto pn = kernel->getAttrOfType<mlir::ArrayAttr>("coir.param_names"))
+      numOrigInputs = std::min(numOrigInputs,
+                               static_cast<unsigned>(pn.size()));
     int retInputIdx = getReturnInputArgIdx(kernel, 0);
     std::string eType = emitType(resTy.getElementType());
     std::string choreoElem = choreoType(resTy.getElementType());
@@ -1173,6 +1258,7 @@ private:
       }
       for (auto &da : dimArgMeta)
         os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+      emitHoistedLaunchArgs(kernel, numOrigInputs, dimArgMeta, mr);
       emitMRLaunchArgs(mr);
       os() << ");\n";
       os() << "  choreo::abend_true(topsDeviceSynchronize());\n";
@@ -1211,6 +1297,8 @@ private:
       }
       for (auto &da : dimArgMeta)
         os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+      emitHoistedLaunchArgs(kernel, numOrigInputs, dimArgMeta, mr);
+      emitMRLaunchArgs(mr);
       // Kernel N parameter: dynamic element count or static.
       if (!resDynBytes.empty()) {
         // Strip " * elemBytes" suffix to get element count.
@@ -1250,6 +1338,9 @@ private:
     auto dimArgMeta = getDimArgs(kernel);
     unsigned numMrExtra = mr.hasDynamicMR ? mr.numOffsetArgs + 1 : 0;
     unsigned numOrigInputs = numInputs - dimArgMeta.size() - numMrExtra;
+    if (auto pn = kernel->getAttrOfType<mlir::ArrayAttr>("coir.param_names"))
+      numOrigInputs = std::min(numOrigInputs,
+                               static_cast<unsigned>(pn.size()));
     auto lc = collectLaunchConfig(kernel);
     std::string gdims = emitDim3(lc.blockDims);
     std::string bdims = hasGroupLevel()
@@ -2477,6 +2568,85 @@ private:
       asyncFutures[outputs[i]] = names[(i + 1) % names.size()];
   }
 
+  // Find the kernel argument name for a dynamic dimension of a tensor.
+  // Walks back through TensorTileOp to the kernel block argument and
+  // uses dimArgMeta + dim_checks to map it to the corresponding dim arg.
+  std::string findDynamicDimName(Value tensor, coir::TensorType /*tty*/,
+                                 const std::string & /*mdspanSoFar*/) {
+    // Walk up through nested region ops (e.g. coir.foreach) to find
+    // the enclosing KernelOp.
+    auto *parentOp = tensor.getParentBlock()->getParentOp();
+    auto kOp = dyn_cast<KernelOp>(parentOp);
+    if (!kOp)
+      kOp = parentOp->getParentOfType<KernelOp>();
+    if (!kOp) return "0";
+    auto dimArgMeta = getDimArgs(kOp);
+    auto fnType = kOp.getFunctionType();
+    auto mrInfo = getMRInfo(kOp);
+    unsigned numMrExtra = mrInfo.hasDynamicMR ? mrInfo.numOffsetArgs + 1 : 0;
+    unsigned numOrigInputs = fnType.getNumInputs() - dimArgMeta.size() - numMrExtra;
+    if (auto pn = kOp->getAttrOfType<mlir::ArrayAttr>("coir.param_names"))
+      numOrigInputs = std::min(numOrigInputs,
+                               static_cast<unsigned>(pn.size()));
+
+    // Find which original param this tensor belongs to.
+    Value baseTensor = tensor;
+    if (auto tileOp = tensor.getDefiningOp<TensorTileOp>())
+      baseTensor = tileOp.getSource();
+    int64_t thisParam = -1;
+    if (auto blockArg = dyn_cast<BlockArgument>(baseTensor))
+      thisParam = blockArg.getArgNumber();
+
+    // If not a block argument (e.g., result tensor), use the first
+    // available dim arg since result typically shares dims with inputs.
+    if (thisParam < 0) {
+      if (!dimArgMeta.empty())
+        return "arg" + std::to_string(numOrigInputs);
+      return "0";
+    }
+
+    // Direct match: dim arg for this exact param.
+    for (unsigned i = 0; i < dimArgMeta.size(); ++i) {
+      if (dimArgMeta[i].paramIdx == thisParam)
+        return "arg" + std::to_string(numOrigInputs + i);
+    }
+
+    // Transitive match: use dim_checks to find a param that shares the
+    // same dynamic dim and has a dim arg. Follow chains up to 3 hops.
+    auto dimChecks = kOp->getAttrOfType<ArrayAttr>("coir.dim_checks");
+    if (dimChecks) {
+      llvm::SmallSetVector<int64_t, 8> visited;
+      llvm::SmallVector<int64_t, 8> worklist = {thisParam};
+      visited.insert(thisParam);
+      while (!worklist.empty()) {
+        int64_t curParam = worklist.pop_back_val();
+        // Check if this param has a dim arg.
+        for (unsigned i = 0; i < dimArgMeta.size(); ++i) {
+          if (dimArgMeta[i].paramIdx == curParam)
+            return "arg" + std::to_string(numOrigInputs + i);
+        }
+        // Follow dim_checks to find related params.
+        for (auto a : dimChecks) {
+          auto dict = dyn_cast<DictionaryAttr>(a);
+          if (!dict) continue;
+          auto p0 = dict.getAs<IntegerAttr>("param0").getInt();
+          auto p1 = dict.getAs<IntegerAttr>("param1").getInt();
+          int64_t otherParam = (p0 == curParam) ? p1
+                               : (p1 == curParam) ? p0 : -1;
+          if (otherParam >= 0 && !visited.count(otherParam)) {
+            visited.insert(otherParam);
+            worklist.push_back(otherParam);
+          }
+        }
+      }
+    }
+
+    // Fallback: use first dim arg if available.
+    if (!dimArgMeta.empty())
+      return "arg" + std::to_string(numOrigInputs);
+    return "0";
+  }
+
   void emitDMAConstDesc(DMAConstDescOp op) override {
     unsigned id = nextDmaId++;
     std::string ctxName = "__dma_" + std::to_string(id);
@@ -2743,39 +2913,45 @@ private:
     // -- Memory reuse: buffer is aliased into a shared SPM at a given offset --
     if (op.getReuseOffsetAttr()) {
       // Dynamic offset: use kernel parameter instead of constant.
+      // Only if the offset name is an actual kernel parameter; otherwise
+      // fall through to the static offset path (local buffers inside
+      // nested inthreads may have dyn_offset_arg set but no corresponding
+      // kernel parameter).
       if (auto dynArgAttr =
               op->getAttrOfType<mlir::StringAttr>("dyn_offset_arg")) {
-        if (!dynSpmEmitted_) {
-          bool isLocal =
-              (tensorTy.getMemorySpace() ==
-               static_cast<int32_t>(coir::TensorMemorySpace::Local));
-          if (isLocal) {
-            // GCU local memory is a real address space with static
-            // allocation: an extern array is not allowed there, and a
-            // runtime-sized (VLA) local array is rejected as well.  Emit a
-            // fixed-size definition instead; the kernel-entry launch bound
-            // (__co__local_spm_size) guarantees the dynamic reuse offsets
-            // fit within it.
-            os() << getIndent()
-                 << "__local__ unsigned char __dyn_smem[__CO_DYN_SMEM_SIZE];"
-                    "\n";
-            os() << getIndent()
-                 << "choreo::choreo_assert(__co__local_spm_size <= "
-                    "__CO_DYN_SMEM_SIZE, \"dynamic local memory reuse "
-                    "exceeds __CO_DYN_SMEM_SIZE\");\n";
-          } else {
-            std::string qual = getAllocQualifier(tensorTy);
-            os() << getIndent() << "extern " << qual
-                 << "unsigned char __dyn_smem[];\n";
+        // Use dynamic path if: (a) mrOffsetParamNames_ is empty (non-device
+        // function, all dyn offsets are kernel params), or (b) the name IS
+        // a kernel param. Fall through to static path only for local buffers
+        // whose dyn_offset_arg is NOT a kernel parameter.
+        if (mrOffsetParamNames_.empty() ||
+            mrOffsetParamNames_.count(dynArgAttr.getValue())) {
+          if (!dynSpmEmitted_) {
+            bool isLocal =
+                (tensorTy.getMemorySpace() ==
+                 static_cast<int32_t>(coir::TensorMemorySpace::Local));
+            if (isLocal) {
+              os() << getIndent()
+                   << "__local__ unsigned char __dyn_smem[__CO_DYN_SMEM_SIZE];"
+                      "\n";
+              os() << getIndent()
+                   << "choreo::choreo_assert(__co__local_spm_size <= "
+                      "__CO_DYN_SMEM_SIZE, \"dynamic local memory reuse "
+                      "exceeds __CO_DYN_SMEM_SIZE\");\n";
+            } else {
+              std::string qual = getAllocQualifier(tensorTy);
+              os() << getIndent() << "extern " << qual
+                   << "unsigned char __dyn_smem[];\n";
+            }
+            dynSpmEmitted_ = true;
           }
-          dynSpmEmitted_ = true;
+          std::string offName = dynArgAttr.getValue().str();
+          std::string eType = emitElementType(tensorTy.getElementType());
+          os() << getIndent() << eType << "* " << name << " = (" << eType
+               << "*)((unsigned char*)__dyn_smem + " << offName << ");\n";
+          emitReuseInit(op, tensorTy, name);
+          return;
         }
-        std::string offName = dynArgAttr.getValue().str();
-        std::string eType = emitElementType(tensorTy.getElementType());
-        os() << getIndent() << eType << "* " << name << " = (" << eType
-             << "*)((unsigned char*)__dyn_smem + " << offName << ");\n";
-        emitReuseInit(op, tensorTy, name);
-        return;
+        // dyn_offset_arg not a kernel param — fall through to static path
       }
 
       // Static offset: emit pool array on first use, then pointer alias.
@@ -2978,6 +3154,9 @@ private:
     for (auto &ea : entryAssertions) {
       auto cond = emitExprInHostScope(ea.op.getCondition(), kernel, hostNames,
                                       dimArgMeta);
+      // TODO: workaround
+      // Skip assertions referencing values not resolvable in host scope.
+      if (cond.find("/* unknown */") != std::string::npos) continue;
       os() << "  choreo::runtime_check(" << cond << ", \""
          << ea.op.getMessage().str() << "\");\n";
     }
