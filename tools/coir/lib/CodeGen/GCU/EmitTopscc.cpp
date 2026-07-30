@@ -583,89 +583,6 @@ private:
     return tensor;
   }
 
-  /// Resolve the C++ variable name for a dynamic dimension of a tensor.
-  /// For kernel block arguments, walks dim_args + dim_checks to find the
-  /// kernel parameter that carries the runtime value.  For alloc-backed
-  /// tensors, reads the alloc's dynamicDims operand.
-  std::string resolveDynamicDimName(Value tensor, unsigned dimIdx) {
-    // Walk through tiles to the base tensor.
-    Value base = tensor;
-    while (auto tile = base.getDefiningOp<TensorTileOp>())
-      base = tile.getSource();
-
-    // Case 1: base is a tensor.alloc — use its dynamicDims.
-    if (auto alloc = base.getDefiningOp<TensorAllocOp>()) {
-      auto dynDims = alloc.getDynamicDims();
-      auto baseTy = cast<coir::TensorType>(base.getType());
-      unsigned dynIdx = 0;
-      for (unsigned i = 0; i < baseTy.getShape().size(); ++i) {
-        if (baseTy.isDynamicDim(i)) {
-          if (i == dimIdx && dynIdx < dynDims.size())
-            return getName(dynDims[dynIdx]);
-          dynIdx++;
-        }
-      }
-    }
-
-    // Case 2: base is a kernel block argument — use dim_args metadata.
-    if (auto blockArg = dyn_cast<BlockArgument>(base)) {
-      auto kOp = blockArg.getOwner()->getParent()->getParentOfType<KernelOp>();
-      if (!kOp) return "0";
-
-      auto dimArgMeta = getDimArgs(kOp);
-      int64_t paramIdx = blockArg.getArgNumber();
-
-      // Direct match.
-      for (auto &da : dimArgMeta) {
-        if (da.paramIdx == paramIdx && da.dimIdx == (int64_t)dimIdx)
-          return da.name;
-      }
-
-      // Transitive match via dim_checks.
-      auto fnType = kOp.getFunctionType();
-      unsigned numOrigInputs = fnType.getNumInputs() - dimArgMeta.size();
-      auto dimChecks = kOp->getAttrOfType<ArrayAttr>("coir.dim_checks");
-      if (dimChecks) {
-        llvm::SmallSetVector<int64_t, 8> visited;
-        llvm::SmallVector<std::pair<int64_t, int64_t>, 8> worklist;
-        visited.insert(paramIdx);
-        worklist.push_back({paramIdx, (int64_t)dimIdx});
-        while (!worklist.empty()) {
-          auto [curParam, curDim] = worklist.pop_back_val();
-          for (auto a : dimChecks) {
-            auto dict = dyn_cast<DictionaryAttr>(a);
-            if (!dict) continue;
-            auto p0 = dict.getAs<IntegerAttr>("param0").getInt();
-            auto p1 = dict.getAs<IntegerAttr>("param1").getInt();
-            auto d0 = dict.getAs<IntegerAttr>("dim0").getInt();
-            auto d1 = dict.getAs<IntegerAttr>("dim1").getInt();
-            int64_t otherParam = -1;
-            int64_t otherDim = -1;
-            if (p0 == curParam && d0 == curDim) {
-              otherParam = p1; otherDim = d1;
-            } else if (p1 == curParam && d1 == curDim) {
-              otherParam = p0; otherDim = d0;
-            }
-            if (otherParam >= 0 && !visited.count(otherParam)) {
-              visited.insert(otherParam);
-              worklist.push_back({otherParam, otherDim});
-              for (auto &da : dimArgMeta) {
-                if (da.paramIdx == otherParam && da.dimIdx == otherDim)
-                  return da.name;
-              }
-            }
-          }
-        }
-      }
-
-      // Fallback: return first dim arg (backward-compatible).
-      if (!dimArgMeta.empty())
-        return "arg" + std::to_string(numOrigInputs);
-    }
-
-    return "0";
-  }
-
   /// Emit a single dimension expression.  Returns the static value as a
   /// string or the name of the dynamic SSA value.
   std::string emitDimExpr(Value tensor, unsigned dimIdx) {
@@ -697,13 +614,73 @@ private:
     if (auto bind = defVal.getDefiningOp<TensorBindDimsOp>())
       return resolveDyn(bind.getDynamicDims());
 
-    // Fallback: try resolving from kernel dim args metadata.
-    std::string resolved = resolveDynamicDimName(tensor, dimIdx);
-    if (resolved != "0") return resolved;
+    // Kernel block argument: resolve via dim_args / dim_checks metadata.
+    if (auto blockArg = dyn_cast<BlockArgument>(defVal)) {
+      // Compute the dynamic-dim index within the base tensor.
+      auto baseTy = cast<coir::TensorType>(defVal.getType());
+      unsigned dynIdx = 0;
+      bool found = false;
+      for (unsigned i = 0; i < baseTy.getShape().size(); ++i) {
+        if (baseTy.isDynamicDim(i)) {
+          if (i == dimIdx) { found = true; break; }
+          dynIdx++;
+        }
+      }
+      if (!found)
+        return "1"; // static dim that was somehow misidentified
+
+      auto kOp =
+          blockArg.getOwner()->getParent()->getParentOfType<KernelOp>();
+      if (!kOp)
+        return "1";
+
+      auto dimArgMeta = getDimArgs(kOp);
+      int64_t paramIdx = blockArg.getArgNumber();
+
+      // Direct match.
+      for (auto &da : dimArgMeta) {
+        if (da.paramIdx == paramIdx && da.dimIdx == (int64_t)dynIdx)
+          return da.name;
+      }
+
+      // Transitive match via dim_checks.
+      auto dimChecks = getDimChecks(kOp);
+      if (!dimChecks.empty()) {
+        llvm::SmallSetVector<int64_t, 8> visited;
+        llvm::SmallVector<std::pair<int64_t, int64_t>, 8> worklist;
+        visited.insert(paramIdx);
+        worklist.push_back({paramIdx, (int64_t)dynIdx});
+        while (!worklist.empty()) {
+          auto [curParam, curDim] = worklist.pop_back_val();
+          for (auto &dc : dimChecks) {
+            int64_t otherParam = -1, otherDim = -1;
+            if (dc.param0 == curParam && dc.dim0 == curDim) {
+              otherParam = dc.param1; otherDim = dc.dim1;
+            } else if (dc.param1 == curParam && dc.dim1 == curDim) {
+              otherParam = dc.param0; otherDim = dc.dim0;
+            }
+            if (otherParam >= 0 && !visited.count(otherParam)) {
+              visited.insert(otherParam);
+              worklist.push_back({otherParam, otherDim});
+              for (auto &da : dimArgMeta) {
+                if (da.paramIdx == otherParam && da.dimIdx == otherDim)
+                  return da.name;
+              }
+            }
+          }
+        }
+      }
+
+      // Fallback: use the first dim_arg (backward-compatible).
+      if (!dimArgMeta.empty())
+        return dimArgMeta[0].name;
+
+      return "1";
+    }
 
     llvm_unreachable(
-        "emitDimExpr: tensor has dynamic dims but no tensor.alloc "
-        "or tensor.bind_dims defining op");
+        "emitDimExpr: tensor has dynamic dims but no tensor.alloc, "
+        "tensor.bind_dims, or kernel block argument defining it");
   }
 
   /// Emit the full shape of a tensor as comma-separated dim expressions.
@@ -898,8 +875,7 @@ private:
     return info;
   }
 
-  void emitHeapSimulator(const MRInfo &mr,
-                         llvm::SmallVectorImpl<DimArgMeta> &dimArgMeta) {
+  void emitHeapSimulator(const MRInfo &mr) {
     os() << "  // JIT memory reuse\n";
     os() << "  HeapSimulator::Chunks " << mr.chunksName << ";\n";
     for (auto chunkAttr : mr.chunks) {
@@ -1076,7 +1052,7 @@ private:
     }
 
     if (mrInfo.hasDynamicMR)
-      emitHeapSimulator(mrInfo, dimArgMeta);
+      emitHeapSimulator(mrInfo);
 
     if (needsDevice && resTy) {
       // Emit pre-parallel host code (constants, prints, etc.)
@@ -1842,7 +1818,7 @@ private:
         factors.push_back(std::to_string(perIdxTileSize[i]));
       for (unsigned j = i + 1; j < srcShape.size(); ++j) {
         if (mlir::ShapedType::isDynamic(srcShape[j])) {
-          factors.push_back(resolveDynamicDimName(op.getSource(), j));
+          factors.push_back(emitDimExpr(op.getSource(), j));
         } else if (srcShape[j] != 1) {
           factors.push_back(std::to_string(srcShape[j]));
         }
