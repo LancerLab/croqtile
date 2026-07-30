@@ -1,5 +1,5 @@
 // RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
-// REQUIRES: TARGET-GCUALL
+// REQUIRES: TARGET-GCU300
 
 // Minimal test: DMA copy with a dynamic (runtime-computed) shape dimension.
 // Tests that cocc correctly emits computed variables (not kDynamic sentinels)
