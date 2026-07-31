@@ -352,7 +352,7 @@ private:
   static bool isPureOp(Operation *op) {
     return isa<arith::ConstantOp, arith::IndexCastOp, arith::SelectOp,
                arith::ExtSIOp, arith::ExtFOp, arith::TruncIOp,
-               arith::TruncFOp>(op) ||
+               arith::TruncFOp, TensorBindDimsOp>(op) ||
            op->hasTrait<mlir::OpTrait::IsCommutative>() ||
            // All standard arith binary/unary ops:
            isa<arith::AddIOp, arith::AddFOp, arith::SubIOp, arith::SubFOp,
@@ -3359,10 +3359,11 @@ private:
       first = false;
       auto ty = arg.getType();
       if (auto tty = mlir::dyn_cast<coir::TensorType>(ty)) {
-        auto base = getTensorDefOp(arg);
+        // bind_dims results are materialized by emitTensorBindDims as
+        // aliases to the underlying tensor, so getName() works directly.
         os() << "(" << emitType(tty.getElementType()) << "*)"
-           << getName(base);
-        if (isEmittingHost_ && !hostTensorAllocs_.count(base))
+             << getName(arg);
+        if (isEmittingHost_ && !hostTensorAllocs_.count(arg))
           os() << ".data()";
       } else {
         os() << getName(arg);
