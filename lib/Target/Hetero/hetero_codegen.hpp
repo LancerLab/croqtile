@@ -28,6 +28,8 @@ public:
 
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::Synchronize&) override;
+  bool Visit(AST::Barrier&) override;
+  bool Visit(AST::Fence&) override;
 
   bool Visit(AST::WithIn&) override;
   bool Visit(AST::ForeachBlock&) override;

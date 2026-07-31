@@ -344,6 +344,8 @@ void CoIREmitterBase::emitOp(Operation *op) {
     emitDmaCopy(dmaCopy);
   else if (auto barrier = dyn_cast<BarrierOp>(op))
     emitBarrier(barrier);
+  else if (auto fence = dyn_cast<FenceOp>(op))
+    emitFence(fence);
   else if (auto wait = dyn_cast<WaitOp>(op))
     emitWait(wait);
   else if (auto rotate = dyn_cast<FutureRotateOp>(op))

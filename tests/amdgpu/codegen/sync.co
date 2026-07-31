@@ -1,0 +1,23 @@
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+// Test: barrier at thread/group levels
+__co__ void test_barriers() {
+  parallel bx by 1 : group {
+    // CHECK: __syncwarp()
+    sync.barrier : thread;
+
+    // CHECK: __syncwarp()
+    sync.barrier : group;
+  }
+}
+
+// Test: fence at thread/block visibility
+__co__ void test_fences() {
+  parallel bx by 1 : block {
+    // CHECK: __threadfence()
+    sync.fence : block;
+
+    // CHECK: __threadfence_block()
+    sync.fence : thread;
+  }
+}

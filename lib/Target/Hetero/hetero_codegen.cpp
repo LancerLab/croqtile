@@ -376,6 +376,22 @@ bool HeteroCodeGen::Visit(AST::ParallelBy& n) {
   return CCCodeGen::Visit(n);
 }
 
+// ---- Barrier / Fence: device-owned, host skips ----
+
+bool HeteroCodeGen::Visit(AST::Barrier& n) {
+  TraceEachVisit(n);
+  if (in_offload_device_block_) return true;
+  // Host does not emit barriers; device codegen handles them.
+  return true;
+}
+
+bool HeteroCodeGen::Visit(AST::Fence& n) {
+  TraceEachVisit(n);
+  if (in_offload_device_block_) return true;
+  // Host defers to CCCodeGen base for CPU fence.
+  return CCCodeGen::Visit(n);
+}
+
 // ---- Synchronize: hetero-specific sync ----
 
 bool HeteroCodeGen::Visit(AST::Synchronize& n) {

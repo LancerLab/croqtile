@@ -106,7 +106,7 @@ inline const char* CudaDeviceMemory(Storage st) {
 inline std::string CudaParamStorage(Storage st) {
   switch (st) {
   case Storage::SHARED: return "__shared__";
-  default: return "";
+  default: choreo_unreachable("unsupported parameter storage"); return "";
   }
   return "";
 }
@@ -897,6 +897,7 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
     ssm.EnterScope();
     ssm.MapDeviceSymbolIfNotExist("::__choreo_no_tiling__", "0");
     levels.push(ParallelLevel::NONE);
+    cooperative_stack_.push(false);
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ResetChoreoFunctionStates();
     has_explicit_mma_wait = AST::ContainsMMAWait(n);
@@ -906,8 +907,10 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
     fty = cast<FunctionType>(GetSymbolType(fname));
     ssm.EnterScope();
     levels.push(ParallelLevel::SEQ);
+    cooperative_stack_.push(false);
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.push(pb->GetLevel());
+    cooperative_stack_.push(pb->IsCooperative());
     // only on device-side
     bool is_deferred_block = !pb->IsOuter() &&
                              pb->GetLevel() == ParallelLevel::BLOCK &&
@@ -1315,6 +1318,7 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     tma_future_count = 0;
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.pop();
+    cooperative_stack_.pop();
     // only on device-side
     bool is_deferred_block = !pb->IsOuter() &&
                              pb->GetLevel() == ParallelLevel::BLOCK &&
@@ -2710,7 +2714,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       ds << d_indent << EmitSync(ety->GetStorage()) << ";\n";
       ssm.MapDeviceSymbol(InScopeName(n.name_str), eaname);
     } break;
-    default: break;
+    default: choreo_unreachable("unsupported storage for event array"); break;
     }
   } else if (auto ety = dyn_cast<EventType>(nty)) {
     auto ename = UniqueDeviceName(n.name_str);
@@ -2766,7 +2770,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       ds << d_indent << EmitSync(ety->GetStorage()) << ";\n";
       ssm.MapDeviceSymbol(InScopeName(n.name_str), ename);
     } break;
-    default: break;
+    default: choreo_unreachable("unsupported storage for event"); break;
     }
   }
 
@@ -3349,52 +3353,78 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       }
     }
 
-    hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
-       << ", __" << fname << "_bdims" << parallel_idx;
-
-    bool explicit_smem = false;
-    if (!sbe::ceq(shared_spm_size, sbe::nu(0))) {
-      // TODO: conservative padding. To be optimized.
-      hs << ", " << ValueSTR(shared_spm_size) << " + (" << required_shared_align
-         << " - 1)";
-      explicit_smem = true;
+    // Collect kernel argument references for both cooperative and
+    // non-cooperative launch paths.
+    std::vector<std::string> kernel_arg_refs;
+    {
+      for (auto& item : GetDeviceFuncIns(updating_cgi)) {
+        auto sname = item.name;
+        if (isa<SpannedType>(item.type)) sname += "__device";
+        if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(sname))) continue;
+        if (ssm.HasHostName(sname))
+          kernel_arg_refs.push_back(ssm.HostName(sname));
+        else
+          kernel_arg_refs.push_back(UnScopedName(ssm.DeviceName(sname)));
+      }
+      for (auto item : symbolic_dimensions)
+        kernel_arg_refs.push_back(UnScopedName(item.first));
+      if (const auto& mri = FCtx(fname).GetDynMemReuseInfo(SSTab().ScopeName()))
+        for (const auto& [sto, ie] : mri->infos)
+          for (size_t idx = 0; idx < ie.offset_args.size(); ++idx)
+            kernel_arg_refs.push_back(ie.offsets_name + "[" +
+                                      std::to_string(idx) + "]");
+      // TMA descriptors
+      for (auto desc : cgi.GetTMADesc(&n))
+        kernel_arg_refs.push_back(desc.GetName() + "_tensor_map");
+      if (!ring_start->IsNumeric())
+        kernel_arg_refs.push_back(ValueSTR(ring_start));
     }
+
+    std::string smem_str;
+    if (!sbe::ceq(shared_spm_size, sbe::nu(0)))
+      smem_str = ValueSTR(shared_spm_size) + " + (" +
+                 std::to_string(required_shared_align) + " - 1)";
+    else
+      smem_str = "0";
+
     std::string effective_stream;
     if (n.HasStream()) effective_stream = STR(n.StreamExpr());
+    std::string stream_str = effective_stream != "" ? effective_stream : "0";
 
-    if (effective_stream != "") {
-      if (!explicit_smem) hs << ", 0";
-      hs << ", " << effective_stream;
+    if (n.IsCooperative()) {
+      // Use cudaLaunchCooperativeKernel (works across all CUDA versions).
+      hs << h_indent << "void* __" << fname << "_coop_args[] = {";
+      for (size_t j = 0; j < kernel_arg_refs.size(); ++j) {
+        hs << (j == 0 ? "" : ", ");
+        hs << "(void*)&" << kernel_arg_refs[j];
+      }
+      hs << "};\n";
+      hs << h_indent << "choreo::abend_true(cudaLaunchCooperativeKernel("
+         << "(const void*)" << device_fn << ", __" << fname << "_gdims"
+         << parallel_idx << ", __" << fname << "_bdims" << parallel_idx
+         << ", __" << fname << "_coop_args, " << smem_str << ", " << stream_str
+         << "));\n";
+    } else {
+      hs << h_indent << device_fn << "<<<__" << fname << "_gdims"
+         << parallel_idx << ", __" << fname << "_bdims" << parallel_idx;
+
+      bool explicit_smem = false;
+      if (!sbe::ceq(shared_spm_size, sbe::nu(0))) {
+        hs << ", " << smem_str;
+        explicit_smem = true;
+      }
+      if (effective_stream != "") {
+        if (!explicit_smem) hs << ", 0";
+        hs << ", " << effective_stream;
+      }
+      hs << ">>>(";
+
+      for (size_t j = 0; j < kernel_arg_refs.size(); ++j) {
+        hs << (j == 0 ? "" : ", ");
+        hs << kernel_arg_refs[j];
+      }
+      hs << ");\n";
     }
-    hs << ">>>(";
-
-    size_t i = 0;
-    for (auto& item : GetDeviceFuncIns(updating_cgi)) {
-      auto sname = item.name;
-      if (isa<SpannedType>(item.type)) sname += "__device";
-      if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(sname))) continue;
-      hs << ((i++ == 0) ? "" : ", ");
-      if (ssm.HasHostName(sname))
-        hs << ssm.HostName(sname);
-      else
-        hs << UnScopedName(ssm.DeviceName(sname));
-    }
-    for (auto item : symbolic_dimensions) {
-      hs << ((i++ > 0) ? ", " : "");
-      hs << UnScopedName(item.first);
-    }
-    if (const auto& mri = FCtx(fname).GetDynMemReuseInfo(SSTab().ScopeName()))
-      for (const auto& [sto, ie] : mri->infos)
-        for (size_t idx = 0; idx < ie.offset_args.size(); ++idx)
-          hs << ((i++ > 0) ? ", " : "") << ie.offsets_name << "[" << idx << "]";
-
-    // tma configurations
-    for (auto desc : cgi.GetTMADesc(&n))
-      hs << ", " << desc.GetName() + "_tensor_map";
-
-    if (!ring_start->IsNumeric()) hs << ", " << ValueSTR(ring_start);
-
-    hs << ");\n";
 
     if (!n.IsAsync()) {
       if (effective_stream != "")
@@ -6834,6 +6864,51 @@ bool CuteCodeGen::Visit(AST::Synchronize& n) {
   default:
     choreo_unreachable(
         "unsupported synchronization type: " + STR(n.Resource()) + ".");
+  }
+
+  return true;
+}
+
+bool CuteCodeGen::Visit(AST::Barrier& n) {
+  TraceEachVisit(n);
+
+  switch (n.GetLevel()) {
+  case ParallelLevel::THREAD: ds << d_indent << "__syncwarp();\n"; break;
+  case ParallelLevel::GROUP: ds << d_indent << "__syncwarp();\n"; break;
+  case ParallelLevel::BLOCK:
+    // Cooperative grid sync requires cooperative launch; fallback to CTA sync.
+    if (!cooperative_stack_.empty() && cooperative_stack_.top()) {
+      ds << d_indent << "cooperative_groups::this_grid().sync();\n";
+    } else {
+      ds << d_indent << "__syncthreads();\n";
+    }
+    break;
+  default:
+    choreo_unreachable("unsupported barrier level: " + STR(n.GetLevel()) + ".");
+  }
+
+  return true;
+}
+
+bool CuteCodeGen::Visit(AST::Fence& n) {
+  TraceEachVisit(n);
+
+  // GPU fences always cover shared+global; visibility distinguishes the scope.
+  switch (n.GetVisibility()) {
+  case ParallelLevel::THREAD:
+  case ParallelLevel::GROUP:
+  case ParallelLevel::GROUPx4:
+    // Fence within CTA: shared + global memory.
+    ds << d_indent << "__threadfence_block();\n";
+    break;
+  case ParallelLevel::BLOCK:
+  case ParallelLevel::DEVICE:
+    // Fence device-wide: global memory.
+    ds << d_indent << "__threadfence();\n";
+    break;
+  default:
+    choreo_unreachable(
+        "unsupported fence visibility: " + STR(n.GetVisibility()) + ".");
   }
 
   return true;

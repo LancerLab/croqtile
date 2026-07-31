@@ -72,6 +72,8 @@ public:
   bool Visit(AST::Yield&) override;
   bool Visit(AST::Rotate&) override;
   bool Visit(AST::Synchronize&) override;
+  bool Visit(AST::Barrier&) override;
+  bool Visit(AST::Fence&) override;
   bool Visit(AST::Call&) override;
   bool Visit(AST::NamedVariableDecl&) override;
   bool Visit(AST::CppSourceCode& n) override;

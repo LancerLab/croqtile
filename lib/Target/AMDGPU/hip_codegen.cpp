@@ -111,6 +111,7 @@ bool HIPCodeGen::BeforeVisitImpl(AST::Node& n) {
     EmitFixedDeviceHead();
     ssm.EnterScope();
     levels.push(ParallelLevel::NONE);
+    cooperative_stack_.push(false);
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ResetChoreoFunctionStates();
     BuildSiteAssertionMap();
@@ -118,8 +119,10 @@ bool HIPCodeGen::BeforeVisitImpl(AST::Node& n) {
     fty = cast<FunctionType>(GetSymbolType(fname));
     ssm.EnterScope();
     levels.push(ParallelLevel::SEQ);
+    cooperative_stack_.push(false);
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.push(pb->GetLevel());
+    cooperative_stack_.push(pb->IsCooperative());
     bool is_outer = pb->IsOuter();
     if (is_outer) {
       parallel_idx += 1;
@@ -174,6 +177,7 @@ bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ssm.LeaveScope();
     levels.pop();
+    cooperative_stack_.pop();
     // ds: device kernel. hs: target launch entry (__hetero_* shim for hetero).
     code_segments.back() += ds.str() + hs.str();
     ds.str("");
@@ -181,6 +185,7 @@ bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
     return_stream.str("");
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.pop();
+    cooperative_stack_.pop();
     if (pb->IsOuter()) {
       cur_pb = nullptr;
       DecrDeviceIndent();
@@ -435,6 +440,50 @@ bool HIPCodeGen::Visit(AST::Synchronize& n) {
     choreo_unreachable(
         "unsupported synchronization type: " + STR(n.Resource()) + ".");
   }
+  return true;
+}
+
+bool HIPCodeGen::Visit(AST::Barrier& n) {
+  TraceEachVisit(n);
+
+  switch (n.GetLevel()) {
+  case ParallelLevel::THREAD: ds << d_indent << "__syncwarp();\n"; break;
+  case ParallelLevel::GROUP: ds << d_indent << "__syncwarp();\n"; break;
+  case ParallelLevel::BLOCK:
+    if (!cooperative_stack_.empty() && cooperative_stack_.top()) {
+      ds << d_indent << "cooperative_groups::this_grid().sync();\n";
+    } else {
+      ds << d_indent << "__syncthreads();\n";
+    }
+    break;
+  default:
+    choreo_unreachable("unsupported barrier level: " + STR(n.GetLevel()) + ".");
+  }
+
+  return true;
+}
+
+bool HIPCodeGen::Visit(AST::Fence& n) {
+  TraceEachVisit(n);
+
+  // GPU fences always cover shared+global; visibility distinguishes the scope.
+  switch (n.GetVisibility()) {
+  case ParallelLevel::THREAD:
+  case ParallelLevel::GROUP:
+  case ParallelLevel::GROUPx4:
+    // Fence within CTA: shared + global memory.
+    ds << d_indent << "__threadfence_block();\n";
+    break;
+  case ParallelLevel::BLOCK:
+  case ParallelLevel::DEVICE:
+    // Fence device-wide: global memory.
+    ds << d_indent << "__threadfence();\n";
+    break;
+  default:
+    choreo_unreachable(
+        "unsupported fence visibility: " + STR(n.GetVisibility()) + ".");
+  }
+
   return true;
 }
 
@@ -816,7 +865,8 @@ bool HIPCodeGen::Visit(AST::ParallelBy& n) {
   hs << h_indent << grid_str.substr(0, 4) << " __grid(" << grid_str.substr(5)
      << ";\n";
   hs << h_indent << "dim3 __block(" << bdim_str.substr(5) << ";\n";
-  hs << h_indent << device_fn << "<<<__grid, __block>>>(";
+  hs << h_indent << device_fn << "<<<__grid, __block>>>";
+  hs << "(";
   first = true;
   for (auto& item : cgi.GetDeviceAllIns(fname)) {
     if (!first) hs << ", ";

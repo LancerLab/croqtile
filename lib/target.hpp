@@ -34,6 +34,9 @@ enum class ChoreoFeature {
   HDRPARSE,
   LIBCALL,
   MMA_UKERNEL,
+  BARRIER,
+  FENCE,
+  COOPERATIVE_LAUNCH,
 };
 
 inline static const std::string STR(ChoreoFeature cf) {
@@ -53,6 +56,9 @@ inline static const std::string STR(ChoreoFeature cf) {
   case ChoreoFeature::HDRPARSE: return "hdrparse";
   case ChoreoFeature::LIBCALL: return "libcall";
   case ChoreoFeature::MMA_UKERNEL: return "mma_ukernel";
+  case ChoreoFeature::BARRIER: return "barrier";
+  case ChoreoFeature::FENCE: return "fence";
+  case ChoreoFeature::COOPERATIVE_LAUNCH: return "cooperative_launch";
   default: choreo_unreachable("unsupported feature kind.");
   }
 }
@@ -82,6 +88,12 @@ inline static const std::string Description(ChoreoFeature cf) {
     return "Target Library (__lib_*) Builtin Support.";
   case ChoreoFeature::MMA_UKERNEL:
     return "Micro-kernel based MMA via target library calls.";
+  case ChoreoFeature::BARRIER:
+    return "Execution barrier synchronization at parallel levels.";
+  case ChoreoFeature::FENCE:
+    return "Memory fence for ordering memory operations.";
+  case ChoreoFeature::COOPERATIVE_LAUNCH:
+    return "Cooperative kernel launch for grid-level synchronization.";
   default: choreo_unreachable("unsupported feature kind.");
   }
 }
@@ -188,6 +200,27 @@ public:
     return true;
   }
   virtual int DefaultOptLevel(const ArchId&) const { return 0; }
+
+  // Barrier, fence, and cooperative launch support queries.
+  // Targets override these to declare which barrier levels, fence scopes,
+  // and cooperative launch are supported for each architecture.
+
+  // Whether execution barrier at the given parallel level is supported.
+  virtual bool IsBarrierSupported(const ArchId&, ParallelLevel) const {
+    return IsFeatureSupported(STR(ChoreoFeature::BARRIER));
+  }
+  // Whether memory fence at the given visibility level is supported.
+  virtual bool IsFenceSupported(const ArchId&, ParallelLevel) const {
+    return IsFeatureSupported(STR(ChoreoFeature::FENCE));
+  }
+  // Default memory scope for a fence at the given visibility level.
+  // Returns Storage::NONE if the default is target-defined (not specifiable).
+  virtual Storage GetDefaultFenceMemory(const ArchId&,
+                                        ParallelLevel visibility) const;
+  // Whether the target supports cooperative kernel launches.
+  virtual bool SupportsCooperativeLaunch(const ArchId&) const {
+    return IsFeatureSupported(STR(ChoreoFeature::COOPERATIVE_LAUNCH));
+  }
 
   virtual size_t VectorizeLimit(const ArchId& arch) const {
     choreo_unreachable("unexpected architecture: " + arch + ".");

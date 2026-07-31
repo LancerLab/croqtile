@@ -103,6 +103,10 @@ public:
            Description(ChoreoFeature::ASYNC_DMA)},
           {STR(ChoreoFeature::SLML), Description(ChoreoFeature::SLML)},
           {STR(ChoreoFeature::MEMALLOC), Description(ChoreoFeature::MEMALLOC)},
+          {STR(ChoreoFeature::BARRIER), Description(ChoreoFeature::BARRIER)},
+          {STR(ChoreoFeature::FENCE), Description(ChoreoFeature::FENCE)},
+          {STR(ChoreoFeature::COOPERATIVE_LAUNCH),
+           Description(ChoreoFeature::COOPERATIVE_LAUNCH)},
       };
       if (arch == "sm_90a")
         feats.push_back(
@@ -118,6 +122,10 @@ public:
         {STR(ChoreoFeature::DSDMA), Description(ChoreoFeature::DSDMA)},
         {STR(ChoreoFeature::SLML), Description(ChoreoFeature::SLML)},
         {STR(ChoreoFeature::MEMALLOC), Description(ChoreoFeature::MEMALLOC)},
+        {STR(ChoreoFeature::BARRIER), Description(ChoreoFeature::BARRIER)},
+        {STR(ChoreoFeature::FENCE), Description(ChoreoFeature::FENCE)},
+        {STR(ChoreoFeature::COOPERATIVE_LAUNCH),
+         Description(ChoreoFeature::COOPERATIVE_LAUNCH)},
     };
   }
 

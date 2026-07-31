@@ -1874,6 +1874,7 @@ private:
   std::string device_target_name;
   ptr<MultiValues> launch_bounds_args = nullptr;
   ptr<Expr> maxnreg_arg = nullptr;
+  bool cooperative = false;
 
 public:
   ParallelBy(const location& l, const ptr<Identifier>& pv,
@@ -1997,6 +1998,9 @@ public:
   const ptr<Expr>& GetMaxnregArg() const { return maxnreg_arg; }
   void SetMaxnregArg(const ptr<Expr>& arg) { maxnreg_arg = arg; }
 
+  bool IsCooperative() const { return cooperative; }
+  void SetCooperative(bool c = true) { cooperative = c; }
+
   ptr<Node> CloneImpl() const override {
     auto pb = Make<ParallelBy>(LOC(), CloneP(bpv), CloneP(bound_expr),
                                CloneP(cmpt_bpvs), CloneP(cmpt_bounds),
@@ -2011,6 +2015,7 @@ public:
     if (HasDeviceTarget()) pb->SetDeviceTargetName(DeviceTargetName());
     if (HasLaunchBounds()) pb->SetLaunchBoundsArgs(CloneP(launch_bounds_args));
     if (HasMaxnreg()) pb->SetMaxnregArg(CloneP(maxnreg_arg));
+    pb->SetCooperative(IsCooperative());
     return pb;
   }
 
@@ -2048,6 +2053,7 @@ public:
       os << " : " << STR(GetLevel());
       if (HasDeviceTarget()) os << "(" << DeviceTargetName() << ")";
     }
+    if (IsCooperative()) os << ", cooperative";
   }
 
   void PrintBound(std::ostream& os) const {
@@ -3596,6 +3602,10 @@ struct Rotate : public Node, public TypeIDProvider<Rotate> {
   __UDT_TYPE_INFO__(Node, Rotate)
 };
 
+// DEPRECATED: Use Barrier (sync.barrier) or Fence (sync.fence) instead.
+// Synchronize only scopes to a storage level without naming the entities
+// that synchronize, which is ambiguous.  Kept for backward compatibility
+// but triggers a warning.
 struct Synchronize : public Node, public TypeIDProvider<Synchronize> {
   Storage buf_ty;
 
@@ -3614,6 +3624,48 @@ struct Synchronize : public Node, public TypeIDProvider<Synchronize> {
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, Synchronize)
+};
+
+struct Barrier : public Node, public TypeIDProvider<Barrier> {
+  ParallelLevel level;
+
+  Barrier(const location& loc, ParallelLevel l) : Node(loc), level(l) {}
+
+  ptr<Node> CloneImpl() const override { return Make<Barrier>(LOC(), level); }
+
+  ParallelLevel GetLevel() const { return level; }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
+    os << "\n" << prefix << "`- " << "Barrier: " << STR(level);
+  }
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, Barrier)
+};
+
+struct Fence : public Node, public TypeIDProvider<Fence> {
+  ParallelLevel visibility;
+  Storage memory;
+
+  Fence(const location& loc, ParallelLevel v, Storage m = Storage::NONE)
+      : Node(loc), visibility(v), memory(m) {}
+
+  ptr<Node> CloneImpl() const override {
+    return Make<Fence>(LOC(), visibility, memory);
+  }
+
+  ParallelLevel GetVisibility() const { return visibility; }
+  Storage GetMemory() const { return memory; }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
+    os << "\n" << prefix << "`- " << "Fence: " << STR(visibility);
+    if (memory != Storage::NONE) os << "<" << STR(memory) << ">";
+  }
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, Fence)
 };
 
 struct LoopRange : public Node, public TypeIDProvider<LoopRange> {

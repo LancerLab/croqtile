@@ -1,4 +1,4 @@
-// RUN: choreo -es --stats %s -o /dev/null 2>&1 | FileCheck %s
+// RUN: choreo -es --stats -t cute -arch=sm_90a %s -o /dev/null 2>&1 | FileCheck %s
 //
 // --stats report: memory reuse statistics for shared buffers.
 // Two shared buffers with non-overlapping lifetimes inside one parallel block:
@@ -13,15 +13,15 @@
 // CHECK: {{[ ]*}}1  mreuse  - Device functions with reuse
 
 __co__ void mem_reuse_stats_test(int j) {
-  parallel p by 8 {
+  parallel p by 8 : block <cooperative> {
     shared s32 [256] a;
     a.at(j) = j;
-    sync.shared;
+    sync.barrier : block;
     x = a.at(j);
 
     shared s32 [256] b;
     b.at(j) = x + 1;
-    sync.shared;
+    sync.barrier : block;
     y = b.at(j);
   }
 }

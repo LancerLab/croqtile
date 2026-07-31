@@ -612,6 +612,7 @@ public:
 
   const Target& GetTarget() const { return *compile_target; }
   Target& GetTarget() { return *compile_target; }
+  bool HasTarget() const { return compile_target != nullptr; }
   bool SetTarget(std::unique_ptr<Target>&& ct) {
     if (ct == nullptr) return false;
     compile_target = std::move(ct);

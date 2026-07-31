@@ -1,0 +1,16 @@
+// RUN: not choreo -n -sa=CHECK %s 2>&1 | FileCheck %s
+
+// Test: cooperative annotation only valid on block-level
+__co__ void test_cooperative_on_thread() {
+  // CHECK: warning: 'cooperative' annotation is only valid on block-level parallel-by; ignoring.
+  parallel bx by 1 : thread <cooperative> {
+  }
+}
+
+// Test: sync.barrier : device requires cooperative enclosing scope
+__co__ void test_barrier_device_no_cooperative() {
+  parallel bx by 1 : block {
+    // CHECK: error: sync.barrier : device requires an enclosing 'parallel : block <cooperative>' scope.
+    sync.barrier : device;
+  }
+}

@@ -139,6 +139,8 @@ public:
   bool Visit(AST::Yield&) override;
   bool Visit(AST::Rotate&) override;
   bool Visit(AST::Synchronize&) override;
+  bool Visit(AST::Barrier&) override;
+  bool Visit(AST::Fence&) override;
   bool Visit(AST::Call&) override;
   bool Visit(AST::NamedVariableDecl&) override;
   bool Visit(AST::CppSourceCode& n) override;
@@ -233,6 +235,8 @@ private:
   static const std::string vid_pfx;
   // block dim enforcement level, default to thread level
   ParallelLevel bdim_level = ParallelLevel::THREAD;
+  std::stack<bool>
+      cooperative_stack_; // track cooperative flag per parallel block
   size_t current_thread_count = 0;
   std::string current_thread_count_expr;
   std::string stream_name; // deprecated: kept for ABI, no longer populated

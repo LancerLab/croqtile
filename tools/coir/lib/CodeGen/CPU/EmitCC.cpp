@@ -1235,6 +1235,10 @@ private:
 
   void emitBarrier(BarrierOp /*op*/) override {}
 
+  void emitFence(FenceOp /*op*/) override {
+    os() << getIndent() << "std::atomic_thread_fence(std::memory_order_seq_cst);\n";
+  }
+
   void emitWait(WaitOp op) override {
     std::string tok = getName(op.getToken());
     if (tok != "0")

@@ -1,5 +1,6 @@
 #include "semacheck.hpp"
 #include "interval.hpp"
+#include "target_utils.hpp"
 #include "types.hpp"
 
 using namespace Choreo;
@@ -289,6 +290,8 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
     pending_async.clear();
     waited_async.clear();
     scope_pred_stack.clear();
+    parallel_level_stack.clear();
+    cooperative_stack.clear();
     shared_tensor_producers.clear();
   }
   if (auto block = dyn_cast<AST::PredBlock>(&n))
@@ -304,6 +307,31 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
                             ") exceeds the loop extent (" +
                             std::to_string(extent) + ").");
     }
+  } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    parallel_level_stack.push_back(pb->GetLevel());
+    cooperative_stack.push_back(pb->IsCooperative());
+
+    // Cooperative annotation is validated after normalization (PB
+    // level has been fully inferred).  Warn when the level is not
+    // BLOCK (the compiler inferred the level, not the user).  Warn
+    // when the target does not support cooperative launches.
+    if (pb->IsCooperative()) {
+      if (pb->GetLevel() != ParallelLevel::BLOCK) {
+        Warning(pb->LOC(),
+                "'cooperative' annotation is only valid on block-level "
+                "parallel-by; ignoring.");
+        pb->SetCooperative(false);
+        cooperative_stack.back() = false;
+      } else if (CCtx().HasTarget() &&
+                 !CCtx().GetTarget().SupportsCooperativeLaunch(
+                     CCtx().GetArch())) {
+        Warning(pb->LOC(), "cooperative launch is not supported by target '" +
+                               CCtx().GetTarget().Name() + "' on arch '" +
+                               CCtx().GetArch() + "'; ignoring.");
+        pb->SetCooperative(false);
+        cooperative_stack.back() = false;
+      }
+    }
   }
   return true;
 }
@@ -312,6 +340,10 @@ bool SemaChecker::AfterVisitImpl(AST::Node& n) {
   if (isa<AST::PredBlock>(&n) || isa<AST::ForeachBlock>(&n))
     scope_pred_stack.pop_back();
   if (isa<AST::ForeachBlock>(&n)) foreach_stack.pop_back();
+  if (isa<AST::ParallelBy>(&n)) {
+    parallel_level_stack.pop_back();
+    cooperative_stack.pop_back();
+  }
 
   if (isa<AST::ChoreoFunction>(&n)) {
     for (auto n : waited_async) pending_async.erase(n);
@@ -741,6 +773,78 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
     } else if (auto val = VIInt(arg->Opts().GetVal());
                !val || val.value() <= 0) {
       Error1(arg->LOC(), "[[maxnreg]] argument must be a positive integer.");
+    }
+  }
+
+  return true;
+}
+
+// Check if `inner` level is a valid nested scope under `outer` level
+// (e.g., THREAD under BLOCK is valid, BLOCK under GROUP is not).
+// PlDepthMap assigns depth 0 to the outermost level; deeper scopes have
+// higher depth values.  `inner` is valid under `outer` when `inner` is at
+// a depth >= `outer` (i.e., as deep or deeper).
+inline bool LevelWithin(ParallelLevel outer, ParallelLevel inner) {
+  return (outer - inner) <= 0;
+}
+
+// Map fence visibility level to the minimum parallel level that can contain it
+static ParallelLevel FenceMinLevel(ParallelLevel visibility) {
+  return visibility;
+}
+
+bool SemaChecker::VisitNode(AST::Barrier& n) {
+  // sync.barrier : device requires a cooperative enclosing parallel : block
+  if (n.GetLevel() == ParallelLevel::DEVICE) {
+    bool found_cooperative_block = false;
+    for (size_t i = cooperative_stack.size(); i > 0; --i) {
+      if (parallel_level_stack[i - 1] == ParallelLevel::BLOCK &&
+          cooperative_stack[i - 1]) {
+        found_cooperative_block = true;
+        break;
+      }
+    }
+    if (!found_cooperative_block) {
+      Error1(n.LOC(), "sync.barrier : device requires an enclosing 'parallel : "
+                      "block <cooperative>' scope.");
+    }
+  }
+
+  // Validate barrier level does not exceed enclosing parallel level
+  if (!parallel_level_stack.empty()) {
+    auto enc_level = parallel_level_stack.back();
+    if (!LevelWithin(enc_level, n.GetLevel())) {
+      Warning(n.LOC(), "sync.barrier : " + STR(n.GetLevel()) +
+                           " inside a parallel : " + STR(enc_level) +
+                           " scope; the barrier may have no effect.");
+    }
+  }
+
+  return true;
+}
+
+bool SemaChecker::VisitNode(AST::Fence& n) {
+  // Validate that the target supports this fence visibility.
+  if (CCtx().HasTarget() && !CCtx().GetTarget().IsFenceSupported(
+                                CCtx().GetArch(), n.GetVisibility())) {
+    Error1(n.LOC(), "sync.fence : " + STR(n.GetVisibility()) +
+                        " is not supported by target '" +
+                        CCtx().GetTarget().Name() + "' on arch '" +
+                        CCtx().GetArch() +
+                        "'; there is no direct hardware equivalent.");
+    return false;
+  }
+
+  // Validate fence visibility is appropriate for the enclosing parallel level
+  if (!parallel_level_stack.empty()) {
+    auto enc_level = parallel_level_stack.back();
+    auto min_level = FenceMinLevel(n.GetVisibility());
+    if (!LevelWithin(enc_level, min_level)) {
+      Warning(
+          n.LOC(),
+          "sync.fence : " + STR(n.GetVisibility()) +
+              " inside a parallel : " + STR(enc_level) +
+              " scope; the fence scope exceeds the enclosing parallel level.");
     }
   }
 

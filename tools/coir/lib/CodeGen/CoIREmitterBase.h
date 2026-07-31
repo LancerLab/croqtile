@@ -116,6 +116,7 @@ protected:
   virtual void emitParallel(ParallelOp op) = 0;
   virtual void emitHostEntry(KernelOp kernel) = 0;
   virtual void emitBarrier(BarrierOp op) = 0;
+  virtual void emitFence(FenceOp op) = 0;
   virtual void emitWait(WaitOp op) = 0;
   virtual void emitDmaCopy(DmaCopyOp op) = 0;
   virtual void emitDMAConstDesc(DMAConstDescOp op) = 0;

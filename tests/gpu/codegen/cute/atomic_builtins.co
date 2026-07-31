@@ -4,7 +4,7 @@ __co__ void atomic_codegen_test(s32 [64] a) {
   parallel p by 64 : thread {
     shared s32 [64] s;
     s.at(p) = a.at(p);
-    sync.shared;
+    sync.barrier : thread;
     __atomic_add(s.at(p), 1);
     __atomic_sub(s.at(p), 2);
     __atomic_exch(s.at(p), 0);

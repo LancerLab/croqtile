@@ -52,10 +52,13 @@ namespace Choreo {
 struct PLAnnotation {
   Choreo::ParallelLevel level;
   std::string device_target;
+  bool cooperative = false;
   PLAnnotation() : level(Choreo::ParallelLevel::NONE) {}
   PLAnnotation(Choreo::ParallelLevel l) : level(l) {}
   PLAnnotation(Choreo::ParallelLevel l, const std::string& dt)
       : level(l), device_target(dt) {}
+  PLAnnotation(Choreo::ParallelLevel l, const std::string& dt, bool c)
+      : level(l), device_target(dt), cooperative(c) {}
 };
 
 namespace Choreo { namespace AST { struct MultiValues; struct Expr; } }
@@ -210,7 +213,7 @@ extern int yylex();
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
 %token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
-%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG
+%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC BARRIER FENCE CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG
 %token DLBRAKT
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD DESC STORE ROW COLUMN SCALE MASK MMAWAIT
@@ -222,7 +225,7 @@ extern int yylex();
 %token <std::string> FRAG
 %token <std::string> APPLY REDUCE_MAX_STMT REDUCE_SUM_STMT COPY_STMT
 // control related
-%token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH RET WHERE WHILE BREAK CONTINUE YIELD
+%token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH RET WHERE WHILE BREAK CONTINUE YIELD COOPERATIVE
 %token <std::string> VECTORIZE
 
 // non-terminals
@@ -270,6 +273,8 @@ extern int yylex();
 %nterm <AST::ptr<AST::ParallelBy>> paraby_block parabys paraby
 %nterm <AST::ptr<AST::Return>> return_stmt
 %nterm <AST::ptr<AST::Synchronize>> sync_stmt
+%nterm <AST::ptr<AST::Barrier>> barrier_stmt
+%nterm <AST::ptr<AST::Fence>> fence_stmt
 %nterm <std::vector<ptr<AST::SpannedOperation>>> spanned_ops
 %nterm <ptr<AST::SpannedOperation>> spanned_op
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr subdata_expr
@@ -748,6 +753,8 @@ statement
     | swap_stmt    SEMCOL        { $$ = $1; }
     | return_stmt  SEMCOL        { $$ = $1; }
     | sync_stmt    SEMCOL        { $$ = $1; }
+    | barrier_stmt SEMCOL   { $$ = $1; }
+    | fence_stmt SEMCOL     { $$ = $1; }
     | inlcpp_stmt  SEMCOL        { $$ = $1; }
     | break_stmt   SEMCOL        { $$ = $1; }
     | continue_stmt  SEMCOL      { $$ = $1; }
@@ -764,6 +771,21 @@ statement
 sync_stmt
     : SYNC DOT STORAGE {
         $$ = AST::Make<AST::Synchronize>(@1, $3);
+      }
+    ;
+
+barrier_stmt
+    : SYNC DOT BARRIER COL PBLEVEL {
+        $$ = AST::Make<AST::Barrier>(@1, $5);
+      }
+    ;
+
+fence_stmt
+    : SYNC DOT FENCE COL PBLEVEL {
+        $$ = AST::Make<AST::Fence>(@1, $5);
+      }
+    | SYNC DOT FENCE COL PBLEVEL LT STORAGE GT {
+        $$ = AST::Make<AST::Fence>(@1, $5, $7);
       }
     ;
 
@@ -824,6 +846,7 @@ parabys
         $3->SetLevel($4.level);
         if (!$4.device_target.empty())
           $3->SetDeviceTargetName($4.device_target);
+        $3->SetCooperative($4.cooperative);
         auto pb = $1;
         while (!pb->stmts->None() && isa<AST::ParallelBy>(pb->stmts->SubAt(0)))
           pb = cast<AST::ParallelBy>(pb->stmts->SubAt(0));
@@ -834,6 +857,7 @@ parabys
         $1->SetLevel($2.level);
         if (!$2.device_target.empty())
           $1->SetDeviceTargetName($2.device_target);
+        $1->SetCooperative($2.cooperative);
         $$ = $1;
       }
     ; /* do not allow empty paraby */
@@ -1353,6 +1377,16 @@ note_pl
           YYERROR;
         }
         $$ = PLAnnotation($2, $4);
+      }
+    | COL PBLEVEL LT COOPERATIVE GT {
+        $$ = PLAnnotation($2, "", true);
+      }
+    | COL PBLEVEL LPAREN IDENTIFIER RPAREN LT COOPERATIVE GT {
+        if ($2 != ParallelLevel::DEVICE) {
+          Parser::error(@2, "parameterized level annotation is only valid for 'device'.");
+          YYERROR;
+        }
+        $$ = PLAnnotation($2, $4, true);
       }
     | %empty { $$ = PLAnnotation(); }
     ;

@@ -91,7 +91,12 @@ inline ParallelLevel operator--(ParallelLevel& pl) {
 
 inline int operator-(ParallelLevel lhs, ParallelLevel rhs) {
   auto& pld = PlDepthMap::Get();
-  return pld.ToDepth(lhs) - pld.ToDepth(rhs);
+  if (pld.HasLevel(lhs) && pld.HasLevel(rhs))
+    return pld.ToDepth(lhs) - pld.ToDepth(rhs);
+  // At least one level is not in the target's parallel level map.
+  // Fall back to the raw enum ordinal comparison, which follows the
+  // same inner-to-outer ordering as the depth map.
+  return static_cast<int>(rhs) - static_cast<int>(lhs);
 }
 
 // MMA related static limitation

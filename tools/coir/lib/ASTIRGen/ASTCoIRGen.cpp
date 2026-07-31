@@ -311,7 +311,7 @@ ASTCoIRGen::LowerSpannedType(const ptr<SpannedType> &sty) {
   case Storage::LOCAL:
     memSpace = static_cast<int32_t>(coir::TensorMemorySpace::Local);
     break;
-  default: break;
+  default: llvm_unreachable("unsupported storage type"); break;
   }
 
   llvm::SmallVector<int64_t> strides;
@@ -356,7 +356,7 @@ ASTCoIRGen::LowerParallelLevel(ParallelLevel pl) {
   case ParallelLevel::CLUSTER: level = coir::ParallelLevel::CLUSTER; break;
   case ParallelLevel::DEVICE:  level = coir::ParallelLevel::DEVICE; break;
   case ParallelLevel::SEQ:     level = coir::ParallelLevel::SEQ; break;
-  default: level = coir::ParallelLevel::BLOCK; break;
+  default: llvm_unreachable("unsupported parallel level"); break;
   }
   return coir::ParallelLevelAttr::get(&IRContext(), level);
 }
@@ -3102,6 +3102,35 @@ bool ASTCoIRGen::Visit(AST::Synchronize &sync) {
   }
   builder.create<coir::BarrierOp>(
       loc, coir::ParallelLevelAttr::get(&IRContext(), scope));
+  return true;
+}
+
+bool ASTCoIRGen::Visit(AST::Barrier &barrier) {
+  auto loc = Loc(barrier);
+  auto level = LowerParallelLevel(barrier.GetLevel());
+  builder.create<coir::BarrierOp>(loc, level);
+  return true;
+}
+
+bool ASTCoIRGen::Visit(AST::Fence &fence) {
+  auto loc = Loc(fence);
+  auto level = LowerParallelLevel(fence.GetVisibility());
+  coir::TensorMemorySpace scope;
+  auto memory = fence.GetMemory();
+  if (memory == Storage::NONE) {
+    // Default memory scope from visibility level (target-defined).
+    memory = CCtx().GetTarget().GetDefaultFenceMemory(CCtx().GetArch(),
+                                                      fence.GetVisibility());
+  }
+  switch (memory) {
+  case Storage::LOCAL:  scope = coir::TensorMemorySpace::Local;  break;
+  case Storage::SHARED: scope = coir::TensorMemorySpace::Shared; break;
+  case Storage::GLOBAL: scope = coir::TensorMemorySpace::Global; break;
+  default:              llvm_unreachable("unsupported fence memory scope"); break;
+  }
+  builder.create<coir::FenceOp>(
+      loc, level,
+      coir::TensorMemorySpaceAttr::get(&IRContext(), scope));
   return true;
 }
 

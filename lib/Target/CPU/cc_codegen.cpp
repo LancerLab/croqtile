@@ -1348,6 +1348,21 @@ bool CCCodeGen::Visit(AST::Synchronize& n) {
   return true;
 }
 
+bool CCCodeGen::Visit(AST::Barrier& n) {
+  TraceEachVisit(n);
+  // Single-threaded CPU execution: barriers are no-ops.
+  // For multi-threaded CPU (e.g., std::async), sync.barrier would
+  // require a std::barrier<> (C++20) -- deferred.
+  return true;
+}
+
+bool CCCodeGen::Visit(AST::Fence& n) {
+  TraceEachVisit(n);
+  // Emit a full sequential-consistency fence for all CPU fence scopes.
+  IndStream() << "std::atomic_thread_fence(std::memory_order_seq_cst);\n";
+  return true;
+}
+
 bool CCCodeGen::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
 

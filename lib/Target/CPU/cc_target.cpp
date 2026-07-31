@@ -48,6 +48,8 @@ public:
     return {
         {STR(ChoreoFeature::ASYNC_DMA), Description(ChoreoFeature::ASYNC_DMA)},
         {STR(ChoreoFeature::EVENT), Description(ChoreoFeature::EVENT)},
+        {STR(ChoreoFeature::FENCE), Description(ChoreoFeature::FENCE)},
+        {STR(ChoreoFeature::BARRIER), Description(ChoreoFeature::BARRIER)},
         {STR(ChoreoFeature::MMA), Description(ChoreoFeature::MMA)},
         {STR(ChoreoFeature::MEMALLOC), Description(ChoreoFeature::MEMALLOC)},
         {STR(ChoreoFeature::LIBCALL), Description(ChoreoFeature::LIBCALL)},

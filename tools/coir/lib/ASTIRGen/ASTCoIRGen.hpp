@@ -183,6 +183,8 @@ public:
   void emitAtomicCall(AST::Call &call);
   bool Visit(AST::Rotate &) override;
   bool Visit(AST::Synchronize &) override;
+  bool Visit(AST::Barrier &) override;
+  bool Visit(AST::Fence &) override;
   bool Visit(AST::Select &) override { return true; }
   bool Visit(AST::LoopRange &) override { return true; }
   bool Visit(AST::InThreadsBlock &) override;

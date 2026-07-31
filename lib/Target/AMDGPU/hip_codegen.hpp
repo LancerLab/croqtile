@@ -91,6 +91,8 @@ public:
   bool Visit(AST::Yield&) override;
   bool Visit(AST::Rotate&) override;
   bool Visit(AST::Synchronize&) override;
+  bool Visit(AST::Barrier&) override;
+  bool Visit(AST::Fence&) override;
   bool Visit(AST::Call&) override;
   bool Visit(AST::NamedVariableDecl&) override;
   bool Visit(AST::NamedTypeDecl&) override;
@@ -108,6 +110,8 @@ private:
   std::string d_indent;
 
   std::stack<ParallelLevel> levels;
+  std::stack<bool>
+      cooperative_stack_; // track cooperative flag per parallel block
   ParallelLevel Level() const { return levels.top(); }
   bool IsParallel() const { return levels.size() > 2; }
   bool NeedLevelPred() const {

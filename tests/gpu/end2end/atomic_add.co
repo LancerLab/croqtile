@@ -10,10 +10,10 @@ __co__ s32 [16] histogram_shared(s32 [256] input) {
     if (p < 16) {
       counts.at(p) = 0;
     }
-    sync.shared;
+    sync.barrier : thread;
     mutable s32 bin = input.at(p) % 16;
     __atomic_add(counts.at(bin), 1);
-    sync.shared;
+    sync.barrier : thread;
     if (p < 16) {
       output.at(p) = counts.at(p);
     }
