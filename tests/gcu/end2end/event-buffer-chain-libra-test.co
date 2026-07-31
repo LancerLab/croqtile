@@ -42,7 +42,7 @@ __co__ f32 [32, 512] relu(f32 [32, 512] input) { /// device program
               trigger ec[r];
             }
           }
-          sync.local;
+          sync.fence : thread;
         }
       }
     }

@@ -1,0 +1,36 @@
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+// Test: barrier at thread/group levels
+__co__ void test_barriers() {
+  parallel bx by 1 : group {
+    // CHECK: __syncwarp();
+    sync.barrier : group;
+
+    // CHECK: __syncwarp();
+    sync.barrier : thread;
+  }
+}
+
+// Test: cooperative block-level barrier (angle bracket syntax)
+__co__ void test_cooperative_block_barrier() {
+  parallel bx by 1 : block<cooperative> {
+    // CHECK: cooperative_groups::this_grid().sync();
+    sync.barrier : block;
+
+    // CHECK: __syncwarp();
+    sync.barrier : group;
+  }
+}
+// CHECK: cudaLaunchCooperativeKernel(
+
+// Test: fence at thread/block visibility
+__co__ void test_fences() {
+  parallel bx by 1 : block {
+    // CHECK: __threadfence();
+    sync.fence : block;
+
+    // CHECK: __threadfence_block();
+    sync.fence : thread;
+  }
+}
+

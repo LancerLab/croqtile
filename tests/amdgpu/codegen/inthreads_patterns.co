@@ -9,7 +9,7 @@ __co__ void inthreads_async_test(f32 [64] a) {
     inthreads.async (p >= 32) {
       a.at(p) = 2.0;
     };
-    sync.shared;
+    sync.barrier : thread;
   }
 }
 
@@ -17,7 +17,7 @@ __co__ void inthreads_async_test(f32 [64] a) {
 // CHECK: } // end inthreads
 // CHECK: if ((__vid_tid_x >= 32)) { // inthreads.async
 // CHECK: } // end inthreads
-// CHECK: __syncthreads();
+// CHECK: __syncwarp();
 
 // --- Sync inthreads with barrier ---
 __co__ void inthreads_sync_test(f32 [64] a) {

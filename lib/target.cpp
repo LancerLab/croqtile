@@ -3,6 +3,7 @@
 #include "codegen_prepare.hpp"
 #include "pipeline.hpp"
 #include "preprocess.hpp"
+#include "types.hpp"
 
 using namespace Choreo;
 
@@ -20,3 +21,15 @@ bool Target::PlanPreCodegenStages(ASTPipeline& p) const {
 }
 
 bool Target::HasDeviceCodeGen() const { return MakeDeviceCodeGen() != nullptr; }
+
+Storage Target::GetDefaultFenceMemory(const ArchId&,
+                                      ParallelLevel visibility) const {
+  switch (visibility) {
+  case ParallelLevel::THREAD: return Storage::LOCAL;
+  case ParallelLevel::GROUP:
+  case ParallelLevel::GROUPx4: return Storage::SHARED;
+  case ParallelLevel::BLOCK:
+  case ParallelLevel::DEVICE: return Storage::GLOBAL;
+  default: return Storage::NONE;
+  }
+}

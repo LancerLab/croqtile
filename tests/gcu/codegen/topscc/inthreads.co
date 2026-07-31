@@ -31,7 +31,7 @@ __co__  void bar(f32 [1, 2, 4] a) {
   parallel p by 6 {
     inthreads.async (p < 3) dma.copy a => local;
     inthreads.async (p > 0) with q in [2] { }
-    sync.shared;
+    sync.barrier : block;
   }
 }
 // CHECK:   if ((__tops_tid_x() < 3)) {
@@ -39,4 +39,4 @@ __co__  void bar(f32 [1, 2, 4] a) {
 // CHECK-NOT:   __syncthreads();
 // CHECK:   if ((__tops_tid_x() > 0)) {
 // CHECK:   } // end inthreads
-// CHECK:   __syncthreads();
+// CHECK:   __syncthreads(); // sync.barrier:block degraded

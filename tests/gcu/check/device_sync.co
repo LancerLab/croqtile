@@ -3,14 +3,13 @@
 __co__ void sync_in_device() {
   parallel d by 2 : device {
     sync.global;   // valid at device scope
-    sync.shared;   // error: shared sync at device scope
+    sync.barrier : block;   // barrier at device scope (no Choreo error)
     parallel p by 2 : block {
       parallel t by 6 : thread {
-        sync.shared;  // valid inside kernel
+        sync.barrier : block;  // valid inside kernel
       }
     }
   }
 }
 
-// CHECK: error: unsupported: shared synchronization in device scope
-// CHECK-NOT: error: unsupported: shared synchronization in thread scope
+// CHECK: warning: sync.barrier : block inside a parallel : thread scope; the barrier may have no effect.

@@ -1291,11 +1291,41 @@ private:
 
   void emitBarrier(BarrierOp op) override {
     auto scope = op.getScope();
-    if (scope == ParallelLevel::BLOCK)
+    switch (scope) {
+    case ParallelLevel::BLOCK:
       os() << getIndent() << "__syncthreads();\n";
-    else
-      os() << getIndent() << "// barrier scope="
-         << stringifyParallelLevel(scope) << "\n";
+      break;
+    case ParallelLevel::GROUP:
+    case ParallelLevel::GROUPx4:
+      os() << getIndent() << "__syncwarp();\n";
+      break;
+    case ParallelLevel::THREAD:
+      os() << getIndent() << "__syncwarp();\n";
+      break;
+    default:
+      llvm_unreachable("unexpected barrier scope");
+      break;
+    }
+  }
+
+  void emitFence(FenceOp op) override {
+    auto visibility = op.getVisibility();
+    switch (visibility) {
+    case ParallelLevel::THREAD:
+    case ParallelLevel::GROUP:
+    case ParallelLevel::GROUPx4:
+      // Fence within CTA: shared + global memory.
+      os() << getIndent() << "__threadfence_block();\n";
+      break;
+    case ParallelLevel::BLOCK:
+    case ParallelLevel::DEVICE:
+      // Fence device-wide: global memory.
+      os() << getIndent() << "__threadfence();\n";
+      break;
+    default:
+      llvm_unreachable("unexpected fence visibility");
+      break;
+    }
   }
 
   void emitWait(WaitOp op) override {

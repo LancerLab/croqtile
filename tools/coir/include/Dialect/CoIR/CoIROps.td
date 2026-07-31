@@ -440,6 +440,25 @@ def BarrierOp : CoIR_Op<"barrier", []> {
   let assemblyFormat = "$scope attr-dict";
 }
 
+def FenceOp : CoIR_Op<"fence", []> {
+  let summary = "Memory fence with visibility scope and optional memory scope";
+  let description = [{
+    Ensures memory ordering at the specified visibility level:
+    - Visibility (ParallelLevel): which threads can see the ordering
+      (thread/group/block), drives GPU intrinsic selection.
+    - Memory (TensorMemorySpace): which memory level is fenced
+      (local/shared/global), drives hardware intrinsic selection.
+
+    For GPU: visibility <= block  --> __threadfence_block()
+             visibility  > block --> __threadfence()
+  }];
+  let arguments = (ins
+    CoIR_ParallelLevelAttr:$visibility,
+    CoIR_TensorMemorySpaceAttr:$scope
+  );
+  let assemblyFormat = "$visibility $scope attr-dict";
+}
+
 def WaitOp : CoIR_Op<"wait", []> {
   let summary = "Wait for an async operation to complete";
   let arguments = (ins CoIR_AsyncTokenTypeC:$token);

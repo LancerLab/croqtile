@@ -33,7 +33,7 @@ __co__ void pc_pattern(f32 [76, 128] lhs, f32 [76, 128] rhs, f32 [76, 128] res) 
         dma.copy out_lbuffer => out.chunk(#p - 1, #q).at(p, q);
       }
     }
-    sync.shared;
+    sync.barrier : block;
   }
 }
 

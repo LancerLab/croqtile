@@ -48,7 +48,7 @@ __co__ f32 [512, 1024] relu(f32 [512, 1024] input) { /// device program
         }
       }
     }
-    // sync.shared;
+    // sync.barrier : block;
   }
   return output;
 }

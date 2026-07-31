@@ -169,6 +169,9 @@ void CoIRKernelLoweringBase::convertOp(OpBuilder &builder, Location loc,
     return;
   }
 
+  // Memory fence -- no direct GPU dialect equivalent; handled by emitters
+  if (isa<FenceOp>(op)) return;
+
   if (auto rotate = dyn_cast<FutureRotateOp>(op)) {
     auto inputs = rotate.getFutures();
     auto outputs = rotate.getResults();

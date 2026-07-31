@@ -18,7 +18,7 @@ __co__ auto foo0(int x) {
         call fff(b);
       }
     }
-    sync.shared; // useless for local buffer
+    sync.barrier : block; // useless for local buffer
   }
   return o;
 }
@@ -49,7 +49,7 @@ __co__ auto foo1(int x) {
       }
     }
     call fff(a, b);
-    sync.shared; // useless for local buffer
+    sync.barrier : block; // useless for local buffer
   }
   return o;
 }
@@ -79,7 +79,7 @@ __co__ auto foo2(int x) {
         call fff(b);
       }
     }
-    sync.shared;
+    sync.barrier : block;
   }
   return o;
 }
@@ -108,7 +108,7 @@ __co__ auto foo3(int x) {
         call fff(b);
       }
     }
-    sync.shared; // useless for local buffer
+    sync.barrier : block; // useless for local buffer
   }
   return o;
 }
@@ -134,7 +134,7 @@ __co__ auto foo4(int x) {
     inthreads.async(p >= 1) {
       call fff(b);
     }
-    sync.shared; // useless for local buffer
+    sync.barrier : block; // useless for local buffer
   }
   return o;
 }

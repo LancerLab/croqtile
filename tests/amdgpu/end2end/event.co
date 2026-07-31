@@ -11,7 +11,7 @@ __co__ auto event_cross_wf(s32 [256] a) {
     shared s32 [256] buf;
     shared event ready;
     buf.at(p) = a.at(p) + 10;
-    sync.shared;
+    sync.barrier : thread;
     pred = p < 128;
     inthreads.async (pred) {
       trigger ready;
@@ -19,7 +19,7 @@ __co__ auto event_cross_wf(s32 [256] a) {
     inthreads.async (!pred) {
       wait ready;
     };
-    sync.shared;
+    sync.barrier : thread;
     output.at(p) = buf.at(p);
   }
   return output;

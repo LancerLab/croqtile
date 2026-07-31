@@ -108,6 +108,10 @@ public:
           {STR(ChoreoFeature::MMA), Description(ChoreoFeature::MMA)},
           {STR(ChoreoFeature::MMA_UKERNEL),
            Description(ChoreoFeature::MMA_UKERNEL)},
+          {STR(ChoreoFeature::BARRIER), Description(ChoreoFeature::BARRIER)},
+          {STR(ChoreoFeature::FENCE), Description(ChoreoFeature::FENCE)},
+          {STR(ChoreoFeature::COOPERATIVE_LAUNCH),
+           Description(ChoreoFeature::COOPERATIVE_LAUNCH)},
       };
     else if (ArchNum(arch) >= 300)
       return {
@@ -124,12 +128,20 @@ public:
           {STR(ChoreoFeature::MMA), Description(ChoreoFeature::MMA)},
           {STR(ChoreoFeature::MMA_UKERNEL),
            Description(ChoreoFeature::MMA_UKERNEL)},
+          {STR(ChoreoFeature::BARRIER), Description(ChoreoFeature::BARRIER)},
+          {STR(ChoreoFeature::FENCE), Description(ChoreoFeature::FENCE)},
+          {STR(ChoreoFeature::COOPERATIVE_LAUNCH),
+           Description(ChoreoFeature::COOPERATIVE_LAUNCH)},
       };
     return {
         {STR(ChoreoFeature::MGM), Description(ChoreoFeature::MGM)},
         {STR(ChoreoFeature::ASYNC_DMA), Description(ChoreoFeature::ASYNC_DMA)},
         {STR(ChoreoFeature::HDRPARSE), Description(ChoreoFeature::HDRPARSE)},
         {STR(ChoreoFeature::MEMALLOC), Description(ChoreoFeature::MEMALLOC)},
+        {STR(ChoreoFeature::BARRIER), Description(ChoreoFeature::BARRIER)},
+        {STR(ChoreoFeature::FENCE), Description(ChoreoFeature::FENCE)},
+        {STR(ChoreoFeature::COOPERATIVE_LAUNCH),
+         Description(ChoreoFeature::COOPERATIVE_LAUNCH)},
     };
   }
   size_t GetVectorLength(const ArchId& arch) const override {

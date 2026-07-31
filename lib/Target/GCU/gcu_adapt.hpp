@@ -23,11 +23,16 @@ private:
   AST::Node* cur_fnode;
   std::string cur_arch;
   std::stack<ParallelLevel> levels;
+  std::stack<bool> cooperative_stack;
 
 private:
   ParallelLevel Level() const {
     assert(levels.size() > 0);
     return levels.top();
+  }
+
+  bool IsInCooperativeBlock() const {
+    return !cooperative_stack.empty() && cooperative_stack.top();
   }
 
   bool Assess(const ValueItem& pred, const std::string& message,
@@ -51,9 +56,11 @@ private:
       cur_params.clear();
       cur_fnode = &n;
       levels.push(ParallelLevel::SEQ);
+      cooperative_stack.push(false);
     } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       if (!ValidLevel(*pb, pb->GetLevel())) return false;
       levels.push(pb->GetLevel());
+      cooperative_stack.push(pb->IsCooperative());
       VST_DEBUG(pb->InlinePrint(dbgs());
                 dbgs() << ": level << " << STR(pb->GetLevel()) << " / "
                        << STR(TargetMaxLevel()) << "\n");
@@ -66,6 +73,7 @@ private:
     if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
       std::string append_note;
       levels.pop();
+      cooperative_stack.pop();
       append_note = STR(pb->GetLevel());
       auto pty = cast<BoundedITupleType>(NodeType(*pb->BPV()));
       pty->AddNote("pv", append_note);
@@ -749,7 +757,7 @@ public:
   bool Visit(AST::DataAccess& n) override {
     TraceEachVisit(n);
     if ((CCtx().GetArch() == "gcu200" || CCtx().GetArch() == "gcu210" ||
-         CCtx().GetArch() == "gcu300") &&
+         (CCtx().GetArch() == "gcu300" && !IsInCooperativeBlock())) &&
         n.indices != nullptr) {
       if (auto sty = GetSpannedType(GetSymbolType(n.data->name)))
         if (sty->GetStorage() == Storage::GLOBAL ||

@@ -30,8 +30,8 @@ __co__ void hetero_demo(f32 [1024] A, f32 [1024] B) {
 // GCU function call (delegated to topscc-compiled object)
 // CHECK: __hetero_gcu_hetero_demo_0(
 
-// CPU future sync
-// CHECK: .get()
+// sync.global waits for pending futures on hetero target
+// CHECK: __host_future_0.get()
 
 // Device compilation fails for this test (global data access restriction)
 // CHECK: [device compilation failed for topscc]

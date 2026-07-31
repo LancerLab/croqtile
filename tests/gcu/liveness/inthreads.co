@@ -41,7 +41,7 @@ __co__ auto mem_reuse0(u8 [K, K, N] i0, u8 [K, K, N] i1) {
         call foo0(l2, l0, |l0|);
         dma.copy l0 => s0.chunkat(_, _, q);
       }
-      sync.shared;
+      sync.barrier : block;
 
       dma.copy s0 => output.chunkat(idx);
     }
@@ -77,7 +77,7 @@ __co__ auto mem_reuse0(u8 [K, K, N] i0, u8 [K, K, N] i1) {
 // LIVENESS: ( 23)             call foo0(l2, l0,  (sizeof l0) )
 // LIVENESS: ( 24)             dma.copy l0 => s0.Chunk(1, 1, (ubound q) ).At(__choreo_no_tiling__, __choreo_no_tiling__, q)
 // LIVENESS: ( 25)           }
-// LIVENESS: ( 26)           sync.shared
+// LIVENESS: ( 26)           sync.barrier : block
 // LIVENESS: ( 27)           dma.copy s0 => output.Chunk( (ubound idx) ).At(idx)
 // LIVENESS: ( 28)         }
 // LIVENESS: ( 29)       }

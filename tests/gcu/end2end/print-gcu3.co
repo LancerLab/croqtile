@@ -65,8 +65,7 @@ __co__ void bar() {
       trigger e;
       println("e after  trigger: ", e);
     }
-
-    sync.shared;
+    sync.barrier : block;
   }
 }
 

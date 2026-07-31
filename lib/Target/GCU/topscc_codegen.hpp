@@ -106,6 +106,8 @@ public:
   bool Visit(AST::Continue&) override;
   bool Visit(AST::Rotate&) override;
   bool Visit(AST::Synchronize&) override;
+  bool Visit(AST::Barrier&) override;
+  bool Visit(AST::Fence&) override;
   bool Visit(AST::Call&) override;
   bool Visit(AST::NamedVariableDecl&) override;
   bool Visit(AST::CppSourceCode& n) override;
@@ -173,11 +175,12 @@ private:
   std::map<std::string, NoFutureInfo> nofuture_vars;
   std::vector<std::string> pld_checklist = {};
 
-  std::set<std::string> global_buffers; // global buffers
-  bool emit_call = true;                // emit the call statement
-  bool has_acore_call = false;          // track acore:: library usage
-  bool has_lib_gemm_general = false;    // track general gemm fallback usage
-  bool has_lib_fallback = false;        // track non-gemm lib fallback usage
+  std::set<std::string> global_buffers;   // global buffers
+  bool current_pb_is_cooperative = false; // set before EmitDeviceFuncDecl
+  bool emit_call = true;                  // emit the call statement
+  bool has_acore_call = false;            // track acore:: library usage
+  bool has_lib_gemm_general = false;      // track general gemm fallback usage
+  bool has_lib_fallback = false;          // track non-gemm lib fallback usage
 
   std::unordered_map<std::string, int> emitted_device_names_;
   std::vector<std::unordered_map<std::string, int>> emitted_names_stack_;

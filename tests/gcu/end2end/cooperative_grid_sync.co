@@ -1,0 +1,42 @@
+// REQUIRES: TARGET-GCU300+
+// RUN: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+
+// Cooperative launch end2end test for GCU300: validates that grid-level sync
+// works correctly when multiple blocks exchange data through global memory.
+// Uses DMA to move data between local and global memory.  With grid sync,
+// both blocks reliably see each other's writes.
+
+#include "choreo.h"
+
+__co__ s32[2] coop_grid_sync() {
+  s32[2] a{0};
+  s32[2] b{0};
+
+  parallel bx by 2 : block<cooperative> {
+    // Block 0 writes 1, block 1 writes 2 using DMA.
+    local s32[1] val;
+    val.at(0) = bx + 1;
+    dma.copy val => a.chunkat(bx);
+
+    sync.barrier : block;    // grid-level sync
+
+    // Read neighbor's value using DMA.
+    local s32[1] neighbor;
+    dma.copy a.chunkat(1 - bx) => neighbor;
+    local s32[1] out;
+    out.at(0) = neighbor.at(0);
+    dma.copy out => b.chunkat(bx);
+  }
+  return b;
+}
+
+int main() {
+  auto res = coop_grid_sync();
+  choreo::choreo_assert(res[0] == 2,
+    "block 0 should see block 1's value (2)");
+  choreo::choreo_assert(res[1] == 1,
+    "block 1 should see block 0's value (1)");
+  std::cout << "Test Passed\n";
+}
+
+// CHECK: Test Passed

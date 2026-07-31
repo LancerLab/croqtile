@@ -7,7 +7,7 @@ __co__  void foo(f32 [24] a) {
     pred = p >= 3;
     inthreads.async (pred) { wait ec; trigger ep; }; // an event is set after all stmts are executed
     inthreads.async (!pred) { wait ep; trigger ec;}; // all the stmts can not execute until event is set
-    sync.shared;
+    sync.barrier : block;
   }
 }
 
@@ -28,7 +28,7 @@ __co__  void foo(f32 [24] a) {
 // CHECK:     ep = false; // reset event
 // CHECK:     ec = true;
 // CHECK:   } // end inthreads
-// CHECK:   __syncthreads();
+// CHECK:   __syncthreads(); // sync.barrier:block degraded
 // CHECK: }
 
 __co__  void eventarray(f32 [24] a) {

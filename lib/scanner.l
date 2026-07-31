@@ -607,6 +607,9 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   ".wait"    return Choreo::Parser::make_MMAWAIT(yytext, loc);
   "assert"   return Choreo::Parser::make_ASSERT(yytext,loc);
   "sync"     return Choreo::Parser::make_SYNC(yytext, loc);
+  "barrier"  return Choreo::Parser::make_BARRIER(yytext, loc);
+  "fence"    return Choreo::Parser::make_FENCE(yytext, loc);
+  "cooperative" return Choreo::Parser::make_COOPERATIVE(yytext, loc);
   "trigger"  return Choreo::Parser::make_TRIGGER(yytext, loc);
   "if"       return Choreo::Parser::make_IF(yytext, loc);
   "else"     return Choreo::Parser::make_ELSE(yytext, loc);

@@ -49,7 +49,7 @@ __co__ auto pc_pattern(f32 [M, N] lhs, f32 [M, N] rhs) {
         trigger ce[p];
       }
     }
-    sync.shared;
+    sync.barrier : block;
   }
   return out;
 }

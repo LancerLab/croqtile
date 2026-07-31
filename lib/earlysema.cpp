@@ -46,6 +46,10 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
         }
       }
     }
+    // Cooperative validation has been moved to SemaCheck
+    // (lib/semacheck.cpp), which runs after normalization.  At that point
+    // the parallel level has been fully inferred, so the check can
+    // accurately determine whether the annotation makes sense.
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     ++inthreads_levels[pl_depth];
     if (inthreads_levels[pl_depth] > 1)
@@ -2866,6 +2870,9 @@ bool EarlySemantics::Visit(AST::Call& n) {
 
 bool EarlySemantics::Visit(AST::Synchronize& n) {
   TraceEachVisit(n);
+
+  Warning(n.LOC(), "'sync.<storage>' is deprecated; use 'sync.barrier' "
+                   "or 'sync.fence' for explicit synchronization.");
 
   switch (n.Resource()) {
   case Storage::GLOBAL:

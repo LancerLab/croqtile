@@ -8,7 +8,7 @@ __co__ void event_scalar_shared(f32 [64] a) {
     pred = p >= 32;
     inthreads.async (pred) { wait ec; trigger ep; };
     inthreads.async (!pred) { wait ep; trigger ec; };
-    sync.shared;
+    sync.barrier : block;
   }
 }
 

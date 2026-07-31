@@ -1,0 +1,45 @@
+// RUN: choreo -es -t topscc -arch=gcu300 %s -o - | FileCheck --check-prefix=CHECK-GCU3 %s
+// RUN: choreo -es -t topscc -arch=gcu400 %s -o - | FileCheck --check-prefix=CHECK-GCU4 %s
+// REQUIRES: TARGET-GCUALL
+
+// Test: barrier at thread/block levels
+__co__ void test_barriers() {
+  parallel bx by 1 : block {
+    // CHECK-GCU4: __syncthreads();
+    sync.barrier : group;
+
+    // CHECK-GCU3: __syncthreads();
+    // CHECK-GCU4: __syncsubthreads();
+    sync.barrier : thread;
+  }
+}
+
+// Test: cooperative block-level barrier
+__co__ void test_cooperative() {
+  parallel bx by 1 : block<cooperative> {
+    // CHECK-GCU3: __syncblocks();
+    // CHECK-GCU4: __syncblocks();
+    sync.barrier : block;
+
+    // CHECK-GCU3: __syncthreads();
+    // CHECK-GCU4: __syncthreads();
+    sync.barrier : group;
+  }
+}
+// The cooperative parallel : block uses __syncblocks() for grid-level sync.
+
+// Test: fence with visibility and memory scopes
+__co__ void test_fences() {
+  parallel bx by 1 : block {
+    // CHECK-GCU3: tcle::fence<FenceType::L3_MEM>();
+    // CHECK-GCU4: tcle::fence<FenceType::L3_MEM>();
+    sync.fence : block<global>;
+
+    // CHECK-GCU4: tcle::fence<FenceType::L2_MEM>();
+    sync.fence : group<shared>;
+
+    // CHECK-GCU3: tcle::fence<FenceType::L1_VDMEM>();
+    // CHECK-GCU4: tcle::fence<FenceType::L1_VDMEM>();
+    sync.fence : thread<local>;
+  }
+}

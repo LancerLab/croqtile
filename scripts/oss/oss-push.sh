@@ -353,9 +353,10 @@ for commit in "${COMMITS[@]}"; do
 
   if [[ ${#seen_excl[@]} -gt 0 ]]; then
   for f in "${!seen_excl[@]}"; do
-    # Restore to oss/main HEAD state (unstage + revert worktree)
-    git reset HEAD -- "$f" >/dev/null 2>&1 || true
-    git checkout HEAD -- "$f" 2>/dev/null || rm -f "$f" 2>/dev/null || true
+    # Remove excluded file from index and worktree.
+    # 'git rm -f' also resolves modify/delete conflicts by accepting deletion.
+    git rm --cached -f "$f" >/dev/null 2>&1 || true
+    rm -f "$f" 2>/dev/null || true
   done
   fi
 

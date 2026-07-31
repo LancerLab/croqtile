@@ -349,8 +349,8 @@ bool ShapeInference::Visit(AST::Expr& n) {
         auto sz = shape.ElementCountValue();
         if (sz && IsValidValueItem(sz)) {
           n.Opts().SetSize(sz);
-          VST_DEBUG(dbgs() << " |-<exprsize> <" << PSTR(nty) << "> "
-                           << STR(n) << ": " << STR(sz) << "\n");
+          VST_DEBUG(dbgs() << " |-<exprsize> <" << PSTR(nty) << "> " << STR(n)
+                           << ": " << STR(sz) << "\n");
         }
       }
     }

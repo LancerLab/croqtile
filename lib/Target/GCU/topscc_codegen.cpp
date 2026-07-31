@@ -330,6 +330,8 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
       emitted_device_names_.clear();
       if (cgi.GetFunctionTrait(fname).multiple_parallelby)
         device_fn = "__choreo_device_" + fname + std::to_string(parallel_idx);
+      current_pb_is_cooperative =
+          pb->GetLevel() == ParallelLevel::BLOCK && pb->IsCooperative();
       EmitDeviceFuncDecl(ds);
       ds << " {\n";
       IncrDeviceIndent();
@@ -1625,42 +1627,82 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
     hs << ValueSTR(lconfig.thread_count.x) << ", "
        << ValueSTR(lconfig.thread_count.y) << ", "
        << ValueSTR(lconfig.thread_count.z) << ");\n";
-  hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
-     << ", __" << fname << "_bdims" << parallel_idx;
-  if (extern_smem) hs << ", " << shared_spm_size;
+
   std::string effective_stream;
   if (n.HasStream()) effective_stream = STR(n.StreamExpr());
-  if (effective_stream != "")
-    hs << (extern_smem ? "" : ", 0") << ", " << effective_stream;
-  hs << ">>>(";
 
-  size_t i = 0;
-  for (auto& item : GetDeviceFuncIns(updating_cgi)) {
-    auto sname = item.name;
-    if (isa<SpannedType>(item.type)) sname += "__device";
-    if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(sname))) continue;
-    hs << ((i++ == 0) ? "" : ", ");
-    if (ssm.HasHostName(sname))
-      hs << ssm.HostName(sname);
-    else
-      hs << UnScopedName(ssm.DeviceName(sname));
+  if (n.IsCooperative()) {
+    // Cooperative launch via topsLaunchCooperativeKernel (required by GCU3+ for
+    // kernels that access global memory via device pointers).
+    hs << h_indent << "{\n";
+    hs << h_indent << "  void* __choreo_coop_args[] = {";
+    size_t i = 0;
+    for (auto& item : GetDeviceFuncIns(updating_cgi)) {
+      auto sname = item.name;
+      if (isa<SpannedType>(item.type)) sname += "__device";
+      if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(sname))) continue;
+      hs << ((i++ == 0) ? "" : ", ");
+      if (ssm.HasHostName(sname))
+        hs << "&" << ssm.HostName(sname);
+      else
+        hs << "&" << UnScopedName(ssm.DeviceName(sname));
+    }
+    for (auto item : symbolic_dimensions) {
+      hs << ((i++ > 0) ? ", " : "");
+      hs << "&" << UnScopedName(item.first);
+    }
+    if (const auto& mri = FCtx(fname).GetDynMemReuseInfo(SSTab().ScopeName()))
+      for (const auto& [sto, ie] : mri->infos)
+        for (size_t idx = 0; idx < ie.offset_args.size(); ++idx)
+          hs << ((i++ > 0) ? ", " : "") << "&" << ie.offsets_name << "[" << idx
+             << "]";
+    if (deferred_device_pb) {
+      auto dpv = deferred_device_pb->BPV()->name;
+      hs << ((i++ > 0) ? ", " : "") << "&" << dpv;
+    }
+    hs << "};\n";
+    hs << h_indent << "  topsLaunchCooperativeKernel((const void*)" << device_fn
+       << ", __" << fname << "_gdims" << parallel_idx << ", __" << fname
+       << "_bdims" << parallel_idx << ", __choreo_coop_args, "
+       << (extern_smem ? ValueSTR(shared_spm_size) : "0") << ", "
+       << (effective_stream != "" ? effective_stream : "0") << ");\n";
+    hs << h_indent << "}\n";
+  } else {
+    hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
+       << ", __" << fname << "_bdims" << parallel_idx;
+    if (extern_smem) hs << ", " << shared_spm_size;
+    if (effective_stream != "")
+      hs << (extern_smem ? "" : ", 0") << ", " << effective_stream;
+    hs << ">>>(";
+
+    size_t i = 0;
+    for (auto& item : GetDeviceFuncIns(updating_cgi)) {
+      auto sname = item.name;
+      if (isa<SpannedType>(item.type)) sname += "__device";
+      if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(sname))) continue;
+      hs << ((i++ == 0) ? "" : ", ");
+      if (ssm.HasHostName(sname))
+        hs << ssm.HostName(sname);
+      else
+        hs << UnScopedName(ssm.DeviceName(sname));
+    }
+    for (auto item : symbolic_dimensions) {
+      hs << ((i++ > 0) ? ", " : "");
+      hs << UnScopedName(item.first);
+    }
+
+    if (const auto& mri = FCtx(fname).GetDynMemReuseInfo(SSTab().ScopeName()))
+      for (const auto& [sto, ie] : mri->infos)
+        for (size_t idx = 0; idx < ie.offset_args.size(); ++idx)
+          hs << ((i++ > 0) ? ", " : "") << ie.offsets_name << "[" << idx << "]";
+
+    if (deferred_device_pb) {
+      auto dpv = deferred_device_pb->BPV()->name;
+      hs << ((i++ > 0) ? ", " : "") << dpv;
+    }
+
+    hs << ");\n";
   }
-  for (auto item : symbolic_dimensions) {
-    hs << ((i++ > 0) ? ", " : "");
-    hs << UnScopedName(item.first);
-  }
-
-  if (const auto& mri = FCtx(fname).GetDynMemReuseInfo(SSTab().ScopeName()))
-    for (const auto& [sto, ie] : mri->infos)
-      for (size_t idx = 0; idx < ie.offset_args.size(); ++idx)
-        hs << ((i++ > 0) ? ", " : "") << ie.offsets_name << "[" << idx << "]";
-
-  if (deferred_device_pb) {
-    auto dpv = deferred_device_pb->BPV()->name;
-    hs << ((i++ > 0) ? ", " : "") << dpv;
-  }
-
-  hs << ");\n";
 
   if (!n.IsAsync() && !device_defers_launch) {
     if (effective_stream != "")
@@ -2710,10 +2752,76 @@ bool TopsccCodeGen::Visit(AST::Synchronize& n) {
     hs << h_indent << "choreo::abend_true(topsDeviceSynchronize());\n";
     break;
   case Storage::SHARED: ds << d_indent << "__syncthreads();\n"; break;
-  case Storage::LOCAL: ds << d_indent << "__syncsubthreads();\n"; break;
+  case Storage::LOCAL:
+    // GCU4+ has __syncsubthreads(); GCU2/GCU3 fall back to __syncthreads().
+    if (CCtx().HasTarget() &&
+        CCtx().GetTarget().ArchNum(CCtx().GetArch()) >= 400)
+      ds << d_indent << "__syncsubthreads();\n";
+    else
+      ds << d_indent << "__syncthreads();\n";
+    break;
   default:
     choreo_unreachable(
         "unsupported synchronization type: " + STR(n.Resource()) + ".");
+  }
+
+  return true;
+}
+
+bool TopsccCodeGen::Visit(AST::Barrier& n) {
+  TraceEachVisit(n);
+
+  switch (n.GetLevel()) {
+  case ParallelLevel::THREAD:
+    // GCU4+ has __syncsubthreads(); GCU2/GCU3 fall back to __syncthreads().
+    if (CCtx().HasTarget() &&
+        CCtx().GetTarget().ArchNum(CCtx().GetArch()) >= 400)
+      ds << d_indent << "__syncsubthreads();\n";
+    else
+      ds << d_indent << "__syncthreads();\n";
+    break;
+  case ParallelLevel::GROUP: ds << d_indent << "__syncthreads();\n"; break;
+  case ParallelLevel::BLOCK:
+    if (!current_pb_is_cooperative) {
+      // Inside a non-cooperative parallel scope, degrade block-level barrier
+      // to the highest available level (GROUP on gcu400+, THREAD on gcu300).
+      if (CCtx().HasTarget() &&
+          CCtx().GetTarget().ArchNum(CCtx().GetArch()) >= 400)
+        ds << d_indent << "__syncthreads(); // sync.barrier:block degraded\n";
+      else
+        ds << d_indent << "__syncthreads(); // sync.barrier:block degraded\n";
+    } else {
+      ds << d_indent << "__syncblocks();\n";
+    }
+    break;
+  default:
+    choreo_unreachable("unsupported barrier level: " + STR(n.GetLevel()) + ".");
+  }
+
+  return true;
+}
+
+bool TopsccCodeGen::Visit(AST::Fence& n) {
+  TraceEachVisit(n);
+
+  auto memory = n.GetMemory();
+  // Default memory scope from visibility level when no explicit <storage>.
+  if (memory == Storage::NONE) {
+    memory = CCtx().GetTarget().GetDefaultFenceMemory(CCtx().GetArch(),
+                                                      n.GetVisibility());
+  }
+
+  switch (memory) {
+  case Storage::LOCAL:
+    ds << d_indent << "tcle::fence<FenceType::L1_VDMEM>();\n";
+    break;
+  case Storage::SHARED:
+    ds << d_indent << "tcle::fence<FenceType::L2_MEM>();\n";
+    break;
+  case Storage::GLOBAL:
+    ds << d_indent << "tcle::fence<FenceType::L3_MEM>();\n";
+    break;
+  default: choreo_unreachable("unsupported fence memory: " + STR(memory) + ".");
   }
 
   return true;
@@ -3510,7 +3618,8 @@ void TopsccCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss) {
         << lconfig.thread_count.y << ", " << lconfig.thread_count.z << ")\n";
   }
 
-  oss << "__global__ void " << device_fn << "(";
+  oss << (current_pb_is_cooperative ? "__cooperative__ " : "")
+      << "__global__ void " << device_fn << "(";
 
   size_t index = 0;
   for (auto& item : GetDeviceFuncIns(updating_cgi)) {

@@ -43,7 +43,7 @@ using namespace Choreo;
 //   4. Update kNumStmtTypes below
 // The runtime assert in HasStmt() will fire if the count is wrong.
 // ==========================================================================
-static constexpr size_t kNumStmtTypes = 18;
+static constexpr size_t kNumStmtTypes = 20;
 static_assert(kNumStmtTypes == LivenessAnalyzer::NumVisitOverrides(),
               "HasStmt type count and Visit override count are out of sync. "
               "When adding a new statement node type, update both HasStmt() "
@@ -138,15 +138,17 @@ bool LivenessAnalyzer::HasStmt(const AST::Node& n) const {
                  isa<AST::Call>(&n) ||              // 7
                  isa<AST::Rotate>(&n) ||            // 8
                  isa<AST::Synchronize>(&n) ||       // 9
-                 isa<AST::Trigger>(&n) ||           // 10
-                 isa<AST::Return>(&n) ||            // 11
-                 isa<AST::ParallelBy>(&n) ||        // 12
-                 isa<AST::WithBlock>(&n) ||         // 13
-                 isa<AST::ForeachBlock>(&n) ||      // 14
-                 isa<AST::WhileBlock>(&n) ||        // 15
-                 isa<AST::InThreadsBlock>(&n) ||    // 16
-                 isa<AST::IfElseBlock>(&n) ||       // 17
-                 isa<AST::ChoreoFunction>(&n);      // 18
+                 isa<AST::Barrier>(&n) ||           // 10
+                 isa<AST::Fence>(&n) ||             // 11
+                 isa<AST::Trigger>(&n) ||           // 12
+                 isa<AST::Return>(&n) ||            // 13
+                 isa<AST::ParallelBy>(&n) ||        // 14
+                 isa<AST::WithBlock>(&n) ||         // 15
+                 isa<AST::ForeachBlock>(&n) ||      // 16
+                 isa<AST::WhileBlock>(&n) ||        // 17
+                 isa<AST::InThreadsBlock>(&n) ||    // 18
+                 isa<AST::IfElseBlock>(&n) ||       // 19
+                 isa<AST::ChoreoFunction>(&n);      // 20
   return is_stmt;
 }
 
@@ -1220,6 +1222,10 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
     os << ")";
   } else if (const auto sync = dyn_cast<AST::Synchronize>(&n)) {
     os << "sync." << STR(sync->Resource());
+  } else if (const auto bar = dyn_cast<AST::Barrier>(&n)) {
+    os << "sync.barrier : " << STR(bar->GetLevel());
+  } else if (const auto fence = dyn_cast<AST::Fence>(&n)) {
+    os << "sync.fence : " << STR(fence->GetVisibility());
   } else if (const auto tr = dyn_cast<AST::Trigger>(&n)) {
     os << "trigger ";
     tr->targets->Print(os);
@@ -1414,7 +1420,7 @@ bool LivenessAnalyzer::IsLoopBlock(const AST::Node& n) {
 
 // TODO: should wait dma be treated as holding point?
 bool LivenessAnalyzer::IsSyncPoint(const AST::Node& n) {
-  return isa<AST::Synchronize>(&n);
+  return isa<AST::Synchronize>(&n) || isa<AST::Barrier>(&n);
 }
 
 bool LivenessAnalyzer::ShouldIndent(const AST::Node& n) {
@@ -2115,6 +2121,26 @@ bool LivenessAnalyzer::Visit(AST::Synchronize& n) {
   adding_synthetic_uses = false;
   visiting_synchronize = false;
   if (cur_hb_state) cta_barrier_since_last_inthreads = true;
+  return true;
+}
+
+bool LivenessAnalyzer::Visit(AST::Barrier& n) {
+  TraceEachVisit(n);
+  std::string cur_scope = SSTab().ScopeName();
+  visiting_synchronize = true;
+  adding_synthetic_uses = true;
+  for (const auto& [scope, vars] : async_inthreads_vars) {
+    if (!PrefixedWith(scope, cur_scope)) continue;
+    for (const auto& var : vars) AddUse(&n, var, false);
+  }
+  adding_synthetic_uses = false;
+  visiting_synchronize = false;
+  if (cur_hb_state) cta_barrier_since_last_inthreads = true;
+  return true;
+}
+
+bool LivenessAnalyzer::Visit(AST::Fence& n) {
+  TraceEachVisit(n);
   return true;
 }
 

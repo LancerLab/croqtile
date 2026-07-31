@@ -73,7 +73,7 @@ __co__ auto foo(int x) {
       inthreads.async (q >= 1) {
         call fff(sa);
       }
-      sync.shared;
+      sync.barrier : block;
       call fff(sb);
     }
   }

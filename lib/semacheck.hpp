@@ -21,6 +21,8 @@ private:
   AttributeDeriver local_deps{this, "local-deps", false};
   std::vector<ValueItem> scope_pred_stack;
   std::vector<AST::ForeachBlock*> foreach_stack;
+  std::vector<ParallelLevel> parallel_level_stack;
+  std::vector<bool> cooperative_stack;
   std::map<std::string, AST::DMA*> shared_tensor_producers;
 
 private:
@@ -59,6 +61,8 @@ public:
   bool VisitNode(AST::Parameter&) override;
   bool VisitNode(AST::IfElseBlock&) override;
   bool VisitNode(AST::ParallelBy&) override;
+  bool VisitNode(AST::Barrier&) override;
+  bool VisitNode(AST::Fence&) override;
   bool VisitNode(AST::WithIn&) override;
   bool VisitNode(AST::SpanAs&) override;
   bool VisitNode(AST::DMA&) override;

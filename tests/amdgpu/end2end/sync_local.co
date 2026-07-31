@@ -6,8 +6,8 @@ __co__ auto sync_local_test(s32 [64] a) {
   parallel p by 64 : thread {
     shared s32 [64] s;
     s.at(p) = a.at(p);
-    sync.shared;
-    sync.local;
+    sync.barrier : thread;
+    sync.fence : thread;
     output.at(p) = s.at(p) + 1;
   }
   return output;

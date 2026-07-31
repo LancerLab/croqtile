@@ -170,7 +170,7 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 
   // When adding a new statement node type to HasStmt(), also add a Visit()
   // override and DumpStmtBriefly() case, then update this count.
-  static constexpr size_t NumVisitOverrides() { return 18; }
+  static constexpr size_t NumVisitOverrides() { return 20; }
 
   static VarSet& SetUnionInPlace(VarSet& a, const VarSet& b);
   static VarSet& SetDiffInPlace(VarSet& a, const VarSet& b);
@@ -210,6 +210,8 @@ public:
   bool Visit(AST::Call&) override;
   bool Visit(AST::Rotate&) override;
   bool Visit(AST::Synchronize&) override;
+  bool Visit(AST::Barrier&) override;
+  bool Visit(AST::Fence&) override;
   bool Visit(AST::Trigger&) override;
   bool Visit(AST::Select&) override;
   bool Visit(AST::Return&) override;

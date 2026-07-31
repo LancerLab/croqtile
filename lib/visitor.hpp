@@ -101,6 +101,8 @@ struct Visitor {
   virtual bool Visit(AST::Call&) = 0;
   virtual bool Visit(AST::Rotate&) = 0;
   virtual bool Visit(AST::Synchronize&) = 0;
+  virtual bool Visit(AST::Barrier&) = 0;
+  virtual bool Visit(AST::Fence&) = 0;
   virtual bool Visit(AST::Select&) = 0;
   virtual bool Visit(AST::Return&) = 0;
   virtual bool Visit(AST::LoopRange&) = 0;
@@ -636,6 +638,8 @@ public:
   bool Visit(AST::Call&) override { return true; }
   bool Visit(AST::Rotate&) override { return true; }
   bool Visit(AST::Synchronize&) override { return true; }
+  bool Visit(AST::Barrier&) override { return true; }
+  bool Visit(AST::Fence&) override { return true; }
   bool Visit(AST::Select&) override { return true; }
   bool Visit(AST::Return&) override { return true; }
   bool Visit(AST::LoopRange&) override { return true; }
@@ -889,6 +893,14 @@ public:
     TraceEachVisit(n);
     return VisitNode(n);
   }
+  bool Visit(AST::Barrier& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::Fence& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
   bool Visit(AST::Select& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
@@ -975,6 +987,8 @@ public:
   virtual bool VisitNode(AST::Call&) { return true; }
   virtual bool VisitNode(AST::Rotate&) { return true; }
   virtual bool VisitNode(AST::Synchronize&) { return true; }
+  virtual bool VisitNode(AST::Barrier&) { return true; }
+  virtual bool VisitNode(AST::Fence&) { return true; }
   virtual bool VisitNode(AST::Select&) { return true; }
   virtual bool VisitNode(AST::Return&) { return true; }
   virtual bool VisitNode(AST::LoopRange&) { return true; }
@@ -1112,6 +1126,8 @@ private:
   bool Visit(AST::Call&) final { return true; }
   bool Visit(AST::Rotate&) final { return true; }
   bool Visit(AST::Synchronize&) final { return true; }
+  bool Visit(AST::Barrier&) final { return true; }
+  bool Visit(AST::Fence&) final { return true; }
   bool Visit(AST::Select&) final { return true; }
   bool Visit(AST::Return&) final { return true; }
   bool Visit(AST::LoopRange&) final { return true; }
