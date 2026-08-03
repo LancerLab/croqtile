@@ -822,10 +822,62 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
                        mlir::ArrayAttr::get(&IRContext(), dimCheckAttrs));
 
   // Dynamic memory reuse: add mr_offset_* and spm_size kernel args.
+  // Reused buffers live in two storages (LOCAL and SHARED).  Both sets of
+  // offsets become kernel args (LOCAL first, then SHARED); only the SHARED
+  // spm_size is a kernel arg (it also sizes the dynamic shared memory at the
+  // kernel launch).  Each storage keeps its own chunks/offsets metadata so the
+  // emitter can run a separate host-side HeapSimulator per pool.
   for (auto &[dfName, mri] : FCtx(cf.name).GetAllDynMemReuseInfos()) {
     if (!mri) continue;
-    for (auto &[sto, ie] : mri->infos) {
-      llvm::SmallVector<mlir::Attribute> mrArgNames;
+
+    // Emit metadata for one storage's reuse info into a set of coir.mr_* /
+    // coir.mr_local_* attributes.
+    auto storeMR = [&](const auto &ie, llvm::StringRef prefix) -> void {
+      llvm::SmallVector<mlir::Attribute> chunkAttrs;
+      for (auto &c : ie.chunks)
+        chunkAttrs.push_back(mlir::StringAttr::get(&IRContext(), c));
+      kernelOp->setAttr(std::string(prefix) + "_chunks",
+                         mlir::ArrayAttr::get(&IRContext(), chunkAttrs));
+      kernelOp->setAttr(std::string(prefix) + "_chunks_name",
+                         mlir::StringAttr::get(&IRContext(), ie.chunks_name));
+      kernelOp->setAttr(std::string(prefix) + "_result_name",
+                         mlir::StringAttr::get(&IRContext(), ie.result));
+      kernelOp->setAttr(std::string(prefix) + "_offsets_name",
+                         mlir::StringAttr::get(&IRContext(), ie.offsets_name));
+      kernelOp->setAttr(std::string(prefix) + "_spm_size_name",
+                         mlir::StringAttr::get(&IRContext(), ie.spm_size));
+      // Const interference matrix for parametric HeapSimulator plan.
+      if (ie.n_buffers > 0 && !ie.interference.empty()) {
+        kernelOp->setAttr(std::string(prefix) + "_n_buffers",
+                           mlir::IntegerAttr::get(
+                               mlir::IntegerType::get(&IRContext(), 64),
+                               ie.n_buffers));
+        kernelOp->setAttr(std::string(prefix) + "_alignment",
+                           mlir::IntegerAttr::get(
+                               mlir::IntegerType::get(&IRContext(), 64),
+                               ie.alignment));
+        llvm::SmallVector<mlir::Attribute> boolMat;
+        for (bool v : ie.interference)
+          boolMat.push_back(mlir::BoolAttr::get(&IRContext(), v));
+        kernelOp->setAttr(std::string(prefix) + "_interference",
+                           mlir::ArrayAttr::get(&IRContext(), boolMat));
+        llvm::SmallVector<mlir::Attribute> sizeExprs;
+        for (auto &s : ie.size_exprs)
+          sizeExprs.push_back(mlir::StringAttr::get(&IRContext(), s));
+        kernelOp->setAttr(std::string(prefix) + "_size_exprs",
+                           mlir::ArrayAttr::get(&IRContext(), sizeExprs));
+        llvm::SmallVector<mlir::Attribute> bufIds;
+        for (auto &b : ie.buffer_ids)
+          bufIds.push_back(mlir::StringAttr::get(&IRContext(), b));
+        kernelOp->setAttr(std::string(prefix) + "_buffer_ids",
+                           mlir::ArrayAttr::get(&IRContext(), bufIds));
+      }
+    };
+
+    llvm::SmallVector<mlir::Attribute> allMrArgNames;
+    auto addOffsetArgs =
+        [&](const auto &ie,
+            llvm::SmallVectorImpl<mlir::Attribute> &names) -> void {
       for (auto &offArg : ie.offset_args) {
         std::string sanitized = offArg;
         for (size_t pos = 0; (pos = sanitized.find("::", pos)) !=
@@ -835,60 +887,36 @@ void ASTCoIRGen::CreateKernelOp(AST::ChoreoFunction &cf) {
         auto arg = entryBlock->addArgument(
             mlir::IndexType::get(&IRContext()), loc);
         MapValue(sanitized, arg);
-        mrArgNames.push_back(
-            mlir::StringAttr::get(&IRContext(), sanitized));
+        names.push_back(mlir::StringAttr::get(&IRContext(), sanitized));
       }
-      // spm_size arg
-      argTypes.push_back(mlir::IndexType::get(&IRContext()));
-      auto spmSizeArg = entryBlock->addArgument(
-          mlir::IndexType::get(&IRContext()), loc);
-      MapValue(ie.spm_size, spmSizeArg);
+    };
 
-      // Store metadata for emitter
-      kernelOp->setAttr("coir.mr_offset_args",
-                         mlir::ArrayAttr::get(&IRContext(), mrArgNames));
-      kernelOp->setAttr("coir.mr_spm_size_arg",
-                         mlir::StringAttr::get(&IRContext(), ie.spm_size));
-      // Store chunks info for host-side HeapSimulator emission
-      llvm::SmallVector<mlir::Attribute> chunkAttrs;
-      for (auto &c : ie.chunks)
-        chunkAttrs.push_back(mlir::StringAttr::get(&IRContext(), c));
-      kernelOp->setAttr("coir.mr_chunks",
-                         mlir::ArrayAttr::get(&IRContext(), chunkAttrs));
-      kernelOp->setAttr("coir.mr_chunks_name",
-                         mlir::StringAttr::get(&IRContext(), ie.chunks_name));
-      kernelOp->setAttr("coir.mr_result_name",
-                         mlir::StringAttr::get(&IRContext(), ie.result));
-      kernelOp->setAttr("coir.mr_offsets_name",
-                         mlir::StringAttr::get(&IRContext(), ie.offsets_name));
-
-      // Const interference matrix for parametric HeapSimulator plan.
-      if (ie.n_buffers > 0 && !ie.interference.empty()) {
-        kernelOp->setAttr("coir.mr_n_buffers",
-                           mlir::IntegerAttr::get(
-                               mlir::IntegerType::get(&IRContext(), 64),
-                               ie.n_buffers));
-        kernelOp->setAttr("coir.mr_alignment",
-                           mlir::IntegerAttr::get(
-                               mlir::IntegerType::get(&IRContext(), 64),
-                               ie.alignment));
-        llvm::SmallVector<mlir::Attribute> boolMat;
-        for (bool v : ie.interference)
-          boolMat.push_back(mlir::BoolAttr::get(&IRContext(), v));
-        kernelOp->setAttr("coir.mr_interference",
-                           mlir::ArrayAttr::get(&IRContext(), boolMat));
-        llvm::SmallVector<mlir::Attribute> sizeExprs;
-        for (auto &s : ie.size_exprs)
-          sizeExprs.push_back(mlir::StringAttr::get(&IRContext(), s));
-        kernelOp->setAttr("coir.mr_size_exprs",
-                           mlir::ArrayAttr::get(&IRContext(), sizeExprs));
-        llvm::SmallVector<mlir::Attribute> bufIds;
-        for (auto &b : ie.buffer_ids)
-          bufIds.push_back(mlir::StringAttr::get(&IRContext(), b));
-        kernelOp->setAttr("coir.mr_buffer_ids",
-                           mlir::ArrayAttr::get(&IRContext(), bufIds));
+    // mri->infos is ordered by Storage (LOCAL < SHARED), so LOCAL offsets are
+    // added before SHARED offsets, matching the kernel-arg layout the
+    // emitter expects ([tensor...] [dim] [local_offsets] [shared_offsets]
+    // [shared_spm_size]).
+    for (auto &[sto, ie] : mri->infos) {
+      if (sto == Storage::LOCAL) {
+        addOffsetArgs(ie, allMrArgNames);
+        storeMR(ie, "coir.mr_local");
+      } else if (sto == Storage::SHARED) {
+        addOffsetArgs(ie, allMrArgNames);
+        // Shared spm_size arg (also the dynamic-shared-memory launch size).
+        argTypes.push_back(mlir::IndexType::get(&IRContext()));
+        auto spmSizeArg = entryBlock->addArgument(
+            mlir::IndexType::get(&IRContext()), loc);
+        MapValue(ie.spm_size, spmSizeArg);
+        kernelOp->setAttr("coir.mr_spm_size_arg",
+                           mlir::StringAttr::get(&IRContext(), ie.spm_size));
+        storeMR(ie, "coir.mr");
       }
     }
+
+    // Store merged offset names (LOCAL offsets, then SHARED offsets) for the
+    // device-function parameter naming.
+    kernelOp->setAttr("coir.mr_offset_args",
+                       mlir::ArrayAttr::get(&IRContext(), allMrArgNames));
+
     // Update function type with the new args
     auto mlirFnType3 =
         mlir::FunctionType::get(&IRContext(), argTypes, resultTypes);
