@@ -1210,6 +1210,45 @@ int64_t ASTCoIRGen::resolveRangeBound(AST::LoopRange *lr) {
 mlir::Value ASTCoIRGen::resolveRangeUBValue(AST::LoopRange *lr, int64_t bound) {
   auto loc = Loc(*lr);
   mlir::Value ubValue;
+
+  // Multi-dim with-in foreach (`foreach index` over [N/#p,17,4]): the loop
+  // bound is the product of the per-dim with-in bounds.  The flattened
+  // ubound may have collapsed a runtime dim (N/#p -> 1), so recompute from
+  // the BoundedType's per-dim bounds.
+  {
+    auto symType = GetSymbolType(lr->GetRVName());
+    if (auto bty = dyn_cast<BoundedType>(symType)) {
+      if (bty->HasValidBound()) {
+        auto ubs = bty->GetUpperBounds();
+        if (ubs.IsValid() && ubs.Value().size() > 1) {
+          mlir::Value prod;
+          bool allOk = true;
+          for (auto &ub : ubs.Value()) {
+            mlir::Value dimVal;
+            if (ub && ub->IsNumeric()) {
+              dimVal = builder.create<mlir::arith::ConstantIndexOp>(
+                  loc, EvalToInt(ub));
+            } else if (ub) {
+              dimVal = MaterializeSBE(loc, ub);
+              if (dimVal && !mlir::isa<mlir::IndexType>(dimVal.getType()))
+                dimVal = builder.create<mlir::arith::IndexCastOp>(
+                    loc, mlir::IndexType::get(&IRContext()), dimVal);
+            }
+            if (!dimVal) {
+              allOk = false;
+              break;
+            }
+            if (prod)
+              prod = builder.create<mlir::arith::MulIOp>(loc, prod, dimVal);
+            else
+              prod = dimVal;
+          }
+          if (allOk && prod) return prod;
+        }
+      }
+    }
+  }
+
   if (bound <= 1) {
     // The iv's with-in extent (BoundedType upper bound), when symbolic.
     // `with x in [extent]` lowers the foreach's range to `(:1:)` (a tiling
@@ -1426,6 +1465,7 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
             auto dims = ubs.Value();
             size_t numDims = dims.size();
             std::string baseName = lr->GetIVName();
+            llvm::SmallVector<mlir::Value> elemVals;
             // Compute strides: stride[i] = product of dims[i+1..end]
             llvm::SmallVector<int64_t> strides(numDims, 1);
             for (int d = (int)numDims - 2; d >= 0; --d) {
@@ -1444,19 +1484,50 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
                 elemVal = builder.create<mlir::arith::DivSIOp>(
                     loc, elemVal, strideConst);
               }
-              int64_t dimVal = 1;
-              if (dims[d] && dims[d]->IsNumeric())
-                dimVal = EvalToInt(dims[d]);
-              if (dimVal > 1) {
-                auto dimConst = builder.create<mlir::arith::ConstantIndexOp>(
-                    loc, dimVal);
-                elemVal = builder.create<mlir::arith::RemSIOp>(
-                    loc, elemVal, dimConst);
-              } else {
-                // dim is 1, so index is always 0
-                elemVal = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
+              mlir::Value dimModVal;
+              if (dims[d] && dims[d]->IsNumeric()) {
+                int64_t dimVal = EvalToInt(dims[d]);
+                if (dimVal > 1)
+                  dimModVal = builder.create<mlir::arith::ConstantIndexOp>(
+                      loc, dimVal);
+              } else if (dims[d]) {
+                // Runtime with-in extent (e.g. N/#p): materialize it and take
+                // the remainder so the decomposed index ranges correctly.
+                dimModVal = MaterializeSBE(loc, dims[d]);
+                if (dimModVal && !mlir::isa<mlir::IndexType>(dimModVal.getType()))
+                  dimModVal = builder.create<mlir::arith::IndexCastOp>(
+                      loc, mlir::IndexType::get(&IRContext()), dimModVal);
               }
+              if (dimModVal)
+                elemVal = builder.create<mlir::arith::RemSIOp>(loc, elemVal,
+                                                               dimModVal);
+              else
+                // dim is 1 (or unresolvable), so index is always 0
+                elemVal = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
               MapValue(elemName, elemVal);
+              elemVals.push_back(elemVal);
+            }
+
+            // Map the with-in matcher USER names (e.g. n/x/y in
+            // `with index = {n, x, y}`) to their decomposed values, so chunkat
+            // indices that reference the matchers by name resolve.  The
+            // frontend keeps the with-in matchers in within_map keyed by the
+            // scoped with-symbol.
+            for (auto &[key, matchers] : within_map) {
+              if (matchers.size() != numDims) continue;
+              llvm::StringRef kr(key);
+              if (kr != rvName && !kr.ends_with("::" + rvName))
+                continue;
+              for (size_t d = 0; d < numDims && d < matchers.size(); ++d) {
+                auto scoped = matchers[d];
+                auto pos = scoped.rfind("::");
+                std::string unscoped = (pos == std::string::npos)
+                                           ? scoped
+                                           : scoped.substr(pos + 2);
+                if (unscoped != (baseName + "__elem__" + std::to_string(d)))
+                  MapValue(unscoped, elemVals[d]);
+              }
+              break;
             }
           }
         }
@@ -1741,24 +1812,41 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
                                    : GetSymbolType(rName);
         auto rty = dyn_cast<BoundedType>(rType);
         if (rty && rty->HasValidBound()) {
-          int64_t ub = EvalToInt(rty->GetUpperBound());
-          if (lhs.getType() != rhs.getType()) {
+          auto &ubItem = rty->GetUpperBound();
+          mlir::Value ubVal;
+          if (ubItem && ubItem->IsNumeric()) {
+            int64_t ub = EvalToInt(ubItem);
             if (mlir::isa<mlir::IndexType>(lhs.getType()))
-              rhs = builder.create<mlir::arith::IndexCastOp>(
-                  loc, lhs.getType(), rhs);
-            else if (mlir::isa<mlir::IndexType>(rhs.getType()))
-              lhs = builder.create<mlir::arith::IndexCastOp>(
-                  loc, rhs.getType(), lhs);
+              ubVal = builder.create<mlir::arith::ConstantIndexOp>(loc, ub);
+            else
+              ubVal = builder.create<mlir::arith::ConstantIntOp>(
+                  loc, ub, lhs.getType());
+          } else if (ubItem) {
+            // Symbolic/runtime extent (e.g. the with-in bound N/#p):
+            // materialize it into arithmetic ops instead of collapsing to a
+            // constant.
+            ubVal = MaterializeSBE(loc, ubItem);
+            if (ubVal && !mlir::isa<mlir::IndexType>(ubVal.getType()))
+              ubVal = builder.create<mlir::arith::IndexCastOp>(
+                  loc, mlir::IndexType::get(&IRContext()), ubVal);
           }
-          mlir::Value ubConst;
-          if (mlir::isa<mlir::IndexType>(lhs.getType()))
-            ubConst = builder.create<mlir::arith::ConstantIndexOp>(loc, ub);
-          else
-            ubConst = builder.create<mlir::arith::ConstantIntOp>(
-                loc, ub, lhs.getType());
-          auto mul = builder.create<mlir::arith::MulIOp>(loc, lhs, ubConst);
-          return (mlir::Value)builder.create<mlir::arith::AddIOp>(loc, mul,
-                                                                   rhs);
+          if (ubVal) {
+            if (lhs.getType() != rhs.getType()) {
+              if (mlir::isa<mlir::IndexType>(lhs.getType()))
+                rhs = builder.create<mlir::arith::IndexCastOp>(
+                    loc, lhs.getType(), rhs);
+              else if (mlir::isa<mlir::IndexType>(rhs.getType()))
+                lhs = builder.create<mlir::arith::IndexCastOp>(
+                    loc, rhs.getType(), lhs);
+            }
+            if (mlir::isa<mlir::IndexType>(lhs.getType()) &&
+                !mlir::isa<mlir::IndexType>(ubVal.getType()))
+              ubVal = builder.create<mlir::arith::IndexCastOp>(
+                  loc, lhs.getType(), ubVal);
+            auto mul = builder.create<mlir::arith::MulIOp>(loc, lhs, ubVal);
+            return (mlir::Value)builder.create<mlir::arith::AddIOp>(loc, mul,
+                                                                     rhs);
+          }
         }
         return nullptr;
       }
