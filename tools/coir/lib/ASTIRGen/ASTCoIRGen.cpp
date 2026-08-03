@@ -1818,6 +1818,29 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
                                                                       rhs)
                    : (mlir::Value)builder.create<mlir::arith::DivSIOp>(loc, lhs,
                                                                        rhs);
+      if (op == Op::CeilDiv) {
+        // cdiv(L, R) = (L + R - 1) / R
+        mlir::Value one;
+        if (mlir::isa<mlir::IndexType>(resTy))
+          one = builder.create<mlir::arith::ConstantIndexOp>(loc, 1);
+        else
+          one = builder.create<mlir::arith::ConstantIntOp>(loc, 1, resTy);
+        auto sum = isFloat
+                       ? (mlir::Value)builder.create<mlir::arith::AddFOp>(
+                             loc, lhs, rhs)
+                       : (mlir::Value)builder.create<mlir::arith::AddIOp>(
+                             loc, lhs, rhs);
+        auto num = isFloat
+                       ? (mlir::Value)builder.create<mlir::arith::SubFOp>(
+                             loc, sum, one)
+                       : (mlir::Value)builder.create<mlir::arith::SubIOp>(
+                             loc, sum, one);
+        return isFloat
+                   ? (mlir::Value)builder.create<mlir::arith::DivFOp>(loc, num,
+                                                                      rhs)
+                   : (mlir::Value)builder.create<mlir::arith::DivSIOp>(loc, num,
+                                                                       rhs);
+      }
       if (op == Op::Mod)
         return (mlir::Value)builder.create<mlir::arith::RemSIOp>(loc, lhs, rhs);
       if (op == Op::Lt)

@@ -138,6 +138,25 @@ private:
   /// Populated during host-side emission, used in kernel launch.
   llvm::SmallVector<std::string> hoistedParamNames_;
 
+  /// Per-block parallel op tracking for nested parallel blocks.
+  /// Maps each block-level ParallelOp to a sequential ID.
+  llvm::DenseMap<mlir::Operation *, unsigned> parallelBlockIds_;
+  unsigned numParallelBlocks_ = 0;
+
+  /// External value references for each per-block device function.
+  /// These are values used inside the parallel block but defined outside
+  /// (e.g., foreach iteration variables, computed values).
+  /// Indexed by block ID.
+  llvm::SmallVector<llvm::SmallVector<mlir::Value>> perBlockExternalRefs_;
+
+  /// Whether we're emitting a host function with nested parallel blocks.
+  /// In this mode, emitParallel emits kernel launches and emitKernelReturn
+  /// emits sync + free + return val at each return point.
+  bool hasNestedParallel_ = false;
+
+  /// Device tensor names to free at each return point (host nested path).
+  llvm::SmallVector<std::string> hostDeviceTensorNames_;
+
   bool hasGroupLevel() const override { return archNum >= 400; }
   bool supportsFP8() const override { return archNum >= 400; }
   bool supportsFP6() const override { return false; }
@@ -388,6 +407,67 @@ private:
     }
 
     auto fnType = kernel.getFunctionType();
+    auto &body = kernel.getBody();
+
+    // Scan for block-level parallel ops and check if any are nested
+    // inside control flow (scf.if, foreach, etc.) rather than at the
+    // top level of the kernel body.
+    parallelBlockIds_.clear();
+    numParallelBlocks_ = 0;
+    hasNestedParallel_ = false;
+    perBlockExternalRefs_.clear();
+    kernel.walk([&](ParallelOp p) {
+      if (p.getLevel() != ParallelLevel::BLOCK) return;
+      auto parentRegion = p->getParentRegion();
+      if (parentRegion && parentRegion->getParentOp() != kernel)
+        hasNestedParallel_ = true;
+      unsigned id = numParallelBlocks_++;
+      parallelBlockIds_[p] = id;
+    });
+
+    // For each block-level parallel op, collect external SSA references
+    // (values used inside the block but defined outside it).
+    if (hasNestedParallel_) {
+      perBlockExternalRefs_.resize(numParallelBlocks_);
+      for (auto &[op, idx] : parallelBlockIds_) {
+        auto parOp = cast<ParallelOp>(op);
+        llvm::DenseSet<mlir::Operation *> bodyOps;
+        parOp.walk([&](Operation *inner) { bodyOps.insert(inner); });
+        llvm::DenseSet<mlir::Value> seen;
+        parOp.walk([&](Operation *inner) {
+          for (auto operand : inner->getOperands()) {
+            // Skip block arguments of the parallel body (thread/block IDs).
+            if (auto ba = dyn_cast<mlir::BlockArgument>(operand))
+              if (ba.getOwner()->getParentOp() == parOp) continue;
+            // Skip kernel block arguments (always passed).
+            if (auto ba = dyn_cast<mlir::BlockArgument>(operand))
+              if (isa<KernelOp>(ba.getOwner()->getParentOp())) continue;
+            // Skip values defined inside this parallel block.
+            if (auto defOp = operand.getDefiningOp())
+              if (bodyOps.count(defOp)) continue;
+            // Skip values from top-level pure ops (constants, dim checks)
+            // that are emitted inside each per-block device function.
+            // Only skip if the defining op is DIRECTLY in the kernel body,
+            // not inside nested control flow (foreach, if, etc.).
+            if (auto defOp = operand.getDefiningOp()) {
+              if (defOp->getParentOp() == kernel && isPureOp(defOp))
+                continue;
+            }
+            if (seen.insert(operand).second)
+              perBlockExternalRefs_[idx].push_back(operand);
+          }
+        });
+      }
+    }
+
+
+    if (hasNestedParallel_) {
+      // Nested parallel blocks: generate per-block __global__ functions.
+      emitPerBlockDeviceFunctions(kernel);
+      return;
+    }
+
+    // === Legacy path: top-level parallel blocks (single device function) ===
 
     if (hasGroupLevel()) {
       auto lc = collectLaunchConfig(kernel);
@@ -424,7 +504,6 @@ private:
     }
     os() << "void __choreo_device_" << kernel.getSymName() << "(";
 
-    auto &body = kernel.getBody();
     unsigned paramIdx = 0;
 
     // Build MR arg name mapping so dynamic reuse offsets are named
@@ -583,6 +662,120 @@ private:
 
     decIndent();
     os() << "}\n\n";
+  }
+
+  /// Emit a separate __global__ function for each block-level ParallelOp.
+  /// Used when parallel blocks are nested inside control flow.
+  void emitPerBlockDeviceFunctions(KernelOp kernel) {
+    auto fnType = kernel.getFunctionType();
+    auto &body = kernel.getBody();
+    auto name = kernel.getSymName();
+
+    auto mrOffsets =
+        kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_offset_args");
+    auto mrSpmSize =
+        kernel->getAttrOfType<mlir::StringAttr>("coir.mr_spm_size_arg");
+    auto paramNames =
+        kernel->getAttrOfType<mlir::ArrayAttr>("coir.param_names");
+    unsigned numMrOffsets = mrOffsets ? mrOffsets.size() : 0;
+    unsigned numFnInputs = fnType.getNumInputs();
+    unsigned mrBaseIdx = 0;
+    if (!body.empty()) {
+      auto args = body.getArguments();
+      mrBaseIdx = numFnInputs - numMrOffsets - (mrSpmSize ? 1 : 0);
+    }
+
+    // Sort parallel blocks by ID for deterministic output.
+    llvm::SmallVector<std::pair<unsigned, ParallelOp>> sortedBlocks;
+    for (auto &[op, idx] : parallelBlockIds_)
+      sortedBlocks.push_back({idx, cast<ParallelOp>(op)});
+    llvm::sort(sortedBlocks, [](auto &a, auto &b) { return a.first < b.first; });
+
+    // Emit one __global__ function per block-level ParallelOp.
+    for (auto &[idx, parOp] : sortedBlocks) {
+      spmNames_.clear();
+      dynSpmEmitted_ = false;
+
+      os() << "__global__ void __choreo_device_" << name.str() << idx << "(";
+
+      // Emit kernel parameters.
+      unsigned paramIdx = 0;
+      if (!body.empty()) {
+        auto args = body.getArguments();
+        for (unsigned i = 0; i < numFnInputs && i < args.size(); ++i) {
+          if (paramIdx > 0) os() << ", ";
+          std::string pname;
+          if (mrOffsets && i >= mrBaseIdx && i < mrBaseIdx + numMrOffsets) {
+            auto offsetIdx = i - mrBaseIdx;
+            pname = mlir::cast<mlir::StringAttr>(mrOffsets[offsetIdx])
+                        .getValue()
+                        .str();
+          } else if (mrSpmSize && i == numFnInputs - 1) {
+            pname = mrSpmSize.getValue().str();
+          } else {
+            // Use coir.param_names if available, else fall back to argN.
+            if (paramNames && paramIdx < paramNames.size())
+              pname = cast<mlir::StringAttr>(paramNames[paramIdx])
+                          .getValue()
+                          .str();
+            else
+              pname = "arg" + std::to_string(paramIdx);
+          }
+          valueNames[args[i]] = pname;
+          os() << emitType(fnType.getInput(i)) << " " << pname;
+          paramIdx++;
+        }
+      }
+
+      // Emit external ref parameters (foreach IVs, computed values).
+      if (idx < perBlockExternalRefs_.size()) {
+        for (unsigned ei = 0; ei < perBlockExternalRefs_[idx].size(); ++ei) {
+          auto ref = perBlockExternalRefs_[idx][ei];
+          if (paramIdx > 0) os() << ", ";
+          std::string refName = "ext_" + std::to_string(idx) + "_" +
+                                std::to_string(ei);
+          valueNames[ref] = refName;
+          os() << emitType(ref.getType()) << " " << refName;
+          paramIdx++;
+        }
+      }
+      os() << ") {\n";
+      incIndent();
+
+      // Emit SPM declarations for allocs inside this parallel block.
+      parOp.walk([&](TensorAllocOp allocOp) {
+        if (!allocOp.getReuseOffsetAttr()) return;
+        auto poolNameOpt = allocOp.getReuseSpm();
+        llvm::StringRef poolName =
+            poolNameOpt.has_value() ? *poolNameOpt : "__default_spm";
+        if (spmNames_.count(poolName)) return;
+        std::string spmVar = "__spm_" + std::to_string(nextId++);
+        spmNames_[poolName] = spmVar;
+        int64_t spmBytes = 0;
+        if (auto spmSizeAttr =
+                allocOp->getAttrOfType<mlir::IntegerAttr>("spm_size"))
+          spmBytes = spmSizeAttr.getInt();
+        auto tensorTy = cast<coir::TensorType>(allocOp.getResult().getType());
+        std::string qual = getAllocQualifier(tensorTy);
+        os() << getIndent() << qual << "unsigned char "
+             << spmVar << "[" << spmBytes << "];\n";
+      });
+
+      // Emit pure ops (constants, arithmetic) from the kernel body so
+      // that the parallel block body can reference them.
+      if (!body.empty()) {
+        for (auto &op : body.front().getOperations()) {
+          if (isPureOp(&op))
+            emitOp(&op);
+        }
+      }
+
+      // Emit the parallel block body.
+      emitOp(parOp);
+
+      decIndent();
+      os() << "}\n\n";
+    }
   }
 
   /// Walk through tensor.tile ops to find the underlying tensor value.
@@ -938,7 +1131,8 @@ private:
     unsigned numMrExtra = mrInfo.hasDynamicMR ? mrInfo.numOffsetArgs + 1 : 0;
 
     // __global__ trampoline — when device offload is needed.
-    if (needsDevice) {
+    // Skip for nested parallel (per-block functions replace the trampoline).
+    if (needsDevice && !hasNestedParallel_) {
       bool isMultiDevice = hasDeviceParallel(kernel);
 
       if (hasGroupLevel()) {
@@ -1000,8 +1194,15 @@ private:
       for (auto a : attr)
         hostElemHints.push_back(cast<StringAttr>(a).getValue());
     os() << hostReturnType(fnType) << " " << name.str() << "(";
+    auto sigParamNames =
+        kernel->getAttrOfType<mlir::ArrayAttr>("coir.param_names");
     for (unsigned i = 0; i < numOrigInputs; ++i) {
       if (i > 0) os() << ", ";
+      std::string pName;
+      if (sigParamNames && i < sigParamNames.size())
+        pName = cast<mlir::StringAttr>(sigParamNames[i]).getValue().str();
+      else
+        pName = "p" + std::to_string(i);
       auto inTy = fnType.getInput(i);
       if (auto tensorTy = dyn_cast<coir::TensorType>(inTy)) {
         unsigned inDim = tensorTy.getShape().size();
@@ -1010,9 +1211,9 @@ private:
                 ? ("choreo::" + hostElemHints[i].str())
                 : choreoType(tensorTy.getElementType());
         os() << "const choreo::spanned_view<"
-           << elemStr << ", " << inDim << "> & p" << i;
+           << elemStr << ", " << inDim << "> & " << pName;
       } else {
-        os() << emitType(inTy) << " p" << i;
+        os() << emitType(inTy) << " " << pName;
       }
     }
     // Add stream parameter if kernel uses a named stream
@@ -1033,7 +1234,91 @@ private:
     if (mrInfo.hasDynamicMR)
       emitHeapSimulator(mrInfo);
 
-    if (needsDevice) {
+    if (needsDevice && hasNestedParallel_) {
+      // === Nested parallel path: full control flow with per-block launches ===
+      auto &body = kernel.getBody();
+      auto args = body.getArguments();
+
+      // Map block args → host param names (use coir.param_names if available).
+      auto hostParamNames =
+          kernel->getAttrOfType<mlir::ArrayAttr>("coir.param_names");
+      for (unsigned i = 0; i < numOrigInputs && i < args.size(); ++i) {
+        if (hostParamNames && i < hostParamNames.size())
+          valueNames[args[i]] =
+              cast<mlir::StringAttr>(hostParamNames[i]).getValue().str();
+        else
+          valueNames[args[i]] = "p" + std::to_string(i);
+      }
+      for (unsigned i = 0; i < dimArgMeta.size(); ++i) {
+        unsigned argIdx = numOrigInputs + i;
+        if (argIdx < args.size())
+          valueNames[args[argIdx]] = dimArgMeta[i].name;
+      }
+
+      // Allocate device memory for tensor inputs.
+      hostTensorAllocs_.clear();
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
+        auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+        if (!tty) continue;
+        std::string inEType = emitType(tty.getElementType());
+        int64_t bytes = getTensorBytes(tty);
+        std::string pName;
+        if (hostParamNames && i < hostParamNames.size())
+          pName = cast<mlir::StringAttr>(hostParamNames[i]).getValue().str();
+        else
+          pName = "p" + std::to_string(i);
+        os() << getIndent() << inEType << "* " << pName
+             << "__device = nullptr;\n";
+        os() << getIndent() << "choreo::abend_true(topsMalloc((void**)&"
+             << pName << "__device, " << bytes << "ULL));\n";
+        os() << getIndent() << "choreo::abend_true(topsMemcpy(" << pName
+             << "__device, " << pName << ".data(), " << bytes
+             << "ULL, topsMemcpyHostToDevice));\n";
+      }
+
+      // Declare __result for return values.
+      bool hasScalarReturn = false;
+      for (unsigned i = 0; i < fnType.getNumResults(); ++i) {
+        if (!isa<coir::TensorType>(fnType.getResult(i))) {
+          hasScalarReturn = true;
+          break;
+        }
+      }
+
+      // Collect device tensor names for cleanup at each return point.
+      hostDeviceTensorNames_.clear();
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
+        auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+        if (!tty) continue;
+        std::string pName;
+        if (hostParamNames && i < hostParamNames.size())
+          pName = cast<mlir::StringAttr>(hostParamNames[i]).getValue().str();
+        else
+          pName = "p" + std::to_string(i);
+        hostDeviceTensorNames_.push_back(pName + "__device");
+      }
+
+      emitEntryAssertions(kernel);
+
+      // Emit the full body directly — ParallelOps emit kernel launches,
+      // KernelReturnOps emit sync + free + return val at each return point.
+      isEmittingHost_ = true;
+      if (!body.empty()) {
+        for (auto &op : body.front().getOperations()) {
+          if (isa<KernelReturnOp>(&op)) continue;
+          emitOp(&op);
+        }
+      }
+      isEmittingHost_ = false;
+
+      // Fall-through cleanup (for paths without coir.return).
+      // Note: sync already done after each kernel launch in emitParallel.
+      for (auto &dn : hostDeviceTensorNames_)
+        os() << getIndent() << "choreo::abend_true(topsFree(" << dn << "));\n";
+      if (hasScalarReturn)
+        os() << getIndent() << "return 0;\n";
+
+    } else if (needsDevice) {
       // Map block args → host param names for host-side op emission.
       auto &body = kernel.getBody();
       auto args = body.getArguments();
@@ -1662,8 +1947,92 @@ private:
   }
 
   void emitParallel(ParallelOp op) override {
-    // In host mode, parallel blocks are handled by the kernel launch
-    // in emitVoidDeviceOffloadBody/emitDeviceOffloadBody — skip here.
+    // In host mode with nested parallel blocks, emit a kernel launch.
+    if (isEmittingHost_ && hasNestedParallel_) {
+      if (op.getLevel() == ParallelLevel::BLOCK) {
+        auto it = parallelBlockIds_.find(op);
+        if (it == parallelBlockIds_.end()) return;
+        unsigned blockIdx = it->second;
+
+        auto kernel = op->getParentOfType<KernelOp>();
+        if (!kernel) return;
+        auto name = kernel.getSymName();
+        auto fnType = kernel.getFunctionType();
+        auto dimArgMeta = getDimArgs(kernel);
+
+        // Compute launch dims from THIS block and its nested parallels only.
+        LaunchConfig lc;
+        auto bounds = op.getBounds();
+        for (auto b : bounds) lc.blockDims.push_back(b);
+        if (op.getStreamAttr())
+          lc.streamName = op.getStreamAttr().getValue().str();
+        if (op.getIsAsyncAttr() && op.getIsAsyncAttr().getValue())
+          lc.isAsync = true;
+        op.getBody().walk([&](ParallelOp p) {
+          if (p == op) return;
+          auto b = p.getBounds();
+          switch (p.getLevel()) {
+          case ParallelLevel::GROUP:
+            for (auto v : b) lc.groupDims.push_back(v);
+            break;
+          case ParallelLevel::GROUPx4:
+            for (auto v : b) lc.groupDims.push_back(v * 4);
+            break;
+          case ParallelLevel::THREAD:
+            for (auto v : b) lc.threadDims.push_back(v);
+            break;
+          default: break;
+          }
+        });
+        std::string gdims = emitDim3(lc.blockDims);
+        std::string bdims = hasGroupLevel()
+                                ? emitDim3(lc.groupDims)
+                                : emitDim3(lc.threadDims);
+
+        os() << getIndent() << "__choreo_device_" << name.str() << blockIdx
+             << "<<<" << gdims << ", " << bdims << ">>>(";
+
+        // Pass kernel args.
+        auto &body = kernel.getBody();
+        bool first = true;
+        if (!body.empty()) {
+          auto args = body.getArguments();
+          unsigned numFnInputs = fnType.getNumInputs();
+          for (unsigned i = 0; i < numFnInputs && i < args.size(); ++i) {
+            if (!first) os() << ", ";
+            first = false;
+            auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+            if (tty) {
+              auto it2 = valueNames.find(args[i]);
+              std::string argName = (it2 != valueNames.end())
+                                        ? it2->second
+                                        : "p" + std::to_string(i);
+              os() << argName << "__device";
+            } else {
+              auto it2 = valueNames.find(args[i]);
+              os() << ((it2 != valueNames.end()) ? it2->second
+                                                  : "p" + std::to_string(i));
+            }
+          }
+        }
+
+        // Pass external refs (foreach IVs, computed values).
+        if (blockIdx < perBlockExternalRefs_.size()) {
+          for (auto &ref : perBlockExternalRefs_[blockIdx]) {
+            if (!first) os() << ", ";
+            first = false;
+            auto it2 = valueNames.find(ref);
+            os() << ((it2 != valueNames.end()) ? it2->second : "0");
+          }
+        }
+
+        os() << ");\n";
+        os() << getIndent()
+             << "choreo::abend_true(topsDeviceSynchronize());\n";
+      }
+      return;
+    }
+    // In host mode (legacy path), skip — handled by kernel launch elsewhere.
     if (isEmittingHost_) return;
     auto level = op.getLevel();
     auto bounds = op.getBounds();
@@ -2198,7 +2567,16 @@ private:
     for (unsigned i = 0; i < op.getOperands().size(); ++i) {
       Value val = op.getOperands()[i];
       if (isa<coir::TensorType>(val.getType())) continue;
-      os() << getIndent() << "return " << getName(val) << ";\n";
+      if (isEmittingHost_ && hasNestedParallel_) {
+        // In host mode with nested parallel: emit free + return
+        // at each return point (like the old choreo codegen).
+        // Note: sync already done after each kernel launch in emitParallel.
+        for (auto &dn : hostDeviceTensorNames_)
+          os() << getIndent() << "choreo::abend_true(topsFree(" << dn << "));\n";
+        os() << getIndent() << "return " << getName(val) << ";\n";
+      } else {
+        os() << getIndent() << "return " << getName(val) << ";\n";
+      }
     }
   }
 
@@ -2232,8 +2610,18 @@ private:
       space = "tops::Shared";
     else
       space = "tops::Global";
-    return "tops::mdspan(" + space + ", (" +
-           emitType(tty.getElementType()) + "*)" + name +
+    // For host-side kernel tensor args (spanned_view), use .data() to get the
+    // raw pointer. For device-side pointers and host tensor.alloc (nullptr),
+    // use a C-style cast.
+    bool isKernelTensorArg =
+        isEmittingHost_ && isa<mlir::BlockArgument>(base) &&
+        isa<KernelOp>(cast<mlir::BlockArgument>(base).getOwner()->getParentOp());
+    std::string ptrExpr;
+    if (isKernelTensorArg)
+      ptrExpr = "(" + emitType(tty.getElementType()) + "*)" + name + ".data()";
+    else
+      ptrExpr = "(" + emitType(tty.getElementType()) + "*)" + name;
+    return "tops::mdspan(" + space + ", " + ptrExpr +
            ", " + emitTensorShape(tensor) + ")";
   }
 
@@ -2249,8 +2637,15 @@ private:
       space = "tops::Shared";
     else
       space = "tops::Global";
-    return "tops::mdspan(" + space + ", (" +
-           emitType(tty.getElementType()) + "*)" + name + ", " +
+    bool isKernelTensorArg =
+        isEmittingHost_ && isa<mlir::BlockArgument>(base) &&
+        isa<KernelOp>(cast<mlir::BlockArgument>(base).getOwner()->getParentOp());
+    std::string ptrExpr;
+    if (isKernelTensorArg)
+      ptrExpr = "(" + emitType(tty.getElementType()) + "*)" + name + ".data()";
+    else
+      ptrExpr = "(" + emitType(tty.getElementType()) + "*)" + name;
+    return "tops::mdspan(" + space + ", " + ptrExpr + ", " +
            sizeStr + ")";
   }
 
@@ -2350,6 +2745,11 @@ private:
   }
 
   void emitDmaCopy(DmaCopyOp op) override {
+    // In host mode with nested parallel, DMA ops use device-only types
+    // (private_cdte, etc.) and cannot be emitted on the host. The actual
+    // DMA happens inside the per-block device functions.
+    if (isEmittingHost_ && hasNestedParallel_) return;
+
     auto kind = op.getKind();
 
     auto srcTile = getTileDefiningOp(op.getSource());
