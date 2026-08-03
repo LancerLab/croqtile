@@ -105,8 +105,12 @@ inline const char* CudaDeviceMemory(Storage st) {
 
 inline std::string CudaParamStorage(Storage st) {
   switch (st) {
+  case Storage::GLOBAL: return "";
   case Storage::SHARED: return "__shared__";
-  default: choreo_unreachable("unsupported parameter storage"); return "";
+  case Storage::LOCAL: return "";
+  default:
+    choreo_unreachable("unsupported parameter storage: " + STR(st));
+    return "";
   }
   return "";
 }
@@ -10747,6 +10751,7 @@ const std::string CuteCodeGen::CallSTR(AST::Call& n) const {
     if (auto sty = GetSpannedType(NodeType(*a))) {
       std::string bts{NameBaseType(sty->ElementType())};
       auto m_ty = sty->GetStorage();
+      std::cerr << "m_ty: " << STR(m_ty) << std::endl;
       auto mem_attr = CudaParamStorage(m_ty);
       if (a->HasNote("annotate_as") && !mem_attr.empty())
         bts = mem_attr + " " + bts;
