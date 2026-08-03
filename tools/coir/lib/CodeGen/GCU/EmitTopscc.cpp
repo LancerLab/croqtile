@@ -3011,17 +3011,27 @@ private:
     auto tileShape = tileTy.getShape();
     auto baseShape = baseTy.getShape();
     auto indices = tile.getIndices();
+    // Tiles produced from chained subspan/modspan operations carry a running
+    // ELEMENT offset (already multiplied by the strides), so emit the index
+    // values directly instead of multiplying by a chunk size.
+    bool elementOffset = tile->hasAttr("coir.element_offset");
     std::string arrName = prefix + "__off__";
     os() << getIndent() << "int " << arrName << "[] = {";
     for (unsigned i = 0; i < baseShape.size(); ++i) {
       if (i) os() << ", ";
       if (i < indices.size()) {
-        int64_t chunkDim = (i < tileShape.size()) ? tileShape[i] : 1;
         auto idxTy = indices[i].getType();
+        bool needCast = !idxTy.isInteger(32);
+        if (elementOffset) {
+          if (needCast) os() << "(int)(";
+          os() << getName(indices[i]);
+          if (needCast) os() << ")";
+          continue;
+        }
+        int64_t chunkDim = (i < tileShape.size()) ? tileShape[i] : 1;
         // Index-typed values may be 64-bit; braced-init into the int array
         // would then be ill-formed (narrowing), so cast explicitly.  The DTE
         // slice API takes const int*, so offsets must be int anyway.
-        bool needCast = !idxTy.isInteger(32);
         if (mlir::ShapedType::isDynamic(chunkDim)) {
           // Dynamic chunk dimension.  The subspan SIZE for this dim is
           // carried in the tile's extra indices (indices[baseRank + N], the

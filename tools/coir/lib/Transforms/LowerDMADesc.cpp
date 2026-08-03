@@ -76,8 +76,16 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
       unsigned rank = tileTy.getRank();
       auto tileShape = tileTy.getShape();
       auto allIdx = tileOp.getIndices();
+      bool elementOffset =
+          tileOp->hasAttr("coir.element_offset");
       for (unsigned i = 0; i < std::min((unsigned)allIdx.size(), rank); ++i) {
         Value idx = allIdx[i];
+        // Element-offset tiles (chained subspan/modspan) carry the offset
+        // already multiplied by the strides, so pass through unchanged.
+        if (elementOffset) {
+          srcOffsets.push_back(idx);
+          continue;
+        }
         // Multiply tile index by tile size to get element offset.
         if (i < tileShape.size() &&
             mlir::ShapedType::isDynamic(tileShape[i])) {
@@ -103,8 +111,14 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
       unsigned rank = tileTy.getRank();
       auto tileShape = tileTy.getShape();
       auto allIdx = tileOp.getIndices();
+      bool elementOffset =
+          tileOp->hasAttr("coir.element_offset");
       for (unsigned i = 0; i < std::min((unsigned)allIdx.size(), rank); ++i) {
         Value idx = allIdx[i];
+        if (elementOffset) {
+          dstOffsets.push_back(idx);
+          continue;
+        }
         if (i < tileShape.size() &&
             mlir::ShapedType::isDynamic(tileShape[i])) {
           unsigned sizeIdx = rank;

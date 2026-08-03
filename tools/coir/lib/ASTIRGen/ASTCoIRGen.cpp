@@ -1211,18 +1211,12 @@ mlir::Value ASTCoIRGen::resolveRangeUBValue(AST::LoopRange *lr, int64_t bound) {
   auto loc = Loc(*lr);
   mlir::Value ubValue;
   if (bound <= 1) {
-    if (lr->ubound) {
-      if (auto *expr = dyn_cast<AST::Expr>(lr->ubound.get())) {
-        if (expr->Opts().HasVal()) {
-          auto &vi = expr->Opts().GetVal();
-          if (vi && !vi->IsNumeric()) {
-            if (auto *sv = dyn_cast<sbe::SymbolicValue>(vi.get()))
-              ubValue = LookupValue(UnScopedName(sv->Value()));
-          }
-        }
-      }
-    }
-    if (!ubValue) {
+    // The iv's with-in extent (BoundedType upper bound), when symbolic.
+    // `with x in [extent]` lowers the foreach's range to `(:1:)` (a tiling
+    // offset) while the real domain lives in the iv's bounded type; the loop
+    // bound is extent + offset (mirrors PrivateCodeGen).
+    mlir::Value extentVal;
+    {
       auto rvName = lr->GetRVName();
       auto symType = GetSymbolType(rvName);
       if (auto bty = dyn_cast<BoundedType>(symType)) {
@@ -1230,35 +1224,43 @@ mlir::Value ASTCoIRGen::resolveRangeUBValue(AST::LoopRange *lr, int64_t bound) {
           auto &ub = bty->GetUpperBound();
           if (ub && !ub->IsNumeric()) {
             if (auto *sv = dyn_cast<sbe::SymbolicValue>(ub.get()))
-              ubValue = LookupValue(UnScopedName(sv->Value()));
+              extentVal = LookupValue(UnScopedName(sv->Value()));
+            if (!extentVal)
+              extentVal = MaterializeSBE(loc, ub);
           }
         }
       }
     }
-    if (!ubValue && lr->ubound) {
-      auto v = EmitExpr(*lr->ubound);
-      if (v) ubValue = v;
-      if (ubValue && !mlir::isa<mlir::IndexType>(ubValue.getType()))
-        ubValue = builder.create<mlir::arith::IndexCastOp>(
-            loc, mlir::IndexType::get(&IRContext()), ubValue);
-    }
-    if (!ubValue) {
-      auto rvName = lr->GetRVName();
-      auto symType = GetSymbolType(rvName);
-      if (auto bty = dyn_cast<BoundedType>(symType)) {
-        if (bty->HasValidBound()) {
-          auto &ub = bty->GetUpperBound();
-          if (ub && !dyn_cast<sbe::NumericValue>(ub.get())) {
-            auto v = MaterializeSBE(loc, ub);
-            if (v) {
-              if (!mlir::isa<mlir::IndexType>(v.getType()))
-                v = builder.create<mlir::arith::IndexCastOp>(
-                    loc, mlir::IndexType::get(&IRContext()), v);
-              ubValue = v;
-            }
+    // The explicit ubound (`foreach x(:N:)` offset), if any.
+    mlir::Value uboundVal;
+    if (lr->ubound) {
+      if (auto *expr = dyn_cast<AST::Expr>(lr->ubound.get())) {
+        if (expr->Opts().HasVal()) {
+          auto &vi = expr->Opts().GetVal();
+          if (vi && !vi->IsNumeric()) {
+            if (auto *sv = dyn_cast<sbe::SymbolicValue>(vi.get()))
+              uboundVal = LookupValue(UnScopedName(sv->Value()));
           }
         }
       }
+      if (!uboundVal) {
+        uboundVal = EmitExpr(*lr->ubound);
+        if (uboundVal && !mlir::isa<mlir::IndexType>(uboundVal.getType()))
+          uboundVal = builder.create<mlir::arith::IndexCastOp>(
+              loc, mlir::IndexType::get(&IRContext()), uboundVal);
+      }
+    }
+    if (extentVal) {
+      if (!mlir::isa<mlir::IndexType>(extentVal.getType()))
+        extentVal = builder.create<mlir::arith::IndexCastOp>(
+            loc, mlir::IndexType::get(&IRContext()), extentVal);
+      if (uboundVal)
+        ubValue = builder.create<mlir::arith::AddIOp>(loc, extentVal,
+                                                      uboundVal);
+      else
+        ubValue = extentVal;
+    } else if (uboundVal) {
+      ubValue = uboundVal;
     }
   }
   if (!ubValue)
@@ -2255,6 +2257,18 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
               auto val = LookupValue(symName);
               if (val) { dynDimVals.push_back(val); continue; }
             }
+            // Materialize compound shape expressions (e.g. M % N for a
+            // modspan destination) into arithmetic ops.
+            if (vi && !vi->IsNumeric()) {
+              auto v = MaterializeSBE(loc, vi);
+              if (v) {
+                if (!mlir::isa<mlir::IndexType>(v.getType()))
+                  v = builder.create<mlir::arith::IndexCastOp>(
+                      loc, mlir::IndexType::get(&IRContext()), v);
+                dynDimVals.push_back(v);
+                continue;
+              }
+            }
           }
           // Fallback: find from kernel index block args
           if (auto kernelOp =
@@ -2374,6 +2388,31 @@ bool ASTCoIRGen::Visit(AST::SpanAs &sa) {
   return true;
 }
 
+/// Resolve the runtime length of a dynamic-dim tensor to its SSA value
+/// (the dynamic-dim operand of a bind_dims/alloc).  Returns nullptr if the
+/// base tensor is not a dynamic-dim alloc/bind we can resolve.
+mlir::Value getTensorLenValue(mlir::Value tensor) {
+  mlir::Value base = tensor;
+  while (auto tile = base.getDefiningOp<coir::TensorTileOp>())
+    base = tile.getSource();
+  auto bty = dyn_cast<coir::TensorType>(base.getType());
+  if (!bty) return nullptr;
+  unsigned dynIdx = 0;
+  for (unsigned d = 0; d < bty.getShape().size(); ++d) {
+    if (!bty.isDynamicDim(d)) continue;
+    if (auto alloc = base.getDefiningOp<coir::TensorAllocOp>()) {
+      if (dynIdx < alloc.getDynamicDims().size())
+        return alloc.getDynamicDims()[dynIdx];
+    }
+    if (auto bind = base.getDefiningOp<coir::TensorBindDimsOp>()) {
+      if (dynIdx < bind.getDynamicDims().size())
+        return bind.getDynamicDims()[dynIdx];
+    }
+    dynIdx++;
+  }
+  return nullptr;
+}
+
 mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
                                         mlir::Value baseVal) {
   auto loc = Loc(chunk);
@@ -2431,6 +2470,13 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
 
   llvm::SmallVector<mlir::Value> dynDimVals;
 
+  // For chained subspan/modspan operations, accumulate a running element
+  // offset (e.g. modspan(N).at(i).subspan(M).at(j) -> i*N + j*M) instead of
+  // raw chunk indices.  Such tiles carry a coir.element_offset marker so the
+  // emitters use the offset directly rather than multiplying by a stride.
+  llvm::SmallVector<mlir::Value> accOffsets;
+  bool elementOffsetTile = false;
+
   if (chunk.HasOperation()) {
     for (auto &sop : chunk.AllOperations()) {
       if (auto *viewOp = dyn_cast<AST::SOP::View>(sop.get())) {
@@ -2481,24 +2527,90 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
         auto subspan = subspanOp->GetSubSpan();
         auto indices = subspanOp->GetIndices();
         if (!subspan) continue;
+
+        // The .at(idx) offsets for this subspan.
+        llvm::SmallVector<mlir::Value> atVals;
         if (indices) {
           for (auto &idx : indices->AllValues()) {
             auto v = emitIdx(idx.get());
-            if (v) idxVals.push_back(v);
+            if (v) atVals.push_back(v);
             else {
               auto zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
-              idxVals.push_back(zero);
+              atVals.push_back(zero);
             }
           }
         } else {
           unsigned rank = subspan->AllValues().size();
           for (unsigned i = 0; i < rank; ++i) {
             auto zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
-            idxVals.push_back(zero);
+            atVals.push_back(zero);
           }
         }
+
+        // The subspan size for each dim = the stride for that dim's offset.
+        llvm::SmallVector<mlir::Value> sizeVals;
+        bool allStridesResolved = true;
+        for (auto &dim : subspan->AllValues()) {
+          auto v = emitIdx(dim.get());
+          sizeVals.push_back(v);
+          if (!v) allStridesResolved = false;
+        }
+
+        if (allStridesResolved) {
+          // Accumulate element offset: offset += at * stride.
+          if (accOffsets.size() < atVals.size())
+            accOffsets.resize(atVals.size(), nullptr);
+          for (unsigned i = 0; i < atVals.size(); ++i) {
+            mlir::Value stride = (i < sizeVals.size()) ? sizeVals[i] : nullptr;
+            if (!stride) continue;
+            if (!mlir::isa<mlir::IndexType>(atVals[i].getType()))
+              atVals[i] = builder.create<mlir::arith::IndexCastOp>(
+                  loc, mlir::IndexType::get(&IRContext()), atVals[i]);
+            if (!mlir::isa<mlir::IndexType>(stride.getType()))
+              stride = builder.create<mlir::arith::IndexCastOp>(
+                  loc, mlir::IndexType::get(&IRContext()), stride);
+            auto prod =
+                builder.create<mlir::arith::MulIOp>(loc, atVals[i], stride);
+            if (accOffsets[i])
+              accOffsets[i] = builder.create<mlir::arith::AddIOp>(
+                  loc, accOffsets[i], prod);
+            else
+              accOffsets[i] = prod;
+          }
+          elementOffsetTile = true;
+        } else {
+          // Unresolvable stride (e.g. lfl.span): keep the original chunk-index
+          // tile so the emitter multiplies by the DMA counterpart's size.
+          for (auto &v : atVals)
+            idxVals.push_back(v);
+        }
+
+        // The tile shape (LAST subspan in the chain wins).
+        tileShape.clear();
+        dynDimVals.clear();
         unsigned dimIdx = 0;
         for (auto &dim : subspan->AllValues()) {
+          if (subspanOp->IsModSpan()) {
+            // modspan: the tile holds the base length modulo the span size
+            // (the remainder chunk), e.g. lhs.modspan(N) -> M % N elements.
+            mlir::Value baseLen = getTensorLenValue(baseVal);
+            mlir::Value nVal = emitIdx(dim.get());
+            if (baseLen && nVal) {
+              if (!mlir::isa<mlir::IndexType>(baseLen.getType()))
+                baseLen = builder.create<mlir::arith::IndexCastOp>(
+                    loc, mlir::IndexType::get(&IRContext()), baseLen);
+              if (!mlir::isa<mlir::IndexType>(nVal.getType()))
+                nVal = builder.create<mlir::arith::IndexCastOp>(
+                    loc, mlir::IndexType::get(&IRContext()), nVal);
+              auto modVal = builder.create<mlir::arith::RemSIOp>(loc, baseLen,
+                                                                 nVal);
+              tileShape.push_back(mlir::ShapedType::kDynamic);
+              dynDimVals.push_back(modVal);
+              dimIdx++;
+              continue;
+            }
+            // Fall through to the plain subspan sizing if unresolved.
+          }
           if (isWildcard(dim.get())) {
             tileShape.push_back(dimIdx < baseShape.size()
                                     ? baseShape[dimIdx]
@@ -2527,6 +2639,8 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
           }
           dimIdx++;
         }
+        // In the element-offset path, keep processing chained operations.
+        if (elementOffsetTile) continue;
         break;
       }
       auto indices = sop->GetIndices();
@@ -2574,6 +2688,27 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
       }
       dimIdx++;
     }
+  }
+
+  if (elementOffsetTile) {
+    // Chained subspan/modspan tiles carry a running element offset.
+    idxVals.clear();
+    for (auto &v : accOffsets)
+      if (v) idxVals.push_back(v);
+    for (auto &v : dynDimVals)
+      if (v) idxVals.push_back(v);
+    if (idxVals.empty()) return baseVal;
+    llvm::SmallVector<int64_t> eoShape;
+    for (auto d : tileShape)
+      eoShape.push_back(d);
+    if (eoShape.empty()) eoShape.push_back(1);
+    auto eoTy = coir::TensorType::get(
+        &IRContext(), baseTy.getElementType(), eoShape,
+        baseTy.getMemorySpace(), llvm::ArrayRef<int64_t>{});
+    auto eoTile =
+        builder.create<coir::TensorTileOp>(loc, eoTy, baseVal, idxVals);
+    eoTile->setAttr("coir.element_offset", builder.getUnitAttr());
+    return eoTile;
   }
 
   if (idxVals.empty()) return baseVal;
