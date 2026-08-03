@@ -1,6 +1,7 @@
 // RUN: cocc -t topscc -es %s -o - | FileCheck %s
 //
-// Verify sync.local emits __syncsubthreads() and sync.shared emits __syncthreads().
+// Verify sync.barrier : thread emits __syncsubthreads() and
+// sync.barrier : block emits __syncthreads().
 
 __co__ s32 [4] test_barrier_scopes(s32 [4] input) {
   s32 [4] output;
@@ -11,8 +12,8 @@ __co__ s32 [4] test_barrier_scopes(s32 [4] input) {
     parallel t by 2 : thread {
       la.at(t) = la.at(t) + 1;
     }
-    sync.local;
-    sync.shared;
+    sync.barrier : thread;
+    sync.barrier : block;
     g = dma.copy.async la => output.chunkat(p);
     wait g;
   }
