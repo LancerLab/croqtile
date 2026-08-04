@@ -414,8 +414,11 @@ private:
   }
 
   /// Scan the kernel for block-level ParallelOps, assign sequential IDs,
-  /// and detect whether any block is nested inside control flow rather
-  /// than at the top level of the kernel body.
+  /// and detect whether any block is nested inside control flow (scf.if,
+  /// foreach, inthreads, ...) rather than at the top level of the kernel
+  /// body or inside another parallel op.  A block inside a device/thread
+  /// parallel is part of the ordinary parallel hierarchy and is handled by
+  /// the monolithic/multi-device path, not the per-block nested path.
   ///
   /// This state is consumed both when emitting the device function(s) and
   /// when emitting the host entry.  Because emitModule emits all device
@@ -430,7 +433,8 @@ private:
     kernel.walk([&](ParallelOp p) {
       if (p.getLevel() != ParallelLevel::BLOCK) return;
       auto parentRegion = p->getParentRegion();
-      if (parentRegion && parentRegion->getParentOp() != kernel)
+      auto parentOp = parentRegion ? parentRegion->getParentOp() : nullptr;
+      if (parentOp && parentOp != kernel && !isa<ParallelOp>(parentOp))
         hasNestedParallel_ = true;
       unsigned id = numParallelBlocks_++;
       parallelBlockIds_[p] = id;
