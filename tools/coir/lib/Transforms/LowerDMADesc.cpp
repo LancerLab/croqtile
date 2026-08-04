@@ -86,18 +86,8 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
           srcOffsets.push_back(idx);
           continue;
         }
-        // Multiply tile index by tile size to get element offset.
-        if (i < tileShape.size() &&
-            mlir::ShapedType::isDynamic(tileShape[i])) {
-          // Dynamic tile dim: the subspan size for this dim is carried in the
-          // tile's dynDimVals (allIdx[rank + N], the Nth dynamic tile dim).
-          unsigned sizeIdx = rank;
-          for (unsigned j = 0; j < i; ++j)
-            if (mlir::ShapedType::isDynamic(tileShape[j])) sizeIdx++;
-          if (sizeIdx < allIdx.size())
-            idx = rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx,
-                                                       allIdx[sizeIdx]);
-        } else if (i < tileShape.size() && tileShape[i] > 1) {
+        // Multiply tile index by tile size to get the per-dim offset.
+        if (i < tileShape.size() && tileShape[i] > 1) {
           auto tileSize = rewriter.create<mlir::arith::ConstantIndexOp>(
               op.getLoc(), tileShape[i]);
           idx = rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, tileSize);
@@ -119,15 +109,7 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
           dstOffsets.push_back(idx);
           continue;
         }
-        if (i < tileShape.size() &&
-            mlir::ShapedType::isDynamic(tileShape[i])) {
-          unsigned sizeIdx = rank;
-          for (unsigned j = 0; j < i; ++j)
-            if (mlir::ShapedType::isDynamic(tileShape[j])) sizeIdx++;
-          if (sizeIdx < allIdx.size())
-            idx = rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx,
-                                                       allIdx[sizeIdx]);
-        } else if (i < tileShape.size() && tileShape[i] > 1) {
+        if (i < tileShape.size() && tileShape[i] > 1) {
           auto tileSize = rewriter.create<mlir::arith::ConstantIndexOp>(
               op.getLoc(), tileShape[i]);
           idx = rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, tileSize);

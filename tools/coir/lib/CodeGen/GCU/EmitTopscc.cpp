@@ -1140,6 +1140,7 @@ private:
     bool hasDynamicMR = false;
     unsigned numOffsetArgs = 0;  // total offsets (LOCAL + SHARED)
     // SHARED storage (dynamic shared memory pool).
+    bool hasSharedMR = false;
     unsigned numSharedOffsets = 0;
     std::string chunksName;
     std::string resultName;
@@ -1170,40 +1171,43 @@ private:
     MRInfo info;
     info.chunks =
         kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_chunks");
-    if (!info.chunks) return info;
+    info.localChunks =
+        kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_local_chunks");
+    if (!info.chunks && !info.localChunks) return info;
     info.hasDynamicMR = true;
-    auto chunksName =
-        kernel->getAttrOfType<mlir::StringAttr>("coir.mr_chunks_name");
-    if (chunksName) info.chunksName = chunksName.getValue().str();
-    auto resultName =
-        kernel->getAttrOfType<mlir::StringAttr>("coir.mr_result_name");
-    if (resultName) info.resultName = resultName.getValue().str();
-    auto offsetsName =
-        kernel->getAttrOfType<mlir::StringAttr>("coir.mr_offsets_name");
-    if (offsetsName) info.offsetsName = offsetsName.getValue().str();
-    auto spmSizeName =
-        kernel->getAttrOfType<mlir::StringAttr>("coir.mr_spm_size_arg");
-    if (spmSizeName) info.spmSizeName = spmSizeName.getValue().str();
+    info.hasSharedMR = (bool)info.chunks;
+    if (info.chunks) {
+      auto chunksName =
+          kernel->getAttrOfType<mlir::StringAttr>("coir.mr_chunks_name");
+      if (chunksName) info.chunksName = chunksName.getValue().str();
+      auto resultName =
+          kernel->getAttrOfType<mlir::StringAttr>("coir.mr_result_name");
+      if (resultName) info.resultName = resultName.getValue().str();
+      auto offsetsName =
+          kernel->getAttrOfType<mlir::StringAttr>("coir.mr_offsets_name");
+      if (offsetsName) info.offsetsName = offsetsName.getValue().str();
+      auto spmSizeName =
+          kernel->getAttrOfType<mlir::StringAttr>("coir.mr_spm_size_arg");
+      if (spmSizeName) info.spmSizeName = spmSizeName.getValue().str();
+      // Const interference matrix (parametric plan).
+      auto nBuf =
+          kernel->getAttrOfType<mlir::IntegerAttr>("coir.mr_n_buffers");
+      if (nBuf) info.nBuffers = nBuf.getInt();
+      auto align =
+          kernel->getAttrOfType<mlir::IntegerAttr>("coir.mr_alignment");
+      if (align) info.alignment = align.getInt();
+      info.interference =
+          kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_interference");
+      info.sizeExprs =
+          kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_size_exprs");
+      info.bufferIds =
+          kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_buffer_ids");
+    }
     auto mrOffsets =
         kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_offset_args");
     if (mrOffsets) info.numOffsetArgs = mrOffsets.size();
-    // Const interference matrix (parametric plan).
-    auto nBuf =
-        kernel->getAttrOfType<mlir::IntegerAttr>("coir.mr_n_buffers");
-    if (nBuf) info.nBuffers = nBuf.getInt();
-    auto align =
-        kernel->getAttrOfType<mlir::IntegerAttr>("coir.mr_alignment");
-    if (align) info.alignment = align.getInt();
-    info.interference =
-        kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_interference");
-    info.sizeExprs =
-        kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_size_exprs");
-    info.bufferIds =
-        kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_buffer_ids");
 
     // LOCAL storage (static private-memory pool).
-    info.localChunks =
-        kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_local_chunks");
     if (info.localChunks) {
       info.hasLocalMR = true;
       info.numLocalOffsets = info.localChunks.size();
@@ -1326,7 +1330,7 @@ private:
 
     auto mrInfo = getMRInfo(kernel);
     auto dimArgMeta = getDimArgs(kernel);
-    unsigned numMrExtra = mrInfo.hasDynamicMR ? mrInfo.numOffsetArgs + 1 : 0;
+    unsigned numMrExtra = mrInfo.hasDynamicMR ? mrInfo.numOffsetArgs + (mrInfo.hasSharedMR ? 1 : 0) : 0;
 
     // __global__ trampoline — when device offload is needed.
     // Skip for nested parallel (per-block functions replace the trampoline).
@@ -1430,10 +1434,10 @@ private:
            << hostParamName(da.paramIdx) << ".shape()[" << da.dimIdx << "];\n";
     }
 
-    if (mrInfo.hasDynamicMR) {
+    if (mrInfo.hasSharedMR)
       emitHeapSimulator(mrInfo);
+    if (mrInfo.hasLocalMR)
       emitLocalHeapSimulator(mrInfo);
-    }
 
     if (needsDevice && hasNestedParallel_) {
       // === Nested parallel path: full control flow with per-block launches ===
@@ -1657,7 +1661,7 @@ private:
         auto mrOffsets =
             kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_offset_args");
         unsigned numMrExtra = mrInfo.hasDynamicMR
-            ? (mrOffsets ? mrOffsets.size() : 0) + 1 : 0;
+            ? (mrOffsets ? mrOffsets.size() : 0) + (mrInfo.hasSharedMR ? 1 : 0) : 0;
         unsigned hoistedStart = numOrigInputs + dimArgMeta.size();
         unsigned hoistedEnd = numInputs - numMrExtra;
         unsigned hoistedIdx = 0;
@@ -1723,12 +1727,15 @@ private:
 
   void emitMRLaunchArgs(const MRInfo &mr) {
     if (!mr.hasDynamicMR) return;
-    // LOCAL offsets first, then SHARED offsets, then the shared spm size.
+    // LOCAL offsets first, then SHARED offsets, then the shared spm size
+    // (only present when there is a shared pool).
     for (unsigned i = 0; i < mr.numLocalOffsets; ++i)
       os() << ", (int)" << mr.localOffsetsName << "[" << i << "]";
-    for (unsigned i = 0; i < mr.numSharedOffsets; ++i)
-      os() << ", (int)" << mr.offsetsName << "[" << i << "]";
-    os() << ", (int)" << mr.spmSizeName;
+    if (mr.hasSharedMR) {
+      for (unsigned i = 0; i < mr.numSharedOffsets; ++i)
+        os() << ", (int)" << mr.offsetsName << "[" << i << "]";
+      os() << ", (int)" << mr.spmSizeName;
+    }
   }
 
   bool isDeviceGlobal(coir::TensorType tty) {
@@ -1742,7 +1749,7 @@ private:
     auto name = kernel.getSymName();
     unsigned numInputs = fnType.getNumInputs();
     auto dimArgMeta = getDimArgs(kernel);
-    unsigned numMrExtra = mr.hasDynamicMR ? mr.numOffsetArgs + 1 : 0;
+    unsigned numMrExtra = mr.hasDynamicMR ? mr.numOffsetArgs + (mr.hasSharedMR ? 1 : 0) : 0;
     unsigned numOrigInputs = numInputs - dimArgMeta.size() - numMrExtra;
     if (auto pn = kernel->getAttrOfType<mlir::ArrayAttr>("coir.param_names"))
       numOrigInputs = std::min(numOrigInputs,
@@ -1843,7 +1850,7 @@ private:
 
     if (retInputIdx >= 0) {
       os() << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
-         << bdims << (mr.hasDynamicMR ? (", " + mr.spmSizeName) : "") << ">>>(";
+         << bdims << (mr.hasSharedMR ? (", " + mr.spmSizeName) : "") << ">>>(";
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os() << ", ";
         os() << hostParamName(i) << "__device";
@@ -1882,7 +1889,7 @@ private:
            << "));\n";
       }
       os() << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
-         << bdims << (mr.hasDynamicMR ? (", " + mr.spmSizeName) : "") << ">>>(";
+         << bdims << (mr.hasSharedMR ? (", " + mr.spmSizeName) : "") << ">>>(";
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os() << ", ";
         os() << hostParamName(i) << "__device";
@@ -1928,7 +1935,7 @@ private:
     auto name = kernel.getSymName();
     unsigned numInputs = fnType.getNumInputs();
     auto dimArgMeta = getDimArgs(kernel);
-    unsigned numMrExtra = mr.hasDynamicMR ? mr.numOffsetArgs + 1 : 0;
+    unsigned numMrExtra = mr.hasDynamicMR ? mr.numOffsetArgs + (mr.hasSharedMR ? 1 : 0) : 0;
     unsigned numOrigInputs = numInputs - dimArgMeta.size() - numMrExtra;
     if (auto pn = kernel->getAttrOfType<mlir::ArrayAttr>("coir.param_names"))
       numOrigInputs = std::min(numOrigInputs,
@@ -1970,7 +1977,7 @@ private:
       }
 
       os() << "    __coir_global_" << name.str() << "<<<" << gdims << ", "
-         << bdims << (mr.hasDynamicMR ? (", " + mr.spmSizeName) : "") << ">>>(";
+         << bdims << (mr.hasSharedMR ? (", " + mr.spmSizeName) : "") << ">>>(";
       bool first = true;
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (!first) os() << ", ";
@@ -2047,7 +2054,7 @@ private:
     }
 
     os() << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
-       << bdims << (mr.hasDynamicMR ? (", " + mr.spmSizeName) : "") << ">>>(";
+       << bdims << (mr.hasSharedMR ? (", " + mr.spmSizeName) : "") << ">>>(";
     bool first = true;
     for (unsigned i = 0; i < numOrigInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
@@ -2157,7 +2164,7 @@ private:
 
     // Kernel launch with device ID
     os() << "    __coir_global_" << name.str() << "<<<" << gdims << ", "
-       << bdims << (mr.hasDynamicMR ? (", " + mr.spmSizeName) : "") << ">>>(";
+       << bdims << (mr.hasSharedMR ? (", " + mr.spmSizeName) : "") << ">>>(";
     bool first = true;
     for (unsigned i = 0; i < numInputs; ++i) {
       if (!first) os() << ", ";
@@ -3037,26 +3044,28 @@ private:
         // would then be ill-formed (narrowing), so cast explicitly.  The DTE
         // slice API takes const int*, so offsets must be int anyway.
         if (mlir::ShapedType::isDynamic(chunkDim)) {
-          // Dynamic chunk dimension.  The subspan SIZE for this dim is
-          // carried in the tile's extra indices (indices[baseRank + N], the
-          // Nth dynamic tile dim).  The element offset is
-          // chunk_index * chunk_size.  If no size index is present, fall
-          // back to the caller-provided chunk size (the DMA counterpart's
-          // element count).
-          unsigned sizeIdx = baseShape.size();
-          for (unsigned j = 0; j < i && j < tileShape.size(); ++j)
-            if (mlir::ShapedType::isDynamic(tileShape[j])) sizeIdx++;
-          std::string multiplier;
-          if (sizeIdx < indices.size()) {
-            multiplier = getName(indices[sizeIdx]);
-          } else if (fallbackSize > 0) {
-            multiplier = std::to_string(fallbackSize);
-          }
-          if (!multiplier.empty()) {
-            if (needCast) os() << "(int)(";
-            os() << getName(indices[i]) << " * " << multiplier;
-            if (needCast) os() << ")";
+          if (baseShape.size() == 1) {
+            // 1-D base: the offset is a chunk index scaled by the subspan
+            // size (a size index if present, else the DMA counterpart's
+            // element count).
+            std::string multiplier;
+            if (baseShape.size() < indices.size()) {
+              multiplier = getName(indices[baseShape.size()]);
+            } else if (fallbackSize > 0) {
+              multiplier = std::to_string(fallbackSize);
+            }
+            if (!multiplier.empty()) {
+              if (needCast) os() << "(int)(";
+              os() << getName(indices[i]) << " * " << multiplier;
+              if (needCast) os() << ")";
+            } else {
+              if (needCast) os() << "(int)(";
+              os() << getName(indices[i]);
+              if (needCast) os() << ")";
+            }
           } else {
+            // Multi-dim base: the index is a coordinate in the base mdspan's
+            // index space (a view/slice offset).
             if (needCast) os() << "(int)(";
             os() << getName(indices[i]);
             if (needCast) os() << ")";
@@ -3347,7 +3356,7 @@ private:
     auto dimArgMeta = getDimArgs(kOp);
     auto fnType = kOp.getFunctionType();
     auto mrInfo = getMRInfo(kOp);
-    unsigned numMrExtra = mrInfo.hasDynamicMR ? mrInfo.numOffsetArgs + 1 : 0;
+    unsigned numMrExtra = mrInfo.hasDynamicMR ? mrInfo.numOffsetArgs + (mrInfo.hasSharedMR ? 1 : 0) : 0;
     unsigned numOrigInputs = fnType.getNumInputs() - dimArgMeta.size() - numMrExtra;
     if (auto pn = kOp->getAttrOfType<mlir::ArrayAttr>("coir.param_names"))
       numOrigInputs = std::min(numOrigInputs,

@@ -14,11 +14,11 @@
 // should generate a 4-buffer interference matrix: 2 buffers from dma.copy
 // => local plus 2 explicit local arrays = 4 total.
 //
-// CHECK-DAG: coir.mr_n_buffers = 4
-// CHECK-DAG: coir.mr_interference
-// CHECK-DAG: coir.mr_alignment = 512
-// CHECK-DAG: coir.mr_size_exprs
-// CHECK-DAG: coir.mr_buffer_ids
+// CHECK-DAG: coir.mr_local_n_buffers = 4
+// CHECK-DAG: coir.mr_local_interference
+// CHECK-DAG: coir.mr_local_alignment = 512
+// CHECK-DAG: coir.mr_local_size_exprs
+// CHECK-DAG: coir.mr_local_buffer_ids
 
 __co__ void interference_test(s32 [1024] src, s32 [N] input, s32 [1024] out) {
   parallel tid by 5 : thread {

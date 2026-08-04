@@ -29,7 +29,7 @@ __co__ s32 [8] test_device(s32 [8] input) {
 // CHECK: __global__ void __coir_global_test_device({{.*}}, int __device_id)
 
 // Host: per-device buffer vectors + portable registered result buffer
-// CHECK: std::vector<{{.*}}> p0__device_vec(2, nullptr)
+// CHECK: std::vector<{{.*}}> input__device_vec(2, nullptr)
 // CHECK: malloc(
 // CHECK: topsHostRegister({{.*}}topsHostRegisterPortable)
 

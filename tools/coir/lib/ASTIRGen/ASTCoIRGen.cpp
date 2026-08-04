@@ -167,6 +167,34 @@ mlir::Value ASTCoIRGen::MaterializeSBE(mlir::Location loc,
   return nullptr;
 }
 
+bool ASTCoIRGen::Visit(AST::WithIn &wi) {
+  // Materialise and map the per-dim extent values so that foreach loops
+  // can look them up as loop bounds.  Without this, single-dim with-in
+  // foreachs (e.g. foreach y in X where y = {...} in [X] and X is a
+  // dynamic value) would fall back to a constant-1 bound.
+  if (!wi.with || !wi.with_matchers) return true;
+
+  // wi.in has been wrapped in a MultiDimSpans by the normaliser.
+  if (auto *mds = dyn_cast<AST::MultiDimSpans>(wi.in.get())) {
+    auto *mv = dyn_cast<AST::MultiValues>(mds->list.get());
+    if (!mv) return true;
+    auto &vals = mv->values;
+    for (size_t d = 0; d < vals.size(); ++d) {
+      auto extentVal = EmitExpr(*vals[d]);
+      if (extentVal) {
+        auto indexType = mlir::IndexType::get(&IRContext());
+        if (!mlir::isa<mlir::IndexType>(extentVal.getType()))
+          extentVal = builder.create<mlir::arith::IndexCastOp>(
+              Loc(wi), indexType, extentVal);
+        // Map under the bounded variable name so resolveRangeUBValue can
+        // find it by looking up lr->GetRVName().
+        MapValue(wi.with->name, extentVal);
+      }
+    }
+  }
+  return true;
+}
+
 void ASTCoIRGen::EmitNodeAssertions(AST::Node* node) {
   if (CCtx().DisableRuntimeCheck()) return;
   auto it = assert_map_.find(node);
@@ -1195,8 +1223,12 @@ int64_t ASTCoIRGen::resolveRangeBound(AST::LoopRange *lr) {
     if (auto bty = dyn_cast<BoundedType>(symType)) {
       if (bty->HasValidBound()) {
         auto &ub = bty->GetUpperBound();
-        if (ub && ub->IsNumeric())
-          bound = EvalToInt(ub);
+        // Skip the kDynamic sentinel. It means the bound is non-constant.
+        if (ub && ub->IsNumeric()) {
+          int64_t v = EvalToInt(ub);
+          if (v != mlir::ShapedType::kDynamic)
+            bound = v;
+        }
       }
     }
   }
@@ -1261,10 +1293,16 @@ mlir::Value ASTCoIRGen::resolveRangeUBValue(AST::LoopRange *lr, int64_t bound) {
       if (auto bty = dyn_cast<BoundedType>(symType)) {
         if (bty->HasValidBound()) {
           auto &ub = bty->GetUpperBound();
-          if (ub && !ub->IsNumeric()) {
+          // The upper bound may be a NumericValue whose value is
+          // ShapedType::kDynamic is a sentinel meaning "dynamic".  Treat it
+          // the same as non-numeric so we try symbolic resolution below.
+          bool isDynamicSentinel =
+              ub && ub->IsNumeric() &&
+              EvalToInt(ub) == mlir::ShapedType::kDynamic;
+          if (ub && (!ub->IsNumeric() || isDynamicSentinel)) {
             if (auto *sv = dyn_cast<sbe::SymbolicValue>(ub.get()))
               extentVal = LookupValue(UnScopedName(sv->Value()));
-            if (!extentVal)
+            if (!extentVal && !isDynamicSentinel)
               extentVal = MaterializeSBE(loc, ub);
           }
         }
@@ -1302,8 +1340,40 @@ mlir::Value ASTCoIRGen::resolveRangeUBValue(AST::LoopRange *lr, int64_t bound) {
       ubValue = uboundVal;
     }
   }
-  if (!ubValue)
-    ubValue = builder.create<mlir::arith::ConstantIndexOp>(loc, bound);
+  if (!ubValue) {
+    // The bound could not be resolved through the bounded-type path.
+    // Try the range variable name. Visit(AST::WithIn) maps the extent
+    // value there for with-in foreachs.
+    if (bound <= 1 || bound == mlir::ShapedType::kDynamic) {
+      auto rvVal = LookupValue(UnScopedName(lr->GetRVName()));
+      if (!rvVal)
+        rvVal = LookupValue(lr->GetRVName());
+      if (rvVal) {
+        if (!mlir::isa<mlir::IndexType>(rvVal.getType()))
+          rvVal = builder.create<mlir::arith::IndexCastOp>(
+              loc, mlir::IndexType::get(&IRContext()), rvVal);
+        ubValue = rvVal;
+      }
+      // Also try the per-dim with-matcher names (e.g., y__elem__0 for
+      // `foreach y in X` when y is a with-in bounded variable).
+      if (!ubValue) {
+        auto ivName = lr->GetIVName();
+        for (int d = 0; d < 3 && !ubValue; ++d) {
+          auto name = ivName + "__elem__" + std::to_string(d);
+          auto matcherVal = LookupValue(UnScopedName(name));
+          if (!matcherVal) matcherVal = LookupValue(name);
+          if (matcherVal) {
+            if (!mlir::isa<mlir::IndexType>(matcherVal.getType()))
+              matcherVal = builder.create<mlir::arith::IndexCastOp>(
+                  loc, mlir::IndexType::get(&IRContext()), matcherVal);
+            ubValue = matcherVal;
+          }
+        }
+      }
+    }
+    if (!ubValue)
+      ubValue = builder.create<mlir::arith::ConstantIndexOp>(loc, bound);
+  }
   if (ubValue && !mlir::isa<mlir::IndexType>(ubValue.getType()))
     ubValue = builder.create<mlir::arith::IndexCastOp>(
         loc, mlir::IndexType::get(&IRContext()), ubValue);

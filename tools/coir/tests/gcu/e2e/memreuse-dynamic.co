@@ -23,7 +23,7 @@ __co__ void memreuse_dynamic(s32 [1024] src, s32 [N] input, s32 [1024] out) {
   }
 }
 
-// DEV: __local__ unsigned char __dyn_smem[__CO_DYN_SMEM_SIZE];
+// DEV: __local__ unsigned char __spm_local[{{.*}}];
 // DEV-COUNT-4: mr_offset_
 // DEV: HeapSimulator
 
@@ -32,4 +32,4 @@ __co__ void memreuse_dynamic(s32 [1024] src, s32 [N] input, s32 [1024] out) {
 // HOST: vector<bool> {{.*}}_imat = {false,true,true,false,true,false,true,false,true,true,false,true,false,false,true,false}
 // HOST: Allocate({{.*}}, 512, {{.*}}_imat)
 // HOST: __co__local_chunk_offsets
-// HOST: __co__local_spm_size
+// HOST: __co__local_result
