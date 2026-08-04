@@ -167,7 +167,7 @@ public:
   bool Visit(AST::Parameter &) override { return true; }
   bool Visit(AST::ParamList &) override { return true; }
   bool Visit(AST::WhereBind &) override { return true; }
-  bool Visit(AST::WithIn &) override { return true; }
+  bool Visit(AST::WithIn &) override;
   bool Visit(AST::WithBlock &) override { return true; }
   bool Visit(AST::Memory &) override { return true; }
   bool Visit(AST::SpanAs &) override;
