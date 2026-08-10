@@ -71,8 +71,8 @@ inline const std::unordered_map<Opcode, OpInfo> op_table = {
     {Op::AddrOf,      {12, Assoc::Right}},
     
     {Op::ElemOf,      {13, Assoc::Right}},  // subscript, seems did not use
-    // {"suf_++",     {x, x}} // suffix increment         
-    // {"suf_--",     {x, x}} // suffix decrement
+    {Op::PostInc,     {13, Assoc::Left}},
+    {Op::PostDec,     {13, Assoc::Left}},
     
     /*
     {"#",      {x, Assoc::Left}}, // L * UB(r) + R

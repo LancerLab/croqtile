@@ -13,7 +13,7 @@ There are two future categories:
   existing object. Asynchronous WGMMA is the first operation-future producer.
 
 ```choreo
-load = tma.copy.async input => tile;
+load = tma.load.async input => tile;
 qk = mma.row.row.async scores, q_tile, k_tile;
 ```
 
@@ -64,8 +64,8 @@ trigger event_name after future_name;
 One event can join several operations:
 
 ```choreo
-lhs_load = tma.copy.async lhs => lhs_s;
-rhs_load = tma.copy.async rhs => rhs_s;
+lhs_load = tma.load.async lhs => lhs_s;
+rhs_load = tma.load.async rhs => rhs_s;
 trigger operands_full after lhs_load, rhs_load;
 ```
 
@@ -92,7 +92,7 @@ Use an event for cross-path communication:
 ```choreo
 parallel g by 2 : group-4 {
   inthreads.async (g == 0) {
-    load = tma.copy.async input => tile;
+    load = tma.load.async input => tile;
     trigger full after load;
   }
   inthreads.async (g == 1) {
@@ -110,7 +110,7 @@ from the logical pipeline order:
 ```choreo
 slot = order % 2;
 wait empty.at(order);
-load = tma.copy.async input.at(order) => tile[slot];
+load = tma.load.async input.at(order) => tile[slot];
 trigger full.at(order) after load;
 ```
 

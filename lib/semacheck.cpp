@@ -1596,6 +1596,21 @@ bool SemaChecker::VisitNode(AST::Trigger& n) {
     if (!native_event)
       Error1(n.LOC(), "trigger-after requires exactly one shared event that "
                       "can be bound to native async completion.");
+    if (n.GetDependencies().size() > 1) {
+      for (const auto& event : n.GetEvents()) {
+        auto event_expr = dyn_cast<AST::Expr>(event);
+        if (!event_expr || !AST::IsEventGenerationAt(*event_expr)) continue;
+        auto order_expr = dyn_cast<AST::Expr>(event_expr->GetR());
+        if (!order_expr) continue;
+        auto op = order_expr->GetOp();
+        if (op == Op::PreInc || op == Op::PreDec || op == Op::PostInc ||
+            op == Op::PostDec)
+          Error1(order_expr->LOC(),
+                 "an incremented event order cannot be shared by multiple "
+                 "trigger-after dependencies; advance the order in a "
+                 "separate statement after the joined trigger.");
+      }
+    }
     for (auto& dependency : n.GetDependencies()) {
       auto dependency_ty = NodeType(*dependency);
       if (!IsFutureLikeType(dependency_ty)) {

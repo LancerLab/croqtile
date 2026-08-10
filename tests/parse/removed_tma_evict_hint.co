@@ -7,4 +7,4 @@ __co__ void removed_tma_evict_hint(global f16[64] input) {
   }
 }
 
-// CHECK: error: syntax error
+// CHECK: error: TMA L2 eviction modifiers are only valid on 'tma.load'.

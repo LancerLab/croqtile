@@ -120,7 +120,7 @@ Key mappings to implement:
 | `dma.copy src => dst` | Memory transfer API calls |
 | `dma.copy.async` | Async transfer with synchronization |
 | `mma.row.col` | Matrix multiply-accumulate (D = A * B + C) |
-| `tma.copy` | Bulk copy API (if supported) |
+| `tma.load`, `tma.copy` | TMA load and copy APIs (if supported) |
 | `wait f` | Synchronization barriers |
 | `inthreads (pred)` | Thread predication / masking |
 

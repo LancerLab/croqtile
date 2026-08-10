@@ -279,6 +279,10 @@ const std::string CCCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
         oss << "++" << ExprSTR(expr->GetR());
       } else if (op == Op::PreDec) {
         oss << "--" << ExprSTR(expr->GetR());
+      } else if (op == Op::PostInc) {
+        oss << ExprSTR(expr->GetR()) << "++";
+      } else if (op == Op::PostDec) {
+        oss << ExprSTR(expr->GetR()) << "--";
       } else if (op == Op::AddrOf) {
         if (auto id = AST::GetIdentifier(expr->GetR()))
           oss << ExprSTR(id);

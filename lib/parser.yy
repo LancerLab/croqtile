@@ -213,7 +213,7 @@ extern int yylex();
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
 %token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
-%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC BARRIER FENCE CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG
+%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST EVICT_FIRST EVICT_LAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC BARRIER FENCE CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG
 %token DLBRAKT
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN SCALE MASK
@@ -1623,6 +1623,12 @@ s_expr
     | MMINUS IDENTIFIER {
         $$ = AST::Make<AST::Expr>(@1, "--", AST::Make<AST::Identifier>(@1, $2));
       }
+    | IDENTIFIER PPLUS {
+        $$ = AST::Make<AST::Expr>(@1, "post++", AST::Make<AST::Identifier>(@1, $1));
+      }
+    | IDENTIFIER MMINUS {
+        $$ = AST::Make<AST::Expr>(@1, "post--", AST::Make<AST::Identifier>(@1, $1));
+      }
     | data_element { $$ = AST::Make<AST::Expr>(@1, $1); }
     | call_expr { $$ = $1; }
     | const_sizeof { $$ = AST::MakeIntExpr(@1, $1); }
@@ -1975,6 +1981,24 @@ dma_attrib
         $$ = $1;
       }
     | dma_attrib MULTICAST { $1.multicast = true; $$ = $1; }
+    | dma_attrib EVICT_FIRST {
+        if ($1.explicit_swizzle)
+          Parser::error(@2,
+                        "TMA eviction modifier must precede '.swiz'.");
+        if ($1.l2_cache_hint != TMAL2CacheHint::NONE)
+          Parser::error(@2, "only one TMA eviction modifier is allowed.");
+        $1.l2_cache_hint = TMAL2CacheHint::EVICT_FIRST;
+        $$ = $1;
+      }
+    | dma_attrib EVICT_LAST {
+        if ($1.explicit_swizzle)
+          Parser::error(@2,
+                        "TMA eviction modifier must precede '.swiz'.");
+        if ($1.l2_cache_hint != TMAL2CacheHint::NONE)
+          Parser::error(@2, "only one TMA eviction modifier is allowed.");
+        $1.l2_cache_hint = TMAL2CacheHint::EVICT_LAST;
+        $$ = $1;
+      }
     | %empty {}
     ;
 
@@ -1989,17 +2013,41 @@ tdma_async
 
 dma_stmt
     : IDENTIFIER ASSIGN tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select {
+        if ($4 == ".load" && !$3)
+          Parser::error(@4, "'.load' is a TMA-only operation.");
+        if ($7.l2_cache_hint != TMAL2CacheHint::NONE &&
+            (!$3 || $4 != ".load"))
+          Parser::error(
+              @4, "TMA L2 eviction modifiers are only valid on 'tma.load'.");
         symtab.AddSymbol($1, MakeDummyFutureType($6.Async()));
         $$ = AST::Make<AST::DMA>(@3, $4, $1, $8, $10, $6, $7, $3, $5);
       }
     | IDENTIFIER ASSIGN tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
+        if ($4 == ".load" && !$3)
+          Parser::error(@4, "'.load' is a TMA-only operation.");
+        if ($7.l2_cache_hint != TMAL2CacheHint::NONE &&
+            (!$3 || $4 != ".load"))
+          Parser::error(
+              @4, "TMA L2 eviction modifiers are only valid on 'tma.load'.");
         symtab.AddSymbol($1, MakeDummyFutureType($6.Async()));
         $$ = AST::Make<AST::DMA>(@3, $4, $1, $12, $8, $10, $6, $7, $3, $5);
       }
     | tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select {
+        if ($2 == ".load" && !$1)
+          Parser::error(@2, "'.load' is a TMA-only operation.");
+        if ($5.l2_cache_hint != TMAL2CacheHint::NONE &&
+            (!$1 || $2 != ".load"))
+          Parser::error(
+              @2, "TMA L2 eviction modifiers are only valid on 'tma.load'.");
         $$ = AST::Make<AST::DMA>(@1, $2, "", $6, $8, $4, $5, $1, $3);
       }
     | tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
+        if ($2 == ".load" && !$1)
+          Parser::error(@2, "'.load' is a TMA-only operation.");
+        if ($5.l2_cache_hint != TMAL2CacheHint::NONE &&
+            (!$1 || $2 != ".load"))
+          Parser::error(
+              @2, "TMA L2 eviction modifiers are only valid on 'tma.load'.");
         $$ = AST::Make<AST::DMA>(@1, $2, "", $10, $6, $8, $4, $5, $1, $3);
       }
     | IDENTIFIER ASSIGN tdma NONE {
@@ -2010,6 +2058,7 @@ dma_stmt
 
 dma_operation
     : COPY { $$ = $1; }
+    | LOAD { $$ = $1; }
     | PAD  { $$ = $1; }
     | TRANSPOSE { $$ = $1; }
     ;

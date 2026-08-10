@@ -15,7 +15,7 @@ __co__ void root_subview_compact_coords(
         row = b;
         input_head = input.subspan(1, S, 1, 128)
                          .at(work_batch, 0, work_head, 0).sqz();
-        load = tma.copy.async.swiz<128>
+        load = tma.load.async.swiz<128>
           input_head.subspan(128, 128).at(row, 0) => tile;
         trigger full after load;
       }

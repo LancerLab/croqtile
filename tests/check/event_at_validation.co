@@ -5,11 +5,13 @@ __co__ void event_at_validation(global s32 [4] data) {
     shared event scalar;
     shared event ring[2];
     shared event matrix[2][2];
+    mutable u32 order = 0;
 
     wait data.at(0);
     wait scalar.at(0);
     wait matrix.at(0);
     wait ring.at(1.0f);
+    wait ring.at(order++ + 1);
   }
 }
 
@@ -17,3 +19,4 @@ __co__ void event_at_validation(global s32 [4] data) {
 // CHECK: error: '.at(order)' requires an event array.
 // CHECK: error: '.at(order)' requires a one-dimensional event array.
 // CHECK: error: event order must be an integer expression.
+// CHECK: error: an event order update must be the direct '.at' argument; use '.at(order++)' or update the order separately.

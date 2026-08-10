@@ -1,0 +1,20 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a %s -o /dev/null 2>&1 | FileCheck %s
+
+__co__ void trigger_after_incremented_join(global f16[64, 64] lhs,
+                                            global f16[64, 64] rhs) {
+  parallel b by 1 : block {
+    shared f16[64, 64] lhs_s;
+    shared f16[64, 64] rhs_s;
+    shared event full[2];
+    mutable u32 order = 0;
+
+    lhs_load = tma.load.async lhs => lhs_s;
+    rhs_load = tma.load.async rhs => rhs_s;
+    trigger full.at(order++) after lhs_load, rhs_load;
+    wait full.at(order);
+  }
+}
+
+// CHECK: error: an incremented event order cannot be shared by multiple trigger-after dependencies; advance the order in a separate statement after the joined trigger.
+// CHECK: Totally 1 errors have been detected.

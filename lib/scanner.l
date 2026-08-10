@@ -578,6 +578,8 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
   ".zfill"   return Choreo::Parser::make_ZFILL(yytext, loc);
   ".promote" return Choreo::Parser::make_PROMOTE(yytext, loc);
   ".multicast" return Choreo::Parser::make_MULTICAST(yytext, loc);
+  ".evict_first" return Choreo::Parser::make_EVICT_FIRST(yytext, loc);
+  ".evict_last" return Choreo::Parser::make_EVICT_LAST(yytext, loc);
   ".any"     return Choreo::Parser::make_NONE(yytext, loc);
   ".async"   return Choreo::Parser::make_ASYNC(yytext, loc);
   ".span"    return Choreo::Parser::make_FNSPAN(yytext, loc);

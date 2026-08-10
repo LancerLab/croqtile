@@ -2729,6 +2729,7 @@ struct DMA : public Node, public TypeIDProvider<DMA> {
 private:
   DMAAsync dma_async;
   bool enforce_tma;
+  TMAAccess tma_access;
 
 public:
   // if this DMA is chained with other DMA in pipeline mode
@@ -2748,8 +2749,11 @@ public:
                const DMAAttribute& at = {}, bool is_tma = false,
                const ptr<DMAConfig>& c = nullptr)
       : Node(l, MakeDummyFutureType(da.async)), operation(o), future(r),
-        dma_async(da), enforce_tma(is_tma), chained(false), chain_from(""),
-        chain_to(""), from(f), to(t), attr(at), config(c) {
+        dma_async(da), enforce_tma(is_tma),
+        tma_access(o == ".load" ? TMAAccess::LOAD : TMAAccess::INFER),
+        chained(false), chain_from(""), chain_to(""), from(f), to(t), attr(at),
+        config(c) {
+    if (is_tma && tma_access != TMAAccess::INFER) operation = ".copy";
     if (auto tptr = dyn_cast<AST::Select>(t)) tptr->inDMA = true;
   }
 
@@ -2759,16 +2763,18 @@ public:
                const DMAAttribute& at = {}, bool is_tma = false,
                const ptr<DMAConfig>& c = nullptr)
       : Node(l, MakeDummyFutureType(da.async)), operation(o), future(r),
-        dma_async(da), enforce_tma(is_tma), chained(true),
-        chain_from(chained_from), chain_to(""), from(f), to(t), attr(at),
-        config(c) {
+        dma_async(da), enforce_tma(is_tma),
+        tma_access(o == ".load" ? TMAAccess::LOAD : TMAAccess::INFER),
+        chained(true), chain_from(chained_from), chain_to(""), from(f), to(t),
+        attr(at), config(c) {
+    if (is_tma && tma_access != TMAAccess::INFER) operation = ".copy";
     if (auto tptr = dyn_cast<AST::Select>(t)) tptr->inDMA = true;
   }
 
   // The dummy dma
   explicit DMA(const location& l, const std::string& f, bool is_tma = false)
       : Node(l, MakePlaceHolderFutureType()), operation(".any"), future(f),
-        enforce_tma(is_tma) {}
+        enforce_tma(is_tma), tma_access(TMAAccess::INFER) {}
 
   bool IsDummy() const { return operation == ".any"; }
   const ptr<Node> GetFrom() const { return from; }
@@ -2792,9 +2798,17 @@ public:
   void SetSwizzleMode(SwizMode sm) { attr.sw_mode = sm; }
   int GetL2PromoteBytes() const { return attr.l2_promote_bytes; }
   TMAL2CacheHint GetL2CacheHint() const { return attr.l2_cache_hint; }
-  void SetL2CacheHint(TMAL2CacheHint hint) { attr.l2_cache_hint = hint; }
   bool HasL2CacheHint() const {
     return attr.l2_cache_hint != TMAL2CacheHint::NONE;
+  }
+  TMAAccess GetTMAAccess() const { return tma_access; }
+  bool HasExplicitTMAAccess() const { return tma_access != TMAAccess::INFER; }
+  bool IsTMALoad() const {
+    return enforce_tma && tma_access == TMAAccess::LOAD;
+  }
+  std::string SourceOperation() const {
+    if (IsTMALoad()) return ".load";
+    return operation;
   }
   const std::pair<int, int> GetSparsePattern() const {
     return {attr.sparse_n, attr.sparse_m};
@@ -2803,8 +2817,8 @@ public:
   const ptr<DMAConfig>& GetConfig() const { return config; }
 
   ptr<Node> CloneImpl() const override {
-    auto n = Make<DMA>(LOC(), operation, future, CloneP(from), CloneP(to),
-                       dma_async, attr, enforce_tma, config);
+    auto n = Make<DMA>(LOC(), SourceOperation(), future, CloneP(from),
+                       CloneP(to), dma_async, attr, enforce_tma, config);
     n->chained = chained;
     n->chain_from = chain_from;
     n->chain_to = chain_to;
@@ -2820,7 +2834,8 @@ public:
       return;
     }
 
-    os << "\n" << prefix << "`- DMA" << operation;
+    os << "\n"
+       << prefix << "`- " << (IsTMA() ? "TMA" : "DMA") << SourceOperation();
     if (IsAsync()) os << ".async";
     if (HasEvent()) os << "<" << PSTR(dma_async.Event()) << ">";
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
@@ -2844,7 +2859,8 @@ public:
   }
 
   std::string SourceString() {
-    return future + " = dma" + operation + " " + STR(*from) + " => " + STR(*to);
+    return future + " = " + (IsTMA() ? "tma" : "dma") + SourceOperation() +
+           " " + STR(*from) + " => " + STR(*to);
   }
 
   bool IsAsync() const { return dma_async.Async(); }
@@ -4214,6 +4230,13 @@ inline void Expr::Print(std::ostream& os, const std::string& prefix,
     os << ".at(";
     value_r->Print(os, "", with_type);
     os << ")";
+    return;
+  }
+
+  if (op == Op::PostInc || op == Op::PostDec) {
+    os << " (";
+    value_r->Print(os, "", with_type);
+    os << (op == Op::PostInc ? "++" : "--") << ") ";
     return;
   }
 

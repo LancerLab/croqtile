@@ -4600,6 +4600,14 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       } else if (expr->GetOp() == Op::PreDec) {
         oss << "--"
             << WrapParen(OpExprSTR(expr->GetR(), "--", false, is_host), "--");
+      } else if (expr->GetOp() == Op::PostInc) {
+        oss << WrapParen(OpExprSTR(expr->GetR(), "post++", false, is_host),
+                         "post++")
+            << "++";
+      } else if (expr->GetOp() == Op::PostDec) {
+        oss << WrapParen(OpExprSTR(expr->GetR(), "post--", false, is_host),
+                         "post--")
+            << "--";
       } else if (expr->GetOp() == Op::AddrOf) {
         if (auto id = AST::GetIdentifier(expr->GetR()))
           oss << OpExprSTR(id, parent_op, is_left_child, is_host);

@@ -168,37 +168,6 @@ public:
     return true;
   }
 
-  bool Visit(AST::Call& n) override {
-    auto name = n.function->name;
-    if (name != "croq::cuda::evict_first" && name != "croq::cuda::evict_last")
-      return true;
-    if (!n.arguments || n.arguments->Count() != 1) return true;
-    auto argument = n.arguments->ValueAt(0);
-    auto id = AST::GetIdentifier(*argument);
-    if (!id) return true;
-    auto producer_it = future_producers.find(InScopeName(id->name));
-    if (producer_it == future_producers.end()) {
-      Error1(n.LOC(),
-             "'" + name + "' requires a preceding TMA future producer.");
-      return false;
-    }
-    auto* producer = producer_it->second;
-    if (!producer->IsTMA() || !producer->IsAsync()) {
-      Error1(n.LOC(), "'" + name + "' can only annotate a TMA future.");
-      return false;
-    }
-    auto hint = name == "croq::cuda::evict_first" ? TMAL2CacheHint::EVICT_FIRST
-                                                  : TMAL2CacheHint::EVICT_LAST;
-    if (producer->HasL2CacheHint() && producer->GetL2CacheHint() != hint) {
-      Error1(n.LOC(), "conflicting L2 eviction annotations for future '" +
-                          id->name + "'.");
-      return false;
-    }
-    producer->SetL2CacheHint(hint);
-    n.AddNote("async_annotation_lowered");
-    return true;
-  }
-
   bool Visit(AST::MMA& n) override {
     auto operation = n.GetOperation();
     if (operation->Tag() != AST::MMAOperation::Exec ||

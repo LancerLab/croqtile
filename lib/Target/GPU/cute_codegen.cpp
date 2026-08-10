@@ -56,6 +56,36 @@ static bool IsNumericZeroLiteral(const AST::ptr<AST::Node>& n) {
   return false;
 }
 
+struct EventGenerationEvaluation {
+  AST::ptr<AST::Expr> event;
+  AST::ptr<AST::Expr> side_effect;
+  bool before = false;
+  bool after = false;
+};
+
+// event.at(order) lowering uses order independently for the physical slot and
+// mbarrier phase.  Peel a direct pre/post increment from the order so codegen
+// can emit the side effect exactly once around the synchronization operation.
+static EventGenerationEvaluation
+PrepareEventGenerationEvaluation(const AST::ptr<AST::Node>& event) {
+  auto expr = cast<AST::Expr>(event);
+  EventGenerationEvaluation result{expr, nullptr, false, false};
+  if (!AST::IsEventGenerationAt(*expr)) return result;
+
+  auto order = dyn_cast<AST::Expr>(expr->GetR());
+  if (!order ||
+      (order->GetOp() != Op::PreInc && order->GetOp() != Op::PreDec &&
+       order->GetOp() != Op::PostInc && order->GetOp() != Op::PostDec))
+    return result;
+
+  result.event = cast<AST::Expr>(expr->Clone());
+  result.event->SetR(order->GetR()->Clone());
+  result.side_effect = cast<AST::Expr>(order->Clone());
+  result.before = order->GetOp() == Op::PreInc || order->GetOp() == Op::PreDec;
+  result.after = !result.before;
+  return result;
+}
+
 // TMA_Swizzle enum and cuda_stringify helper for code generation
 enum class TMA_Swizzle {
   NONE = 0, // No swizzle
@@ -3021,6 +3051,11 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
          << "__mem; // raw mbarrier storage\n";
       ds << d_indent << "Barrier& " << ename
          << " = *reinterpret_cast<Barrier*>(&" << ename << "__mem);\n";
+      auto phase_name = UniqueDeviceName(ename + "__phase");
+      scalar_event_phase_names_[ename] = phase_name;
+      ds << d_indent << "unsigned int " << phase_name << " = "
+         << (n.HasNote("event_ready") ? "1" : "0")
+         << "; // implicit scalar event generation\n";
 
       {
         auto etc = ety->GetThreadCount();
@@ -4584,6 +4619,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       if (warpspec_only && event_only) {
         assert(n.IsAsync() && "warpspec event-only tma copy must be async");
       }
+      EventGenerationEvaluation completion_event_eval;
+      if (event_only) {
+        completion_event_eval = PrepareEventGenerationEvaluation(n.Event());
+        if (completion_event_eval.before)
+          ds << d_indent
+             << ExprSTR(completion_event_eval.side_effect, false) << ";\n";
+      }
 
       auto rev_indices = Reverse(GenIndices(f_ca));
 
@@ -4665,8 +4707,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       // arrive_and_expect_tx MUST be emitted before the PTX TMA load.
       std::string ptx_bar_expr;
       if (event_only) {
-        ptx_bar_expr = "(uint64_t*)&(" + ExprSTR(n.Event(), IsHost()) + ")";
-        auto event_expr = ExprSTR(n.Event(), IsHost());
+        ptx_bar_expr = "(uint64_t*)&(" +
+                       ExprSTR(completion_event_eval.event, IsHost()) + ")";
+        auto event_expr = ExprSTR(completion_event_eval.event, IsHost());
         // A trigger edge can join several TMA loads on one barrier. The async
         // graph marks all but the first load in that one edge as joins. Do not
         // deduplicate by the generated event expression: a later, independent
@@ -4748,11 +4791,14 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
            << ");\n";
       }
       if (emit_tma_single_guard) { ds << d_indent << "}\n"; }
+      if (event_only && completion_event_eval.after)
+        ds << d_indent << ExprSTR(completion_event_eval.side_effect, false)
+           << ";\n";
       recent_tma_tx_bytes.push_back(tma_tx_bytes_expr);
       if (recent_tma_tx_bytes.size() > 8) recent_tma_tx_bytes.pop_front();
 
-      // For async tma.copy.async, trigger the future
-      // For sync tma.copy, default behavior is immediate wait.
+      // For an async TMA operation, trigger the future. For a synchronous TMA
+      // operation, the default behavior is an immediate wait.
       // In warpspec mode, defer this wait to event barrier protocol
       // so producer-consumer pipelining remains asynchronous like ref kernels.
       if (fty->IsAsync()) {
@@ -7517,7 +7563,10 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
   };
 
   for (auto& t : n.GetTargets()) {
-    auto expr = cast<AST::Expr>(t);
+    auto event_eval = PrepareEventGenerationEvaluation(t);
+    auto expr = event_eval.event;
+    if (event_eval.before)
+      ds << d_indent << ExprSTR(event_eval.side_effect, false) << ";\n";
     bool is_array_ref = (expr->op == Op::ElemOf);
     auto tty = is_array_ref
                    ? GetSymbolType(AST::GetArrayBaseSymbol(*expr)->name)
@@ -7573,6 +7622,8 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
         ds << d_indent << "asm volatile(\"bar.sync %0, %1;\" :: \"r\"("
            << named->barrier_id << "), \"r\"(" << named->total_threads
            << ") : \"memory\");\n";
+        if (event_eval.after)
+          ds << d_indent << ExprSTR(event_eval.side_effect, false) << ";\n";
         continue;
       }
       switch (ety->GetStorage()) {
@@ -7587,10 +7638,10 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
           auto bty =
               cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
           // TODO: "!" same here
-          GenerateSubscriptions(ds, "!" + ExprSTR(t, false), " || ",
+          GenerateSubscriptions(ds, "!" + ExprSTR(expr, false), " || ",
                                 bty->RemainderDimensions(lvl));
         } else
-          GenerateSubscriptions(ds, "!" + ExprSTR(t, false), " || ",
+          GenerateSubscriptions(ds, "!" + ExprSTR(expr, false), " || ",
                                 ety->RemainderDimensions(0));
         ds << "false) continue;\n";
         ds << d_indent << "// reset event " << PSTR(t) << "\n";
@@ -7599,10 +7650,12 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
           auto bid = AST::GetArrayBaseSymbol(*expr);
           auto bty =
               cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
-          GenerateSubscriptions(ds, d_indent + ExprSTR(t, false), " = false;\n",
+          GenerateSubscriptions(ds, d_indent + ExprSTR(expr, false),
+                                " = false;\n",
                                 bty->RemainderDimensions(lvl));
         } else
-          GenerateSubscriptions(ds, d_indent + ExprSTR(t, false), " = false;\n",
+          GenerateSubscriptions(ds, d_indent + ExprSTR(expr, false),
+                                " = false;\n",
                                 ety->RemainderDimensions(0));
         EndEventCritical(guarded);
       } break;
@@ -7650,12 +7703,12 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
             else
               phase_cl = InlinePhaseExpr(stages_cl, !starts_ready);
             if (is_array_ref) {
-              std::string bar_expr = ExprSTR(t, false);
+              std::string bar_expr = ExprSTR(expr, false);
               ds << d_indent << "choreo::tma_mbarrier_wait_parity((uint64_t*)&"
                  << bar_expr << ", " << phase_cl << ");\n";
             } else {
               ds << d_indent << "choreo::tma_mbarrier_wait_parity((uint64_t*)&"
-                 << ExprSTR(t, false) << ", " << phase_cl << ");\n";
+                 << ExprSTR(expr, false) << ", " << phase_cl << ");\n";
             }
           }
           if (cluster_wait_guarded) {
@@ -7699,10 +7752,10 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
             }
           }
           if (is_array_ref) {
-            std::string bar_expr = ExprSTR(t, false);
+            std::string bar_expr = ExprSTR(expr, false);
             ds << d_indent << bar_expr << ".wait(" << phase_expr << ");\n";
           } else {
-            ds << d_indent << ExprSTR(t, false) << ".wait(" << phase_expr
+            ds << d_indent << ExprSTR(expr, false) << ".wait(" << phase_expr
                << ");\n";
           }
         }
@@ -7726,13 +7779,15 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
         ds << d_indent << "asm volatile(\"bar.sync %0, %1;\" :: \"r\"("
            << named->barrier_id << "), \"r\"(" << named->total_threads
            << ") : \"memory\");\n";
+        if (event_eval.after)
+          ds << d_indent << ExprSTR(event_eval.side_effect, false) << ";\n";
         continue;
       }
       switch (ety->GetStorage()) {
       case Storage::GLOBAL:
       case Storage::LOCAL: {
         bool guarded = BeginEventCritical();
-        ds << d_indent << "while (" << ExprSTR(t, false)
+        ds << d_indent << "while (" << ExprSTR(expr, false)
            << " == false) continue; // spinlock\n";
         if (is_array_ref) {
           ds << d_indent << "// reset event " << PSTR(t) << "\n";
@@ -7740,10 +7795,12 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
           auto bid = AST::GetArrayBaseSymbol(*expr);
           auto bty =
               cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
-          GenerateSubscriptions(ds, d_indent + ExprSTR(t, false), " = false;\n",
+          GenerateSubscriptions(ds, d_indent + ExprSTR(expr, false),
+                                " = false;\n",
                                 bty->RemainderDimensions(lvl));
         } else
-          ds << d_indent << ExprSTR(t, false) << " = false; // reset event\n";
+          ds << d_indent << ExprSTR(expr, false)
+             << " = false; // reset event\n";
         EndEventCritical(guarded);
       } break;
       case Storage::SHARED: {
@@ -7767,28 +7824,25 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
             ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
             IncrDeviceIndent();
           }
-          {
-            bool starts_ready = ready_event_names_.count(base_name) > 0;
-            std::string phase_sc = starts_ready ? "1" : "0";
-            if (is_array_ref) {
-              std::string bar_expr = ExprSTR(t, false);
-              ds << d_indent << "choreo::tma_mbarrier_wait_parity((uint64_t*)&"
-                 << bar_expr << ", " << phase_sc << ");\n";
-            } else {
-              ds << d_indent << "choreo::tma_mbarrier_wait_parity((uint64_t*)&"
-                 << ExprSTR(t, false) << ", " << phase_sc << ");\n";
-            }
-          }
+          auto bar_name = ExprSTR(expr, false);
+          auto phase_it = scalar_event_phase_names_.find(bar_name);
+          assert(phase_it != scalar_event_phase_names_.end() &&
+                 "missing implicit scalar event phase");
+          ds << d_indent << "choreo::tma_mbarrier_wait_parity((uint64_t*)&"
+             << bar_name << ", " << phase_it->second << ");\n";
+          ds << d_indent << phase_it->second << " ^= 1;\n";
           if (cluster_wait_guarded) {
             DecrDeviceIndent();
             ds << d_indent << "}\n";
           }
         } else {
           auto bar_name = ExprSTR(t, false);
-          bool starts_ready = ready_event_names_.count(base_name) > 0;
-          std::string phase_single = starts_ready ? "1" : "0";
-          ds << d_indent << bar_name << ".wait(" << phase_single
+          auto phase_it = scalar_event_phase_names_.find(bar_name);
+          assert(phase_it != scalar_event_phase_names_.end() &&
+                 "missing implicit scalar event phase");
+          ds << d_indent << bar_name << ".wait(" << phase_it->second
              << "); // wait event(raw mbarrier)\n";
+          ds << d_indent << phase_it->second << " ^= 1;\n";
         }
       } break;
       default:
@@ -7797,6 +7851,8 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
       }
     } else
       choreo_unreachable("unsupported wait target.");
+    if (event_eval.after)
+      ds << d_indent << ExprSTR(event_eval.side_effect, false) << ";\n";
   }
 
   return true;
@@ -7822,6 +7878,9 @@ bool CuteCodeGen::Visit(AST::Yield& n) {
 
 bool CuteCodeGen::Visit(AST::Trigger& n) {
   TraceEachVisit(n);
+
+  auto& event_stream = IsHost() ? hs : ds;
+  auto& event_indent = IsHost() ? h_indent : d_indent;
 
   if (n.HasNote("native_completion_event")) {
     ds << d_indent << "// trigger-after folded into native async completion\n";
@@ -7883,7 +7942,11 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
   };
 
   for (auto& f : n.GetEvents()) {
-    auto expr = cast<AST::Expr>(f);
+    auto event_eval = PrepareEventGenerationEvaluation(f);
+    auto expr = event_eval.event;
+    if (event_eval.before)
+      event_stream << event_indent
+                   << ExprSTR(event_eval.side_effect, IsHost()) << ";\n";
     bool is_array_ref = (expr->op == Op::ElemOf);
     assert(IsSymbolOrArrayRef(*f) &&
            "expect either symbol or array reference.");
@@ -7903,13 +7966,16 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
       ds << d_indent << "asm volatile(\"bar.arrive %0, %1;\" :: \"r\"("
          << named->barrier_id << "), \"r\"(" << named->total_threads
          << ") : \"memory\");\n";
+      if (event_eval.after)
+        ds << d_indent << ExprSTR(event_eval.side_effect, false) << ";\n";
       continue;
     }
     if (auto ety = dyn_cast<EventArrayType>(fty)) {
       if (IsHost()) {
         assert(ety->GetStorage() == Storage::GLOBAL);
         // TODO: make & into OpExprSTR?
-        hs << h_indent << "choreo::abend_true(cudaMemset(&" << ExprSTR(f, true)
+        hs << h_indent << "choreo::abend_true(cudaMemset(&"
+           << ExprSTR(expr, true)
            << ", 1, " << ety->ElemCount() << ")); // trigger event\n";
         // TODO: support array reference
       } else {
@@ -7923,10 +7989,10 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
             auto bid = AST::GetArrayBaseSymbol(*expr);
             auto bty =
                 cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
-            GenerateSubscriptions(ds, d_indent + ExprSTR(f, false),
+            GenerateSubscriptions(ds, d_indent + ExprSTR(expr, false),
                                   " = true;\n", bty->RemainderDimensions(lvl));
           } else
-            GenerateSubscriptions(ds, d_indent + ExprSTR(f, false),
+            GenerateSubscriptions(ds, d_indent + ExprSTR(expr, false),
                                   " = true;\n", ety->RemainderDimensions(0));
           EndEventCritical(guarded);
           break;
@@ -7948,13 +8014,13 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
             if (is_array_ref) {
               ds << d_indent
                  << "choreo::tma_mbarrier_arrive_cluster((uint64_t*)&"
-                 << ExprSTR(f, false) << ", __cta);\n";
+                 << ExprSTR(expr, false) << ", __cta);\n";
             } else {
               GenerateSubscriptions(
                   ds,
                   d_indent +
                       "choreo::tma_mbarrier_arrive_cluster((uint64_t*)&" +
-                      ExprSTR(f, false),
+                      ExprSTR(expr, false),
                   ", __cta);\n", ety->RemainderDimensions(0));
             }
             DecrDeviceIndent();
@@ -7968,22 +8034,23 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
                 !ScopeAlreadySingleThreadForLevel(ParallelLevel::GROUPx4);
             if (is_array_ref) {
               if (conditional_tx) {
-                ds << d_indent << ExprSTR(f, false)
+                ds << d_indent << ExprSTR(expr, false)
                    << ".arrive_and_expect_tx(__CHOREO_GROUPX4_SINGLE__ ? "
                    << tx_bytes_expr << " : 0);\n";
               } else {
-                ds << d_indent << ExprSTR(f, false) << ".arrive_and_expect_tx("
+                ds << d_indent << ExprSTR(expr, false)
+                   << ".arrive_and_expect_tx("
                    << tx_bytes_expr << ");\n";
               }
             } else {
               if (conditional_tx) {
                 GenerateSubscriptions(
-                    ds, d_indent + ExprSTR(f, false),
+                    ds, d_indent + ExprSTR(expr, false),
                     ".arrive_and_expect_tx(__CHOREO_GROUPX4_SINGLE__ ? " +
                         tx_bytes_expr + " : 0);\n",
                     ety->RemainderDimensions(0));
               } else {
-                GenerateSubscriptions(ds, d_indent + ExprSTR(f, false),
+                GenerateSubscriptions(ds, d_indent + ExprSTR(expr, false),
                                       ".arrive_and_expect_tx(" + tx_bytes_expr +
                                           ");\n",
                                       ety->RemainderDimensions(0));
@@ -7992,9 +8059,12 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
             recent_tma_tx_bytes.clear();
           } else {
             if (is_array_ref) {
-              ds << d_indent << "(void)" << ExprSTR(f, false) << ".arrive();\n";
+              ds << d_indent << "(void)" << ExprSTR(expr, false)
+                 << ".arrive();\n";
             } else {
-              GenerateSubscriptions(ds, d_indent + "(void)" + ExprSTR(f, false),
+              GenerateSubscriptions(ds,
+                                    d_indent + "(void)" +
+                                        ExprSTR(expr, false),
                                     ".arrive();\n",
                                     ety->RemainderDimensions(0));
             }
@@ -8010,7 +8080,8 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
     } else if (auto ety = dyn_cast<EventType>(fty)) {
       if (IsHost()) {
         assert(ety->GetStorage() == Storage::GLOBAL);
-        hs << h_indent << "choreo::abend_true(cudaMemset(&" << ExprSTR(f, true)
+        hs << h_indent << "choreo::abend_true(cudaMemset(&"
+           << ExprSTR(expr, true)
            << ", 1, 1)); // trigger event\n";
         // TODO: support array reference
       } else {
@@ -8024,11 +8095,11 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
             auto bid = AST::GetArrayBaseSymbol(*expr);
             auto bty =
                 cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
-            GenerateSubscriptions(ds, d_indent + ExprSTR(f, false),
+            GenerateSubscriptions(ds, d_indent + ExprSTR(expr, false),
                                   " = true; // trigger event\n",
                                   bty->RemainderDimensions(lvl));
           } else
-            ds << d_indent << ExprSTR(f, false)
+            ds << d_indent << ExprSTR(expr, false)
                << " = true; // trigger event\n";
           EndEventCritical(guarded);
           break;
@@ -8044,7 +8115,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
                   "choreo::tma_cluster_dim(); ++__cta) {\n";
             IncrDeviceIndent();
             ds << d_indent << "choreo::tma_mbarrier_arrive_cluster((uint64_t*)&"
-               << ExprSTR(f, false) << ", __cta);\n";
+               << ExprSTR(expr, false) << ", __cta);\n";
             DecrDeviceIndent();
             ds << d_indent << "}\n";
             DecrDeviceIndent();
@@ -8055,16 +8126,17 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
                 IsWarpSpecActive() &&
                 !ScopeAlreadySingleThreadForLevel(ParallelLevel::GROUPx4);
             if (conditional_tx) {
-              ds << d_indent << ExprSTR(f, false)
+              ds << d_indent << ExprSTR(expr, false)
                  << ".arrive_and_expect_tx(__CHOREO_GROUPX4_SINGLE__ ? "
                  << tx_bytes_expr << " : 0); // trigger event(barrier)\n";
             } else {
-              ds << d_indent << ExprSTR(f, false) << ".arrive_and_expect_tx("
+              ds << d_indent << ExprSTR(expr, false)
+                 << ".arrive_and_expect_tx("
                  << tx_bytes_expr << "); // trigger event(barrier)\n";
             }
             recent_tma_tx_bytes.clear();
           } else {
-            ds << d_indent << "(void)" << ExprSTR(f, false)
+            ds << d_indent << "(void)" << ExprSTR(expr, false)
                << ".arrive(); // trigger event(barrier)\n";
           }
           break;
@@ -8076,6 +8148,9 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
         }
       }
     }
+    if (event_eval.after)
+      event_stream << event_indent
+                   << ExprSTR(event_eval.side_effect, IsHost()) << ";\n";
   }
   return true;
 }
@@ -8105,11 +8180,6 @@ bool CuteCodeGen::Visit(AST::Call& n) {
         os << indent << "  __co_abort__();\n";
         os << indent << "}\n";
       }
-      return true;
-    } else if (func_name == "croq::cuda::evict_first" ||
-               func_name == "croq::cuda::evict_last") {
-      // AsyncOpGraphPrepare folds this source-level future annotation into
-      // the producing TMA instruction.  It has no runtime representation.
       return true;
     } else if (func_name == "croq::cuda::setreg_inc" ||
                func_name == "croq::cuda::setreg_dec") {
@@ -11157,6 +11227,14 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       } else if (expr->GetOp() == Op::PreDec) {
         oss << "--"
             << WrapParen(OpExprSTR(expr->GetR(), "--", false, is_host), "--");
+      } else if (expr->GetOp() == Op::PostInc) {
+        oss << WrapParen(OpExprSTR(expr->GetR(), "post++", false, is_host),
+                         "post++")
+            << "++";
+      } else if (expr->GetOp() == Op::PostDec) {
+        oss << WrapParen(OpExprSTR(expr->GetR(), "post--", false, is_host),
+                         "post--")
+            << "--";
       } else if (expr->GetOp() == Op::AddrOf) {
         if (auto id = AST::GetIdentifier(expr->GetR()))
           oss << OpExprSTR(id, parent_op, is_left_child, is_host);

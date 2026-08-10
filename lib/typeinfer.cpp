@@ -710,7 +710,8 @@ bool TypeInference::Visit(AST::Expr& n) {
       return true;
     } else if (n.op == Op::LogicNot) {
       SetNodeType(n, MakeBooleanType());
-    } else if (n.op == Op::PreInc || n.op == Op::PreDec) {
+    } else if (n.op == Op::PreInc || n.op == Op::PreDec ||
+               n.op == Op::PostInc || n.op == Op::PostDec) {
       SetNodeType(n, NodeType(*n.GetR()));
     } else if (n.op == Op::BitNot) {
       assert(CanYieldAnInteger(NodeType(*n.GetR())));
