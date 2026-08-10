@@ -1,0 +1,25 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__device__ __forceinline__ void consume_fragment(float* values) {
+  values[0] = values[0] + 1.0f;
+}
+
+__co__ void device_call_register_fragment() {
+  parallel b by 1 : block {
+    shared f16[64, 16] lhs;
+    shared f16[128, 16] rhs;
+    parallel g by 1 : group-4 {
+      frag f32[64] values {0.0f};
+      call consume_fragment(values);
+
+      acc = mma.fill.f32 0.0f;
+      work = mma.row.row.async acc, lhs, rhs;
+      wait work;
+      call consume_fragment(acc);
+    }
+  }
+}
+
+// CHECK: consume_fragment((float*)values);
+// CHECK: consume_fragment((float*)acc);
