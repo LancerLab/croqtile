@@ -76,16 +76,16 @@ __co__ void spmm(global f8_e4m3 [M, PACKED_K] lhs_packed,
         call croq::cuda::setreg_dec(40);
         foreach {iv_k} in [cdiv(K, SPMM_TILE_K)] {
           stage = iv_k % SPMM_STAGES;
-          wait empty[stage];
-          tma.copy.async<full[stage]>.swiz<SPMM_LHS_SWIZ> lhs_packed
+          wait empty.at(iv_k);
+          lhs_load = tma.copy.async.swiz<SPMM_LHS_SWIZ> lhs_packed
               .subspan(SPMM_WARP_M, SPMM_PACKED_TILE_K)
               .at(block_m, iv_k)
               => lhs_load_s[stage];
-          tma.copy.async<full[stage]>.swiz<SPMM_RHS_SWIZ> rhs
+          rhs_load = tma.copy.async.swiz<SPMM_RHS_SWIZ> rhs
               .subspan(SPMM_WARP_N, SPMM_TILE_K)
               .at(block_n, iv_k)
               => rhs_load_s[stage];
-          trigger full[stage];
+          trigger full.at(iv_k) after lhs_load, rhs_load;
         }
       }
 
@@ -93,11 +93,11 @@ __co__ void spmm(global f8_e4m3 [M, PACKED_K] lhs_packed,
         call croq::cuda::setreg_inc(216);
         mc = mma.fill.f16 0.0f;
         foreach {s} in [SPMM_STAGES] {
-          trigger empty[s];
+          trigger empty.at(s);
         }
         foreach {iv_k} in [cdiv(K, SPMM_TILE_K)] {
           stage = iv_k % SPMM_STAGES;
-          wait full[stage];
+          wait full.at(iv_k);
           foreach {iv_warp} in [cdiv(SPMM_TILE_K, SPMM_WARP_K)] {
             ma = lhs_load_s[stage]
                 .view(SPMM_WARP_M, 32)
@@ -110,7 +110,7 @@ __co__ void spmm(global f8_e4m3 [M, PACKED_K] lhs_packed,
                 .chunkat(_, iv_warp);
             mma.row.row.sp mc, ma, mb, me;
           }
-          trigger empty[stage];
+          trigger empty.at(iv_k);
         }
         shared f16 [SPMM_WARP_M, SPMM_WARP_N] output_s;
         mma.store mc, output_s;

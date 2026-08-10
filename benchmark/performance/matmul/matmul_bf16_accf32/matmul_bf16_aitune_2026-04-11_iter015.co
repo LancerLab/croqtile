@@ -29,12 +29,12 @@ __co__ void matmul(global bf16 [M, K] lhs, global bf16 [N, K] rhs, global bf16 [
       inthreads.async (wg == 0) {
         foreach {iv_k} in [cdiv(K, TILE_K)] {
           stage = iv_k % STAGES;
-          wait empty[stage];
-          tma.copy.async<full[stage]>.swiz<SWIZ> lhs
+          wait empty.at(iv_k);
+          lhs_load = tma.copy.async.swiz<SWIZ> lhs
             .subspan(TILE_M, TILE_K).at(block_m, iv_k) => lhs_s[stage];
-          tma.copy.async<full[stage]>.swiz<SWIZ> rhs
+          rhs_load = tma.copy.async.swiz<SWIZ> rhs
             .subspan(WARP_N, TILE_K).at(block_n, iv_k) => rhs_s[stage];
-          trigger full[stage];
+          trigger full.at(iv_k) after lhs_load, rhs_load;
         }
       }
 
@@ -42,13 +42,13 @@ __co__ void matmul(global bf16 [M, K] lhs, global bf16 [N, K] rhs, global bf16 [
         cidx = wg - 1;
         mc = mma.fill.f32 0.0f;
         foreach {s} in [STAGES]
-          trigger empty[s];
+          trigger empty.at(s);
 
         foreach {iv_k} in [cdiv(K, TILE_K)] {
           stage = iv_k % STAGES;
-          wait full[stage];
+          wait full.at(iv_k);
           mma.row.row mc, lhs_s[stage], rhs_s[stage];
-          trigger empty[stage];
+          trigger empty.at(iv_k);
         }
         mma.store mc, output_s[cidx];
         tma.copy output_s[cidx] => output.subspan(WARP_M, WARP_N)

@@ -45,21 +45,21 @@ __co__ void flash_atten(
     parallel p by [BLOCK_M/WG_M + 1] : group-4, t by 128 : thread {
       inthreads.async (p == 0) {
         call croq::cuda::setreg_dec(24);
-        tma.copy.async<qf>.swiz<SWIZ>
+        q_load = tma.copy.async.swiz<SWIZ>
           Q_head.subspan(BLOCK_M, DIM).at(bm, 0) => q_shared;
-        trigger qf;
+        trigger qf after q_load;
 
         foreach {bn} in [kv_bound] {
           stage = bn % STAGES;
-          wait ke[stage];
-          tma.copy.async<kf[stage]>.swiz<SWIZ>
+          wait ke.at(bn);
+          k_load = tma.copy.async.swiz<SWIZ>
             K_head.subspan(BLOCK_N, DIM).at(bn, 0) => k_buf[stage];
-          trigger kf[stage];
+          trigger kf.at(bn) after k_load;
 
-          wait ve[stage];
-          tma.copy.async<vf[stage]>.swiz<SWIZ>
+          wait ve.at(bn);
+          v_load = tma.copy.async.swiz<SWIZ>
             V_head.subspan(BLOCK_N, DIM).at(bn, 0) => v_buf[stage];
-          trigger vf[stage];
+          trigger vf.at(bn) after v_load;
         }
       }
 
@@ -67,8 +67,8 @@ __co__ void flash_atten(
         call croq::cuda::setreg_inc(240);
         cid = p - 1;
         foreach {s} in [STAGES] {
-          trigger ke[s];
-          trigger ve[s];
+          trigger ke.at(s);
+          trigger ve.at(s);
         }
 
         wait qf;
@@ -84,9 +84,9 @@ __co__ void flash_atten(
           stage = bn % STAGES;
           acc_s = mma.fill.f32 0.0f;
 
-          wait kf[stage];
+          wait kf.at(bn);
           mma.row.row acc_s, q_shared.subspan(WG_M, DIM).at(cid, 0), k_buf[stage];
-          trigger ke[stage];
+          trigger ke.at(bn);
 
           int causal_row_base = bm * BLOCK_M + cid * WG_M;
           if ((bn + 1) * BLOCK_N > causal_row_base + 1) {
@@ -114,9 +114,9 @@ __co__ void flash_atten(
           apply {i, j} in acc_s_cast.span
             acc_s_cast.at(i, j) = __to<bf16>(acc_s.at(i, j));
 
-          wait vf[stage];
+          wait vf.at(bn);
           mma.row.col acc_o, acc_s_cast, v_buf[stage];
-          trigger ve[stage];
+          trigger ve.at(bn);
         }
 
         apply {i, j} in acc_o.span

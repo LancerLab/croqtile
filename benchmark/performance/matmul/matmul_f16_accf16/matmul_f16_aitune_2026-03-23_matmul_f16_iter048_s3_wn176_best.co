@@ -57,23 +57,23 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
       inthreads.async (p1 == 0) {
         foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
           stage = iv_k % MATMUL_STAGES;
-          wait empty[stage];
-          tma.copy.async<full[stage]>.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s[stage];
-          tma.copy.async<full[stage]>.swiz<MATMUL_SWIZ> rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(block_n, iv_k) => rhs_load_s[stage];
-          trigger full[stage];
+          wait empty.at(iv_k);
+          lhs_load = tma.copy.async.swiz<MATMUL_SWIZ> lhs.subspan(MATMUL_WARP_M, MATMUL_TILE_K).at(block_m, iv_k) => lhs_load_s[stage];
+          rhs_load = tma.copy.async.swiz<MATMUL_SWIZ> rhs.subspan(MATMUL_WARP_N, MATMUL_TILE_K).at(block_n, iv_k) => rhs_load_s[stage];
+          trigger full.at(iv_k) after lhs_load, rhs_load;
         }
       }
 
       inthreads.async (p1 == 1) {
         mc = mma.fill.f16 0.0f;
         foreach {s} in [MATMUL_STAGES] {
-          trigger empty[s];
+          trigger empty.at(s);
         }
         foreach {iv_k} in [cdiv(K, MATMUL_TILE_K)] {
           stage = iv_k % MATMUL_STAGES;
-          wait full[stage];
+          wait full.at(iv_k);
           mma.row.row mc, lhs_load_s[stage], rhs_load_s[stage];
-          trigger empty[stage];
+          trigger empty.at(iv_k);
         }
         mma.store mc, output_s;
         tma.copy output_s => output.subspan(MATMUL_WARP_M, MATMUL_WARP_N).at(block_m, block_n);

@@ -77,40 +77,40 @@ __co__ void spmm(global f8_e4m3 [M, PACKED_K] lhs_packed,
       inthreads.async (p1 == 0) {
         foreach {iv_k} in [cdiv(K, SPMM_TILE_K)] {
           stage = iv_k % SPMM_STAGES;
-          wait empty[stage];
-          tma.copy.async<meta_full[stage]> lhs_meta
+          wait empty.at(iv_k);
+          meta_load = tma.copy.async lhs_meta
               .subspan(SPMM_WARP_M, SPMM_META_TILE_COLS)
               .at(block_m, iv_k)
               => meta_s[stage];
-          trigger meta_full[stage];
-          tma.copy.async<full[stage]>.swiz<SPMM_LHS_SWIZ> lhs_packed
+          trigger meta_full.at(iv_k) after meta_load;
+          lhs_load = tma.copy.async.swiz<SPMM_LHS_SWIZ> lhs_packed
               .subspan(SPMM_WARP_M, SPMM_PACKED_TILE_K)
               .at(block_m, iv_k)
               => lhs_load_s[stage];
-          tma.copy.async<full[stage]>.swiz<SPMM_RHS_SWIZ> rhs
+          rhs_load = tma.copy.async.swiz<SPMM_RHS_SWIZ> rhs
               .subspan(SPMM_WARP_N, SPMM_TILE_K)
               .at(block_n, iv_k)
               => rhs_load_s[stage];
-          trigger full[stage];
+          trigger full.at(iv_k) after lhs_load, rhs_load;
         }
       }
 
       inthreads.async (p1 == 1) {
         mc = mma.fill.f16 0.0f;
         foreach {s} in [SPMM_STAGES] {
-          trigger empty[s];
+          trigger empty.at(s);
         }
         foreach {iv_k} in [cdiv(K, SPMM_TILE_K)] {
           stage = iv_k % SPMM_STAGES;
-          wait meta_full[stage];
-          wait full[stage];
+          wait meta_full.at(iv_k);
+          wait full.at(iv_k);
           foreach {iv_warp} in [cdiv(SPMM_TILE_K, SPMM_WARP_K)] {
             ma = lhs_load_s[stage].chunkat(_, iv_warp);
             mb = rhs_load_s[stage].chunkat(_, iv_warp);
             me = mma.load meta_s[stage].chunkat(_, iv_warp);
             mma.row.row.sp mc, ma, mb, me;
           }
-          trigger empty[stage];
+          trigger empty.at(iv_k);
         }
         shared f16 [SPMM_WARP_M, SPMM_WARP_N] output_s;
         mma.store mc, output_s;

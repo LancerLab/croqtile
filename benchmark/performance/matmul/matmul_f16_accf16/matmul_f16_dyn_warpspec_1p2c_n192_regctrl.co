@@ -27,12 +27,12 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
         call croq::cuda::setreg_dec(40);
         foreach {iv_k} in [cdiv(K, TILE_K)] {
           stage = iv_k % STAGES;
-          wait empty[stage];
-          tma.copy.async<full[stage]>.swiz<SWIZ> lhs
+          wait empty.at(iv_k);
+          lhs_load = tma.copy.async.swiz<SWIZ> lhs
             .subspan(TILE_M, TILE_K).at(block_m, iv_k) => lhs_s[stage];
-          tma.copy.async<full[stage]>.swiz<SWIZ> rhs
+          rhs_load = tma.copy.async.swiz<SWIZ> rhs
             .subspan(WARP_N, TILE_K).at(block_n, iv_k) => rhs_s[stage];
-          trigger full[stage];
+          trigger full.at(iv_k) after lhs_load, rhs_load;
         }
       }
 
@@ -41,13 +41,13 @@ __co__ void matmul(global f16 [M, K] lhs, global f16 [N, K] rhs, global f16 [M, 
         mc = mma.fill.f16 0.0f;
         cidx = wg - 1;
         foreach {s} in [STAGES]
-          trigger empty[s];
+          trigger empty.at(s);
 
         foreach {iv_k} in [cdiv(K, TILE_K)] {
           stage = iv_k % STAGES;
-          wait full[stage];
+          wait full.at(iv_k);
           mma.row.row mc, lhs_s[stage].subspan(WARP_M, TILE_K).at(cidx, 0), rhs_s[stage];
-          trigger empty[stage];
+          trigger empty.at(iv_k);
         }
         shared f16 [WARP_M, WARP_N] output_s[CONSUMERS];
         mma.store mc, output_s[cidx];
