@@ -1,7 +1,8 @@
 # TMA Codegen Overhaul Plan
 
 Date: 2026-06-11
-Status: APPROVED -- all design questions resolved, ready to implement
+Status: HISTORICAL -- superseded by the operation-future/event design. Current
+syntax is documented in `Documents/Documentation/tma.md`.
 
 ------------------------------------------------------------------------
 
@@ -42,7 +43,7 @@ through multiple iterations, resulting in:
 | D2 | **Index-derived phase** -- compute phase from loop induction variable, not local `__phase` vars | Matches a2.cu `((bn & 3) >> 1)` and TileLang; fewer registers; no per-event state |
 | D3 | **Remove `--ptx-barrier` flag** -- PTX mbarrier is the only path | Simplification; flag was "obsolete" per user |
 | D4 | **Remove `--event-arrive-tx` flag** -- auto-compile arrive-tx from TMA/event analysis | No user choice needed; compiler determines protocol |
-| D5 | **Keep `trigger` after `tma.copy.async` mandatory in .co source** -- serves as semantic validation checkpoint; codegen emits nothing for TMA-bound triggers | Source-level safety (compiler can warn on missing trigger); codegen handles protocol entirely at DMA node; trigger populates init count analysis |
+| D5 | **Keep a separate `trigger event after future` edge after async TMA** -- serves as semantic validation checkpoint; codegen can fold it into the TMA node | Source-level safety; codegen handles the native protocol while trigger-after populates event analysis |
 | D6 | **Use PTX TMA load helpers for all ranks** -- 2D and 3D variants in `choreo_cute.h` | Avoids `cde::` + reinterpret_cast; direct PTX gives full control |
 
 ------------------------------------------------------------------------
@@ -93,7 +94,7 @@ Add `TMAProtocol` struct to `DMALoweringDecision`:
 
 ```cpp
 struct TMAProtocol {
-  bool event_managed = false;       // tma.copy.async<event>
+  bool event_managed = false;       // future published by trigger-after
   int tx_bytes = 0;                 // tile bytes for arrive_and_expect_tx
   std::string event_base_name;      // "kf", "vf", "qf"
   int effective_rank = 0;           // 2 or 3 (after swizzle split)
@@ -121,10 +122,10 @@ Build a mapping: `trigger AST node -> bound DMA AST node`
 
 Algorithm:
 - Walk AST in source order within each `inthreads` scope
-- When visiting `tma.copy.async<event>`: record
-  `pending[event_name] = &dma_node`
-- When visiting `trigger event_name`:
-  - If `pending[event_name]` exists: mark trigger as TMA-bound
+- When visiting a named async TMA future: record
+  `pending[future_name] = &dma_node`
+- When visiting `trigger event_name after future_name`:
+  - If `pending[future_name]` exists: mark trigger as TMA-bound
     (store in static map: `tma_bound_triggers_[trigger_ast_id] = dma_ast`)
   - Clear `pending[event_name]`
   - If not in pending: this is a consumer-release trigger (no binding)
@@ -138,12 +139,12 @@ Two event roles, each with a deterministic init count:
 
 | Event Role | Examples | Who signals | Init count | How determined |
 |------------|---------|-------------|------------|----------------|
-| **Full event** (TMA-fill) | `kf`, `vf`, `qf` | 1 elect thread via `arrive_and_expect_tx` | **1** | Event appears in `tma.copy.async<event>` |
+| **Full event** (TMA-fill) | `kf`, `vf`, `qf` | 1 elect thread via `arrive_and_expect_tx` | **1** | Event is published after a TMA future |
 | **Empty event** (signal/release) | `ke`, `ve` | All consumer threads via `.arrive()` | **num_consumers** | Event only used in `trigger` (no TMA binding) |
 
 **Auto-detection algorithm** (in DMAPlan or codegen_prepare):
-1. Scan all DMA nodes: if `tma.copy.async<ev>` found -> mark `ev` as
-   **full event** -> `init(1)`
+1. Scan trigger-after edges: if an event depends on a TMA future, mark the
+   event as a **full event** -> `init(1)`.
 2. Remaining events with triggers but no TMA binding -> **empty event**
    -> `init(trigger_thread_count)` from `GetEventTriggerParticipation`
 
@@ -171,7 +172,8 @@ Init: single thread inits with count derived from event role:
   consumer threads call `.arrive()` to signal buffer release
 
 Event role determined automatically by checking if the event appears
-in a `tma.copy.async<event>` (full) or only in `trigger` (empty).
+in a trigger-after edge from a TMA future (full) or only in an immediate
+`trigger` (empty).
 See Phase 3 for the auto-detection algorithm.
 
 **Phase variable elimination (D2)**:
@@ -307,10 +309,10 @@ if (bound_dma) {
 
 This replaces the entire `recent_tma_tx_bytes`-based trigger logic.
 
-**Semantic validation** (in semacheck or codegen_prepare): If an
-event-managed TMA (`tma.copy.async<ev>`) has no matching `trigger ev`
-in the same scope, emit a warning. The trigger is required as a
-source-level contract even though codegen ignores it.
+**Semantic validation** (in semacheck or codegen_prepare): Every named async
+TMA future must be waited on or consumed by a matching
+`trigger event after future` edge in the same scope. The edge is required as a
+source-level contract even when codegen folds it into the TMA operation.
 
 ### Phase 8: Wait Codegen (Visit(Wait))
 

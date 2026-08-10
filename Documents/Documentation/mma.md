@@ -2,144 +2,160 @@
 
 ## Overview
 
-Modern GPU hardware provides dedicated **Matrix Multiply-Accumulate (MMA)** units that perform small matrix multiplications in hardware. The underlying hardware operation is:
+Choreo maps the `mma.*` family to WMMA, `mma.sync`, WGMMA, and sparse MMA
+instructions. The compiler selects the hardware atom from operand types,
+shapes, layouts, storage, and target architecture.
+
+The mathematical operation is:
 
 ```
 D = A * B + C
 ```
 
-Croqtile exposes MMA through a simplified interface: a family of `mma.*` operations where the programmer specifies the operand layouts, and the **compiler infers the data types and tile shapes** to select the appropriate hardware MMA instruction automatically (WMMA, mma.sync, WGMMA, or their sparse variants). If the data shapes do not satisfy a valid MMA tile configuration, the compiler reports an error.
+The accumulator normally represents both C and D.
 
-In most usage, the accumulator register serves as both C (input) and D (output), yielding the familiar `C += A * B` pattern.
-
-## MMA Operations
-
-### `mma.fill` -- Initialize Accumulator
+## Initialize an Accumulator
 
 ```choreo
-mc = mma.fill 0;
-mc = mma.fill 0.0f;
+acc = mma.fill.f32 0.0f;
+mma.fill acc, 0.0f;
 ```
 
-Creates an accumulator matrix initialized to the given value. The accumulator is an opaque register-level object managed by the MMA hardware.
+The first form creates an accumulator. The second reinitializes an existing
+accumulator.
 
-A variant re-initializes an existing accumulator:
+## Operand Forms
+
+### Register fragments
+
+`mma.load` materializes a register operand for WMMA, `mma.sync`, WGMMA RS mode,
+or sparse metadata where the selected atom requires one:
 
 ```choreo
-mma.fill mc, 0.0f;
+a_frag = mma.load lhs.chunkat(m, k);
+mma.row.col acc, a_frag, b_frag;
 ```
 
-### `mma.load` -- Load Operand
+### Direct WGMMA shared operands
+
+For WGMMA SS mode, reference shared-memory views directly:
 
 ```choreo
-ma = mma.load lhs.chunkat(m, k);
-mb = mma.load rhs.chunkat(k, n);
+mma.row.row acc,
+    q_shared.subspan(64, 128).at(consumer, 0),
+    k_shared;
 ```
 
-Loads a tile of data from a spanned view into an MMA-compatible register fragment. The view operation (`chunkat`, `subspan`, etc.) must produce a tile whose dimensions are compatible with a hardware MMA shape. The compiler checks this and reports an error if the tile does not match any available MMA configuration.
+The compiler constructs and hoists the required shared-memory descriptors.
+There is no source-level `mma.desc` operation. Loading a WGMMA shared B operand
+into a register fragment is rejected because it obscures the actual hardware
+operand mode.
 
-### `mma.row.col` / `mma.row.row` -- Execute MMA
+## Layouts
+
+The layout suffix names A and B memory layouts:
+
+| Syntax | A | B |
+|--------|---|---|
+| `mma.row.col` | row-major | column-major |
+| `mma.row.row` | row-major | row-major |
+| `mma.col.row` | column-major | row-major |
+| `mma.col.col` | column-major | column-major |
+
+Example:
 
 ```choreo
-mma.row.col mc, ma, mb;    // mc = ma * mb + mc  (A row-major, B col-major)
-mma.row.row mc, ma, mb;    // mc = ma * mb + mc  (A row-major, B row-major)
+mma.row.col acc, a, b;
 ```
 
-Executes the matrix multiply-accumulate. The layout suffixes (`.row.col`, `.row.row`, `.col.row`, `.col.col`) specify the memory layout of operands A and B. The accumulator `mc` is both the input C and the output D -- effectively `mc += ma * mb`.
+## Asynchronous MMA and Operation Futures
 
-All four layout combinations are supported:
-
-| Syntax | A Layout | B Layout |
-|--------|----------|----------|
-| `mma.row.col` | Row-major | Column-major |
-| `mma.row.row` | Row-major | Row-major |
-| `mma.col.row` | Column-major | Row-major |
-| `mma.col.col` | Column-major | Column-major |
-
-The compiler inspects the element types and tile shapes of `ma` and `mb`, then selects the matching hardware MMA instruction. If no instruction matches (unsupported type combination or tile shape), the compiler emits a diagnostic.
-
-### `mma.store` -- Store Result
+Assignment form with `.async` creates an operation future:
 
 ```choreo
-mma.store mc, output.chunkat(m, n);
+qk = mma.row.row.async scores, q_shared, k_shared;
 ```
 
-Stores the accumulator contents back to a spanned data view.
+The accumulator remains the result object. `qk` represents completion only.
 
-## Complete MMA Example
-
-A basic matmul using MMA:
+Wait before local code consumes the accumulator:
 
 ```choreo
-#define M 128
-#define N 256
-#define K 64
-
-__co__ auto matmul(f16 [M, K] lhs, f16 [K, N] rhs) {
-  f16 [M, N] output;
-  int MMA_M = 16, MMA_N = 16, MMA_K = 16;
-
-  parallel {m, n} by [M / MMA_M / 4, N / MMA_N] : block {
-    mc = mma.fill 0.0;
-    parallel {g0, g1} by [4, 1] : group {
-      mma.fill mc, 0.0f;
-      foreach k in K / MMA_K {
-        ma = mma.load lhs.chunkat(m#g0, k);
-        mb = mma.load rhs.chunkat(k, n#g1);
-        mma.row.col mc, ma, mb;   // mc += ma * mb
-      }
-      mma.store mc, output.chunkat(m#g0, n#g1);
-    }
-  }
-  return output;
-}
+wait qk;
+reduce_max(scores_max, scores, 1);
 ```
 
-Note the `m#g0` syntax, which composes the block-level index `m` with the group-level index `g0` to form a hierarchical tile coordinate.
+WGMMA has no native completion-event operand. To release another asynchronous
+path, wait for the operation future and then trigger the event directly:
 
-*(Reference: `tests/gpu/end2end/mma.co`, `tests/parse/mma.co`)*
+```choreo
+wait qk;
+trigger k_empty;
+```
 
-## Hardware Mapping
+Local work can be placed between that wait and publication:
 
-The compiler automatically selects the hardware MMA instruction based on the operand types, tile shapes, and target architecture:
+```choreo
+wait qk;
+// Local work derived from scores.
+trigger qk_done;
+```
 
-| Target | Hardware Instruction | How Selected |
-|--------|---------------------|--------------|
-| Volta+ | `wmma` | Type and shape match WMMA tile sizes |
-| Ampere+ | `mma.sync` | Type and shape match PTX MMA tiles (m8n8k16, m16n8k8, ...) |
-| Hopper+ | `wgmma` | Warpgroup-level types and shapes |
-| Sparse | `mma.sync.sp` / `wgmma.sp` | Sparse operand detected (2:4 sparsity) |
+`trigger event after qk` is rejected rather than being lowered to a hidden
+WGMMA wait. The compiler infers WGMMA commit and wait depth from explicit
+future waits. There is no source-level `mma.wait` statement.
 
-The programmer does **not** select the instruction variant manually. Croqtile infers the correct instruction from the data types and shapes, making the MMA interface portable across GPU generations.
+## K-Tile Issue Schedule
+
+A dense auto-split WGMMA can request a semantic K-tile permutation:
+
+```choreo
+[[schedule(k_tiles(7, 6, 5, 4, 0, 1, 2, 3))]]
+pv = mma.row.col.async output, probabilities, v_shared;
+```
+
+The list must be a permutation containing exactly one entry for every
+auto-split K tile. The annotation controls issue order, not a named CUDA helper
+or a descriptor representation. The backend may select a specialized lowering
+for a recognized order or generate the general sequence.
+
+The schedule applies only to the following MMA execution statement. Sparse
+WGMMA schedules are not currently supported.
+
+## Store an Accumulator
+
+```choreo
+mma.store acc, output_shared;
+```
+
+The backend can select `stmatrix` when the target, accumulator layout, and
+destination match. A later TMA operation can copy the shared tile to global
+memory.
+
+## Hardware Selection
+
+| Target | Typical instruction |
+|--------|---------------------|
+| Volta+ | WMMA |
+| Ampere+ | `mma.sync` |
+| Hopper+ | WGMMA |
+| Sparse | `mma.sync.sp` or WGMMA sparse |
+
+The programmer does not encode atom names, K sizes, descriptor order, or
+generated helper function names. Those are inferred backend details.
 
 ## Supported Types
 
-MMA operations support a wide range of precision combinations:
+Common combinations include:
 
-| A Type | B Type | C Type | Notes |
-|--------|--------|--------|-------|
-| `f16` | `f16` | `f16`/`f32` | Standard half-precision |
-| `bf16` | `bf16` | `f32` | Brain float |
-| `tf32` | `tf32` | `f32` | TensorFloat-32 |
-| `f8_e4m3` | `f8_e4m3` | `f32` | FP8 (Hopper+) |
-| `f8_e5m2` | `f8_e5m2` | `f32` | FP8 (Hopper+) |
-| `s8` | `s8` | `s32` | Integer MMA |
-| `f64` | `f64` | `f64` | Double precision |
+| A/B | Accumulator | Notes |
+|-----|-------------|-------|
+| `f16` | `f16` or `f32` | Half precision |
+| `bf16` | `f32` | Brain floating point |
+| `tf32` | `f32` | TensorFloat-32 |
+| FP8 | `f32` | Hopper+ |
+| `s8` | `s32` | Integer MMA |
+| `f64` | `f64` | Double precision |
 
-*(Reference: `tests/gpu/end2end/wmma/`, `tests/gpu/end2end/ptx_mma/`)*
-
-## MMA with Fusion
-
-Scalar operations can be fused with MMA:
-
-```choreo
-mma.row.col.scale mc, ma, mb, scale_factor;
-```
-
-*(Reference: `tests/gpu/end2end/mma_fusion_scalar.co`)*
-
-## stmatrix
-
-For Hopper targets, the `stmatrix` instruction provides efficient store from registers to shared memory. Croqtile can generate `stmatrix` when the MMA store pattern matches.
-
-*(Reference: `tests/gpu/codegen/cute/stmatrix_codegen_enable.co`)*
+Exact shape and type support depends on the selected target atom. Invalid
+combinations produce a compile-time diagnostic.

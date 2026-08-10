@@ -1,0 +1,19 @@
+// RUN: not choreo -es -t cute -arch=sm_90a %s -o /dev/null 2>&1 | FileCheck %s
+
+__co__ void event_at_validation(global s32 [4] data) {
+  parallel b by 1 : block {
+    shared event scalar;
+    shared event ring[2];
+    shared event matrix[2][2];
+
+    wait data.at(0);
+    wait scalar.at(0);
+    wait matrix.at(0);
+    wait ring.at(1.0f);
+  }
+}
+
+// CHECK: error: '.at(order)' requires an event array.
+// CHECK: error: '.at(order)' requires an event array.
+// CHECK: error: '.at(order)' requires a one-dimensional event array.
+// CHECK: error: event order must be an integer expression.

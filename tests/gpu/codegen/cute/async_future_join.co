@@ -1,0 +1,30 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void async_future_join(global f16 [128, 128] lhs,
+                              global f16 [128, 128] rhs) {
+  parallel b by 1 : block {
+    shared f16 [128, 128] lhs_s;
+    shared f16 [128, 128] rhs_s;
+    shared event full;
+
+    parallel g by 2 : group-4 {
+      inthreads.async (g == 0) {
+        lhs_load = tma.copy.async lhs => lhs_s;
+        rhs_load = tma.copy.async rhs => rhs_s;
+        trigger full after lhs_load, rhs_load;
+      }
+
+      inthreads.async (g == 1) {
+        wait full;
+      }
+    }
+  }
+}
+
+// CHECK: full.arrive_and_expect_tx(32768);
+// CHECK: (uint64_t*)&(full)
+// CHECK: full.expect_transaction(32768);
+// CHECK: (uint64_t*)&(full)
+// CHECK-NOT: lhs_load.wait();
+// CHECK-NOT: rhs_load.wait();

@@ -1,0 +1,10 @@
+// RUN: not choreo -e %s 2>&1 | FileCheck %s
+
+__co__ void removed_wait_phase() {
+  parallel b by 1 : block {
+    shared event full;
+    wait<0> full;
+  }
+}
+
+// CHECK: error: syntax error

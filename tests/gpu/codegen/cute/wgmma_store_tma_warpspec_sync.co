@@ -20,26 +20,25 @@ __co__ void foo(global f16 [M, K] lhs,
       inthreads.async (p == 0) {
         foreach {iv_k} in [cdiv(K, TILE_K)] {
           stage = iv_k % STAGES;
-          wait empty[stage];
-          tma.copy.async<full[stage]>.swiz<128> lhs.subspan(WARP_M, TILE_K).at(block_m, iv_k) => lhs_s[stage];
-          tma.copy.async<full[stage]>.swiz<128> rhs.subspan(WARP_N, TILE_K).at(block_n, iv_k) => rhs_s[stage];
-          trigger full[stage];
+          wait empty.at(iv_k);
+          lhs_load = tma.copy.async.swiz<128> lhs.subspan(WARP_M, TILE_K).at(block_m, iv_k) => lhs_s[stage];
+          rhs_load = tma.copy.async.swiz<128> rhs.subspan(WARP_N, TILE_K).at(block_n, iv_k) => rhs_s[stage];
+          trigger full.at(iv_k) after lhs_load, rhs_load;
         }
       }
 
       inthreads.async (p == 1) {
         mc = mma.fill.f16 0.0f;
         foreach {s} in [STAGES]
-          trigger empty[s];
+          trigger empty.at(s);
         foreach {iv_k} in [cdiv(K, TILE_K)] {
           stage = iv_k % STAGES;
-          wait full[stage];
+          wait full.at(iv_k);
           foreach {iv_wk} in [cdiv(TILE_K, WARP_K)] {
-            ma = mma.load.swiz<128> lhs_s[stage].chunkat(_, iv_wk);
-            mb = mma.load.swiz<128> rhs_s[stage].chunkat(_, iv_wk);
-            mma.row.row mc, ma, mb;
+            mma.row.row mc, lhs_s[stage].chunkat(_, iv_wk),
+                            rhs_s[stage].chunkat(_, iv_wk);
           }
-          trigger empty[stage];
+          trigger empty.at(iv_k);
         }
         mma.store mc, output_s;
         tma.copy output_s => output.subspan(WARP_M, WARP_N).at(block_m, block_n);
@@ -54,5 +53,5 @@ __co__ void foo(global f16 [M, K] lhs,
 // CHECK: choreo::named_barrier_sync(128, 15);
 // CHECK: cde::fence_proxy_async_shared_cta();
 // CHECK-NEXT: choreo::named_barrier_sync(128, 15);
-// CHECK: if (__choreo_vtid_x == 0) {
+// CHECK: if ((threadIdx.x == 128)) {
 // CHECK-NEXT: cde::cp_async_bulk_tensor_2d_shared_to_global(

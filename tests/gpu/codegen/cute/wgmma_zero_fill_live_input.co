@@ -1,0 +1,37 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a --stmatrix %s -o - | FileCheck %s
+
+__co__ void wgmma_zero_fill_live_input(
+    global bf16[128, 128] q, global bf16[128, 128] k) {
+  parallel b by 1 : block {
+    shared bf16[128, 128] q_s;
+    shared bf16[128, 128] k_s;
+    shared event full;
+
+    parallel p by 2 : group-4 {
+      inthreads.async (p == 0) {
+        q_load = tma.copy.async.swiz<128> q => q_s;
+        k_load = tma.copy.async.swiz<128> k => k_s;
+        trigger full after q_load, k_load;
+      }
+      inthreads.async (p == 1) {
+        wait full;
+        scores = mma.fill.f32 0.0f;
+        apply {i, j} in scores.span
+          scores.at(i, j) = scores.at(i, j) + 1.0f;
+        [[schedule(k_tiles(0, 1, 2, 3, 4, 5, 6, 7))]]
+        qk = mma.row.row.async scores,
+          q_s.subspan(64, 128).at(0, 0), k_s;
+        wait qk;
+      }
+    }
+  }
+}
+
+// CHECK-LABEL: __choreo_device_wgmma_zero_fill_live_input
+// CHECK: float scores[64];
+// CHECK: float [[ZERO:__frag_init_val[0-9]+]] = 0.000000f;
+// CHECK: scores[idx] = [[ZERO]];
+// CHECK: scores[__r] = scores[__r] + 1.000000f;
+// CHECK: wgmma_bf16_m64n128k16_ss_k128_order_01234567(
+// CHECK-NOT: wgmma_bf16_m64n128k16_ss_k128_order_01234567<true>(

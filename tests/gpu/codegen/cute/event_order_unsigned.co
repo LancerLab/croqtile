@@ -1,0 +1,17 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void event_order_unsigned() {
+  parallel b by 1 : block {
+    shared event full[2] = ready;
+    parallel g by 2 : group-4 {
+      inthreads.async (g == 0) {
+        mutable u32 order = 3u;
+        wait full.at(order);
+      }
+    }
+  }
+}
+
+// CHECK: unsigned int order = 3;
+// CHECK: full[(order) % 2].wait(((((order) / 2) & 1) ^ 1));

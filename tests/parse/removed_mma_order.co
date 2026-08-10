@@ -1,0 +1,14 @@
+// RUN: not choreo -e %s 2>&1 | FileCheck %s
+
+__co__ void removed_mma_order() {
+  parallel b by 1 : block {
+    shared bf16[64, 128] lhs;
+    shared bf16[128, 128] rhs;
+    parallel g by 1 : group-4 {
+      acc = mma.fill.f32 0.0f;
+      mma.row.row.order<0, 1, 2, 3> acc, lhs, rhs;
+    }
+  }
+}
+
+// CHECK: error: syntax error

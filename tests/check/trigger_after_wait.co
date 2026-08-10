@@ -1,0 +1,16 @@
+// RUN: not choreo -es -t cute -arch=sm_90a %s -o /dev/null 2>&1 | FileCheck %s
+
+__co__ void trigger_after_wait(global f16[64, 64] input) {
+  parallel b by 1 : block {
+    shared f16[64, 64] tile;
+    shared event full;
+
+    load = tma.copy.async input => tile;
+    wait load;
+    trigger full after load;
+    wait full;
+  }
+}
+
+// CHECK: error: trigger-after cannot bind future '{{.*}}load' after it was explicitly waited; trigger the event directly after the wait.
+// CHECK: Totally 1 errors have been detected.

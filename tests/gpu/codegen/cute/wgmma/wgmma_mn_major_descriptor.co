@@ -18,9 +18,8 @@ __co__ auto row_col_case(f16 [M, K] lhs, f16 [K, N] rhs) {
       rhs_s = dma.copy rhs.chunkat(iv_k, block_n) => shared;
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
-          ma = mma.desc lhs_s.chunkat(_, iv_warp);
-          mb = mma.desc rhs_s.chunkat(iv_warp, _);
-          mma.row.col mc, ma, mb;
+          mma.row.col mc, lhs_s.chunkat(_, iv_warp),
+                          rhs_s.chunkat(iv_warp, _);
         }
       }
     }
@@ -42,9 +41,8 @@ __co__ auto row_row_case(f16 [M, K] lhs, f16 [N, K] rhs) {
       rhs_s = tma.copy.swiz<128> rhs.chunkat(block_n, iv_k) => shared;
       foreach {iv_warp} in [cdiv(TILE_K, WARP_K)] {
         parallel p by 1 : group-4 {
-          ma = mma.desc lhs_s.chunkat(_, iv_warp);
-          mb = mma.desc rhs_s.chunkat(_, iv_warp);
-          mma.row.row mc, ma, mb;
+          mma.row.row mc, lhs_s.chunkat(_, iv_warp),
+                          rhs_s.chunkat(_, iv_warp);
         }
       }
     }
@@ -54,10 +52,10 @@ __co__ auto row_row_case(f16 [M, K] lhs, f16 [N, K] rhs) {
   return output;
 }
 
-// ROW-COL: uint64_t desc_ma = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::NS>(ma_smem_ptr);
-// ROW-COL: uint64_t desc_mb = wgmma_make_smem_desc<WGMMA_MajorOrder::MN_MAJOR, WGMMA_Swizzle::NS>(mb_smem_ptr);
+// ROW-COL: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::NS>
+// ROW-COL: wgmma_make_smem_desc<WGMMA_MajorOrder::MN_MAJOR, WGMMA_Swizzle::NS>
 // ROW-COL: MMA_64x64x16_F32F16F16_SS<static_cast<cute::SM90::GMMA::Major>(0), static_cast<cute::SM90::GMMA::Major>(1)>::fma
 
-// ROW-ROW: uint64_t desc_ma = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(ma_smem_ptr);
-// ROW-ROW: uint64_t desc_mb = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(mb_smem_ptr);
+// ROW-ROW: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>
+// ROW-ROW: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>
 // ROW-ROW: MMA_64x64x16_F32F16F16_SS<static_cast<cute::SM90::GMMA::Major>(0), static_cast<cute::SM90::GMMA::Major>(0)>::fma

@@ -11,7 +11,9 @@ Croqtile has four fundamental type categories, each serving a distinct role:
 | **I-Tuple** | Groups of integer values (indices, tiling factors) | `{4, 8, 16}` |
 | **Bounded** | Variables with known ranges (loop variables, thread IDs) | `parallel p by 6` |
 
-Additionally, **future** types arise from DMA statements and **mdspan** is a partial type representing shapes alone.
+Additionally, **future** types represent asynchronous completion, **event**
+types publish completion between control paths, and **mdspan** is a partial
+type representing shapes alone.
 
 ## Scalar Types
 
@@ -100,15 +102,42 @@ Bounded variables are used to select subviews of spanned data -- they determine 
 
 ## Future Types
 
-A **future** is produced by a DMA statement. It represents both the handle of an (optionally asynchronous) operation and a reference to the destination buffer:
+A future represents operation completion. Choreo distinguishes two inferred
+future types.
+
+A **data future** is produced by DMA or TMA and retains the destination view:
 
 ```choreo
-f = dma.copy.async input => shared;
-wait f;
-call kernel(f.data, |f.span|);
+load = tma.copy.async input => shared_tile;
+wait load;
+call kernel(load.data, |load.span|);
 ```
 
-Futures provide `.data` (the destination buffer) and `.span` (the destination shape). See [DMA Basics](dma-basics.md).
+An **operation future** represents completion without owning a new data view.
+Asynchronous MMA updates its accumulator and returns this kind of future:
+
+```choreo
+qk = mma.row.row.async scores, q_shared, k_shared;
+wait qk;
+```
+
+Only data futures expose `.data` and `.span`. A future can be bound to an event
+with `trigger event after future` only when its operation has native event
+completion. Other futures use an explicit wait followed by a direct trigger.
+See [Futures and Async](futures-and-async.md).
+
+## Event Types
+
+An event is a generation-based synchronization object declared with a storage
+qualifier:
+
+```choreo
+shared event full[2], empty[2] = ready;
+```
+
+Events are pending by default. `= ready` initializes generation zero as ready.
+The compiler derives hardware participation and synchronization primitives
+from producers and consumers.
 
 ## Type Inference
 
@@ -118,7 +147,7 @@ Croqtile aggressively infers types from initialization expressions. The explicit
 a = 5;                 // inferred as int
 b = {3, 4};            // inferred as ituple<2>
 sp : [7, 8];           // inferred as mdspan<2>
-f = dma.copy x => shared;  // inferred as future
+f = dma.copy x => shared;  // inferred as data future
 ```
 
 The compiler also infers shapes through DMA operations, `chunkat` expressions, and arithmetic on mdspans. The [Value Numbering](../Developer/value-numbering.md) chapter in the Developer Guide explains the inference pipeline.

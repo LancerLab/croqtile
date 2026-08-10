@@ -109,6 +109,171 @@ public:
   }
 };
 
+// Resolve native async completion edges before collecting target codegen
+// metadata. This is the first lowering of the source-level async-op graph: a
+// TMA load can bind one shared event directly, including a join where several
+// TMA futures feed the same event. The binding never inserts a wait.
+struct AsyncOpGraphPrepare : public CodeGenerator {
+private:
+  enum class MMACompletion { Pending, Emitted };
+
+  struct MMAFutureState {
+    std::string queue_name;
+    MMACompletion completion = MMACompletion::Pending;
+  };
+
+  std::unordered_map<std::string, AST::DMA*> future_producers;
+  std::unordered_map<std::string, std::vector<std::string>> mma_queues;
+  std::unordered_map<std::string, MMAFutureState> mma_futures;
+
+  void ResolveMMAWait(const ptr<AST::Node>& target) {
+    if (!isa<OperationFutureType>(NodeType(*target))) return;
+    auto id = AST::GetIdentifier(*target);
+    if (!id) return;
+    auto future_name = InScopeName(id->name);
+    auto state_it = mma_futures.find(future_name);
+    if (state_it == mma_futures.end()) return;
+    auto& state = state_it->second;
+    auto& queue = mma_queues[state.queue_name];
+
+    if (state.completion != MMACompletion::Pending) {
+      target->AddNote("mma_wait_already_emitted");
+      return;
+    }
+
+    auto future_it = std::find(queue.begin(), queue.end(), future_name);
+    if (future_it == queue.end()) return;
+    auto depth = static_cast<int>(std::distance(future_it, queue.end()) - 1);
+    target->AddNote("mma_wait_depth", std::to_string(depth));
+    for (auto it = queue.begin(); it != std::next(future_it); ++it)
+      mma_futures[*it].completion = MMACompletion::Emitted;
+    queue.erase(queue.begin(), std::next(future_it));
+  }
+
+  bool BeforeVisitImpl(AST::Node& n) override {
+    if (isa<AST::ChoreoFunction>(&n)) {
+      future_producers.clear();
+      mma_queues.clear();
+      mma_futures.clear();
+    }
+    return true;
+  }
+
+public:
+  AsyncOpGraphPrepare() : CodeGenerator("async-op-graph") {}
+
+  bool Visit(AST::DMA& n) override {
+    if (n.IsAsync() && !n.future.empty())
+      future_producers[InScopeName(n.future)] = &n;
+    return true;
+  }
+
+  bool Visit(AST::Call& n) override {
+    auto name = n.function->name;
+    if (name != "croq::cuda::evict_first" && name != "croq::cuda::evict_last")
+      return true;
+    if (!n.arguments || n.arguments->Count() != 1) return true;
+    auto argument = n.arguments->ValueAt(0);
+    auto id = AST::GetIdentifier(*argument);
+    if (!id) return true;
+    auto producer_it = future_producers.find(InScopeName(id->name));
+    if (producer_it == future_producers.end()) {
+      Error1(n.LOC(),
+             "'" + name + "' requires a preceding TMA future producer.");
+      return false;
+    }
+    auto* producer = producer_it->second;
+    if (!producer->IsTMA() || !producer->IsAsync()) {
+      Error1(n.LOC(), "'" + name + "' can only annotate a TMA future.");
+      return false;
+    }
+    auto hint = name == "croq::cuda::evict_first" ? TMAL2CacheHint::EVICT_FIRST
+                                                  : TMAL2CacheHint::EVICT_LAST;
+    if (producer->HasL2CacheHint() && producer->GetL2CacheHint() != hint) {
+      Error1(n.LOC(), "conflicting L2 eviction annotations for future '" +
+                          id->name + "'.");
+      return false;
+    }
+    producer->SetL2CacheHint(hint);
+    n.AddNote("async_annotation_lowered");
+    return true;
+  }
+
+  bool Visit(AST::MMA& n) override {
+    auto operation = n.GetOperation();
+    if (operation->Tag() != AST::MMAOperation::Exec ||
+        !operation->HasExecFuture())
+      return true;
+    auto id = AST::GetIdentifier(*operation->ExecFuture());
+    if (!id) return true;
+    auto future_name = InScopeName(id->name);
+    auto queue_name = SSTab().ScopeName();
+    mma_queues[queue_name].push_back(future_name);
+    mma_futures[future_name] =
+        MMAFutureState{queue_name, MMACompletion::Pending};
+    return true;
+  }
+
+  bool Visit(AST::Wait& n) override {
+    for (auto& target : n.GetTargets()) ResolveMMAWait(target);
+    return true;
+  }
+
+  bool Visit(AST::Trigger& n) override {
+    if (!n.HasDependencies() || n.GetEvents().size() != 1) return true;
+
+    auto event = n.GetEvents().front();
+    auto event_ty = NodeType(*event);
+    if (!isa<EventType>(event_ty)) return true;
+    auto concrete_event_ty = cast<EventType>(event_ty);
+    if (concrete_event_ty->GetStorage() != Storage::SHARED) return true;
+
+    std::vector<std::pair<AST::DMA*, ptr<AST::Node>>> candidates;
+    for (auto& dependency : n.GetDependencies()) {
+      if (!isa<FutureType>(NodeType(*dependency)))
+        choreo_unreachable(
+            "non-DMA future reached native trigger-after lowering.");
+      auto id = AST::GetIdentifier(*dependency);
+      if (!id)
+        choreo_unreachable(
+            "unnamed future reached native trigger-after lowering.");
+      auto producer_it = future_producers.find(InScopeName(id->name));
+      if (producer_it == future_producers.end())
+        choreo_unreachable(
+            "future without producer reached native trigger-after lowering.");
+
+      auto* dma = producer_it->second;
+      if (!dma->IsTMA() || !dma->IsAsync() || dma->future.empty())
+        choreo_unreachable(
+            "non-TMA future reached native trigger-after lowering.");
+      auto src_ty = GetSpannedType(NodeType(*dma->GetFrom()));
+      auto dst_ty = GetSpannedType(NodeType(*dma->GetTo()));
+      if (!src_ty || !dst_ty)
+        choreo_unreachable(
+            "untyped TMA reached native trigger-after lowering.");
+      const bool global_to_shared =
+          (src_ty->GetStorage() == Storage::GLOBAL ||
+           src_ty->GetStorage() == Storage::DEFAULT) &&
+          dst_ty->GetStorage() == Storage::SHARED;
+      if (!global_to_shared)
+        choreo_unreachable(
+            "non-load TMA reached native trigger-after lowering.");
+
+      candidates.emplace_back(dma, dependency);
+    }
+
+    bool first_completion = true;
+    for (auto& [dma, dependency] : candidates) {
+      dma->BindNativeCompletionEvent(cast<AST::Expr>(event->Clone()));
+      if (!first_completion) dma->AddNote("native_completion_event_join");
+      dependency->AddNote("native_completion_event");
+      first_completion = false;
+    }
+    n.AddNote("native_completion_event");
+    return true;
+  }
+};
+
 struct CodegenInfoCollect : public CodeGenerator {
 private:
   // special case for `return select.data;`
@@ -362,12 +527,15 @@ public:
     if (isa<AST::Select>(n.init_expr)) select_syms.insert(InScopeName(name));
 
     auto sty = GetSymbolType(name);
-    if (auto ety = dyn_cast<EventArrayType>(sty))
+    if (auto ety = dyn_cast<EventArrayType>(sty)) {
+      cgi.GetModuleTrait().has_event = true;
       cgi.GetFunctionTrait(fname).RecordEventDecl(
           name, ety->event->GetThreadCount(), n.LOC());
-    else if (auto ety = dyn_cast<EventType>(sty))
+    } else if (auto ety = dyn_cast<EventType>(sty)) {
+      cgi.GetModuleTrait().has_event = true;
       cgi.GetFunctionTrait(fname).RecordEventDecl(name, ety->GetThreadCount(),
                                                   n.LOC());
+    }
     return true;
   }
 
@@ -587,7 +755,6 @@ public:
     case AST::MMAOperation::Fill: break;
     case AST::MMAOperation::Load: break;
     case AST::MMAOperation::LoadR: break;
-    case AST::MMAOperation::Desc: break;
     case AST::MMAOperation::Exec: {
       auto& a_sym = AST::FragName(op.ExecOperand(1));
       auto& b_sym = AST::FragName(op.ExecOperand(2));
@@ -668,7 +835,6 @@ public:
     case AST::MMAOperation::Scale: break;
     case AST::MMAOperation::Store: break;
     case AST::MMAOperation::Commit: break;
-    case AST::MMAOperation::Wait: break;
     default: choreo_unreachable("unsupported mma operation.");
     }
     return true;
@@ -707,11 +873,12 @@ public:
 
 class CodegenPrepare : public VisitorGroup {
 private:
+  AsyncOpGraphPrepare async_op_graph;
   CodegenInfoCollect cic;
   FutureAnalysis fa;
 
 public:
-  CodegenPrepare() : VisitorGroup("codegen", cic, fa) {}
+  CodegenPrepare() : VisitorGroup("codegen", async_op_graph, cic, fa) {}
 };
 
 } // end namespace Choreo

@@ -1019,8 +1019,7 @@ public:
     case AST::MMAOperation::Store: break;
 
     case AST::MMAOperation::Commit:
-    case AST::MMAOperation::Wait:
-      choreo_unreachable("mma.commit/wait should not reach GCU adaptor.");
+      choreo_unreachable("mma.commit should not reach GCU adaptor.");
       break;
 
     case AST::MMAOperation::Scale:

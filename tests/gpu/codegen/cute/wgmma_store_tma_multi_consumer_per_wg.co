@@ -1,0 +1,22 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void multi_consumer_per_wg_store(global f16 [128, 128] output) {
+  parallel b by 1 : block {
+    shared f16 [64, 128] output_s[2];
+
+    parallel p by 3 : group-4 {
+      inthreads.async (p > 0) {
+        tma.copy output_s[p - 1]
+            => output.subspan(64, 128).at(p - 1, 0);
+      }
+    }
+  }
+}
+
+// Each consumer owns a different shared tile and global destination. Both
+// warp-group leaders must issue their own TMA store.
+// CHECK: choreo::named_barrier_sync(256, 15);
+// CHECK: if ((threadIdx.x == 128 || threadIdx.x == 256)) {
+// CHECK-NOT: && __choreo_vg4id_x ==
+// CHECK: cde::cp_async_bulk_tensor_2d_shared_to_global(

@@ -1,0 +1,38 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a %s -o /dev/null 2>&1 | FileCheck %s
+
+#define WARP_M 64
+#define WARP_N 128
+#define TILE_K 64
+
+__co__ void foo(global f16 [WARP_M, TILE_K] lhs,
+                global f16 [WARP_N, TILE_K] rhs,
+                global f16 [2 * WARP_M, WARP_N] output) {
+  parallel block_id by 1 : block {
+    shared event full, stored;
+    shared f16 [WARP_M, TILE_K] lhs_s;
+    shared f16 [WARP_N, TILE_K] rhs_s;
+    shared f16 [2 * WARP_M, WARP_N] output_s;
+
+    parallel p by 3 : group-4 {
+      inthreads.async (p == 0) {
+        lhs_load = tma.copy.async.swiz<128> lhs => lhs_s;
+        rhs_load = tma.copy.async.swiz<128> rhs => rhs_s;
+        trigger full after lhs_load, rhs_load;
+        wait stored;
+      }
+
+      inthreads.async (p > 0) {
+        wait full;
+        mc = mma.fill.f16 0.0f;
+        mma.row.row mc, lhs_s, rhs_s;
+        mma.store.async mc, output_s.subspan(WARP_M, WARP_N).at(p - 1, 0);
+        store = tma.copy.async output_s => output;
+        trigger stored after store;
+      }
+    }
+  }
+}
+
+// CHECK: error: trigger-after cannot bind a TMA store future because shared-to-global TMA has no mbarrier completion; use a synchronous tma.copy followed by a direct trigger.
+// CHECK: Totally 1 errors have been detected.

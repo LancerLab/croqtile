@@ -1,0 +1,59 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+#define WARP_M 64
+#define WARP_N 128
+#define TILE_K 64
+#define WARP_K 16
+#define STAGES 2
+
+__co__ void foo(global f16 [M, K] lhs,
+                global f16 [N, K] rhs,
+                global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    shared event full[STAGES], empty[STAGES];
+    shared f16 [WARP_M, TILE_K] lhs_s[STAGES];
+    shared f16 [WARP_N, TILE_K] rhs_s[STAGES];
+    shared f16 [WARP_M, WARP_N] output_s;
+
+    parallel p by 2 : group-4, t by 128 : thread {
+      inthreads.async (p == 0) {
+        foreach {iv_k} in [cdiv(K, TILE_K)] {
+          stage = iv_k % STAGES;
+          wait empty.at(iv_k);
+          lhs_load = tma.copy.async.swiz<128>
+            lhs.subspan(WARP_M, TILE_K).at(block_m, iv_k) => lhs_s[stage];
+          rhs_load = tma.copy.async.swiz<128>
+            rhs.subspan(WARP_N, TILE_K).at(block_n, iv_k) => rhs_s[stage];
+          trigger full.at(iv_k) after lhs_load, rhs_load;
+        }
+      }
+
+      inthreads.async (p == 1) {
+        mc = mma.fill.f16 0.0f;
+        foreach {s} in [STAGES]
+          trigger empty.at(s);
+        foreach {iv_k} in [cdiv(K, TILE_K)] {
+          stage = iv_k % STAGES;
+          wait full.at(iv_k);
+          foreach {iv_wk} in [cdiv(TILE_K, WARP_K)] {
+            mma.row.row mc, lhs_s[stage].chunkat(_, iv_wk),
+                            rhs_s[stage].chunkat(_, iv_wk);
+          }
+          trigger empty.at(iv_k);
+        }
+        mma.store.async mc, output_s;
+        tma.copy output_s =>
+          output.subspan(WARP_M, WARP_N).at(block_m, block_n);
+      }
+    }
+  }
+}
+
+// CHECK: warpgroup_commit_batch();
+// CHECK-NEXT: warpgroup_wait<0>();
+// CHECK: store_fragment_d_stmatrix<CUTE_WGMMA_M64K16, 128>(
+// CHECK-NEXT: cde::fence_proxy_async_shared_cta();
+// CHECK-NEXT: choreo::named_barrier_sync(128, 15);
+// CHECK: if ((threadIdx.x == 128)) {
+// CHECK-NEXT: cde::cp_async_bulk_tensor_2d_shared_to_global(

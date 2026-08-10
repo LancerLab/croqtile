@@ -9,15 +9,19 @@ __co__ void foo(f32 [128, 128] input) {
       shared event full[2];
       
       inthreads (g == 0) {
-        foreach {stage} in [2]
-          tma.copy.async<full[stage]> input.chunkat(_, _) => input_s;
+        foreach {order} in [2] {
+          load = tma.copy.async input.chunkat(_, _) => input_s;
+          trigger full.at(order) after load;
+        }
         tma.copy.async input.chunkat(_, _) => input_s;
       }
-      foreach {stage} in [2]
-        tma.copy.async<full[stage]> input.chunkat(_, _) => input_s;
+      foreach {order} in [2] {
+        load = tma.copy.async input.chunkat(_, _) => input_s;
+        trigger full.at(order) after load;
+      }
     }
   }
 }
 
 // CHECK: error: forbid to associated async dma without a named future or a named event.
-// CHECK: warning: Be careful to wait event outside inthreads block
+// CHECK: warning: Be careful to trigger event outside inthreads block

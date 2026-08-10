@@ -4,8 +4,8 @@
 
 Flash Attention on Hopper achieves higher throughput by overlapping computation
 across consumer warpgroups using PTX named barriers (`bar.sync` / `bar.arrive`).
-Currently Choreo has no way to express this pattern -- our two consumer WGs run
-in lockstep.
+Choreo exposes named-barrier builtins for this explicit scheduler pattern. This
+is separate from async operation completion, which uses futures and events.
 
 The goal: let a fast WG start PV WGMMA while the slow WG is still in softmax,
 achieving CUDA core + Tensor Core concurrency across warpgroups.
@@ -44,14 +44,14 @@ completion signal.
 
 ### Choreo's Current State
 
-- `shared event` -> `cuda::barrier<thread_scope_block>` (CTA-scoped, phase-flip)
-- `bar.sync 15, 128` hardcoded for GROUPx4 internal sync
-- `mma.wait<N>` for WGMMA pipeline control
-- No user-accessible named barrier primitives
+- `shared event` publishes future completion to one or more consumers.
+- Async MMA returns an operation future; the compiler derives WGMMA waits.
+- Barrier ID 15 is reserved for internal GROUPx4 synchronization.
+- `__bar_arrive` and `__bar_sync` provide explicit named-barrier scheduling.
 
-## Design
+## Interface
 
-### New Builtins
+### Named-Barrier Builtins
 
 Add two new compiler-recognized builtin functions:
 
@@ -104,8 +104,8 @@ inthreads.async (p > 0) {
 
   foreach {bn} in [kv_bound] {
     // QK WGMMA
-    mma.row.row acc_s, q_shared, k_buf[stage];
-    mma.wait<0>;
+    qk = mma.row.row.async acc_s, q_shared, k_buf[stage];
+    wait qk;
 
     // Signal: my QK is done
     __bar_arrive(next_barrier, 256);
@@ -117,8 +117,8 @@ inthreads.async (p > 0) {
     __bar_sync(my_barrier, 256);
 
     // PV WGMMA
-    mma.row.col acc_o, acc_s_cast, v_buf[stage];
-    mma.wait<0>;
+    pv = mma.row.col.async acc_o, acc_s_cast, v_buf[stage];
+    wait pv;
   }
 }
 ```
@@ -129,7 +129,7 @@ The cross-WG stagger composes with the existing QK/PV overlap (iter036):
 
 ```co
     // Issue PV[n]
-    mma.row.col acc_o, acc_s_cast, v_buf[stage];
+    pv = mma.row.col.async acc_o, acc_s_cast, v_buf[stage];
 
     __bar_arrive(next_barrier, 256);  // Signal: PV issued, QK next
 
@@ -137,25 +137,25 @@ The cross-WG stagger composes with the existing QK/PV overlap (iter036):
     if (bn + 1 < kv_bound) {
       wait kvf[(bn + 1) % STAGES];
       acc_s = mma.fill.f32 0.0f;
-      mma.row.row acc_s, q_shared, k_buf[(bn+1) % STAGES];
+      qk = mma.row.row.async acc_s, q_shared, k_buf[(bn+1) % STAGES];
 
       __bar_sync(my_barrier, 256);  // Wait for other WG before next softmax
-      mma.wait<0>;                  // Both PV[n] and QK[n+1] done
+      wait qk, pv;                  // Both PV[n] and QK[n+1] are done
     }
 ```
 
-## Implementation Plan
+## Implementation Notes
 
 ### Phase 1: Parser + Scanner (scanner.l, parser.yy)
 
-1. Add `__bar_arrive` and `__bar_sync` as recognized identifiers (builtin calls)
-2. Parse as `AST::Call` nodes with 2 integer arguments
+1. Recognize `__bar_arrive` and `__bar_sync` as builtin calls.
+2. Require two integer arguments.
 
 ### Phase 2: Codegen (cute_codegen.cpp)
 
-1. In `Visit(AST::Call&)`, detect `__bar_arrive` / `__bar_sync` names
-2. Emit the appropriate `asm volatile` PTX string
-3. Validate argument count (must be exactly 2)
+1. Detect `__bar_arrive` and `__bar_sync` during target code generation.
+2. Emit the appropriate PTX instruction.
+3. Validate the argument count.
 
 ### Phase 3: Sema (optional warnings)
 
@@ -187,7 +187,7 @@ Rejected for now: Adds parser complexity (new type, method syntax) for a feature
 that may only be used in advanced warp-specialized kernels. The builtin approach
 is simpler and equally expressive.
 
-### Reuse `shared event` with mode annotation
+### Completion fanout through `shared event`
 
 ```co
 shared event<named, 256> sched[2];  // named barrier mode
@@ -195,9 +195,18 @@ trigger sched[next];                // -> bar.arrive
 wait sched[my];                     // -> bar.sync
 ```
 
-Rejected: Overloading `shared event` semantics is confusing. Named barriers
-(bar.sync) have fundamentally different semantics from mbarriers (phase-flip,
-TMA-aware). Mixing them behind the same type would cause subtle bugs.
+Async completion should use an ordinary event:
+
+```co
+qk = mma.row.row.async acc_s, q_shared, k_buf[stage];
+wait qk;
+trigger qk_done;
+```
+
+WGMMA has no native completion-event binding, so its wait remains explicit.
+The event backend supports multiple consumers after the direct trigger.
+Explicit named barriers remain available for scheduler topology and fixed
+participant-count control; they are not operation futures.
 
 ### Direct asm() escape
 

@@ -3864,7 +3864,6 @@ bool TopsccCodeGen::Visit(AST::MMA& n) {
   } break;
 
   case AST::MMAOperation::Commit:
-  case AST::MMAOperation::Wait:
   case AST::MMAOperation::Scale: break;
 
   default: break;
@@ -4637,6 +4636,15 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
         } else
           oss << OpExprSTR(r, parent_op, is_left_child, is_host);
       } else if (expr->GetOp() == Op::ElemOf) {
+        if (AST::IsEventGenerationAt(*expr)) {
+          auto event_array = cast<EventArrayType>(NodeType(*expr->GetL()));
+          auto extent = VIInt(event_array->Dimension(0));
+          assert(extent && *extent > 0);
+          oss << OpExprSTR(expr->GetL(), "[]", true, is_host) << "[("
+              << OpExprSTR(expr->GetR(), "", true, is_host) << ") % " << *extent
+              << "]";
+          return oss.str();
+        }
         // When MemReuse is on and the base is an ArrayType of SpannedType,
         // the declaration is a flat pointer (or future data()), so arr[idx]
         // must become byte-level pointer arithmetic to handle void* base:

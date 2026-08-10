@@ -12,7 +12,7 @@ future = dma-op src-expr => dst-expr;
 
 | Component | Description |
 |-----------|-------------|
-| `future` | Handle for the operation and reference to the destination buffer |
+| `future` | Data-future handle and reference to the destination buffer |
 | `dma-op` | Operation type with optional `.async` suffix |
 | `src-expr` | Source data expression |
 | `=>` | Data flow direction |
@@ -29,10 +29,13 @@ f1 = dma.copy data1 => shared;        // blocking
 wait f0;                                // wait for f0 to complete
 ```
 
-- **Async DMA** (`dma.copy.async`): Execution continues immediately. The programmer must `wait` on the future before using the result.
+- **Async DMA** (`dma.copy.async`): Execution continues immediately. The
+  future must be waited on locally or, when the operation supports native event
+  completion, bound to an event before the result is consumed.
 - **Sync DMA** (`dma.copy`): Execution blocks until the transfer completes. No `wait` is needed (or allowed).
 
-An async DMA without a corresponding `wait` is a programming error that leads to undefined behavior on hardware.
+An async DMA future without a corresponding `wait` or valid native
+`trigger event after future` binding is a programming error.
 
 ## Operation Types
 
@@ -74,13 +77,13 @@ Using a storage keyword as the destination lets the compiler allocate and manage
 
 ## Futures
 
-Every DMA statement (sync or async) can produce a **future**:
+Every DMA statement (sync or async) can produce a **data future**:
 
 ```choreo
 f = dma.copy.async input => shared;
 ```
 
-Futures provide access to the destination:
+Data futures provide access to the destination:
 
 | Member | Returns |
 |--------|---------|

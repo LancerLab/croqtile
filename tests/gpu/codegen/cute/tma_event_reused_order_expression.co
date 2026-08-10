@@ -1,0 +1,33 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void reused_order_expression(global f32 [256, 128] input) {
+  parallel b by 1 : block {
+    shared f32 [128, 128] input_s[2];
+    shared event full[2];
+
+    parallel g by 2 : group-4 {
+      inthreads.async (g == 0) {
+        mutable u32 order = 0;
+        first_load = tma.copy.async
+          input.subspan(128, 128).at(0, 0) => input_s[order % 2];
+        trigger full.at(order) after first_load;
+
+        order = order + 1;
+        next_load = tma.copy.async
+          input.subspan(128, 128).at(1, 0) => input_s[order % 2];
+        trigger full.at(order) after next_load;
+      }
+
+      inthreads.async (g == 1) {
+        mutable u32 order = 0;
+        wait full.at(order);
+        order = order + 1;
+        wait full.at(order);
+      }
+    }
+  }
+}
+
+// CHECK-COUNT-2: .arrive_and_expect_tx(
+// CHECK-NOT: .expect_transaction(

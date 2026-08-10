@@ -54,31 +54,31 @@ __co__ void matmul_f16_ws_1p3c_persis(
           inthreads.async (wg == 0) {
             foreach {iv_k} in [cdiv(K, 64)] {
               stage = iv_k % 2;
-              wait empty[stage];
-              tma.copy.async<full[stage]>.swiz<128>
+              wait empty.at(iv_k);
+              lhs_load = tma.copy.async.swiz<128>
                   lhs.subspan(192, 64).at(block_m, iv_k)
                   => lhs_load_s[stage];
-              tma.copy.async<full[stage]>.swiz<128>
+              rhs_load = tma.copy.async.swiz<128>
                   rhs.subspan(128, 64).at(block_n, iv_k)
                   => rhs_load_s[stage];
-              trigger full[stage];
+              trigger full.at(iv_k) after lhs_load, rhs_load;
             }
           }
           inthreads.async (wg > 0) {
             mc = mma.fill.f16 0.0f;
             if (tile_iter == 0) {
-              foreach {stage} in [2] { trigger empty[stage]; }
+              foreach {order} in [2] { trigger empty.at(order); }
             }
             foreach {iv_k} in [cdiv(K, 64)] {
               stage = iv_k % 2;
-              wait full[stage];
+              wait full.at(iv_k);
               foreach {iv_warp} in [cdiv(64, 16)] {
                 mma.row.row mc,
                     lhs_load_s[stage]
                         .subspan(64, 64).at(wg - 1, 0).chunkat(_, iv_warp),
                     rhs_load_s[stage].chunkat(_, iv_warp);
               }
-              trigger empty[stage];
+              trigger empty.at(iv_k);
             }
             mma.store mc, output_s[wg - 1];
             tma.copy output_s[wg - 1]
@@ -116,24 +116,24 @@ __co__ void blockscale_gemm_e4m3_ws_persis(
           inthreads.async (wg == 0) {
             foreach {iv_k} in [cdiv(K, 128)] {
               stage = iv_k % 4;
-              wait empty[stage];
-              tma.copy.async<full[stage]>.swiz<128>
+              wait empty.at(iv_k);
+              lhs_load = tma.copy.async.swiz<128>
                   lhs.subspan(64, 128).at(block_m, iv_k)
                   => lhs_load_s[stage];
-              tma.copy.async<full[stage]>.swiz<128>
+              rhs_load = tma.copy.async.swiz<128>
                   rhs.subspan(128, 128).at(block_n, iv_k)
                   => rhs_load_s[stage];
-              trigger full[stage];
+              trigger full.at(iv_k) after lhs_load, rhs_load;
             }
           }
           inthreads.async (wg == 1) {
             mc = mma.fill.f16 0.0f;
             if (tile_iter == 0) {
-              foreach {stage} in [4] { trigger empty[stage]; }
+              foreach {order} in [4] { trigger empty.at(order); }
             }
             foreach {iv_k} in [cdiv(K, 128)] {
               stage = iv_k % 4;
-              wait full[stage];
+              wait full.at(iv_k);
               foreach {iv_warp} in [cdiv(128, 32)] {
                 mma.row.row mc,
                     lhs_load_s[stage].chunkat(_, iv_warp),
@@ -141,7 +141,7 @@ __co__ void blockscale_gemm_e4m3_ws_persis(
               }
               mma.scale mc, scale_lhs.subspan(64, 1).at(block_m, iv_k),
                         scale_rhs.at(block_n, iv_k);
-              trigger empty[stage];
+              trigger empty.at(iv_k);
             }
             mma.store mc, output_s;
             tma.copy output_s

@@ -1,0 +1,24 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void subwarp_elected_lane(global f32 [128, 128] input) {
+  parallel b by 1 : block {
+    shared f32 [128, 128] input_s;
+    shared event full;
+
+    parallel g by 2 : group-4, t by 128 : thread {
+      inthreads.async (g == 0 && t >= 32 && t < 64) {
+        load = tma.copy.async input => input_s;
+        trigger full after load;
+      }
+
+      inthreads.async (g == 1) {
+        wait full;
+      }
+    }
+  }
+}
+
+// CHECK: if ((threadIdx.x == 32)) {
+// CHECK-NEXT: full.arrive_and_expect_tx(
+// CHECK: tma_load_2d_shared_cta_global_mbarrier

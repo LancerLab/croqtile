@@ -127,7 +127,7 @@ Short alias: `croq.wi(...)`. Also supports `for tile_k in croq.wi(tile_k=16):` s
 | `f = tma.copy src => dst` | `f = croq.tma.copy(src, dst)` | Done |
 | `f = tma.copy.async src => shared dst` | `f = croq.tma.copy_async(src, dst, to=croq.SHARED)` | Done |
 | `tma.copy.swiz<N> src => dst` | `croq.tma.copy(src, dst, swizzle=N)` | Done |
-| `tma.copy.async<event[stage]>` | Not yet supported (event tokens) | Planned |
+| `load = tma.copy.async ...; trigger full.at(order) after load` | Not yet supported (future-to-event edge) | Planned |
 | `tma.copy.multicast` | Not yet supported | Planned |
 | `tma.any(...)` | Not yet supported | Planned |
 
@@ -157,8 +157,9 @@ Short alias: `croq.wi(...)`. Also supports `for tile_k in croq.wi(tile_k=16):` s
 | `wait f1, f2` | `croq.wait(f1, f2)` | Done |
 | `swap(a, b)` | `croq.swap(a, b)` | Done |
 | `sync.shared` | `croq.sync("shared")` | Done |
-| `wait full[stage]` (event-based) | Not yet supported | Planned |
-| `trigger full[stage]` | Not yet supported | Planned |
+| `wait full.at(order)` (event-based) | Not yet supported | Planned |
+| `trigger full.at(order)` | Not yet supported | Planned |
+| `trigger full.at(order) after load` | Not yet supported | Planned |
 | `shared event full[N]` | Not yet supported | Planned |
 
 ## Types
@@ -261,8 +262,8 @@ Sorted by priority (how many tests use them):
 
 ### Medium Priority (used in 5-20 tests)
 
-- **TMA event tokens**: `tma.copy.async<event[stage]>` -- async dependency chains for warpspec kernels.
-- **Event system**: `shared event full[N]`, `trigger full[stage]`, `wait full[stage]` -- event-based synchronization.
+- **Future-to-event edges**: `trigger full.at(order) after load` -- async completion publication for warpspec kernels.
+- **Event system**: `shared event full[N]`, `trigger full.at(order)`, `wait full.at(order)` -- generation-based synchronization.
 - **`inthreads.async`**: Warp-specialization predicated code blocks.
 
 ### Lower Priority (used in <5 tests)

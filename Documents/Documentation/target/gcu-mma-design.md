@@ -14,8 +14,8 @@ GPU (CUTE mma.sync/WGMMA) and GCU (acore/VACC).
 machine. Out-of-line device stubs (ICALL workaround). Performance parity with
 hand-tuned acore patterns.
 
-**Out of scope:** GPU `mma.wait<N>` (kept as-is), `mma.scale`,
-sparse MMA on GCU. Async-future MMA redesign (separate GPU effort).
+**Out of scope:** `mma.scale`, sparse MMA on GCU, and lowering GPU-style MMA
+operation futures on GCU. The GCU implementation remains synchronous.
 
 ## Architecture
 
@@ -86,12 +86,14 @@ Supported configurations (from lower_libcall.hpp):
 - Types: f16, bf16, f32, s8
 - K/N alignment varies by M and type (see GetAcoreAlignments)
 
-## Future: Async-Future MMA (GPU, Separate Effort)
+## Async MMA Status
 
-Replace `mma.wait<N>` with:
-```
+GPU async MMA uses an operation future:
+
+```choreo
 f = mma.row.col.async mc, ma, mb;
 wait f;
 ```
-Compiler infers wait<N> depth via static analysis or runtime ring buffer.
-Unifies GPU and GCU under one async model.
+
+The GPU backend infers the hardware wait depth from future dependencies. GCU
+does not yet lower this form; its MMA state machine remains synchronous.

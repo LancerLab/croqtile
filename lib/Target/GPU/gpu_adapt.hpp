@@ -786,6 +786,18 @@ public:
       return false;
     }
 
+    if (n.HasL2CacheHint()) {
+      if (!n.IsTMA()) {
+        Error1(n.LOC(), "L2 eviction hints require a TMA copy.");
+        return false;
+      }
+      if (n.IsMulticast()) {
+        Error1(n.LOC(),
+               "L2 eviction hints are not yet supported for multicast TMA.");
+        return false;
+      }
+    }
+
     if (n.operation == ".any") return true;
 
     // DMA directions check:
@@ -804,6 +816,12 @@ public:
             tst == Storage::SHARED))
         Error1(n.LOC(), "GPU does not allow the TMA " + n.operation.substr(1) +
                             " (" + STR(fst) + " -> " + STR(tst) + ").");
+      if (n.HasL2CacheHint() &&
+          !((fst == Storage::GLOBAL || fst == Storage::DEFAULT) &&
+            tst == Storage::SHARED))
+        Error1(n.LOC(),
+               "TMA L2 eviction hints currently require a global-to-shared "
+               "copy.");
     } else if (n.IsAsync()) {
       if (!CCtx().TargetSupportAsyncDMA())
         Error1(n.LOC(), "target '" + CCtx().GetTarget().Name() + "' (arch '" +
@@ -880,7 +898,6 @@ public:
     } break;
     case AST::MMAOperation::Load: break;
     case AST::MMAOperation::LoadR: break;
-    case AST::MMAOperation::Desc: break;
     case AST::MMAOperation::Exec: {
       auto& a_sym = AST::FragName(op.ExecOperand(1));
       auto& b_sym = AST::FragName(op.ExecOperand(2));
@@ -985,14 +1002,15 @@ public:
                             "but target is SM" +
                             std::to_string(arch) + ".");
 
-      // mma.desc denotes a WGMMA shared-memory descriptor.  Other MMA
-      // families consume register fragments, so accepting a shared operand
-      // here would leave the fragment unmaterialized in their codegen.
-      if (mma_ty != MMAType::WGMMA && (a_sty->GetStorage() == Storage::SHARED ||
-                                       b_sty->GetStorage() == Storage::SHARED))
+      // WGMMA may consume shared-memory operands directly. Other MMA families
+      // consume register fragments, so accepting a shared operand here would
+      // leave the fragment unmaterialized in their codegen.
+      if (mma_ty != MMAType::WGMMA &&
+          (a_sty->GetStorage() == Storage::SHARED ||
+            b_sty->GetStorage() == Storage::SHARED))
         Error1(n.LOC(),
-               "mma.desc is only valid for WGMMA shared-memory operands; "
-               "use mma.load for WMMA/mma.sync operands.");
+               "direct shared-memory operands are only valid for WGMMA; use "
+               "mma.load for WMMA/mma.sync operands.");
 
       FCtx(fname).SetFragMMAType(InScopeName(a_sym), mma_ty);
       FCtx(fname).SetFragMMAType(InScopeName(b_sym), mma_ty);
@@ -1038,7 +1056,6 @@ public:
     } break;
     case AST::MMAOperation::Store: break;
     case AST::MMAOperation::Commit: break;
-    case AST::MMAOperation::Wait: break;
     default: choreo_unreachable("unsupported mma operation.");
     }
     return true;

@@ -1,0 +1,40 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void mma_operation_future_delayed_publish() {
+  parallel b by 1 : block {
+    shared bf16 [64, 128] lhs;
+    shared bf16 [128, 128] rhs;
+    shared event qk_done;
+    shared event pv_done;
+
+    parallel g by 2 : group-4 {
+      inthreads.async (g == 0) {
+        frag f32[64] scores_scale;
+        qk_acc = mma.fill.f32 0.0f;
+        qk = mma.row.row.async qk_acc, lhs, rhs;
+        pv_acc = mma.fill.f32 0.0f;
+        pv = mma.row.row.async pv_acc, lhs, rhs;
+
+        wait qk;
+        apply {i} in scores_scale.span
+          scores_scale.at(i) = 1.0f;
+        trigger qk_done;
+        wait pv;
+        trigger pv_done;
+      }
+
+      inthreads.async (g == 1) {
+        wait qk_done;
+        wait pv_done;
+      }
+    }
+  }
+}
+
+// CHECK: warpgroup_wait<1>();
+// CHECK: scores_scale{{.*}} = 1.000000f;
+// CHECK: qk_done.arrive();
+// CHECK-NEXT: warpgroup_wait<0>();
+// CHECK-NEXT: pv_done.arrive();
+// CHECK-NOT: __choreo_mma_publish_anchor_

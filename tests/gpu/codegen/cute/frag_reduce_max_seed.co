@@ -1,0 +1,16 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void reduce_max_seed() {
+  parallel b by 1 : block {
+    parallel g by 1 : group-4 {
+      frag f32[64, 128] scores {1.0f};
+      frag f32[64] row_max;
+      reduce_max(row_max, scores, 1);
+    }
+  }
+}
+
+// CHECK: float __local_reduce = scores[
+// CHECK: for (int __rv = 1; __rv <
+// CHECK-NOT: float __local_reduce = __int_as_float(0xff800000)

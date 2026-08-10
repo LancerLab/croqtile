@@ -1087,23 +1087,6 @@ bool TypeInference::Visit(AST::MMA& n) {
     }
   } break;
   case AST::MMAOperation::LoadR: break;
-  case AST::MMAOperation::Desc: {
-    std::string operand_sym = AST::FragName(op.DescTo());
-    auto operand_ty = GetSpannedType(n.GetType());
-    assert(operand_ty && operand_ty->GetStorage() == Storage::SHARED &&
-           "expect mma.desc to infer a shared span");
-    AssignSymbolWithType(n.LOC(), operand_sym, operand_ty->Clone());
-    AssignSymbolWithType(n.LOC(), operand_sym + ".span",
-                         operand_ty->GetMDSpanType()->Clone());
-    if (CCtx().ShowInferredTypes()) {
-      dbgs() << color::out(color::kBoldMagenta)
-             << "Descriptor: " << color::out(color::kReset)
-             << InScopeName(operand_sym) << color::out(color::kDim)
-             << ", Type: " << color::out(color::kReset)
-             << color::colorizeType(PSTR(operand_ty), color::stdoutHasColor())
-             << "\n";
-    }
-  } break;
   case AST::MMAOperation::Exec: {
     const auto& acc = op.ExecOperand(0);
     std::string acc_sym = AST::FragName(acc);
@@ -1169,6 +1152,12 @@ bool TypeInference::Visit(AST::MMA& n) {
                                     color::stdoutHasColor())
              << "\n";
     }
+    if (op.HasExecFuture()) {
+      auto future_ty = MakeOperationFutureType(AsyncOperationKind::MMA);
+      auto future_sym = AST::FragName(op.ExecFuture());
+      AssignSymbolWithType(n.LOC(), future_sym, future_ty);
+      SetNodeType(*op.ExecFuture(), future_ty);
+    }
   } break;
   case AST::MMAOperation::Scale:
     SetNodeType(
@@ -1176,8 +1165,7 @@ bool TypeInference::Visit(AST::MMA& n) {
         GetSymbolType(n.LOC(), AST::FragName(op.ScaleAccumulator()))->Clone());
     break;
   case AST::MMAOperation::Store:
-  case AST::MMAOperation::Commit:
-  case AST::MMAOperation::Wait: break;
+  case AST::MMAOperation::Commit: break;
   default: break;
   }
   return true;

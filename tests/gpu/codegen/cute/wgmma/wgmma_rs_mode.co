@@ -130,8 +130,7 @@ __co__ auto rs_assignment_load(f16 [64, 16] lhs, f16 [64, 16] rhs) {
     rhs_s = dma.copy rhs.chunkat(bn, _) => shared;
     parallel p by 1 : group-4 {
       ma = mma.load.frag lhs_s;
-      mb = mma.desc rhs_s;
-      mma.row.row mc, ma, mb;
+      mma.row.row mc, ma, rhs_s;
     }
     mma.store mc, output.chunkat(bm, bn);
   }
@@ -140,5 +139,5 @@ __co__ auto rs_assignment_load(f16 [64, 16] lhs, f16 [64, 16] rhs) {
 // CHECK-LABEL: __global__{{.*}}rs_assignment_load
 // CHECK: f16 ma[8];
 // CHECK: __mma_load_src
-// CHECK: uint64_t desc_mb = wgmma_make_smem_desc
+// CHECK: wgmma_make_smem_desc
 // CHECK: MMA_64x64x16_F32F16F16_RS<{{.*}}>::fma(reinterpret_cast<const uint32_t*>(ma)

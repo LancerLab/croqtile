@@ -1,7 +1,7 @@
 // RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
 
-// A 16x16x16 f16 MMA selects WMMA, not WGMMA.  Its operands must be
-// materialized as register fragments with mma.load.
+// mma.desc has been removed. Shared-memory WGMMA operands are referenced
+// directly, while WMMA/mma.sync operands use mma.load.
 __co__ auto reject_wmma_descriptor(f16 [16, 16] lhs, f16 [16, 16] rhs) {
   f16 [16, 16] output;
   parallel p by 1 : block {
@@ -20,4 +20,4 @@ __co__ auto reject_wmma_descriptor(f16 [16, 16] lhs, f16 [16, 16] rhs) {
   return output;
 }
 
-// CHECK: error: mma.desc is only valid for WGMMA shared-memory operands; use mma.load for WMMA/mma.sync operands.
+// CHECK: error: syntax error

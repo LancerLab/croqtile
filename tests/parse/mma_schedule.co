@@ -1,0 +1,14 @@
+// RUN: choreo -e %s | FileCheck %s
+
+// CHECK: {{\[\[}}schedule(k_tiles(3, 2, 1, 0)){{\]\]}} MMA.EXEC.ROW.COL
+__co__ void mma_schedule() {
+  parallel b by 1 : block {
+    shared bf16[64, 64] lhs;
+    shared bf16[64, 128] rhs;
+    parallel g by 1 : group-4 {
+      acc = mma.fill.f32 0.0f;
+      [[schedule(k_tiles(3, 2, 1, 0))]]
+      mma.row.col acc, lhs, rhs;
+    }
+  }
+}

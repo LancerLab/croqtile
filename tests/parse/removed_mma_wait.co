@@ -1,0 +1,7 @@
+// RUN: not choreo -e %s 2>&1 | FileCheck %s
+
+__co__ void removed_mma_wait() {
+  mma.wait<0>;
+}
+
+// CHECK: error: syntax error
