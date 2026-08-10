@@ -54,6 +54,7 @@ __co__ void flash_atten_persistent(
     shared bf16[BLOCK_M, DIM] o_buf;
 
     shared event qf[1], kf[STAGES], vf[STAGES];
+    shared event qe[1] = ready;
     shared event ke[STAGES] = ready, ve[STAGES] = ready;
 
     parallel p by [BLOCK_M/WG_M + 1] : group-4, t by 128 : thread {
@@ -62,8 +63,7 @@ __co__ void flash_atten_persistent(
       }
 
       // Only two producer warps carry task and address state. Warp 0 issues
-      // K/Q TMA, warp 1 issues V TMA, and the other two warps only preserve
-      // the full-CTA Q lifetime barrier protocol below.
+      // K/Q TMA and warp 1 issues V TMA.
       inthreads.async (p == 0 && t < 64) {
         mutable u32 k_pipe_order = 0;
         mutable u32 v_pipe_order = 0;
@@ -97,9 +97,9 @@ __co__ void flash_atten_persistent(
             trigger kf.at(k_pipe_order) after first_k_load;
           }
 
-          // Match c459's task handoff. Consumers arrive after the final QK,
-          // while the producer arrives and waits before publishing the next Q.
-          __bar_sync(12, 384);
+          // The next Q may overwrite shared storage only after both consumer
+          // warpgroups have released the previous task's Q generation.
+          wait qe.at(q_pipe_order);
 
           inthreads (t == 0) {
             q_load = tma.copy.async.swiz<SWIZ>
@@ -139,21 +139,9 @@ __co__ void flash_atten_persistent(
         }
       }
 
-      inthreads.async (p == 0 && t >= 64) {
-        mutable u32 task_pos = task_offsets.at(block_id);
-        task_end = task_offsets.at(block_id + 1);
-        while (task_pos < task_end) {
-          task_pos = task_pos + 1;
-          __bar_sync(12, 384);
-        }
-      }
-
       inthreads.async (p > 0) {
         call croq::cuda::setreg_inc(232);
         cid = p - 1;
-
-        // Prime the first task's producer/consumer handoff.
-        __bar_arrive(12, 384);
 
         mutable u32 k_pipe_order = 0;
         mutable u32 v_pipe_order = 0;
@@ -184,7 +172,6 @@ __co__ void flash_atten_persistent(
           acc_s = mma.fill.f32 0.0f;
           first_k_slot = k_pipe_order % STAGES;
           wait kf.at(k_pipe_order);
-          [[schedule(k_tiles(0, 1, 2, 3, 4, 5, 6, 7))]]
           first_qk = mma.row.row.async acc_s,
             q_shared.subspan(WG_M, DIM).at(cid, 0),
             k_buf[first_k_slot];
@@ -215,13 +202,11 @@ __co__ void flash_atten_persistent(
 
             acc_s = mma.fill.f32 0.0f;
             wait kf.at(k_pipe_order);
-            [[schedule(k_tiles(0, 1, 2, 3, 4, 5, 6, 7))]]
             qk = mma.row.row.async acc_s,
               q_shared.subspan(WG_M, DIM).at(cid, 0),
               k_buf[k_slot];
 
             wait vf.at(v_pipe_order);
-            [[schedule(k_tiles(7, 6, 5, 4, 0, 1, 2, 3))]]
             pv = mma.row.col.async acc_o, acc_s_cast, v_buf[prev_v_slot];
 
             wait qk;
@@ -253,13 +238,13 @@ __co__ void flash_atten_persistent(
             }
           }
 
-          // Q is dead after the final QK softmax update. Let the producer
-          // overlap the next task's Q load with final PV and output work.
-          __bar_arrive(12, 384);
+          // Q is dead after the final QK softmax update. Publish the empty
+          // generation so the producer can overlap the next task's Q load
+          // with final PV and output work.
+          trigger qe.at(q_task_order);
 
           final_v_slot = v_pipe_order % STAGES;
           wait vf.at(v_pipe_order);
-          [[schedule(k_tiles(7, 6, 5, 4, 0, 1, 2, 3))]]
           final_pv = mma.row.col.async acc_o, acc_s_cast, v_buf[final_v_slot];
           call fa3_row_sum_finalize_64x128(logsum);
           apply {i} in scores_scale.span
