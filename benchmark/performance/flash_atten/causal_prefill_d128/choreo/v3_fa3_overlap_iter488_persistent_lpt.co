@@ -90,10 +90,9 @@ __co__ void flash_atten_persistent(
             // Publish diagonal K before waiting for reusable Q storage.
             first_k_slot = k_pipe_order % STAGES;
             wait ke.at(k_pipe_order);
-            first_k_load = tma.copy.async.swiz<SWIZ>
+            first_k_load = tma.load.async.evict_last.swiz<SWIZ>
               K_head.subspan(BLOCK_N, DIM).at(logical_bm, 0)
                 => k_buf[first_k_slot];
-            call croq::cuda::evict_last(first_k_load);
             trigger kf.at(k_pipe_order) after first_k_load;
           }
 
@@ -102,9 +101,8 @@ __co__ void flash_atten_persistent(
           __bar_sync(12, 384);
 
           inthreads (t == 0) {
-            q_load = tma.copy.async.swiz<SWIZ>
+            q_load = tma.load.async.evict_first.swiz<SWIZ>
               Q_head.subspan(BLOCK_M, DIM).at(logical_bm, 0) => q_shared;
-            call croq::cuda::evict_first(q_load);
             trigger qf.at(q_pipe_order) after q_load;
             q_pipe_order = q_pipe_order + 1;
 
@@ -114,9 +112,8 @@ __co__ void flash_atten_persistent(
               k_order = k_pipe_order + issue;
               k_slot = k_order % STAGES;
               wait ke.at(k_order);
-              k_load = tma.copy.async.swiz<SWIZ>
+              k_load = tma.load.async.evict_last.swiz<SWIZ>
                 K_head.subspan(BLOCK_N, DIM).at(bn, 0) => k_buf[k_slot];
-              call croq::cuda::evict_last(k_load);
               trigger kf.at(k_order) after k_load;
             }
           }
@@ -127,9 +124,8 @@ __co__ void flash_atten_persistent(
               v_order = v_pipe_order + issue;
               v_slot = v_order % STAGES;
               wait ve.at(v_order);
-              v_load = tma.copy.async.swiz<SWIZ>
+              v_load = tma.load.async.evict_last.swiz<SWIZ>
                 V_head.subspan(BLOCK_N, DIM).at(bn, 0) => v_buf[v_slot];
-              call croq::cuda::evict_last(v_load);
               trigger vf.at(v_order) after v_load;
             }
           }

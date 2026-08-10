@@ -53,8 +53,9 @@ __co__ void flash_atten_persistent(
     shared bf16[BLOCK_N, DIM] v_buf[STAGES];
     shared bf16[BLOCK_M, DIM] o_buf;
 
-    shared event qf[1], kf[STAGES], vf[STAGES];
-    shared event qe[1] = ready;
+    shared event qf;
+    shared event qe = ready;
+    shared event kf[STAGES], vf[STAGES];
     shared event ke[STAGES] = ready, ve[STAGES] = ready;
 
     parallel p by [BLOCK_M/WG_M + 1] : group-4, t by 128 : thread {
@@ -67,9 +68,8 @@ __co__ void flash_atten_persistent(
       inthreads.async (p == 0 && t < 64) {
         mutable u32 k_pipe_order = 0;
         mutable u32 v_pipe_order = 0;
-        mutable u32 q_pipe_order = 0;
         mutable u32 task_pos = task_offsets.at(block_id);
-        task_end = task_offsets.at(block_id + 1);
+        mutable u32 task_end = task_offsets.at(block_id + 1);
 
         while (task_pos < task_end) {
           packed = task_ids.at(task_pos);
@@ -79,63 +79,45 @@ __co__ void flash_atten_persistent(
           work_batch = packed >> 14;
           kv_bound = logical_bm + 1;
 
-          Q_head = Q.subspan(1, Q_SEQ, 1, DIM)
-              .at(work_batch, 0, work_head, 0).sqz();
-          K_head = K.subspan(1, KV_SEQ, 1, DIM)
-              .at(work_batch, 0, work_head, 0).sqz();
-          V_head = V.subspan(1, KV_SEQ, 1, DIM)
-              .at(work_batch, 0, work_head, 0).sqz();
+          Q_head = Q.subspan(1, Q_SEQ, 1, DIM).at(work_batch, 0, work_head, 0).sqz();
+          K_head = K.subspan(1, KV_SEQ, 1, DIM).at(work_batch, 0, work_head, 0).sqz();
+          V_head = V.subspan(1, KV_SEQ, 1, DIM).at(work_batch, 0, work_head, 0).sqz();
+
+          // Wait for reusable Q storage before publishing the next task's Q.
+          wait qe;
+          q_load = tma.load.async.evict_first.swiz<SWIZ>
+            Q_head.subspan(BLOCK_M, DIM).at(logical_bm, 0) => q_shared;
+          trigger qf after q_load;
 
           inthreads (t == 0) {
-            // Publish diagonal K before waiting for reusable Q storage.
             first_k_slot = k_pipe_order % STAGES;
             wait ke.at(k_pipe_order);
-            first_k_load = tma.copy.async.swiz<SWIZ>
+            first_k_load = tma.load.async.evict_last.swiz<SWIZ>
               K_head.subspan(BLOCK_N, DIM).at(logical_bm, 0)
                 => k_buf[first_k_slot];
-            call croq::cuda::evict_last(first_k_load);
-            trigger kf.at(k_pipe_order) after first_k_load;
-          }
-
-          // The next Q may overwrite shared storage only after both consumer
-          // warpgroups have released the previous task's Q generation.
-          wait qe.at(q_pipe_order);
-
-          inthreads (t == 0) {
-            q_load = tma.copy.async.swiz<SWIZ>
-              Q_head.subspan(BLOCK_M, DIM).at(logical_bm, 0) => q_shared;
-            call croq::cuda::evict_first(q_load);
-            trigger qf.at(q_pipe_order) after q_load;
-            q_pipe_order = q_pipe_order + 1;
+            trigger kf.at(k_pipe_order++) after first_k_load;
 
             foreach {step} in [kv_bound - 1] {
               issue = step + 1;
               bn = logical_bm - issue;
-              k_order = k_pipe_order + issue;
-              k_slot = k_order % STAGES;
-              wait ke.at(k_order);
-              k_load = tma.copy.async.swiz<SWIZ>
+              k_slot = k_pipe_order % STAGES;
+              wait ke.at(k_pipe_order);
+              k_load = tma.load.async.evict_last.swiz<SWIZ>
                 K_head.subspan(BLOCK_N, DIM).at(bn, 0) => k_buf[k_slot];
-              call croq::cuda::evict_last(k_load);
-              trigger kf.at(k_order) after k_load;
+              trigger kf.at(k_pipe_order++) after k_load;
             }
           }
 
           inthreads (t == 32) {
             foreach {issue} in [kv_bound] {
               bn = logical_bm - issue;
-              v_order = v_pipe_order + issue;
-              v_slot = v_order % STAGES;
-              wait ve.at(v_order);
-              v_load = tma.copy.async.swiz<SWIZ>
+              v_slot = v_pipe_order % STAGES;
+              wait ve.at(v_pipe_order);
+              v_load = tma.load.async.evict_last.swiz<SWIZ>
                 V_head.subspan(BLOCK_N, DIM).at(bn, 0) => v_buf[v_slot];
-              call croq::cuda::evict_last(v_load);
-              trigger vf.at(v_order) after v_load;
+              trigger vf.at(v_pipe_order++) after v_load;
             }
           }
-
-          k_pipe_order = k_pipe_order + kv_bound;
-          v_pipe_order = v_pipe_order + kv_bound;
         }
       }
 
@@ -145,9 +127,8 @@ __co__ void flash_atten_persistent(
 
         mutable u32 k_pipe_order = 0;
         mutable u32 v_pipe_order = 0;
-        mutable u32 q_task_order = 0;
         mutable u32 task_pos = task_offsets.at(block_id);
-        task_end = task_offsets.at(block_id + 1);
+        mutable u32 task_end = task_offsets.at(block_id + 1);
 
         while (task_pos < task_end) {
           packed = task_ids.at(task_pos);
@@ -160,8 +141,6 @@ __co__ void flash_atten_persistent(
           O_head = O.subspan(1, Q_SEQ, 1, DIM)
               .at(work_batch, 0, work_head, 0).sqz();
 
-          wait qf.at(q_task_order);
-
           frag f32[WG_M] scores_max {-inf};
           frag f32[WG_M] scores_max_prev;
           frag f32[WG_M] scores_scale;
@@ -170,14 +149,12 @@ __co__ void flash_atten_persistent(
           frag bf16[WG_M, BLOCK_N] acc_s_cast;
 
           acc_s = mma.fill.f32 0.0f;
-          first_k_slot = k_pipe_order % STAGES;
+          wait qf;
           wait kf.at(k_pipe_order);
-          first_qk = mma.row.row.async acc_s,
-            q_shared.subspan(WG_M, DIM).at(cid, 0),
+          first_k_slot = k_pipe_order % STAGES;
+          mma.row.row acc_s, q_shared.subspan(WG_M, DIM).at(cid, 0),
             k_buf[first_k_slot];
-          wait first_qk;
-          trigger ke.at(k_pipe_order);
-          k_pipe_order = (k_pipe_order + 1) & 3;
+          trigger ke.at(k_pipe_order++);
 
           apply {i, j} in acc_s.span {
             if (j > cid * WG_M + i)
@@ -186,8 +163,8 @@ __co__ void flash_atten_persistent(
 
           reduce_max(scores_max, acc_s, 1);
           apply {i, j} in acc_s.span
-            acc_s.at(i, j) =
-              __exp2f(acc_s.at(i, j) * scale - scores_max.at(i) * scale);
+            acc_s.at(i, j) = __exp2f(
+              acc_s.at(i, j) * scale - scores_max.at(i) * scale);
           call fa3_row_sum_local_64x128(scores_sum, acc_s);
           apply {i} in logsum.span
             logsum.at(i) = scores_sum.at(i);
@@ -195,7 +172,6 @@ __co__ void flash_atten_persistent(
             acc_s_cast.at(i, j) = __to<bf16>(acc_s.at(i, j));
 
           acc_o = mma.fill.f32 0.0f;
-
           foreach {step} in [kv_bound - 1] {
             k_slot = k_pipe_order % STAGES;
             prev_v_slot = v_pipe_order % STAGES;
@@ -203,34 +179,28 @@ __co__ void flash_atten_persistent(
             acc_s = mma.fill.f32 0.0f;
             wait kf.at(k_pipe_order);
             qk = mma.row.row.async acc_s,
-              q_shared.subspan(WG_M, DIM).at(cid, 0),
-              k_buf[k_slot];
-
+              q_shared.subspan(WG_M, DIM).at(cid, 0), k_buf[k_slot];
             wait vf.at(v_pipe_order);
             pv = mma.row.col.async acc_o, acc_s_cast, v_buf[prev_v_slot];
 
             wait qk;
-
             copy(scores_max_prev, scores_max);
             reduce_max(scores_max, acc_s, 1);
             apply {i, j} in acc_s.span {
               scores_max.at(i) = __max(scores_max.at(i), scores_max_prev.at(i));
-              scores_scale.at(i) = __exp2f(scores_max_prev.at(i) * scale - scores_max.at(i) * scale);
-              acc_s.at(i, j) = __exp2f(acc_s.at(i, j) * scale - scores_max.at(i) * scale);
-            }
+              scores_scale.at(i) = __exp2f(
+                scores_max_prev.at(i) * scale - scores_max.at(i) * scale);
+              acc_s.at(i, j) = __exp2f(
+                acc_s.at(i, j) * scale - scores_max.at(i) * scale);
+             }
 
             call fa3_row_sum_local_64x128(scores_sum, acc_s);
             apply {i} in logsum.span
               logsum.at(i) = logsum.at(i) * scores_scale.at(i) + scores_sum.at(i);
 
-            // Publish both reusable operands at the explicit PV drain point.
-            // This keeps the direct event arrivals from being hoisted across
-            // the softmax while avoiding a second dependency on qk.
             wait pv;
-            trigger ke.at(k_pipe_order);
-            trigger ve.at(v_pipe_order);
-            k_pipe_order = (k_pipe_order + 1) & 3;
-            v_pipe_order = (v_pipe_order + 1) & 3;
+            trigger ke.at(k_pipe_order++);
+            trigger ve.at(v_pipe_order++);
 
             apply {i, j} in acc_o.span {
               acc_o.at(i, j) = acc_o.at(i, j) * scores_scale.at(i);
@@ -241,7 +211,7 @@ __co__ void flash_atten_persistent(
           // Q is dead after the final QK softmax update. Publish the empty
           // generation so the producer can overlap the next task's Q load
           // with final PV and output work.
-          trigger qe.at(q_task_order);
+          trigger qe;
 
           final_v_slot = v_pipe_order % STAGES;
           wait vf.at(v_pipe_order);
@@ -250,15 +220,12 @@ __co__ void flash_atten_persistent(
           apply {i} in scores_scale.span
             scores_scale.at(i) = 1.0f / logsum.at(i);
           wait final_pv;
-          trigger ve.at(v_pipe_order);
-          v_pipe_order = (v_pipe_order + 1) & 3;
+          trigger ve.at(v_pipe_order++);
 
           apply {i, j} in acc_o.span
             acc_o.at(i, j) = acc_o.at(i, j) * scores_scale.at(i);
           mma.store acc_o, o_buf.subspan(WG_M, DIM).at(cid, 0);
           tma.copy o_buf => O_head.subspan(BLOCK_M, DIM).at(logical_bm, 0);
-
-          q_task_order = q_task_order + 1;
         }
       }
     }
