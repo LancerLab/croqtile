@@ -31,6 +31,7 @@ __co__ void foo(global f16 [64, 64] first,
 // CHECK: if ((__choreo_vg4id_x == 0)) {
 // CHECK: if ((__choreo_vtid_x == 32)) {
 // CHECK: first_empty.wait(
+// CHECK-NEXT: first_empty__phase ^= 1;
 // CHECK-NEXT: first_full.arrive_and_expect_tx(8192);
 // CHECK: tma_load_2d_shared_cta_global_mbarrier
 // CHECK: } // end inthreads

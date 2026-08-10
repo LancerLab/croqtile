@@ -74,6 +74,10 @@ enum class SwizMode { NONE, B32, B64, B128 };
 // tensor-map L2 promotion size configured by DMA .promote<N>.
 enum class TMAL2CacheHint { NONE, EVICT_FIRST, EVICT_LAST };
 
+// Direction written by a TMA source operation. Legacy tma.copy keeps INFER
+// and derives the direction from operand storage.
+enum class TMAAccess { INFER, LOAD };
+
 inline const std::string STR(SwizMode sm) {
   switch (sm) {
   case SwizMode::NONE: return "none";

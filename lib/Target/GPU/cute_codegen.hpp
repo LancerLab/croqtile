@@ -294,6 +294,9 @@ private:
   std::set<std::string> cluster_trigger_events_;
   std::set<std::string> ready_event_names_;
   std::set<std::string> waited_events_;
+  // Reusable scalar mbarriers have one physical slot but alternating logical
+  // generations.  Keep the expected wait parity private to each thread.
+  std::unordered_map<std::string, std::string> scalar_event_phase_names_;
   std::vector<std::string> pending_barrier_inits_;
   std::vector<std::string> pending_named_event_primes_;
   std::vector<std::string> pending_tma_prefetch_names_;
@@ -518,6 +521,7 @@ private:
     cluster_trigger_events_.clear();
     ready_event_names_.clear();
     waited_events_.clear();
+    scalar_event_phase_names_.clear();
     pending_barrier_inits_.clear();
     pending_named_event_primes_.clear();
     in_named_var_decl_ = false;

@@ -1,0 +1,79 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+#define STAGES 2
+
+__co__ void event_post_increment(global f16[256, 128] input) {
+  parallel b by 1 : block {
+    shared f16[128, 128] tile[STAGES];
+    shared event full[STAGES], empty[STAGES] = ready;
+
+    parallel g by 2 : group-4 {
+      inthreads.async (g == 0) {
+        mutable u32 order = 0;
+        wait empty.at(order);
+        load = tma.copy.async
+          input.subspan(128, 128).at(0, 0) => tile[order % STAGES];
+        trigger full.at(order++) after load;
+      }
+
+      inthreads.async (g == 1) {
+        mutable u32 order = 0;
+        wait full.at(order);
+        trigger empty.at(order++);
+      }
+    }
+  }
+}
+
+// CHECK: full[(order) % 2].arrive_and_expect_tx(32768);
+// CHECK-NEXT: choreo::tma_load_2d_shared_cta_global_mbarrier
+// CHECK-SAME: (uint64_t*)&(full[(order) % 2])
+// CHECK: order++;
+// CHECK-NOT: full[(order++)
+// CHECK: (void)empty[(order) % 2].arrive();
+// CHECK-NEXT: order++;
+
+__co__ void scalar_post_increment() {
+  parallel b by 1 : block {
+    mutable s32 value = 1;
+    old = value++;
+    current = ++value;
+  }
+}
+
+// CHECK-LABEL: __choreo_device_scalar_post_increment
+// CHECK: int value = 1;
+// CHECK: int old = value++;
+// CHECK: int current = ++value;
+
+__co__ void repeated_scalar_event(global f16[256, 128] input) {
+  parallel b by 1 : block {
+    shared f16[128, 128] tile;
+    shared event full;
+    shared event empty = ready;
+
+    parallel g by 2 : group-4 {
+      inthreads.async (g == 0) {
+        foreach {i} in [2] {
+          wait empty;
+          load = tma.copy.async
+            input.subspan(128, 128).at(i, 0) => tile;
+          trigger full after load;
+        }
+      }
+
+      inthreads.async (g == 1) {
+        foreach {i} in [2] {
+          wait full;
+          trigger empty;
+        }
+      }
+    }
+  }
+}
+
+// CHECK-LABEL: __choreo_device_repeated_scalar_event
+// CHECK: unsigned int full__phase = 0; // implicit scalar event generation
+// CHECK: full.wait(full__phase); // wait event(raw mbarrier)
+// CHECK-NEXT: full__phase ^= 1;

@@ -338,7 +338,8 @@ void SymReplace::SymbolizeExprNode(ptr<AST::Node> n) {
       // construct new SymExpr from Symbol.
       res = StringifyOpFromSymExpr(
           n, op, GetSymExprFromSymValno(GetSymValnoFromExpr(R)));
-    } else if (op == "++" || op == "--" || op == "addrof") {
+    } else if (op == "++" || op == "--" || op == "post++" ||
+               op == "post--" || op == "addrof") {
       InsertExprSymValnoMap(n, 0);
     } else if (op == "ubound") {
       // The rhs is AST::Identifier, which is not AST::Expr.

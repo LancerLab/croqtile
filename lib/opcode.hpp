@@ -52,6 +52,8 @@ struct Opcode {
     AddrOf,
     PreInc,
     PreDec,
+    PostInc,
+    PostDec,
     Cast,
     Concat,
     ElemOf,
@@ -130,6 +132,8 @@ public:
     if (op == "addrof") return Kind::AddrOf;
     if (op == "++") return Kind::PreInc;
     if (op == "--") return Kind::PreDec;
+    if (op == "post++") return Kind::PostInc;
+    if (op == "post--") return Kind::PostDec;
     if (op == "cast") return Kind::Cast;
     if (op == "concat") return Kind::Concat;
     if (op == "elemof") return Kind::ElemOf;
@@ -183,6 +187,8 @@ public:
     case Kind::AddrOf: return "addrof";
     case Kind::PreInc: return "++";
     case Kind::PreDec: return "--";
+    case Kind::PostInc: return "post++";
+    case Kind::PostDec: return "post--";
     case Kind::Cast: return "cast";
     case Kind::Concat: return "concat";
     case Kind::ElemOf: return "elemof";

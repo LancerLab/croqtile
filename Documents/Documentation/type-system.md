@@ -108,7 +108,7 @@ future types.
 A **data future** is produced by DMA or TMA and retains the destination view:
 
 ```choreo
-load = tma.copy.async input => shared_tile;
+load = tma.load.async input => shared_tile;
 wait load;
 call kernel(load.data, |load.span|);
 ```

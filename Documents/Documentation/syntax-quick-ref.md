@@ -95,9 +95,10 @@
 | `dma.transp<perm> src => dst` | Transpose during transfer |
 | `dma.any` | Placeholder future |
 | `dma.copy.async src => dst after f` | Chained DMA |
-| `tma.copy src => shared` | TMA bulk copy, global <-> shared (SM90+) |
-| `f = tma.copy.async src => shared` | Async TMA data future |
-| `call croq::cuda::evict_first(f)` | Attach TMA L2 eviction hint |
+| `tma.load src => shared` | Synchronous global-to-shared TMA load (SM90+) |
+| `tma.copy shared => dst` | Synchronous shared-to-global TMA copy (SM90+) |
+| `f = tma.load.async src => shared` | Async TMA data future |
+| `f = tma.load.async.evict_first src => shared` | TMA load with an L2 eviction hint |
 
 ## View Operations
 
@@ -140,6 +141,7 @@
 | `trigger e after f0, f1` | Bind native future completion to an event (no wait) |
 | `wait e` | Wait for the current event generation |
 | `wait e.at(order)` | Wait for a cyclic event generation |
+| `trigger e.at(order++)` | Trigger the current generation, then advance order |
 | `sync.shared` | Thread synchronization |
 
 ## Thread Masking

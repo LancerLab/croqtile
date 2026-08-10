@@ -1,0 +1,20 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+__co__ void invalid_tma_load(global f16[64] input,
+                             global f16[64] output) {
+  parallel b by 1 : block {
+    tma.load input => output;
+  }
+}
+
+__co__ void removed_tma_evict_builtin(global f16[64] input) {
+  parallel b by 1 : block {
+    shared f16[64] tile;
+    load = tma.load.async input => tile;
+    call croq::cuda::evict_last(load);
+  }
+}
+
+// CHECK-DAG: error: tma.load requires global-to-shared operands, but got 'global -> global'.
+// CHECK-DAG: error: 'croq::cuda::evict_last' has been removed; attach '.evict_last' directly to 'tma.load'.

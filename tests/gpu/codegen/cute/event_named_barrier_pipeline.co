@@ -43,8 +43,10 @@ __co__ void event_partial_warp_fallback() {
 
 // CHECK-LABEL: __choreo_device_event_partial_warp_fallback
 // CHECK: uint64_t empty__mem
+// CHECK: unsigned int empty__phase = 1; // implicit scalar event generation
 // CHECK: empty.init(128)
-// CHECK: empty.wait(1); // wait event(raw mbarrier)
+// CHECK: empty.wait(empty__phase); // wait event(raw mbarrier)
+// CHECK-NEXT: empty__phase ^= 1;
 // CHECK: (void)empty.arrive(); // trigger event(barrier)
 
 __co__ void event_named_barrier_avoids_explicit_id() {
@@ -86,8 +88,10 @@ __co__ void event_role_overlap_fallback() {
 
 // CHECK-LABEL: __choreo_device_event_role_overlap_fallback
 // CHECK: uint64_t handoff__mem
+// CHECK: unsigned int handoff__phase = 1; // implicit scalar event generation
 // CHECK: handoff.init(256)
-// CHECK: handoff.wait(1); // wait event(raw mbarrier)
+// CHECK: handoff.wait(handoff__phase); // wait event(raw mbarrier)
+// CHECK-NEXT: handoff__phase ^= 1;
 // CHECK-COUNT-2: (void)handoff.arrive(); // trigger event(barrier)
 
 __co__ void event_dynamic_scope_fallback(int limit) {
@@ -106,5 +110,7 @@ __co__ void event_dynamic_scope_fallback(int limit) {
 
 // CHECK-LABEL: __choreo_device_event_dynamic_scope_fallback
 // CHECK: uint64_t handoff__mem
+// CHECK: unsigned int handoff__phase = 1; // implicit scalar event generation
 // CHECK: handoff.init(128)
-// CHECK: handoff.wait(1); // wait event(raw mbarrier)
+// CHECK: handoff.wait(handoff__phase); // wait event(raw mbarrier)
+// CHECK-NEXT: handoff__phase ^= 1;

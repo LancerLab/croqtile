@@ -1,0 +1,10 @@
+// RUN: not choreo -e %s 2>&1 | FileCheck %s
+
+__co__ void tma_load_tma_only(global f16[64] input) {
+  parallel b by 1 : block {
+    shared f16[64] tile;
+    dma.load input => tile;
+  }
+}
+
+// CHECK: error: '.load' is a TMA-only operation.

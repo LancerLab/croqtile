@@ -787,8 +787,9 @@ public:
     }
 
     if (n.HasL2CacheHint()) {
-      if (!n.IsTMA()) {
-        Error1(n.LOC(), "L2 eviction hints require a TMA copy.");
+      if (!n.IsTMALoad()) {
+        Error1(n.LOC(),
+               "TMA L2 eviction modifiers are only valid on 'tma.load'.");
         return false;
       }
       if (n.IsMulticast()) {
@@ -816,12 +817,6 @@ public:
             tst == Storage::SHARED))
         Error1(n.LOC(), "GPU does not allow the TMA " + n.operation.substr(1) +
                             " (" + STR(fst) + " -> " + STR(tst) + ").");
-      if (n.HasL2CacheHint() &&
-          !((fst == Storage::GLOBAL || fst == Storage::DEFAULT) &&
-            tst == Storage::SHARED))
-        Error1(n.LOC(),
-               "TMA L2 eviction hints currently require a global-to-shared "
-               "copy.");
     } else if (n.IsAsync()) {
       if (!CCtx().TargetSupportAsyncDMA())
         Error1(n.LOC(), "target '" + CCtx().GetTarget().Name() + "' (arch '" +

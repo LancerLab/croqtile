@@ -1,0 +1,10 @@
+// RUN: not choreo -e %s 2>&1 | FileCheck %s
+
+__co__ void tma_evict_modifier_order(global f16[64] input) {
+  parallel b by 1 : block {
+    shared f16[64] tile;
+    load = tma.load.async.swiz<128>.evict_last input => tile;
+  }
+}
+
+// CHECK: error: TMA eviction modifier must precede '.swiz'.

@@ -10,6 +10,20 @@
 
 using namespace Choreo;
 
+static bool IsIncrementOrDecrement(const Opcode& op) {
+  return op == Op::PreInc || op == Op::PreDec || op == Op::PostInc ||
+         op == Op::PostDec;
+}
+
+static bool ContainsIncrementOrDecrement(const AST::ptr<AST::Node>& node) {
+  auto expr = dyn_cast<AST::Expr>(node);
+  if (!expr) return false;
+  if (IsIncrementOrDecrement(expr->GetOp())) return true;
+  return ContainsIncrementOrDecrement(expr->GetC()) ||
+         ContainsIncrementOrDecrement(expr->GetL()) ||
+         ContainsIncrementOrDecrement(expr->GetR());
+}
+
 bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
   if (isa<AST::Program>(&n)) {
     type_equals.Reset();
@@ -289,7 +303,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeITupleType(ty->Dims()));
     else
       choreo_unreachable("unexpect");
-  } else if ((n.op == "++") || (n.op == "--")) {
+  } else if (n.op == Op::PreInc || n.op == Op::PreDec ||
+             n.op == Op::PostInc || n.op == Op::PostDec) {
     auto ty = NodeType(*n.GetR());
     auto sty = dyn_cast<ScalarIntegerType>(ty);
     assert(!isa<BooleanType>(ty) &&
@@ -690,6 +705,16 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       }
       if (!isa<ScalarIntegerType>(rty) && !isa<BoundedType>(rty)) {
         Error1(n.GetR()->LOC(), "event order must be an integer expression.");
+        SetNodeType(n, MakeUnknownType());
+        return false;
+      }
+      auto order_expr = dyn_cast<AST::Expr>(n.GetR());
+      bool direct_update =
+          order_expr && IsIncrementOrDecrement(order_expr->GetOp());
+      if (!direct_update && ContainsIncrementOrDecrement(n.GetR())) {
+        Error1(n.GetR()->LOC(),
+               "an event order update must be the direct '.at' argument; "
+               "use '.at(order++)' or update the order separately.");
         SetNodeType(n, MakeUnknownType());
         return false;
       }
@@ -1834,6 +1859,27 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     }
   }
 
+  if (n.HasExplicitTMAAccess() && !n.IsTMA()) {
+    Error1(n.LOC(), "'.load' is a TMA-only operation.");
+    return false;
+  }
+
+  const auto src_storage = sty->GetStorage();
+  const auto dst_storage = isa<AST::Memory>(n.to)
+                               ? cast<AST::Memory>(n.to)->Get()
+                               : tty->GetStorage();
+  const auto is_global = [](Storage storage) {
+    return storage == Storage::GLOBAL || storage == Storage::DEFAULT;
+  };
+  if (n.IsTMALoad() &&
+      !(is_global(src_storage) && dst_storage == Storage::SHARED)) {
+    Error1(n.LOC(), "tma.load requires global-to-shared operands, but got '" +
+                        STR(src_storage) + " -> " + STR(dst_storage) + "'.");
+  }
+  if (n.HasL2CacheHint() && !n.IsTMALoad()) {
+    Error1(n.LOC(), "TMA L2 eviction modifiers are only valid on 'tma.load'.");
+  }
+
   if (pl_depth == 0) {
     if (auto m = dyn_cast<AST::Memory>(n.to)) {
       if ((m->Get() != Storage::GLOBAL) && (m->Get() != Storage::DEFAULT)) {
@@ -2451,28 +2497,10 @@ bool EarlySemantics::Visit(AST::Call& n) {
         Error1(n.LOC(), "expect a string but got '" + PSTR(sty) + "'.");
     } else if (func_name == "croq::cuda::evict_first" ||
                func_name == "croq::cuda::evict_last") {
-      if (pl_depth == 0) {
-        Error1(n.LOC(), "'" + func_name +
-                            "' can only annotate a device-side TMA future.");
-      }
-      if (n.arguments->Count() != 1) {
-        Error1(n.LOC(), "'" + func_name +
-                            "' expects exactly one future argument, but got " +
-                            std::to_string(n.arguments->Count()) + ".");
-      } else {
-        auto argument = n.arguments->ValueAt(0);
-        auto argument_ty = NodeType(*argument);
-        if (!isa<FutureType>(argument_ty) ||
-            !cast<FutureType>(argument_ty)->IsAsync()) {
-          Error1(argument->LOC(), "'" + func_name +
-                                      "' expects an asynchronous data future, "
-                                      "but got '" +
-                                      PSTR(argument_ty) + "'.");
-        }
-        if (!AST::GetIdentifier(*argument))
-          Error1(argument->LOC(),
-                 "'" + func_name + "' requires a named TMA future.");
-      }
+      auto modifier = func_name == "croq::cuda::evict_first" ? ".evict_first"
+                                                             : ".evict_last";
+      Error1(n.LOC(), "'" + func_name + "' has been removed; attach '" +
+                          modifier + "' directly to 'tma.load'.");
     } else if (func_name == "croq::cuda::setreg_inc" ||
                func_name == "croq::cuda::setreg_dec") {
       if (pl_depth == 0) {

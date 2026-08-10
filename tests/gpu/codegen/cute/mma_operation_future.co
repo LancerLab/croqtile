@@ -26,4 +26,5 @@ __co__ void mma_operation_future() {
 // CHECK: warpgroup_commit_batch();
 // CHECK: warpgroup_wait<0>();
 // CHECK-NEXT: done.arrive();
-// CHECK: done.wait(0); // wait event(raw mbarrier)
+// CHECK: done.wait(done__phase); // wait event(raw mbarrier)
+// CHECK-NEXT: done__phase ^= 1;

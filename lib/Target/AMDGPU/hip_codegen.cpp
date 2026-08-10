@@ -1847,6 +1847,8 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
     }
     if (op == Op::PreInc) return "++" + ExprSTR(expr->GetR(), is_host);
     if (op == Op::PreDec) return "--" + ExprSTR(expr->GetR(), is_host);
+    if (op == Op::PostInc) return ExprSTR(expr->GetR(), is_host) + "++";
+    if (op == Op::PostDec) return ExprSTR(expr->GetR(), is_host) + "--";
     if (op == Op::BitNot) return "(~" + ExprSTR(expr->GetR(), is_host) + ")";
     if (op == Op::LogicNot) return "(!" + ExprSTR(expr->GetR(), is_host) + ")";
     if (op == Op::AddrOf) {

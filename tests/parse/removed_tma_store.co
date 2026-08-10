@@ -1,0 +1,10 @@
+// RUN: not choreo -e %s 2>&1 | FileCheck %s
+
+__co__ void removed_tma_store(global f16[64] output) {
+  parallel b by 1 : block {
+    shared f16[64] tile;
+    tma.store tile => output;
+  }
+}
+
+// CHECK: error: syntax error
