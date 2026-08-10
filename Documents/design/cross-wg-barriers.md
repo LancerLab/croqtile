@@ -4,8 +4,10 @@
 
 Flash Attention on Hopper achieves higher throughput by overlapping computation
 across consumer warpgroups using PTX named barriers (`bar.sync` / `bar.arrive`).
-Choreo exposes named-barrier builtins for this explicit scheduler pattern. This
-is separate from async operation completion, which uses futures and events.
+Choreo uses events for ordinary producer-consumer handoffs and may lower a
+direct event to a named barrier. Low-level named-barrier builtins remain only
+for scheduler topologies that cannot be expressed as one event handoff. This is
+separate from async operation completion, which uses futures and events.
 
 The goal: let a fast WG start PV WGMMA while the slow WG is still in softmax,
 achieving CUDA core + Tensor Core concurrency across warpgroups.
@@ -46,22 +48,26 @@ completion signal.
 
 - `shared event` publishes future completion to one or more consumers.
 - Async MMA returns an operation future; the compiler derives WGMMA waits.
+- Direct ready one-slot release events with static, disjoint, warp-aligned
+  participants can lower to `bar.sync` / `bar.arrive` without exposing IDs or
+  counts in source.
 - Barrier ID 15 is reserved for internal GROUPx4 synchronization.
 - `__bar_arrive` and `__bar_sync` provide explicit named-barrier scheduling.
 
 ## Interface
 
-### Named-Barrier Builtins
+### Low-Level Named-Barrier Builtins
 
-Add two new compiler-recognized builtin functions:
+Two compiler-recognized builtin functions are retained as an escape hatch:
 
 ```co
 __bar_arrive(int barrier_id, int thread_count);
 __bar_sync(int barrier_id, int thread_count);
 ```
 
-These emit raw PTX and are available only in device code within `inthreads.async`
-blocks. No type checking beyond integer arguments.
+These emit raw PTX and are available only in device code within
+`inthreads.async` blocks. They should not be used to implement an ordinary
+full/empty buffer protocol; use `event`, `wait`, and `trigger` for that case.
 
 ### Codegen Output
 
@@ -195,7 +201,8 @@ trigger sched[next];                // -> bar.arrive
 wait sched[my];                     // -> bar.sync
 ```
 
-Async completion should use an ordinary event:
+Accepted for direct producer-consumer handoffs. Async completion uses an
+ordinary event:
 
 ```co
 qk = mma.row.row.async acc_s, q_shared, k_buf[stage];
@@ -204,9 +211,11 @@ trigger qk_done;
 ```
 
 WGMMA has no native completion-event binding, so its wait remains explicit.
-The event backend supports multiple consumers after the direct trigger.
-Explicit named barriers remain available for scheduler topology and fixed
-participant-count control; they are not operation futures.
+The event backend supports multiple consumers after the direct trigger. It can
+select a named barrier for a ready one-slot release event when participation is
+statically safe. Explicit named barriers remain available for scheduler graphs
+in which the wait and arrival roles do not form one event handoff; they are not
+operation futures.
 
 ### Direct asm() escape
 

@@ -22,12 +22,10 @@ __co__ void ordered_group_fast_path(
         frag bf16[64, 128] probs {0.0f};
         wait full;
         scores = mma.fill.f32 0.0f;
-        [[schedule(k_tiles(0, 1, 2, 3, 4, 5, 6, 7))]]
         qk = mma.row.row.async scores,
           q_s.subspan(64, 128).at(cid, 0), k_s;
         wait qk;
         output = mma.fill.f32 0.0f;
-        [[schedule(k_tiles(7, 6, 5, 4, 0, 1, 2, 3))]]
         pv = mma.row.col.async output, probs, v_s;
         wait pv;
       }
@@ -38,6 +36,6 @@ __co__ void ordered_group_fast_path(
 // CHECK-LABEL: __choreo_device_ordered_group_fast_path
 // CHECK: float scores[64];
 // CHECK-NOT: __frag_init_val
-// CHECK: wgmma_bf16_m64n128k16_ss_k128_order_01234567<true>(
-// CHECK: wgmma_bf16_m64n128k16_rs_k128_order_76540123(
+// CHECK: __choreo_wgmma_group_bf16_m64n128k16_ss_k128<true>(
+// CHECK: __choreo_wgmma_group_bf16_m64n128k16_rs_k128(
 // CHECK-NOT: uint64_t __choreo_wgmma_desc_{{[0-9]+}}_order_

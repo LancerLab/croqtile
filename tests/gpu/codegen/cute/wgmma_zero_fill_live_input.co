@@ -33,5 +33,5 @@ __co__ void wgmma_zero_fill_live_input(
 // CHECK: float [[ZERO:__frag_init_val[0-9]+]] = 0.000000f;
 // CHECK: scores[idx] = [[ZERO]];
 // CHECK: scores[__r] = scores[__r] + 1.000000f;
-// CHECK: wgmma_bf16_m64n128k16_ss_k128_order_01234567(
-// CHECK-NOT: wgmma_bf16_m64n128k16_ss_k128_order_01234567<true>(
+// CHECK: __choreo_wgmma_group_bf16_m64n128k16_ss_k128(
+// CHECK-NOT: __choreo_wgmma_group_bf16_m64n128k16_ss_k128<true>(

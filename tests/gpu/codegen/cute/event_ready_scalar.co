@@ -15,4 +15,12 @@ __co__ void event_ready_scalar() {
   }
 }
 
-// CHECK: empty.wait(1); // wait event(raw mbarrier)
+// CHECK: shared event empty lowered to CTA named barrier 14 (trigger=128, wait=128)
+// CHECK-NOT: empty__mem
+// CHECK: prime ready event 'empty' (named barrier 14)
+// CHECK: bar.arrive %0, %1;
+// CHECK-SAME: "r"(14), "r"(256)
+// CHECK: wait event(named barrier) empty
+// CHECK-NEXT: asm volatile("bar.sync %0, %1;" :: "r"(14), "r"(256)
+// CHECK: trigger event(named barrier) empty
+// CHECK-NEXT: asm volatile("bar.arrive %0, %1;" :: "r"(14), "r"(256)

@@ -3,6 +3,7 @@ set(GPU_TARGET_SOURCES
   cute_target.cpp
   dma_plan.cpp
   fragment_layout_pass.cpp
+  wgmma_pattern.cpp
 )
 
 add_library(GPUTarget OBJECT ${GPU_TARGET_SOURCES})
@@ -40,4 +41,3 @@ if(ENABLE_CUTE)
     __CHOREO_CUTE_DIR__=${_cute_root}
   )
 endif()
-

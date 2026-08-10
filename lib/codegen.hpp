@@ -146,6 +146,11 @@ struct FuncTrait {
   std::map<std::string, std::vector<bool>> event_participation;
   // Trigger-only participation: threads that call trigger on this event.
   std::map<std::string, std::vector<bool>> event_trigger_participation;
+  // Wait-only participation: threads that wait on this event.
+  std::map<std::string, std::vector<bool>> event_wait_participation;
+  // Events referenced from a dynamic inthreads predicate cannot use a
+  // compile-time participation-based lowering.
+  std::set<std::string> events_with_unknown_participation;
 
   void RecordEventUsage(const std::string& event_name,
                         const std::vector<bool>& mask) {
@@ -171,6 +176,26 @@ struct FuncTrait {
     }
   }
 
+  void RecordEventWaitUsage(const std::string& event_name,
+                            const std::vector<bool>& mask) {
+    auto it = event_wait_participation.find(event_name);
+    if (it == event_wait_participation.end()) {
+      event_wait_participation[event_name] = mask;
+    } else {
+      auto& existing = it->second;
+      for (size_t i = 0; i < std::min(existing.size(), mask.size()); ++i)
+        existing[i] = existing[i] || mask[i];
+    }
+  }
+
+  void RecordEventUnknownParticipation(const std::string& event_name) {
+    events_with_unknown_participation.insert(event_name);
+  }
+
+  bool HasEventUnknownParticipation(const std::string& event_name) const {
+    return events_with_unknown_participation.count(event_name) > 0;
+  }
+
   int64_t GetEventParticipation(const std::string& event_name) const {
     auto it = event_participation.find(event_name);
     if (it == event_participation.end()) return -1;
@@ -188,6 +213,29 @@ struct FuncTrait {
       if (b) ++count;
     return count;
   }
+
+  const std::vector<bool>*
+  GetEventTriggerParticipationMask(const std::string& event_name) const {
+    auto it = event_trigger_participation.find(event_name);
+    return it == event_trigger_participation.end() ? nullptr : &it->second;
+  }
+
+  const std::vector<bool>*
+  GetEventWaitParticipationMask(const std::string& event_name) const {
+    auto it = event_wait_participation.find(event_name);
+    return it == event_wait_participation.end() ? nullptr : &it->second;
+  }
+
+  // Explicit PTX named-barrier IDs used by low-level builtins. Target
+  // backends consult this set before assigning a named barrier to an event.
+  std::set<int64_t> explicit_named_barrier_ids;
+  bool has_dynamic_named_barrier_id = false;
+
+  void RecordExplicitNamedBarrierID(int64_t id) {
+    explicit_named_barrier_ids.insert(id);
+  }
+
+  void RecordDynamicNamedBarrierID() { has_dynamic_named_barrier_id = true; }
 
   struct EventDeclInfo {
     std::string name;
