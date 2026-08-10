@@ -1,0 +1,110 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void event_named_barrier_pipeline() {
+  parallel b by 1 : block {
+    shared event empty[1] = ready;
+    parallel g by 3 : group-4, t by 128 : thread {
+      inthreads.async (g == 0 && t < 64) {
+        mutable u32 order = 0;
+        wait empty.at(order);
+      }
+      inthreads.async (g > 0) {
+        mutable u32 order = 0;
+        trigger empty.at(order);
+      }
+    }
+  }
+}
+
+// CHECK: shared event empty lowered to CTA named barrier 14 (trigger=256, wait=64)
+// CHECK-NOT: empty__mem
+// CHECK: prime ready event 'empty' (named barrier 14)
+// CHECK: (threadIdx.x >= 128 && threadIdx.x < 384)
+// CHECK-NEXT: asm volatile("bar.arrive %0, %1;" :: "r"(14), "r"(320)
+// CHECK: wait event(named barrier) empty.at(order)
+// CHECK-NEXT: asm volatile("bar.sync %0, %1;" :: "r"(14), "r"(320)
+// CHECK: trigger event(named barrier) empty.at(order)
+// CHECK-NEXT: asm volatile("bar.arrive %0, %1;" :: "r"(14), "r"(320)
+
+__co__ void event_partial_warp_fallback() {
+  parallel b by 1 : block {
+    shared event empty = ready;
+    parallel g by 2 : group-4, t by 128 : thread {
+      inthreads.async (g == 0 && t == 0) {
+        wait empty;
+      }
+      inthreads.async (g == 1) {
+        trigger empty;
+      }
+    }
+  }
+}
+
+// CHECK-LABEL: __choreo_device_event_partial_warp_fallback
+// CHECK: uint64_t empty__mem
+// CHECK: empty.init(128)
+// CHECK: empty.wait(1); // wait event(raw mbarrier)
+// CHECK: (void)empty.arrive(); // trigger event(barrier)
+
+__co__ void event_named_barrier_avoids_explicit_id() {
+  parallel b by 1 : block {
+    shared event empty = ready;
+    parallel g by 2 : group-4 {
+      inthreads.async (g == 0) {
+        wait empty;
+        __bar_arrive(14, 128);
+      }
+      inthreads.async (g == 1) {
+        trigger empty;
+      }
+    }
+  }
+}
+
+// CHECK-LABEL: __choreo_device_event_named_barrier_avoids_explicit_id
+// CHECK: shared event empty lowered to CTA named barrier 13 (trigger=128, wait=128)
+// CHECK: prime ready event 'empty' (named barrier 13)
+// CHECK: asm volatile("bar.arrive %0, %1;" :: "r"(13), "r"(256)
+// CHECK: asm volatile("bar.sync %0, %1;" :: "r"(13), "r"(256)
+// CHECK: asm volatile("bar.arrive %0, %1;" :: "r"(14), "r"(128)
+
+__co__ void event_role_overlap_fallback() {
+  parallel b by 1 : block {
+    shared event handoff = ready;
+    parallel g by 2 : group-4 {
+      inthreads.async (g == 0) {
+        wait handoff;
+        trigger handoff;
+      }
+      inthreads.async (g == 1) {
+        trigger handoff;
+      }
+    }
+  }
+}
+
+// CHECK-LABEL: __choreo_device_event_role_overlap_fallback
+// CHECK: uint64_t handoff__mem
+// CHECK: handoff.init(256)
+// CHECK: handoff.wait(1); // wait event(raw mbarrier)
+// CHECK-COUNT-2: (void)handoff.arrive(); // trigger event(barrier)
+
+__co__ void event_dynamic_scope_fallback(int limit) {
+  parallel b by 1 : block {
+    shared event handoff = ready;
+    parallel g by 2 : group-4, t by 128 : thread {
+      inthreads.async (g == 0 && t < limit) {
+        wait handoff;
+      }
+      inthreads.async (g == 1) {
+        trigger handoff;
+      }
+    }
+  }
+}
+
+// CHECK-LABEL: __choreo_device_event_dynamic_scope_fallback
+// CHECK: uint64_t handoff__mem
+// CHECK: handoff.init(128)
+// CHECK: handoff.wait(1); // wait event(raw mbarrier)

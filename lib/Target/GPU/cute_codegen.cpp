@@ -900,12 +900,14 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
     // emit the fixed headers
     EmitFixedHostHead();
     EmitFixedDeviceHead();
+    required_wgmma_specializations_.clear();
     ssm.EnterScope();
     ssm.MapDeviceSymbolIfNotExist("::__choreo_no_tiling__", "0");
     levels.push(ParallelLevel::NONE);
     cooperative_stack_.push(false);
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ResetChoreoFunctionStates();
+    InitializeNamedEventLowering();
     has_managed_mma_completion = AST::ContainsMMAOperationFuture(n);
     CollectClusterTriggerEvents(&n, cluster_trigger_events_);
     BuildSiteAssertionMap();
@@ -1245,7 +1247,9 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
   }
   if (isa<AST::NamedVariableDecl>(&n)) in_named_var_decl_ = true;
 
-  if (!pending_barrier_inits_.empty() && !in_named_var_decl_)
+  if ((!pending_barrier_inits_.empty() ||
+       !pending_named_event_primes_.empty()) &&
+      !in_named_var_decl_)
     FlushBarrierInits();
 
   if (isa<AST::IfElseBlock>(&n) && !IsHost() && has_pending_wgmma_finalize)
@@ -1279,6 +1283,11 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
 
   if (isa<AST::Program>(&n)) {
     ssm.LeaveScope();
+
+    auto wgmma_specializations =
+        EmitWGMMASpecializations(required_wgmma_specializations_);
+    if (!wgmma_specializations.empty())
+      code_segments.front() += wgmma_specializations;
 
     switch (CCtx().GetOutputKind()) {
     case OutputKind::TargetSourceCode:
@@ -1822,8 +1831,121 @@ const ValueList CuteCodeGen::GenStrides(const ptr<AST::ChunkAt>& ca,
   return strides;
 }
 
+void CuteCodeGen::InitializeNamedEventLowering() {
+  auto& ft = cgi.GetFunctionTrait(fname);
+  if (ft.has_dynamic_named_barrier_id) return;
+  // Keep 15 for Choreo's internal warp-specialization handshakes and leave
+  // 0-7 available to CUDA/CUTLASS helpers. Events use the remaining IDs and
+  // fall back to mbarrier when that small pool is exhausted.
+  for (int id = 14; id >= 8; --id)
+    if (ft.explicit_named_barrier_ids.count(id) == 0)
+      available_named_barrier_ids_.push_back(id);
+}
+
+std::string CuteCodeGen::ThreadMaskPredicate(const std::vector<bool>& mask) {
+  std::ostringstream predicate;
+  bool first = true;
+  size_t begin = 0;
+  while (begin < mask.size()) {
+    while (begin < mask.size() && !mask[begin]) ++begin;
+    if (begin == mask.size()) break;
+    size_t end = begin + 1;
+    while (end < mask.size() && mask[end]) ++end;
+    if (!first) predicate << " || ";
+    predicate << "(threadIdx.x >= " << begin << " && threadIdx.x < " << end
+              << ")";
+    first = false;
+    begin = end;
+  }
+  return first ? "false" : predicate.str();
+}
+
+bool CuteCodeGen::TryConfigureNamedEvent(const std::string& name, bool is_array,
+                                         int64_t element_count,
+                                         int64_t explicit_threads,
+                                         Storage storage, bool starts_ready) {
+  if (storage != Storage::SHARED || CCtx().ArchNum() < 80 ||
+      !IsWarpSpecActive() || !starts_ready || explicit_threads > 0 ||
+      (is_array && element_count != 1) ||
+      cluster_trigger_events_.count(name) > 0 ||
+      available_named_barrier_ids_.empty())
+    return false;
+
+  auto& ft = cgi.GetFunctionTrait(fname);
+  if (ft.IsTMAFillEvent(name) || ft.HasEventUnknownParticipation(name))
+    return false;
+
+  size_t same_name_decls = 0;
+  for (const auto& decl : ft.event_decls)
+    if (decl.name == name) ++same_name_decls;
+  if (same_name_decls != 1) return false;
+
+  auto* triggers = ft.GetEventTriggerParticipationMask(name);
+  auto* waiters = ft.GetEventWaitParticipationMask(name);
+  if (!triggers || !waiters || triggers->size() != waiters->size() ||
+      triggers->empty() || triggers->size() % 32 != 0)
+    return false;
+
+  int64_t trigger_threads = 0;
+  int64_t wait_threads = 0;
+  for (size_t i = 0; i < triggers->size(); ++i) {
+    // A named barrier has one arrival per participating thread in each
+    // generation. Keep events whose waiters also trigger on the general
+    // mbarrier lowering, where those two operations remain independent.
+    if ((*triggers)[i] && (*waiters)[i]) return false;
+    if ((*triggers)[i]) {
+      ++trigger_threads;
+    } else if ((*waiters)[i]) {
+      ++wait_threads;
+    }
+  }
+
+  auto is_warp_aligned = [](const std::vector<bool>& mask) {
+    for (size_t warp = 0; warp < mask.size(); warp += 32) {
+      int64_t active = 0;
+      for (size_t lane = warp; lane < std::min(warp + 32, mask.size()); ++lane)
+        if (mask[lane]) ++active;
+      if (active != 0 && active != 32) return false;
+    }
+    return true;
+  };
+  if (trigger_threads == 0 || wait_threads == 0 ||
+      !is_warp_aligned(*triggers) || !is_warp_aligned(*waiters))
+    return false;
+
+  NamedEventLowering lowering;
+  lowering.barrier_id = available_named_barrier_ids_.front();
+  available_named_barrier_ids_.pop_front();
+  lowering.trigger_threads = trigger_threads;
+  lowering.wait_threads = wait_threads;
+  lowering.total_threads = trigger_threads + wait_threads;
+  lowering.trigger_mask = *triggers;
+  named_event_lowerings_[name] = lowering;
+
+  if (starts_ready) {
+    std::ostringstream prime;
+    prime << d_indent << "// prime ready event '" << name << "' (named barrier "
+          << lowering.barrier_id << ")\n";
+    prime << d_indent << "if (" << ThreadMaskPredicate(lowering.trigger_mask)
+          << ") {\n";
+    prime << d_indent << "  asm volatile(\"bar.arrive %0, %1;\" :: \"r\"("
+          << lowering.barrier_id << "), \"r\"(" << lowering.total_threads
+          << ") : \"memory\");\n";
+    prime << d_indent << "}\n";
+    pending_named_event_primes_.push_back(prime.str());
+  }
+  return true;
+}
+
+const CuteCodeGen::NamedEventLowering*
+CuteCodeGen::GetNamedEventLowering(const std::string& name) const {
+  auto it = named_event_lowerings_.find(name);
+  return it == named_event_lowerings_.end() ? nullptr : &it->second;
+}
+
 void CuteCodeGen::FlushBarrierInits() {
-  if (pending_barrier_inits_.empty()) return;
+  if (pending_barrier_inits_.empty() && pending_named_event_primes_.empty())
+    return;
   if (!pending_tma_prefetch_names_.empty()) {
     this->ds << d_indent << "if (threadIdx.x == 0) {\n";
     for (auto& name : pending_tma_prefetch_names_) {
@@ -1833,12 +1955,16 @@ void CuteCodeGen::FlushBarrierInits() {
     this->ds << d_indent << "}\n";
     pending_tma_prefetch_names_.clear();
   }
-  this->ds << d_indent << "if (threadIdx.x == 0) {\n";
-  for (auto& init_line : pending_barrier_inits_) this->ds << init_line;
-  this->ds << d_indent << "}\n";
-  this->ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
-  this->ds << d_indent << "__syncthreads();\n";
+  if (!pending_barrier_inits_.empty()) {
+    this->ds << d_indent << "if (threadIdx.x == 0) {\n";
+    for (auto& init_line : pending_barrier_inits_) this->ds << init_line;
+    this->ds << d_indent << "}\n";
+    this->ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
+    this->ds << d_indent << "__syncthreads();\n";
+  }
+  for (auto& prime : pending_named_event_primes_) this->ds << prime;
   pending_barrier_inits_.clear();
+  pending_named_event_primes_.clear();
 }
 
 std::string CuteCodeGen::InlinePhaseExpr(int stages, bool is_fill) const {
@@ -2297,8 +2423,9 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
   auto sym = n.name_str;
   const bool enable_debug_rtti = EnableDebugTypeRTTI();
 
-  if (!pending_barrier_inits_.empty() && !isa<EventArrayType>(nty) &&
-      !isa<EventType>(nty))
+  if ((!pending_barrier_inits_.empty() ||
+       !pending_named_event_primes_.empty()) &&
+      !isa<EventArrayType>(nty) && !isa<EventType>(nty))
     FlushBarrierInits();
 
   // Register in the live scoped table so that InScopeNameForRef correctly
@@ -2796,7 +2923,20 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
 
       if (n.HasNote("event_ready")) ready_event_names_.insert(n.name_str);
 
-      // All shared events use Cutlass ClusterTransactionBarrier
+      if (TryConfigureNamedEvent(n.name_str, /*is_array=*/true,
+                                 VIInt(ety->ElemCount()).value_or(-1),
+                                 ety->event->GetThreadCount(),
+                                 ety->GetStorage(), n.HasNote("event_ready"))) {
+        auto* lowering = GetNamedEventLowering(n.name_str);
+        ds << d_indent << "// shared event " << eaname
+           << " lowered to CTA named barrier " << lowering->barrier_id
+           << " (trigger=" << lowering->trigger_threads
+           << ", wait=" << lowering->wait_threads << ")\n";
+        ssm.MapDeviceSymbol(InScopeName(n.name_str), eaname);
+        break;
+      }
+
+      // General shared events use a Cutlass ClusterTransactionBarrier.
       auto& ft = cgi.GetFunctionTrait(fname);
       bool is_fill_event = ft.IsTMAFillEvent(n.name_str);
 
@@ -2864,6 +3004,18 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       bool is_fill = ft.IsTMAFillEvent(n.name_str);
 
       if (n.HasNote("event_ready")) ready_event_names_.insert(n.name_str);
+
+      if (TryConfigureNamedEvent(n.name_str, /*is_array=*/false,
+                                 /*element_count=*/1, ety->GetThreadCount(),
+                                 ety->GetStorage(), n.HasNote("event_ready"))) {
+        auto* lowering = GetNamedEventLowering(n.name_str);
+        ds << d_indent << "// shared event " << ename
+           << " lowered to CTA named barrier " << lowering->barrier_id
+           << " (trigger=" << lowering->trigger_threads
+           << ", wait=" << lowering->wait_threads << ")\n";
+        ssm.MapDeviceSymbol(InScopeName(n.name_str), ename);
+        break;
+      }
 
       ds << d_indent << "__shared__ __align__(16) uint64_t " << ename
          << "__mem; // raw mbarrier storage\n";
@@ -5953,24 +6105,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                           "sparse WGMMA operations.");
           return false;
         }
-        if (issue_order.size() != wgmma_k_iters) {
-          Error1(n.LOC(), "MMA k_tiles schedule must contain exactly one "
-                          "entry for each auto-split WGMMA K iteration "
-                          "(expected " +
-                              std::to_string(wgmma_k_iters) + ", got " +
-                              std::to_string(issue_order.size()) + ").");
+        if (auto error = ValidateWGMMAKOrder(issue_order, wgmma_k_iters)) {
+          Error1(n.LOC(), "MMA k_tiles schedule " + *error + ".");
           return false;
-        }
-        std::vector<bool> seen(wgmma_k_iters, false);
-        for (int issue : issue_order) {
-          if (issue < 0 || static_cast<size_t>(issue) >= wgmma_k_iters ||
-              seen[issue]) {
-            Error1(n.LOC(),
-                   "MMA k_tiles schedule must be a permutation of [0, " +
-                       std::to_string(wgmma_k_iters) + ").");
-            return false;
-          }
-          seen[issue] = true;
         }
       }
       if (wgmma_k_iters > 1 &&
@@ -6151,32 +6288,45 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ds << ");\n";
       };
 
-      const std::vector<int> fast_ss_order = {0, 1, 2, 3, 4, 5, 6, 7};
-      const std::vector<int> fast_rs_order = {7, 6, 5, 4, 0, 1, 2, 3};
-      const std::vector<uint64_t> fast_ss_offsets = {
-          0x0, 0x2, 0x4, 0x6, 0x400, 0x402, 0x404, 0x406};
-      const std::vector<uint64_t> fast_rs_offsets = {
-          0x0, 0x80, 0x100, 0x180, 0x200, 0x280, 0x300, 0x380};
-      bool can_use_fast_ss =
-          !policy_is_sparse && !op.HasScale() && !use_explicit_scale_accum &&
-          reg_num_d == 64 && issue_order == fast_ss_order &&
-          mma_policy.find("MMA_64x128x16_F32BF16BF16_SS") !=
-              std::string::npos &&
-          direct_a.static_desc_offsets == fast_ss_offsets &&
-          direct_b.static_desc_offsets == fast_ss_offsets &&
-          (direct_a.is_shared_direct || direct_a.is_precomputed_desc) &&
-          (direct_b.is_shared_direct || direct_b.is_precomputed_desc);
-      bool can_use_fast_rs =
-          !policy_is_sparse && !op.HasScale() && !use_explicit_scale_accum &&
-          reg_num_d == 64 && issue_order == fast_rs_order &&
-          mma_policy.find("MMA_64x128x16_F32BF16BF16_RS") !=
-              std::string::npos &&
-          direct_a.is_rs_direct && direct_a.regs_per_step == 8 &&
-          direct_b.static_desc_offsets == fast_rs_offsets &&
-          (direct_b.is_shared_direct || direct_b.is_precomputed_desc);
-      if (can_use_fast_ss || can_use_fast_rs) {
+      WGMMAPatternRequest pattern_request;
+      pattern_request.arch = CCtx().ArchNum();
+      pattern_request.a_type = ssmi_a.ty;
+      pattern_request.b_type = ssmi_b.ty;
+      pattern_request.accumulator_type = ssmi_c.ty;
+      if (auto atom_m = VIInt(ssmi_c.shape.at(0)))
+        pattern_request.atom_m = *atom_m;
+      if (auto atom_n = VIInt(ssmi_c.shape.at(1)))
+        pattern_request.atom_n = *atom_n;
+      if (auto atom_k = VIInt(ssmi_c.shape.at(2)))
+        pattern_request.atom_k = *atom_k;
+      pattern_request.operand_mode =
+          is_rs ? WGMMAOperandMode::RS : WGMMAOperandMode::SS;
+      pattern_request.sparse = policy_is_sparse;
+      pattern_request.scaled_accumulator =
+          op.HasScale() || use_explicit_scale_accum;
+      pattern_request.accumulator_registers = reg_num_d;
+      pattern_request.k_tiles = wgmma_k_iters;
+      pattern_request.a.is_register = direct_a.is_rs_direct;
+      pattern_request.a.is_shared =
+          direct_a.is_shared_direct || direct_a.is_precomputed_desc;
+      pattern_request.a.registers_per_k_tile = direct_a.regs_per_step;
+      pattern_request.a.major = ParseWGMMAMajor(direct_a.shared_major_order);
+      pattern_request.a.descriptor_offsets = direct_a.static_desc_offsets;
+      pattern_request.b.is_register = direct_b.is_rs_direct;
+      pattern_request.b.is_shared =
+          direct_b.is_shared_direct || direct_b.is_precomputed_desc;
+      pattern_request.b.registers_per_k_tile = direct_b.regs_per_step;
+      pattern_request.b.major = ParseWGMMAMajor(direct_b.shared_major_order);
+      pattern_request.b.descriptor_offsets = direct_b.static_desc_offsets;
+      if (op.HasIssueOrder()) pattern_request.requested_k_order = issue_order;
+
+      auto lowering_pattern = WGMMAPatternRegistry::Select(pattern_request);
+      if (!op.HasIssueOrder() && !lowering_pattern.k_order.empty())
+        issue_order = lowering_pattern.k_order;
+
+      if (lowering_pattern.IsSpecialized()) {
         bool zero_first = false;
-        if (can_use_fast_ss && pending_wgmma_zero_fill_ &&
+        if (lowering_pattern.supports_zero_first && pending_wgmma_zero_fill_ &&
             pending_wgmma_zero_fill_->frag_sym == c_sym &&
             pending_wgmma_zero_fill_->init_end <= exec_output_start) {
           auto generated = ds.str();
@@ -6216,16 +6366,19 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           pending_wgmma_zero_fill_.reset();
         emit_shared_direct_ordered_base(direct_a);
         emit_shared_direct_ordered_base(direct_b);
-        if (can_use_fast_ss) {
-          ds << d_indent << "wgmma_bf16_m64n128k16_ss_k128_order_01234567"
+        required_wgmma_specializations_.insert(lowering_pattern.specialization);
+        auto specialization_name =
+            WGMMASpecializationName(lowering_pattern.specialization);
+        if (lowering_pattern.specialization ==
+            WGMMASpecialization::BF16_M64N128K16_SS_K128) {
+          ds << d_indent << specialization_name
              << (zero_first ? "<true>(" : "(")
              << base_desc_expr_for(direct_a, "desc_" + a_sym) << ", "
              << base_desc_expr_for(direct_b, "desc_" + b_sym) << ", "
              << ExprSTR(frag, false) << ");\n";
         } else {
-          ds << d_indent << "wgmma_bf16_m64n128k16_rs_k128_order_76540123("
-             << direct_a.rs_base_expr << ", "
-             << base_desc_expr_for(direct_b, "desc_" + b_sym) << ", "
+          ds << d_indent << specialization_name << "(" << direct_a.rs_base_expr
+             << ", " << base_desc_expr_for(direct_b, "desc_" + b_sym) << ", "
              << ExprSTR(frag, false) << ");\n";
         }
         if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent);
@@ -7408,6 +7561,20 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
     } else if (auto ety = dyn_cast<EventArrayType>(tty)) {
       if (IsHost())
         choreo_unreachable("yet to support: wait global event in host.");
+      std::string event_name;
+      if (is_array_ref) {
+        auto bid = AST::GetArrayBaseSymbol(*expr);
+        event_name = UnScopedName(bid->name);
+      } else {
+        event_name = UnScopedName(expr->GetSymbol()->name);
+      }
+      if (auto* named = GetNamedEventLowering(event_name)) {
+        ds << d_indent << "// wait event(named barrier) " << PSTR(t) << "\n";
+        ds << d_indent << "asm volatile(\"bar.sync %0, %1;\" :: \"r\"("
+           << named->barrier_id << "), \"r\"(" << named->total_threads
+           << ") : \"memory\");\n";
+        continue;
+      }
       switch (ety->GetStorage()) {
       case Storage::GLOBAL:
       case Storage::LOCAL: {
@@ -7547,6 +7714,20 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
     } else if (auto ety = dyn_cast<EventType>(tty)) {
       if (IsHost())
         choreo_unreachable("yet to support: wait global event in host.");
+      std::string event_name;
+      if (is_array_ref) {
+        auto bid = AST::GetArrayBaseSymbol(*expr);
+        event_name = UnScopedName(bid->name);
+      } else {
+        event_name = UnScopedName(expr->GetSymbol()->name);
+      }
+      if (auto* named = GetNamedEventLowering(event_name)) {
+        ds << d_indent << "// wait event(named barrier) " << PSTR(t) << "\n";
+        ds << d_indent << "asm volatile(\"bar.sync %0, %1;\" :: \"r\"("
+           << named->barrier_id << "), \"r\"(" << named->total_threads
+           << ") : \"memory\");\n";
+        continue;
+      }
       switch (ety->GetStorage()) {
       case Storage::GLOBAL:
       case Storage::LOCAL: {
@@ -7709,6 +7890,21 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
     auto fty = is_array_ref
                    ? GetSymbolType(AST::GetArrayBaseSymbol(*expr)->name)
                    : NodeType(*f);
+    std::string event_name;
+    if (is_array_ref) {
+      auto bid = AST::GetArrayBaseSymbol(*expr);
+      event_name = UnScopedName(bid->name);
+    } else {
+      event_name = UnScopedName(expr->GetSymbol()->name);
+    }
+    if (auto* named = GetNamedEventLowering(event_name)) {
+      assert(!IsHost());
+      ds << d_indent << "// trigger event(named barrier) " << PSTR(f) << "\n";
+      ds << d_indent << "asm volatile(\"bar.arrive %0, %1;\" :: \"r\"("
+         << named->barrier_id << "), \"r\"(" << named->total_threads
+         << ") : \"memory\");\n";
+      continue;
+    }
     if (auto ety = dyn_cast<EventArrayType>(fty)) {
       if (IsHost()) {
         assert(ety->GetStorage() == Storage::GLOBAL);

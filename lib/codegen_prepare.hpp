@@ -506,6 +506,7 @@ private:
     if (in_thr_block_stack.empty()) return;
     auto* it = in_thr_block_stack.top();
     if (!it->HasScopeThreadMask()) {
+      cgi.GetFunctionTrait(fname).RecordEventUnknownParticipation(event_name);
       Note(loc, "event '" + event_name +
                     "' is used in a scope with dynamic thread predicate; "
                     "participation count cannot be determined at compile "
@@ -711,10 +712,35 @@ public:
     return true;
   }
 
+  bool Visit(AST::Call& n) override {
+    auto name = n.function->name;
+    if (name != "__bar_arrive" && name != "__bar_sync") return true;
+    if (!n.arguments || n.arguments->Count() < 1) return true;
+    auto id_arg = dyn_cast<AST::Expr>(n.arguments->ValueAt(0));
+    if (!id_arg || !id_arg->Opts().HasVal()) {
+      cgi.GetFunctionTrait(fname).RecordDynamicNamedBarrierID();
+      return true;
+    }
+    if (auto id = VIInt(id_arg->Opts().GetVal())) {
+      cgi.GetFunctionTrait(fname).RecordExplicitNamedBarrierID(*id);
+    } else {
+      cgi.GetFunctionTrait(fname).RecordDynamicNamedBarrierID();
+    }
+    return true;
+  }
+
   bool Visit(AST::Wait& n) override {
     for (auto& t : n.GetTargets()) {
       auto name = ExtractEventName(*t);
-      if (!name.empty()) RecordEventRef(name, n.LOC());
+      if (!name.empty()) {
+        RecordEventRef(name, n.LOC());
+        if (!in_thr_block_stack.empty()) {
+          auto* it = in_thr_block_stack.top();
+          if (it->HasScopeThreadMask())
+            cgi.GetFunctionTrait(fname).RecordEventWaitUsage(
+                name, it->GetScopeThreadMask());
+        }
+      }
     }
     return true;
   }

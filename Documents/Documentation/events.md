@@ -32,6 +32,14 @@ The backend chooses the hardware synchronization primitive from the event's
 producer, consumers, scope, and participation. Source code does not select an
 mbarrier, named barrier, or transaction count.
 
+For a one-slot CTA release handoff initialized with `= ready`, with statically
+known, disjoint, warp-aligned waiter and trigger sets, the CUDA backend may
+lower the event directly to a named barrier and prime it automatically. Events
+with pending initial state, dynamic, overlapping, sub-warp, multi-slot,
+TMA-completion, or cluster-scope participation keep the general mbarrier
+lowering. This choice is an implementation detail and does not change the
+source semantics.
+
 ## Immediate Trigger
 
 `trigger` without dependencies publishes readiness at that point:

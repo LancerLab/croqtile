@@ -15,6 +15,7 @@
 #include "fragment_layout.hpp"
 #include "operator_info.hpp"
 #include "types.hpp"
+#include "wgmma_pattern.hpp"
 
 using namespace Choreo;
 
@@ -256,6 +257,7 @@ private:
     size_t init_end = 0;
   };
   std::optional<PendingWGMMAZeroFill> pending_wgmma_zero_fill_;
+  std::set<WGMMASpecialization> required_wgmma_specializations_;
   bool has_managed_mma_completion = false;
   bool wgmma_arrive_state_declared = false;
   struct WGMMAHoistedDescArray {
@@ -280,10 +282,20 @@ private:
   // loop-varying address from a loop-invariant expression hidden behind an
   // `anon_*` declaration inside the loop.
   std::unordered_map<std::string, std::string> anonymous_scalar_exprs_;
+  struct NamedEventLowering {
+    int barrier_id = -1;
+    int64_t trigger_threads = 0;
+    int64_t wait_threads = 0;
+    int64_t total_threads = 0;
+    std::vector<bool> trigger_mask;
+  };
+  std::map<std::string, NamedEventLowering> named_event_lowerings_;
+  std::deque<int> available_named_barrier_ids_;
   std::set<std::string> cluster_trigger_events_;
   std::set<std::string> ready_event_names_;
   std::set<std::string> waited_events_;
   std::vector<std::string> pending_barrier_inits_;
+  std::vector<std::string> pending_named_event_primes_;
   std::vector<std::string> pending_tma_prefetch_names_;
   // Stack of innermost foreach loop induction variable names (__iv_xxx).
   // Used to derive inline phase formulas for mbarrier waits.
@@ -356,6 +368,13 @@ private:
 
 private:
   void FlushBarrierInits();
+  void InitializeNamedEventLowering();
+  bool TryConfigureNamedEvent(const std::string& name, bool is_array,
+                              int64_t element_count, int64_t explicit_threads,
+                              Storage storage, bool starts_ready);
+  const NamedEventLowering*
+  GetNamedEventLowering(const std::string& name) const;
+  static std::string ThreadMaskPredicate(const std::vector<bool>& mask);
   std::string InlinePhaseExpr(int stages, bool is_fill) const;
   void EmitFixedHostHead();
   void EmitFixedDeviceHead();
@@ -486,6 +505,8 @@ private:
     wgmma_hoisted_desc_count_ = 0;
     wgmma_uniform_index_count_ = 0;
     anonymous_scalar_exprs_.clear();
+    named_event_lowerings_.clear();
+    available_named_barrier_ids_.clear();
     hoisted_scale_decl_scopes.clear();
     active_hoisted_scale_decls.clear();
     hoisted_scale_accum_scopes.clear();
@@ -498,6 +519,7 @@ private:
     ready_event_names_.clear();
     waited_events_.clear();
     pending_barrier_inits_.clear();
+    pending_named_event_primes_.clear();
     in_named_var_decl_ = false;
     current_inthreads = nullptr;
     inthreads_codegen_stack_.clear();
