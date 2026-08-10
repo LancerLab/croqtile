@@ -2121,6 +2121,17 @@ struct AsyncType : public Type, public TypeIDProvider<AsyncType> {
   __UDT_TYPE_INFO__(Type, AsyncType)
 };
 
+// Common completion-token interface.  DataFuture retains the transferred
+// span, while OperationFuture represents completion of an operation that does
+// not materialize a new data object (for example an asynchronous WGMMA group).
+struct FutureLikeType : public AsyncType,
+                        public TypeIDProvider<FutureLikeType> {
+  FutureLikeType() : AsyncType(BaseType::FUTURE) {}
+  virtual bool IsAsync() const = 0;
+
+  __UDT_TYPE_INFO__(AsyncType, FutureLikeType)
+};
+
 struct EventType;
 template <>
 inline EventType* dyn_cast<EventType>(const Type*);
@@ -2161,13 +2172,13 @@ struct EventType : public AsyncType, public TypeIDProvider<EventType> {
   __UDT_TYPE_INFO__(AsyncType, EventType)
 };
 
-struct FutureType : public AsyncType, public TypeIDProvider<FutureType> {
+struct FutureType : public FutureLikeType, public TypeIDProvider<FutureType> {
   ptr<SpannedType> psty =
       nullptr; // the spanned data associated with the future
   bool async;
 
   explicit FutureType(const ptr<SpannedType>& s, bool a)
-      : AsyncType(BaseType::FUTURE), psty(s), async(a) {}
+      : FutureLikeType(), psty(s), async(a) {}
   const ptr<Type> CloneImpl() const override {
     auto fty =
         std::make_shared<FutureType>(cast<SpannedType>(psty->Clone()), async);
@@ -2220,7 +2231,53 @@ struct FutureType : public AsyncType, public TypeIDProvider<FutureType> {
     psty->Print(os);
   }
 
-  __UDT_TYPE_INFO__(AsyncType, FutureType)
+  __UDT_TYPE_INFO__(FutureLikeType, FutureType)
+};
+
+enum class AsyncOperationKind { UNKNOWN, MMA };
+
+struct OperationFutureType final : public FutureLikeType,
+                                   public TypeIDProvider<OperationFutureType> {
+  AsyncOperationKind operation_kind;
+
+  explicit OperationFutureType(
+      AsyncOperationKind kind = AsyncOperationKind::UNKNOWN)
+      : FutureLikeType(), operation_kind(kind) {}
+
+  AsyncOperationKind OperationKind() const { return operation_kind; }
+  bool IsAsync() const override { return true; }
+  size_t Dims() const override { return 1; }
+  bool IsComplete() const override { return true; }
+  bool HasSufficientInfo() const override {
+    return operation_kind != AsyncOperationKind::UNKNOWN;
+  }
+
+  const ptr<Type> CloneImpl() const override {
+    return std::make_shared<OperationFutureType>(operation_kind);
+  }
+
+  bool operator==(const Type& ty) const override {
+    if (auto fty = dyn_cast<OperationFutureType>(&ty))
+      return operation_kind == fty->operation_kind;
+    return false;
+  }
+
+  bool ApprxEqual(const Type& ty) const override {
+    if (auto fty = dyn_cast<OperationFutureType>(&ty))
+      return operation_kind == AsyncOperationKind::UNKNOWN ||
+             fty->operation_kind == AsyncOperationKind::UNKNOWN ||
+             operation_kind == fty->operation_kind;
+    return false;
+  }
+
+  void Print(std::ostream& os) const override {
+    os << "operation future";
+    if (operation_kind == AsyncOperationKind::MMA) os << "<mma>";
+  }
+
+  const std::string Name() const override { return "operation-future"; }
+
+  __UDT_TYPE_INFO__(FutureLikeType, OperationFutureType)
 };
 
 struct FunctionType : public Type, public TypeIDProvider<FunctionType> {
@@ -3007,6 +3064,11 @@ inline ptr<FutureType> MakeFutureType(const ptr<SpannedType>& v, bool async) {
   return std::make_shared<FutureType>(v, async);
 }
 
+inline ptr<OperationFutureType>
+MakeOperationFutureType(AsyncOperationKind kind = AsyncOperationKind::UNKNOWN) {
+  return std::make_shared<OperationFutureType>(kind);
+}
+
 inline ptr<FutureType> MakeRankedFutureType(size_t n, bool async) {
   return std::make_shared<FutureType>(MakeRankedSpannedType(n), async);
 }
@@ -3133,6 +3195,15 @@ inline static bool GeneralFutureType(const Type& ty) {
 inline static bool GeneralFutureType(const ptr<Type>& ty) {
   if (!ty) return false;
   return GeneralFutureType(*ty);
+}
+
+inline static bool IsFutureLikeType(const Type& ty) {
+  return isa<FutureLikeType>(&ty) ||
+         (isa<PlaceHolderType>(&ty) && ty.GetBaseType() == BaseType::FUTURE);
+}
+
+inline static bool IsFutureLikeType(const ptr<Type>& ty) {
+  return ty && IsFutureLikeType(*ty);
 }
 
 // if type a has better quality than type b

@@ -1,0 +1,35 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a --stmatrix %s -o - | FileCheck %s
+
+__co__ void wgmma_descriptor_loop_hoist() {
+  parallel b by 1 : block {
+    shared bf16[128, 128] q_s;
+    shared bf16[128, 128] k_s[2];
+
+    parallel p by 3 : group-4 {
+      inthreads.async (p > 0) {
+        cid = p - 1;
+        mutable s32 i = 0;
+        while (i < 2) {
+          scores = mma.fill.f32 0.0f;
+          [[schedule(k_tiles(0, 1, 2, 3, 4, 5, 6, 7))]]
+          qk = mma.row.row.async scores,
+            q_s.subspan(64, 128).at(cid, 0), k_s[i % 2];
+          wait qk;
+          i = i + 1;
+        }
+      }
+    }
+  }
+}
+
+// CHECK-LABEL: __choreo_device_wgmma_descriptor_loop_hoist
+// CHECK: int [[WG_INDEX:__choreo_wgmma_uniform_group4_index_[0-9]+]] = __shfl_sync(0xffffffffu, __choreo_vg4id_x, 0);
+// CHECK: uint64_t [[Q_DESC:__choreo_wgmma_hoisted_desc_[0-9]+]] = wgmma_make_smem_desc
+// CHECK-SAME: [[WG_INDEX]]
+// CHECK: uint64_t [[K_DESC0:__choreo_wgmma_hoisted_desc_[0-9]+_0]] = wgmma_make_smem_desc
+// CHECK: uint64_t [[K_DESC1:__choreo_wgmma_hoisted_desc_[0-9]+_1]] = wgmma_make_smem_desc
+// CHECK: while (
+// CHECK-NOT: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>((bf16*)((q_s
+// CHECK: uint64_t {{.*}} = [[Q_DESC]] + matrix_descriptor_encode
+// CHECK: uint64_t {{.*}} = (((i % 2)) ? [[K_DESC1]] : [[K_DESC0]]) + matrix_descriptor_encode

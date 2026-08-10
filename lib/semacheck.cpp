@@ -228,77 +228,23 @@ static int64_t GetForeachStaticExtent(const AST::ForeachBlock& fe) {
   return dyn_cast<sbe::NumericValue>(ub.get())->Value();
 }
 
-static ValueItem GetForeachDynamicExtent(const AST::ForeachBlock& fe) {
-  auto& ranges = fe.GetRanges();
-  if (ranges.empty()) return nullptr;
-  auto rng = dyn_cast<AST::LoopRange>(ranges.front());
-  if (!rng || !rng->GetRV()) return nullptr;
-  auto iv_ty = dyn_cast<BoundedType>(rng->GetRV()->GetType());
-  if (!iv_ty) return nullptr;
-  return iv_ty->GetUpperBound();
-}
-
-// Count MMA Exec operations in the direct body of a foreach (not nested
-// foreachs) that precede the given mma.wait node.  Each Exec on a distinct
-// accumulator generates a warpgroup_commit_batch(), so the maximum number of
-// batches in flight per iteration equals the number of Exec ops.
-static int CountMMAExecsInBody(const ptr<AST::Node>& node,
-                               const AST::Node* stop_at = nullptr,
-                               bool* found_stop = nullptr) {
-  if (!node) return 0;
-  int count = 0;
-  bool dummy = false;
-  if (!found_stop) found_stop = &dummy;
-
-  auto walk = [&](auto&& self, const ptr<AST::Node>& n) -> void {
-    if (!n || *found_stop) return;
-    if (stop_at && n.get() == stop_at) {
-      *found_stop = true;
-      return;
-    }
-    if (auto mma = dyn_cast<AST::MMA>(n)) {
-      if (auto op = mma->GetOperation()) {
-        if (op->Tag() == AST::MMAOperation::Exec) count++;
-      }
-      return;
-    }
-    if (dyn_cast<AST::ForeachBlock>(n)) return;
-    if (auto mn = dyn_cast<AST::MultiNodes>(n)) {
-      for (auto& item : mn->values) {
-        self(self, item);
-        if (*found_stop) return;
-      }
-      return;
-    }
-    if (auto ie = dyn_cast<AST::IfElseBlock>(n)) {
-      self(self, ie->GetBody());
-      if (*found_stop) return;
-      if (ie->HasElse()) self(self, ie->GetElseBody());
-      return;
-    }
-    if (auto block = dyn_cast<AST::Block>(n)) {
-      self(self, block->GetBody());
-      return;
-    }
-  };
-  walk(walk, node);
-  return count;
-}
-
 bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
   if (isa<AST::ChoreoFunction>(&n)) {
     pending_async.clear();
     waited_async.clear();
+    live_async.clear();
+    observed_async.clear();
+    completed_async.clear();
     scope_pred_stack.clear();
     parallel_level_stack.clear();
     cooperative_stack.clear();
     shared_tensor_producers.clear();
+    async_dma_producers.clear();
   }
   if (auto block = dyn_cast<AST::PredBlock>(&n))
     scope_pred_stack.push_back(block->GetScopePredicate());
   else if (auto fe = dyn_cast<AST::ForeachBlock>(&n)) {
     scope_pred_stack.push_back(fe->GetScopePredicate());
-    foreach_stack.push_back(fe);
     int unroll_factor = 0;
     if (AST::HasUnrollHint(*fe, unroll_factor) && unroll_factor > 0) {
       int64_t extent = GetForeachStaticExtent(*fe);
@@ -336,10 +282,63 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
   return true;
 }
 
+void SemaChecker::RecordAsyncProducer(const std::string& name) {
+  pending_async.insert(name);
+  live_async.insert(name);
+}
+
+bool SemaChecker::ObserveAsyncFuture(const std::string& name,
+                                     const location& loc,
+                                     const std::string& operation) {
+  if (completed_async.count(name)) {
+    Error1(loc, operation + " observes future '" + name +
+                    "' after it was published; wait on the published event "
+                    "instead.");
+    return false;
+  }
+  if (observed_async.count(name)) {
+    Error1(loc, operation + " observes future '" + name + "' more than once.");
+    return false;
+  }
+  if (!live_async.count(name)) {
+    Error1(loc,
+           operation + " requires a preceding live future '" + name + "'.");
+    return false;
+  }
+  observed_async.insert(name);
+  waited_async.insert(name);
+  return true;
+}
+
+bool SemaChecker::ConsumeAsyncFuture(const std::string& name,
+                                     const location& loc,
+                                     const std::string& operation) {
+  if (completed_async.count(name)) {
+    Error1(loc, operation + " consumes future '" + name +
+                    "' more than once; publish an event for multiple "
+                    "consumers.");
+    return false;
+  }
+  if (observed_async.count(name)) {
+    Error1(loc, operation + " cannot bind future '" + name +
+                    "' after it was explicitly waited; trigger the event "
+                    "directly after the wait.");
+    return false;
+  }
+  if (!live_async.count(name)) {
+    Error1(loc,
+           operation + " requires a preceding live future '" + name + "'.");
+    return false;
+  }
+  live_async.erase(name);
+  completed_async.insert(name);
+  waited_async.insert(name);
+  return true;
+}
+
 bool SemaChecker::AfterVisitImpl(AST::Node& n) {
   if (isa<AST::PredBlock>(&n) || isa<AST::ForeachBlock>(&n))
     scope_pred_stack.pop_back();
-  if (isa<AST::ForeachBlock>(&n)) foreach_stack.pop_back();
   if (isa<AST::ParallelBy>(&n)) {
     parallel_level_stack.pop_back();
     cooperative_stack.pop_back();
@@ -399,6 +398,9 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
   // check out-of-bound for the elemof operation in wait or trigger.
   // note: elemof in chunkat is not Expr node, so we do not check it here.
   if (n.op == "elemof") {
+    // event.at(order) accepts a monotonically increasing logical order. Its
+    // physical slot is selected modulo the event-array extent in codegen.
+    if (AST::IsEventGenerationAt(n)) return true;
     auto arr_sym = GetArrayBaseSymbol(n);
     size_t subscription_level = GetSubScriptLevel(n);
     // access: events[a][b][c]
@@ -977,8 +979,10 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     Error1(n.LOC(),
            "A async DMA must have a named future or an event to wait on.");
 
-  if (!n.future.empty() && cast<FutureType>(ty)->IsAsync())
-    pending_async.insert(InScopeName(n.future));
+  if (!n.future.empty() && cast<FutureType>(ty)->IsAsync()) {
+    RecordAsyncProducer(InScopeName(n.future));
+    async_dma_producers[InScopeName(n.future)] = &n;
+  }
   if (!n.chain_from.empty()) waited_async.insert(InScopeName(n.chain_from));
 
   if (!isa<AST::ChunkAt>(n.from) || !isa<SpannedType>(n.from->GetType()))
@@ -1232,7 +1236,6 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
   switch (op.Tag()) {
   case AST::MMAOperation::Fill: break;
   case AST::MMAOperation::LoadR: break;
-  case AST::MMAOperation::Desc: break;
   case AST::MMAOperation::Load: {
     // Keep explicit mma.load swizzles consistent with the DMA/TMA that fills
     // the referenced shared-memory tensor.
@@ -1420,6 +1423,11 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
                          "to verify at compile time.");
       }
     }
+    if (op.HasExecFuture()) {
+      auto future_id = AST::GetIdentifier(*op.ExecFuture());
+      assert(future_id && "expecting a named MMA operation future.");
+      RecordAsyncProducer(InScopeName(future_id->name));
+    }
   } break;
   case AST::MMAOperation::Scale: {
     auto& c_sym = AST::FragName(op.ScaleAccumulator());
@@ -1456,36 +1464,6 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
   } break;
   case AST::MMAOperation::Store: break;
   case AST::MMAOperation::Commit: break;
-  case AST::MMAOperation::Wait: {
-    int depth = op.WaitDepth();
-    if (depth > 0 && !foreach_stack.empty()) {
-      auto* fe = foreach_stack.back();
-      int execs_per_iter = CountMMAExecsInBody(fe->GetBody(), &n);
-      if (execs_per_iter < 1) execs_per_iter = 1;
-      int64_t extent = GetForeachStaticExtent(*fe);
-      if (extent > 0 && depth >= extent * execs_per_iter) {
-        Error1(n.LOC(), "mma.wait<" + std::to_string(depth) +
-                            "> depth must be less than the enclosing loop "
-                            "extent (" +
-                            std::to_string(extent) +
-                            ") * commits per iteration (" +
-                            std::to_string(execs_per_iter) + ").");
-      } else if (extent < 0) {
-        auto ub = GetForeachDynamicExtent(*fe);
-        if (ub) {
-          auto limit = (execs_per_iter > 1) ? ub * sbe::nu(execs_per_iter) : ub;
-          auto cond = sbe::oc_lt(sbe::nu(depth), limit);
-          FCtx(fname).GetAssessor(*this).Assess(
-              AssessPolicy::Error, cond,
-              "mma.wait<" + std::to_string(depth) +
-                  "> depth must be less than the enclosing loop extent"
-                  " * commits per iteration (" +
-                  std::to_string(execs_per_iter) + ").",
-              UsageType::ShapeCompatibility, AssessType::ENTRY, n.LOC(), &n);
-        }
-      }
-    }
-  } break;
   default: choreo_unreachable("unsupported mma operation.");
   }
   return true;
@@ -1591,13 +1569,17 @@ bool SemaChecker::VisitNode(AST::ChunkAt& n) {
 }
 
 bool SemaChecker::VisitNode(AST::Trigger& n) {
+  bool native_event = n.GetEvents().size() == 1;
   for (auto& f : n.GetEvents()) {
     auto fty = NodeType(*f);
     if (!isa<EventType>(fty)) {
       Error1(n.LOC(),
              "trigger a non-event type " + PSTR(f) + " (" + PSTR(fty) + ").");
+      native_event = false;
       continue;
     }
+    if (cast<EventType>(fty)->GetStorage() != Storage::SHARED)
+      native_event = false;
     if (auto id = AST::GetIdentifier(*f))
       pending_async.insert(InScopeName(id->name));
     else if (auto e = dyn_cast<AST::Expr>(f)) {
@@ -1610,20 +1592,108 @@ bool SemaChecker::VisitNode(AST::Trigger& n) {
       pending_async.insert(InScopeName(bid->name));
     }
   }
+  if (n.HasDependencies()) {
+    if (!native_event)
+      Error1(n.LOC(), "trigger-after requires exactly one shared event that "
+                      "can be bound to native async completion.");
+    for (auto& dependency : n.GetDependencies()) {
+      auto dependency_ty = NodeType(*dependency);
+      if (!IsFutureLikeType(dependency_ty)) {
+        Error1(dependency->LOC(),
+               "trigger-after expects a future dependency, but got " +
+                   PSTR(dependency_ty) + ".");
+        continue;
+      }
+      auto id = AST::GetIdentifier(*dependency);
+      if (!id) {
+        Error1(dependency->LOC(),
+               "trigger-after currently requires a named future.");
+        continue;
+      }
+      auto future_name = InScopeName(id->name);
+      bool native_future = true;
+      if (observed_async.count(future_name)) {
+        Error1(dependency->LOC(),
+               "trigger-after cannot bind future '" + future_name +
+                   "' after it was explicitly waited; trigger the event "
+                   "directly after the wait.");
+        native_future = false;
+      } else if (isa<OperationFutureType>(dependency_ty)) {
+        Error1(dependency->LOC(),
+               "trigger-after cannot bind an MMA future because WGMMA has no "
+               "native completion event; use 'wait " +
+                   id->name + "; trigger <event>'.");
+        native_future = false;
+      } else {
+        auto producer_it = async_dma_producers.find(future_name);
+        if (producer_it == async_dma_producers.end()) {
+          Error1(dependency->LOC(),
+                 "trigger-after requires a source-visible async DMA future "
+                 "producer.");
+          native_future = false;
+        } else {
+          auto* producer = producer_it->second;
+          auto src_ty = GetSpannedType(NodeType(*producer->GetFrom()));
+          auto dst_ty = GetSpannedType(NodeType(*producer->GetTo()));
+          const bool global_to_shared =
+              src_ty && dst_ty &&
+              (src_ty->GetStorage() == Storage::GLOBAL ||
+               src_ty->GetStorage() == Storage::DEFAULT) &&
+              dst_ty->GetStorage() == Storage::SHARED;
+          if (!producer->IsTMA() || !producer->IsAsync()) {
+            Error1(dependency->LOC(),
+                   "trigger-after requires native completion-event binding; "
+                   "use an explicit wait followed by a direct trigger for "
+                   "this DMA future.");
+            native_future = false;
+          } else if (!global_to_shared) {
+            Error1(dependency->LOC(),
+                   "trigger-after cannot bind a TMA store future because "
+                   "shared-to-global TMA has no mbarrier completion; use a "
+                   "synchronous tma.copy followed by a direct trigger.");
+            native_future = false;
+          }
+        }
+      }
+      // Count an invalid edge as an attempted completion so the focused
+      // diagnostic above is not followed by an unrelated end-of-function
+      // "not explicitly waited" error.
+      if (native_future && native_event)
+        ConsumeAsyncFuture(future_name, dependency->LOC(), "trigger-after");
+      else {
+        live_async.erase(future_name);
+        completed_async.insert(future_name);
+        waited_async.insert(future_name);
+      }
+    }
+  }
   return true;
 }
 
 bool SemaChecker::VisitNode(AST::Wait& n) {
   for (auto& f : n.GetTargets()) {
     auto fty = NodeType(*f);
-    if (!isa<FutureType>(fty) && !isa<EventType>(fty)) {
+    if (!IsFutureLikeType(fty) && !isa<EventType>(fty)) {
       Error1(n.LOC(),
              "wait for a non-async type " + PSTR(f) + " (" + PSTR(fty) + ").");
       continue;
     }
-    if (auto id = AST::GetIdentifier(*f))
-      waited_async.insert(InScopeName(id->name));
-    else if (auto e = dyn_cast<AST::Expr>(f)) {
+    if (auto id = AST::GetIdentifier(*f)) {
+      auto future_name = InScopeName(id->name);
+      if (isa<OperationFutureType>(fty))
+        ObserveAsyncFuture(future_name, f->LOC(), "wait");
+      else if (isa<FutureType>(fty)) {
+        // Data-future symbols can participate in swap/rotation pipelines, so
+        // multiple static wait sites are valid. Remember a direct DMA wait to
+        // reject a later native event binding without applying the stricter
+        // single-observation rule used by operation futures.
+        if (async_dma_producers.count(future_name))
+          observed_async.insert(future_name);
+        waited_async.insert(future_name);
+      } else {
+        waited_async.insert(future_name);
+      }
+    } else if (auto e = dyn_cast<AST::Expr>(f)) {
       if (e->op != "elemof") {
         Error1(n.LOC(),
                "expect a element-of operation but got " + e->op + ").");

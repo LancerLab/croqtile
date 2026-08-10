@@ -1,0 +1,10 @@
+// RUN: not choreo -e %s 2>&1 | FileCheck %s
+
+__co__ void removed_tma_evict_hint(global f16[64] input) {
+  parallel b by 1 : block {
+    shared f16[64] tile;
+    load = tma.copy.async.evict_last input => tile;
+  }
+}
+
+// CHECK: error: syntax error

@@ -1,0 +1,18 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void event_ready_scalar() {
+  parallel b by 1 : block {
+    shared event empty = ready;
+    parallel g by 2 : group-4 {
+      inthreads.async (g == 0) {
+        wait empty;
+      }
+      inthreads.async (g == 1) {
+        trigger empty;
+      }
+    }
+  }
+}
+
+// CHECK: empty.wait(1); // wait event(raw mbarrier)

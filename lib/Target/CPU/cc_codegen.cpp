@@ -290,7 +290,16 @@ const std::string CCCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
     } else if (expr->IsBinary()) {
       auto& op = expr->GetOp();
       if (op == Op::ElemOf) {
-        oss << ExprSTR(expr->GetL()) << "[" << ExprSTR(expr->GetR()) << "]";
+        oss << ExprSTR(expr->GetL()) << "[";
+        if (AST::IsEventGenerationAt(*expr)) {
+          auto event_array = cast<EventArrayType>(NodeType(*expr->GetL()));
+          auto extent = VIInt(event_array->Dimension(0));
+          assert(extent && *extent > 0);
+          oss << "(" << ExprSTR(expr->GetR()) << ") % " << *extent;
+        } else {
+          oss << ExprSTR(expr->GetR());
+        }
+        oss << "]";
       } else if (op == Op::GetIth) {
         oss << ExprSTR(expr->GetR());
       } else if (op == Op::Select) {
@@ -1110,9 +1119,7 @@ bool CCCodeGen::Visit(AST::MMA& n) {
   TraceEachVisit(n);
   auto& op = *n.GetOperation();
 
-  if (op.Tag() == AST::MMAOperation::Commit ||
-      op.Tag() == AST::MMAOperation::Wait)
-    return true;
+  if (op.Tag() == AST::MMAOperation::Commit) return true;
 
   const ptr<AST::Expr>& frag = op.GetFrag();
   std::string sym = AST::FragName(frag);

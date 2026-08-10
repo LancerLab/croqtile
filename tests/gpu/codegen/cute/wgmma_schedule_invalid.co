@@ -1,0 +1,16 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s
+
+__co__ void wgmma_schedule_invalid() {
+  parallel b by 1 : block {
+    shared bf16[64, 64] lhs;
+    shared bf16[64, 128] rhs;
+    parallel g by 1 : group-4 {
+      acc = mma.fill.f32 0.0f;
+      [[schedule(k_tiles(3, 2, 2, 0))]]
+      mma.row.col acc, lhs, rhs;
+    }
+  }
+}
+
+// CHECK: MMA k_tiles schedule must be a permutation of [0, 4)

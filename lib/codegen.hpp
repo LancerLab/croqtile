@@ -130,6 +130,7 @@ struct LaunchConfig {
 
 struct ModuleTraits {
   bool has_tma = false;
+  bool has_event = false;
 };
 
 struct FuncTrait {
@@ -200,8 +201,9 @@ struct FuncTrait {
     event_decls.push_back({name, tc, loc});
   }
 
-  // Events used in tma.copy.async<event> are "fill" events (init(1)).
-  // Events only used in trigger/wait are "empty" events (init(N)).
+  // Events bound to a TMA completion by trigger-after are "fill" events
+  // (init(1)). Events used only by immediate trigger/wait are "empty" events
+  // (init(N)).
   std::set<std::string> tma_fill_events;
 
   void RecordTMAFillEvent(const std::string& name) {
@@ -442,6 +444,8 @@ public:
   }
 
   bool HasTMA() const { return GetModuleTrait().has_tma; }
+
+  bool HasEvent() const { return GetModuleTrait().has_event; }
 
   bool HasTMA(const std::string& fname) const {
     return GetFunctionTrait(fname).has_tma;

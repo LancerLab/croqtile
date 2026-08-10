@@ -250,12 +250,38 @@ private:
   std::deque<std::string> recent_tma_tx_bytes;
   bool has_pending_wgmma_finalize = false;
   std::string pending_wgmma_acc_sym;
-  bool has_explicit_mma_wait = false;
+  struct PendingWGMMAZeroFill {
+    std::string frag_sym;
+    size_t init_begin = 0;
+    size_t init_end = 0;
+  };
+  std::optional<PendingWGMMAZeroFill> pending_wgmma_zero_fill_;
+  bool has_managed_mma_completion = false;
   bool wgmma_arrive_state_declared = false;
+  struct WGMMAHoistedDescArray {
+    std::string stage0;
+    std::string stage1;
+  };
+  struct WGMMAWhileHoistScope {
+    size_t insertion_pos = 0;
+    std::string indent;
+    std::set<std::string> variant_symbols;
+    std::ostringstream declarations;
+    std::unordered_map<std::string, std::string> invariant_descs;
+    std::unordered_map<std::string, WGMMAHoistedDescArray> stage_descs;
+    std::unordered_map<std::string, std::string> uniform_group4_indices;
+  };
+  std::vector<WGMMAWhileHoistScope> wgmma_while_hoist_scopes_;
+  size_t wgmma_hoisted_desc_count_ = 0;
+  size_t wgmma_uniform_index_count_ = 0;
+  // Scalar address expressions introduced by normalization.  Direct WGMMA
+  // operands commonly use one of these aliases for a tile index.  Keep the
+  // original expression so descriptor hoisting can distinguish a genuinely
+  // loop-varying address from a loop-invariant expression hidden behind an
+  // `anon_*` declaration inside the loop.
+  std::unordered_map<std::string, std::string> anonymous_scalar_exprs_;
   std::set<std::string> cluster_trigger_events_;
-  std::set<std::string> event_arrive_tx_events_;
-  std::set<std::string> tma_bound_event_triggers_;
-  std::set<std::string> empty_event_names_;
+  std::set<std::string> ready_event_names_;
   std::set<std::string> waited_events_;
   std::vector<std::string> pending_barrier_inits_;
   std::vector<std::string> pending_tma_prefetch_names_;
@@ -266,6 +292,7 @@ private:
   bool has_analyzed_warpspec = false;
   bool warpspec_wgmma_arrived = false;
   AST::InThreadsBlock* current_inthreads = nullptr;
+  std::vector<AST::InThreadsBlock*> inthreads_codegen_stack_;
 
   bool in_register_direct_automap_ = false;
   bool vec4_automap_skip_ = false;
@@ -312,7 +339,6 @@ private:
   std::vector<std::optional<HoistedScaleAccumInfo>> hoisted_scale_accum_scopes;
   std::vector<std::vector<ExplicitScaleAccumInfo>> explicit_scale_accum_scopes;
   std::unordered_map<std::string, ptr<AST::ChunkAt>> live_chunk_aliases;
-  std::unordered_set<std::string> explicit_mma_descs_;
   std::unordered_set<std::string> explicit_mma_loads_;
   std::unordered_map<std::string, SwizMode> shared_buf_swiz_;
 
@@ -453,24 +479,55 @@ private:
     post_site_assertions.clear();
     recent_tma_tx_bytes.clear();
     has_pending_wgmma_finalize = false;
-    has_explicit_mma_wait = false;
+    pending_wgmma_zero_fill_.reset();
+    has_managed_mma_completion = false;
     wgmma_arrive_state_declared = false;
+    wgmma_while_hoist_scopes_.clear();
+    wgmma_hoisted_desc_count_ = 0;
+    wgmma_uniform_index_count_ = 0;
+    anonymous_scalar_exprs_.clear();
     hoisted_scale_decl_scopes.clear();
     active_hoisted_scale_decls.clear();
     hoisted_scale_accum_scopes.clear();
     live_chunk_aliases.clear();
-    explicit_mma_descs_.clear();
     explicit_mma_loads_.clear();
     shared_buf_swiz_.clear();
     tma_inner_splits_.clear();
     frag_chunk_rs_aliases_.clear();
     cluster_trigger_events_.clear();
-    event_arrive_tx_events_.clear();
-    tma_bound_event_triggers_.clear();
+    ready_event_names_.clear();
+    waited_events_.clear();
     pending_barrier_inits_.clear();
     in_named_var_decl_ = false;
+    current_inthreads = nullptr;
+    inthreads_codegen_stack_.clear();
     emitted_device_names_.clear();
     ResetLineDirectiveState();
+  }
+
+  static void CollectLoopVariantSymbols(AST::Node* node,
+                                        std::set<std::string>& out) {
+    if (!node) return;
+    if (auto decl = dyn_cast<AST::NamedVariableDecl>(node)) {
+      out.insert(decl->GetName());
+    } else if (auto assignment = dyn_cast<AST::Assignment>(node)) {
+      if (!assignment->AssignToDataElement()) out.insert(assignment->GetName());
+    } else if (auto with = dyn_cast<AST::WithIn>(node)) {
+      for (const auto& matcher : with->GetMatchers())
+        if (auto id = dyn_cast<AST::Identifier>(matcher)) out.insert(id->name);
+    }
+
+    if (auto nodes = dyn_cast<AST::MultiNodes>(node)) {
+      for (const auto& child : nodes->values)
+        CollectLoopVariantSymbols(child.get(), out);
+      return;
+    }
+    if (auto if_else = dyn_cast<AST::IfElseBlock>(node)) {
+      CollectLoopVariantSymbols(if_else->GetThenBody().get(), out);
+      CollectLoopVariantSymbols(if_else->GetElseBody().get(), out);
+      return;
+    }
+    if (node->HasBody()) CollectLoopVariantSymbols(node->GetBody().get(), out);
   }
 
   static void CollectClusterTriggerEvents(AST::Node* node,
@@ -588,6 +645,9 @@ private:
                                               ptr<DMAConfig> = nullptr) const;
   const ValueList GenIndices(const ptr<AST::ChunkAt>&,
                              const ptr<DMAConfig>& = nullptr) const;
+  std::optional<ValueList>
+  GenCompactRootTMAIndices(const TMADesc&, const ptr<AST::ChunkAt>&,
+                           const ValueItem& inner_dim) const;
   const std::string TileBaseOffset(const ptr<AST::ChunkAt>&) const;
   const ValueItem
   GenOffset(const ptr<AST::ChunkAt>&,
@@ -736,6 +796,28 @@ private:
     for (size_t i = 0; i < mask.size(); ++i)
       if (mask[i]) thread_indices.push_back(i);
     return thread_indices;
+  }
+
+  std::string CurrentScopeWarpGroupLeaderPredicate() const {
+    auto indices = CurrentScopeThreadIndices();
+    if (indices.empty()) {
+      return current_thread_count_expr.empty() ? "(threadIdx.x % 128) == 0"
+                                               : "__choreo_vtid_x == 0";
+    }
+
+    std::string predicate = "(";
+    int64_t previous_wg = -1;
+    bool first = true;
+    for (int64_t index : indices) {
+      int64_t wg = index / 128;
+      if (wg == previous_wg) continue;
+      if (!first) predicate += " || ";
+      predicate += "threadIdx.x == " + std::to_string(index);
+      first = false;
+      previous_wg = wg;
+    }
+    predicate += ")";
+    return predicate;
   }
 
   // In warpspec mode, use wg_barrier.sync() instead of __syncthreads()

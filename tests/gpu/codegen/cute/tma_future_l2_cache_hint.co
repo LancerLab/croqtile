@@ -1,0 +1,29 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void tma_future_l2_cache_hint(global bf16[128, 128] q,
+                                     global bf16[128, 128] kv) {
+  parallel b by 1 : block {
+    shared bf16[128, 128] q_s;
+    shared bf16[128, 128] kv_s;
+    shared event q_full, kv_full;
+    parallel g by 2 : group-4 {
+      inthreads.async (g == 0) {
+        q_load = tma.copy.async.swiz<128> q => q_s;
+        call croq::cuda::evict_first(q_load);
+        trigger q_full after q_load;
+
+        kv_load = tma.copy.async.swiz<128> kv => kv_s;
+        call croq::cuda::evict_last(kv_load);
+        trigger kv_full after kv_load;
+      }
+      inthreads.async (g == 1) {
+        wait q_full, kv_full;
+      }
+    }
+  }
+}
+
+// CHECK: tma_load_3d_shared_global_mbarrier_cache_hint<choreo::TMA_L2CacheHint::EVICT_FIRST>
+// CHECK: tma_load_3d_shared_global_mbarrier_cache_hint<choreo::TMA_L2CacheHint::EVICT_LAST>
+// CHECK-NOT: croq::cuda::evict_

@@ -96,6 +96,8 @@
 | `dma.any` | Placeholder future |
 | `dma.copy.async src => dst after f` | Chained DMA |
 | `tma.copy src => shared` | TMA bulk copy, global <-> shared (SM90+) |
+| `f = tma.copy.async src => shared` | Async TMA data future |
+| `call croq::cuda::evict_first(f)` | Attach TMA L2 eviction hint |
 
 ## View Operations
 
@@ -115,10 +117,13 @@
 | `mc = mma.fill 0` | Initialize accumulator |
 | `mma.fill mc, 0.0f` | Re-initialize |
 | `ma = mma.load data.chunkat(...)` | Load operand |
+| `mma.row.row mc, shared_a, shared_b` | Direct WGMMA shared operands |
 | `mma.row.col mc, ma, mb` | D = A * B + C (A row, B col) |
 | `mma.row.row mc, ma, mb` | D = A * B + C (A row, B row) |
 | `mma.col.row mc, ma, mb` | D = A * B + C (A col, B row) |
 | `mma.col.col mc, ma, mb` | D = A * B + C (A col, B col) |
+| `f = mma.row.row.async mc, a, b` | Async MMA operation future |
+| `[[schedule(k_tiles(...))]]` | Set auto-split WGMMA K issue order |
 | `mma.store mc, output.chunkat(...)` | Store result |
 
 ## Synchronization
@@ -130,8 +135,11 @@
 | `swap(f1, f2)` | Exchange futures |
 | `select(cond, f_t, f_f)` | Conditional future |
 | `shared event e` | Declare event |
-| `trigger e` | Set event |
-| `wait e` | Wait + auto-reset event |
+| `shared event e[N] = ready` | Declare initially ready generation zero |
+| `trigger e` | Publish readiness immediately |
+| `trigger e after f0, f1` | Bind native future completion to an event (no wait) |
+| `wait e` | Wait for the current event generation |
+| `wait e.at(order)` | Wait for a cyclic event generation |
 | `sync.shared` | Thread synchronization |
 
 ## Thread Masking

@@ -47,8 +47,8 @@ This reference (level-2) is for readers who want to understand the language in d
 
 ### Part F -- Synchronization and Async
 
-19. [Events](events.md) -- `event`, `trigger`, `wait`, deadlock avoidance
-20. [Futures and Async](futures-and-async.md) -- Future semantics, async model, non-blocking chains
+19. [Events](events.md) -- Generations, `ready`, staged access, and completion publication
+20. [Futures and Async](futures-and-async.md) -- Data/operation futures, event generations, and native completion bindings
 
 ### Part G -- C++ Interop
 

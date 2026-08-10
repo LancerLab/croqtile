@@ -244,8 +244,6 @@ void MMA::accept(Choreo::Visitor& v) {
     operation->LoadFrom()->accept(v);
     if (operation->IsLoadR() && operation->LoadTo())
       operation->LoadTo()->accept(v);
-  } else if (operation->IsDesc()) {
-    operation->DescFrom()->accept(v);
   } else if (operation->IsKind(MMAOperation::Exec)) {
     if (operation->ExecOperand(0)) operation->ExecOperand(0)->accept(v);
     if (operation->ExecOperand(1)) operation->ExecOperand(1)->accept(v);
@@ -337,6 +335,7 @@ void Wait::accept(Choreo::Visitor& v) {
 void Trigger::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   targets->accept(v);
+  if (dependencies) dependencies->accept(v);
   v.Visit(*this);
   v.AfterVisit(*this);
 }

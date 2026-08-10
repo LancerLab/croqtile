@@ -1,0 +1,24 @@
+// RUN: not choreo -es -t cute -arch=sm_90a %s -o /dev/null 2>&1 | FileCheck %s
+
+__co__ void async_operation_future_lifetime() {
+  parallel b by 1 : block {
+    shared f16 [64, 64] lhs;
+    shared f16 [128, 64] rhs;
+    shared event done;
+
+    parallel g by 2 : group-4 {
+      inthreads.async (g == 0) {
+        acc = mma.fill.f32 0.0f;
+        qk = mma.row.row.async acc, lhs, rhs;
+        trigger done after qk;
+      }
+
+      inthreads.async (g == 1) {
+        wait done;
+      }
+    }
+  }
+}
+
+// CHECK: error: trigger-after cannot bind an MMA future because WGMMA has no native completion event; use 'wait qk; trigger <event>'.
+// CHECK: Totally 1 errors have been detected.

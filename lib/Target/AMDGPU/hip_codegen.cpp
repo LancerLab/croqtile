@@ -1868,6 +1868,14 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
              ExprSTR(expr->GetR(), is_host) + ")";
     }
     if (op == Op::ElemOf) {
+      if (AST::IsEventGenerationAt(*expr)) {
+        auto event_array = cast<EventArrayType>(NodeType(*expr->GetL()));
+        auto extent = VIInt(event_array->Dimension(0));
+        assert(extent && *extent > 0);
+        return ExprSTR(expr->GetL(), is_host) + "[(" +
+               ExprSTR(expr->GetR(), is_host) + ") % " +
+               std::to_string(*extent) + "]";
+      }
       return ExprSTR(expr->GetL(), is_host) + "[" +
              ExprSTR(expr->GetR(), is_host) + "]";
     }

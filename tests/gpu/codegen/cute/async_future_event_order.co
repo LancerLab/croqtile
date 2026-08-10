@@ -1,0 +1,36 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+#define STAGES 2
+
+__co__ void async_future_event_order(global f16 [512, 128] input) {
+  parallel b by 1 : block {
+    shared f16 [128, 128] tile[STAGES];
+    shared event full[STAGES], empty[STAGES] = ready;
+
+    parallel g by 2 : group-4 {
+      inthreads.async (g == 0) {
+        foreach {order} in [4] {
+          slot = order % STAGES;
+          wait empty.at(order);
+          load = tma.copy.async
+            input.subspan(128, 128).at(order, 0) => tile[slot];
+          trigger full.at(order) after load;
+        }
+      }
+
+      inthreads.async (g == 1) {
+        foreach {order} in [4] {
+          wait full.at(order);
+          trigger empty.at(order);
+        }
+      }
+    }
+  }
+}
+
+// CHECK: empty[(__iv_order) % 2].wait(((((__iv_order) / 2) & 1) ^ 1));
+// CHECK: full[(__iv_order) % 2].arrive_and_expect_tx(32768);
+// CHECK-NEXT: choreo::tma_load_2d_shared_cta_global_mbarrier
+// CHECK-NOT: load.wait();
+// CHECK: full[(__iv_order) % 2].wait(((((__iv_order) / 2) & 1)));

@@ -1,0 +1,11 @@
+// RUN: not choreo -e %s 2>&1 | FileCheck %s
+
+__co__ void removed_tma_event_binding(global f16[64] input) {
+  parallel b by 1 : block {
+    shared f16[64] tile;
+    shared event full;
+    tma.copy.async<full> input => tile;
+  }
+}
+
+// CHECK: error: syntax error

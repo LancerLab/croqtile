@@ -295,7 +295,8 @@ public:
                          n.TypeNameString());
     if (isa<BoundedType>(nty))
       return VNKind::VNK_UBOUND;
-    else if (isa<SpannedType>(nty) || GeneralFutureType(nty))
+    else if (isa<SpannedType>(nty) ||
+             (GeneralFutureType(nty) && !isa<OperationFutureType>(nty)))
       return VNKind::VNK_MDSPAN;
     else
       return VNKind::VNK_VALUE;

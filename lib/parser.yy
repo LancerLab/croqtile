@@ -207,7 +207,7 @@ extern int yylex();
 %token <std::string> IDENTIFIER ATTR_CO DEVICE_EXPR
 %token <std::string> CONST STATIC EXTERN INLINE ATTR_ID ATTRIBUTE SIGNED UNSIGNED TYPENAME DEVICE_TEMPLATE
 // type related
-%token <std::string> MDSPAN ITUPLE EVENT MUTABLE STREAM
+%token <std::string> MDSPAN ITUPLE EVENT MUTABLE STREAM REMOVED_STAGE
 %token <Choreo::Storage> STORAGE
 %token <Choreo::ParallelLevel> PBLEVEL
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
@@ -216,7 +216,7 @@ extern int yylex();
 %token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC BARRIER FENCE CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG
 %token DLBRAKT
 // MMA related builtin operations
-%token <std::string> MMA FILL LOAD DESC STORE ROW COLUMN SCALE MASK MMAWAIT
+%token <std::string> MMA FILL LOAD STORE ROW COLUMN SCALE MASK
 %token <std::string> UNROLL
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXP2F EXPM1 FABS FMAF FRCP_RN FLOOR GELU ISFINITE FMAX FMIN ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA TOCAST
 %token <std::string> ATOMIC_ADD ATOMIC_SUB ATOMIC_EXCH ATOMIC_MIN ATOMIC_MAX ATOMIC_AND ATOMIC_OR ATOMIC_XOR ATOMIC_CAS
@@ -280,6 +280,7 @@ extern int yylex();
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr subdata_expr
 %nterm <AST::ptr<AST::Select>> select_expr
 %nterm <AST::MMAOperation::ExecMethod> mma_exec_method
+%nterm <std::vector<int>> mma_issue_order mma_schedule_attribute
 %nterm <Choreo::Storage> param_storage
 %nterm <PLAnnotation> note_pl
 
@@ -745,6 +746,16 @@ statement
     : declarations SEMCOL        { $$ = $1; }
     | assignments  SEMCOL        { $$ = $1; }
     | dma_stmt     SEMCOL        { $$ = $1; }
+    | mma_schedule_attribute mma_stmt SEMCOL {
+        auto mma = cast<AST::MMA>($2);
+        auto op = mma->GetOperation();
+        if (op->Tag() != AST::MMAOperation::Exec) {
+          error(@2, "[[schedule(k_tiles(...))]] only applies to an MMA execution statement");
+          YYERROR;
+        }
+        op->SetIssueOrder(std::move($1));
+        $$ = $2;
+      }
     | mma_stmt     SEMCOL        { $$ = $1; }
     | frag_stmt    SEMCOL        { $$ = $1; }
     | wait_stmt    SEMCOL        { $$ = $1; }
@@ -812,7 +823,15 @@ opt_stream_bind
     ;
 
 pb_attribute
-    : pb_attribute DLBRAKT LAUNCHBOUNDS LPAREN g_value_list RPAREN RBRAKT RBRAKT {
+    : DLBRAKT LAUNCHBOUNDS LPAREN g_value_list RPAREN RBRAKT RBRAKT {
+        $$ = PBAttributes{};
+        $$.launch_bounds = $4;
+      }
+    | DLBRAKT MAXNREG LPAREN s_expr RPAREN RBRAKT RBRAKT {
+        $$ = PBAttributes{};
+        $$.maxnreg = $4;
+      }
+    | pb_attribute DLBRAKT LAUNCHBOUNDS LPAREN g_value_list RPAREN RBRAKT RBRAKT {
         $$ = $1;
         $$.launch_bounds = $5;
       }
@@ -820,7 +839,6 @@ pb_attribute
         $$ = $1;
         $$.maxnreg = $5;
       }
-    | %empty { $$ = PBAttributes{}; }
     ;
 
 paraby_block
@@ -838,6 +856,19 @@ paraby_block
         if ($1.launch_bounds) $6->SetLaunchBoundsArgs($1.launch_bounds);
         if ($1.maxnreg) $6->SetMaxnregArg($1.maxnreg);
         $$ = $6;
+      }
+    | PARA sync_type opt_stream_bind {
+        paraby_symbols.clear();
+      } parabys stmts_block {
+        $5->SetAsync($2);
+        if ($3) $5->SetStream($3);
+        // attach statement to the inner-most pb
+        auto pb = $5;
+        while (!pb->stmts->None() && isa<AST::ParallelBy>(pb->stmts->SubAt(0)))
+          pb = cast<AST::ParallelBy>(pb->stmts->SubAt(0));
+        assert(pb->stmts->None() && "expect no statement.");
+        pb->stmts = $6;
+        $$ = $5;
       }
     ;
 
@@ -1087,6 +1118,16 @@ event_decl
         $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
              AST::Make<AST::DataType>(@1, BaseType::EVENT, $2), nullptr);
         $$->SetArrayDims($2);
+      }
+    | IDENTIFIER optional_array_dims ASSIGN IDENTIFIER {
+        if ($4 != "ready") {
+          error(@4, "event initializer must be 'ready'");
+          YYERROR;
+        }
+        $$ = AST::Make<AST::NamedVariableDecl>(@1, $1,
+             AST::Make<AST::DataType>(@1, BaseType::EVENT, $2), nullptr);
+        $$->SetArrayDims($2);
+        $$->AddNote("event_ready");
       }
     ;
 
@@ -1938,14 +1979,7 @@ dma_attrib
     ;
 
 tdma_async
-    : ASYNC LT IDENTIFIER GT {
-       $$ = AST::DMAAsync(true, AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $3)));
-      }
-    | ASYNC LT IDENTIFIER LBRAKT s_expr RBRAKT GT {
-       auto event_expr = AST::Make<AST::Expr>(@1, "elemof", AST::Make<AST::Identifier>(@1, $3), $5);
-       $$ = AST::DMAAsync(true, event_expr);
-      }
-    | ASYNC {
+    : ASYNC {
       $$ = AST::DMAAsync(true);
      }
     | %empty {
@@ -2241,17 +2275,18 @@ mma_stmt
         auto op = AST::Make<AST::MMAOperation>(AST::MMAOperation::LoadRTag{}, $3, $5, false);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | IDENTIFIER ASSIGN MMA DESC chunkat_expr {
-        auto operand = AST::Make<AST::Expr>(
-            @1, AST::Make<AST::Identifier>(@1, $1));
-        auto op = AST::Make<AST::MMAOperation>(
-            AST::MMAOperation::DescTag{}, $5, operand);
-        symtab.AddSymbol($1, MakeUnknownType());
-        $$ = AST::Make<AST::MMA>(@1, op);
-      }
     | MMA mma_exec_method frag_expr COMMA mma_exec_operand_expr COMMA mma_exec_operand_expr {
         auto op = AST::Make<AST::MMAOperation>($2, $3, $5, $7);
         $$ = AST::Make<AST::MMA>(@1, op);
+      }
+    | IDENTIFIER ASSIGN MMA mma_exec_method ASYNC frag_expr COMMA mma_exec_operand_expr COMMA mma_exec_operand_expr {
+        auto op = AST::Make<AST::MMAOperation>($4, $6, $8, $10);
+        auto future = AST::Make<AST::Expr>(
+            @1, AST::Make<AST::Identifier>(@1, $1));
+        op->SetExecFuture(future);
+        symtab.AddSymbol(
+            $1, MakeOperationFutureType(AsyncOperationKind::MMA));
+        $$ = AST::Make<AST::MMA>(@3, op);
       }
     | MMA mma_exec_method SCALE frag_expr COMMA mma_exec_operand_expr COMMA mma_exec_operand_expr COMMA chunkat_expr COMMA s_expr {
         auto op = AST::Make<AST::MMAOperation>($2, $4, $6, $8, $10, $12);
@@ -2269,6 +2304,11 @@ mma_stmt
         auto op = AST::Make<AST::MMAOperation>($3, $5);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
+    | MMA STORE ASYNC frag_expr COMMA chunkat_expr {
+        auto op = AST::Make<AST::MMAOperation>($4, $6);
+        op->SetStoreAsync();
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
     | MMA STORE TRANSPOSE frag_expr COMMA chunkat_expr {
         auto op = AST::Make<AST::MMAOperation>($4, $6, true);
         $$ = AST::Make<AST::MMA>(@1, op);
@@ -2281,15 +2321,6 @@ mma_stmt
         auto op = AST::Make<AST::MMAOperation>($4, $6, false, $8, nullptr);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | MMA MMAWAIT LT NUM GT {
-      if ($4 < 0 || $4 > 7) {
-        error(@4, "mma.wait depth must be in range [0, 7]");
-        YYABORT;
-      }
-      auto op = AST::Make<AST::MMAOperation>(
-          AST::MMAOperation::WaitTag{}, $4);
-      $$ = AST::Make<AST::MMA>(@1, op);
-    }
     | MMA SCALE frag_expr COMMA chunkat_expr COMMA s_expr {
       auto op = AST::Make<AST::MMAOperation>($3, $5, $7);
       $$ = AST::Make<AST::MMA>(@1, op);
@@ -2301,6 +2332,38 @@ mma_exec_method
     | ROW ROW       { $$ = AST::MMAOperation::ROW_ROW; }
     | COLUMN COLUMN { $$ = AST::MMAOperation::COL_COL; }
     | COLUMN ROW    { $$ = AST::MMAOperation::COL_ROW; }
+    ;
+
+mma_issue_order
+    : NUM {
+        if ($1 < 0) {
+          error(@1, "mma issue order entries must be non-negative");
+          YYABORT;
+        }
+        $$ = {$1};
+      }
+    | mma_issue_order COMMA NUM {
+        if ($3 < 0) {
+          error(@3, "mma issue order entries must be non-negative");
+          YYABORT;
+        }
+        $1.push_back($3);
+        $$ = std::move($1);
+      }
+    ;
+
+mma_schedule_attribute
+    : DLBRAKT IDENTIFIER LPAREN IDENTIFIER LPAREN mma_issue_order RPAREN RPAREN RBRAKT RBRAKT {
+        if ($2 != "schedule") {
+          error(@2, "expected 'schedule' statement attribute");
+          YYERROR;
+        }
+        if ($4 != "k_tiles") {
+          error(@4, "expected 'k_tiles' inside the MMA schedule attribute");
+          YYERROR;
+        }
+        $$ = std::move($6);
+      }
     ;
 
 frag_stmt
@@ -2408,9 +2471,24 @@ with_matchers /* TODO: this special case is pattern-match ids for with-block */
 ids_expr /* enforce: either a ref to id or a subscription */
     : s_expr {
         if ($1->IsReference()) {
-          if (!$1->GetSymbol())
-            Parser::error($1->LOC(), "expect a symbol but got a " + $1->GetR()->TypeNameString() + ".");
-          $$ = $1;
+          if ($1->GetSymbol()) {
+            $$ = $1;
+          } else if (auto access = dyn_cast<AST::DataAccess>($1->GetR());
+                     access && access->AccessElement() &&
+                     access->indices->Count() == 1) {
+            // Keep generation-aware event access distinct from normal array
+            // indexing. Semantic checking below rejects non-events.
+            $$ = AST::Make<AST::Expr>(
+                $1->LOC(), "elemof",
+                AST::Make<AST::Identifier>(access->data->LOC(),
+                                           access->data->name),
+                access->indices->ValueAt(0));
+            $$->AddNote(AST::event_generation_at_note);
+          } else {
+            Parser::error($1->LOC(), "expect a symbol but got a " +
+                                           $1->GetR()->TypeNameString() + ".");
+            YYERROR;
+          }
         } else if ($1->op == "dataof") {  // ignore the dataof
           auto er = cast<AST::Expr>($1->GetR());
           if ((er->op == "elemof") || (er->GetSymbol()))
@@ -2519,12 +2597,22 @@ wait_stmt
 
 trigger_stmt
     : TRIGGER ids_list { $$ = AST::Make<AST::Trigger>(@1, $2); }
+    | TRIGGER ids_list CHAIN ids_list {
+        $$ = AST::Make<AST::Trigger>(@1, $2, $4);
+      }
     | TRIGGER DOT PBLEVEL ids_list {
         if ($3 != ParallelLevel::CLUSTER) {
           error(@3, "only 'cluster' scope is supported for trigger.");
           YYERROR;
         }
-        $$ = AST::Make<AST::Trigger>(@1, $4, true);
+        $$ = AST::Make<AST::Trigger>(@1, $4, nullptr, true);
+      }
+    | TRIGGER DOT PBLEVEL ids_list CHAIN ids_list {
+        if ($3 != ParallelLevel::CLUSTER) {
+          error(@3, "only 'cluster' scope is supported for trigger.");
+          YYERROR;
+        }
+        $$ = AST::Make<AST::Trigger>(@1, $4, $6, true);
       }
     ;
 

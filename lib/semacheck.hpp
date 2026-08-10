@@ -16,14 +16,22 @@ private:
                                        // entities that are not waited
   std::set<std::string> waited_async;  // a simple check to detect async
                                        // entities that are not waited
+  // Source-order state for first-class futures. pending_async/waited_async
+  // retain the whole-function completeness check. Each dynamic future
+  // instance is completed by an explicit wait or a native completion-event
+  // binding. Data-future symbols may have multiple static wait sites in a
+  // swap/rotation pipeline.
+  std::set<std::string> live_async;
+  std::set<std::string> observed_async;
+  std::set<std::string> completed_async;
 
   AttributeDeriver input_deps{this, "input-deps", false};
   AttributeDeriver local_deps{this, "local-deps", false};
   std::vector<ValueItem> scope_pred_stack;
-  std::vector<AST::ForeachBlock*> foreach_stack;
   std::vector<ParallelLevel> parallel_level_stack;
   std::vector<bool> cooperative_stack;
   std::map<std::string, AST::DMA*> shared_tensor_producers;
+  std::map<std::string, AST::DMA*> async_dma_producers;
 
 private:
   bool BeforeVisitImpl(AST::Node&) override;
@@ -33,6 +41,12 @@ private:
   bool ReportUnknown(AST::Node&, const char*, int, bool = false);
   bool ReportUnknownSymbol(const std::string&, const location&, const char*,
                            int);
+
+  void RecordAsyncProducer(const std::string&);
+  bool ObserveAsyncFuture(const std::string&, const location&,
+                          const std::string&);
+  bool ConsumeAsyncFuture(const std::string&, const location&,
+                          const std::string&);
 
   void CreateAssessment(const ValueItem&, const std::string&, const location&,
                         const ptr<AST::Node>&,

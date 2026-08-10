@@ -76,6 +76,7 @@ attr_id     (__{id}__|\[\[{blank}*{id}{blank}*(?:\({blank}*{cstr}{blank}*\){blan
 val         ({num}|{hex_num}|{fpnum}|{fpnum_f}|{cstr})
 comments    \/\*([^*]|\*+[^*/])*\*+\/
 device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
+removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
 
 
 %%
@@ -465,6 +466,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "ituple"   return Choreo::Parser::make_ITUPLE(yytext, loc);
   "stream"   return Choreo::Parser::make_STREAM(yytext, loc);
   "event"    return Choreo::Parser::make_EVENT(yytext, loc);
+  {removed_stage} return Choreo::Parser::make_REMOVED_STAGE(yytext, loc);
   "frag"     return Choreo::Parser::make_FRAG(yytext, loc);
   "print"    return Choreo::Parser::make_PRINT(yytext, loc);
   "println"  return Choreo::Parser::make_PRINTLN(yytext, loc);
@@ -598,13 +600,11 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "mma"      return Choreo::Parser::make_MMA(yytext, loc);
   ".fill"    return Choreo::Parser::make_FILL(yytext, loc);
   ".load"    return Choreo::Parser::make_LOAD(yytext, loc);
-  ".desc"    return Choreo::Parser::make_DESC(yytext, loc);
   ".store"   return Choreo::Parser::make_STORE(yytext, loc);
   ".row"     return Choreo::Parser::make_ROW(yytext, loc);
   ".col"     return Choreo::Parser::make_COLUMN(yytext, loc);
   ".scale"   return Choreo::Parser::make_SCALE(yytext, loc);
   ".mask"    return Choreo::Parser::make_MASK(yytext, loc);
-  ".wait"    return Choreo::Parser::make_MMAWAIT(yytext, loc);
   "assert"   return Choreo::Parser::make_ASSERT(yytext,loc);
   "sync"     return Choreo::Parser::make_SYNC(yytext, loc);
   "barrier"  return Choreo::Parser::make_BARRIER(yytext, loc);

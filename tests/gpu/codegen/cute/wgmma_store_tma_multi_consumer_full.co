@@ -1,0 +1,37 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void multi_consumer_full_store(global f16 [128, 64] lhs,
+                                      global f16 [128, 64] rhs,
+                                      global f16 [128, 128] output) {
+  parallel b by 1 : block {
+    shared f16 [128, 64] lhs_s;
+    shared f16 [128, 64] rhs_s;
+    shared f16 [128, 128] output_s;
+    shared event full;
+
+    parallel p by 3 : group-4 {
+      inthreads.async (p == 0) {
+        lhs_load = tma.copy.async.swiz<128> lhs => lhs_s;
+        rhs_load = tma.copy.async.swiz<128> rhs => rhs_s;
+        trigger full after lhs_load, rhs_load;
+      }
+
+      inthreads.async (p > 0) {
+        cid = p - 1;
+        wait full;
+        acc = mma.fill.f32 0.0f;
+        product = mma.row.row.async acc,
+          lhs_s.subspan(64, 64).at(cid, 0), rhs_s;
+        wait product;
+        mma.store acc, output_s.subspan(64, 128).at(cid, 0);
+        tma.copy output_s => output;
+      }
+    }
+  }
+}
+
+// CHECK: choreo::named_barrier_sync(256, 15);
+// CHECK: if ((threadIdx.x == 128 || threadIdx.x == 256) && __choreo_vg4id_x == 1) {
+// CHECK-NOT: for (int __s2g_ci
+// CHECK: cde::cp_async_bulk_tensor_2d_shared_to_global(

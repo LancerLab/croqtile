@@ -1,0 +1,38 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void foo(global f16 [64, 64] first,
+                global f16 [64, 64] second) {
+  parallel block_id by 1 : block {
+    shared event first_full, second_full;
+    shared event first_empty;
+    shared f16 [64, 64] first_s;
+    shared f16 [64, 64] second_s;
+
+    parallel p by 2 : group-4, t by 128 : thread {
+      inthreads.async (p == 0) {
+        inthreads (t == 32) {
+          wait first_empty;
+          first_load = tma.copy.async first => first_s;
+          trigger first_full after first_load;
+        }
+        second_load = tma.copy.async second => second_s;
+        trigger second_full after second_load;
+      }
+      inthreads.async (p == 1) {
+        trigger first_empty;
+        wait first_full;
+        wait second_full;
+      }
+    }
+  }
+}
+
+// CHECK: if ((__choreo_vg4id_x == 0)) {
+// CHECK: if ((__choreo_vtid_x == 32)) {
+// CHECK: first_empty.wait(
+// CHECK-NEXT: first_full.arrive_and_expect_tx(8192);
+// CHECK: tma_load_2d_shared_cta_global_mbarrier
+// CHECK: } // end inthreads
+// CHECK: if ((threadIdx.x == 0)) {
+// CHECK-NEXT: second_full.arrive_and_expect_tx(8192);

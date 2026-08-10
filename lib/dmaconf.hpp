@@ -70,6 +70,10 @@ inline std::string STR(const DMAConfig& dc) {
 
 enum class SwizMode { NONE, B32, B64, B128 };
 
+// Per-instruction Hopper TMA L2 eviction policy. This is independent of the
+// tensor-map L2 promotion size configured by DMA .promote<N>.
+enum class TMAL2CacheHint { NONE, EVICT_FIRST, EVICT_LAST };
+
 inline const std::string STR(SwizMode sm) {
   switch (sm) {
   case SwizMode::NONE: return "none";

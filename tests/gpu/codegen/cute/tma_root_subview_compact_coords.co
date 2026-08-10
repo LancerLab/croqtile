@@ -1,0 +1,43 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void root_subview_compact_coords(
+    global bf16[B, S, H, 128] input,
+    global bf16[B, S, H, 128] output) {
+  parallel b by 1 : block {
+    shared bf16[128, 128] tile;
+    shared event full;
+
+    parallel g by 2 : group-4 {
+      inthreads.async (g == 0) {
+        work_batch = b;
+        work_head = b;
+        row = b;
+        input_head = input.subspan(1, S, 1, 128)
+                         .at(work_batch, 0, work_head, 0).sqz();
+        load = tma.copy.async.swiz<128>
+          input_head.subspan(128, 128).at(row, 0) => tile;
+        trigger full after load;
+      }
+
+      inthreads.async (g == 1) {
+        work_batch = b;
+        work_head = b;
+        row = b;
+        output_head = output.subspan(1, S, 1, 128)
+                          .at(work_batch, 0, work_head, 0).sqz();
+        wait full;
+        tma.copy tile => output_head.subspan(128, 128).at(row, 0);
+      }
+    }
+  }
+}
+
+// CHECK-NOT: % (H * 128)
+// CHECK: tma_load_3d_shared_cta_global_mbarrier
+// CHECK-SAME: (blockIdx.x * 128 % 64)
+// CHECK-SAME: (S * blockIdx.x + blockIdx.x * 128)
+// CHECK-SAME: (blockIdx.x * 2)
+// CHECK: cp_async_bulk_tensor_2d_shared_to_global
+// CHECK-SAME: (blockIdx.x * 128)
+// CHECK-SAME: (S * blockIdx.x + blockIdx.x * 128)

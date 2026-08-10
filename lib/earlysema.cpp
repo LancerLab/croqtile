@@ -675,7 +675,26 @@ bool EarlySemantics::Visit(AST::Expr& n) {
   } else if (n.op == Op::ElemOf) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    if (auto aty = dyn_cast<ArrayType>(lty))
+    if (AST::IsEventGenerationAt(n)) {
+      auto event_array = dyn_cast<EventArrayType>(lty);
+      if (!event_array) {
+        Error1(n.LOC(), "'.at(order)' requires an event array.");
+        SetNodeType(n, MakeUnknownType());
+        return false;
+      }
+      if (event_array->ArrayRank() != 1) {
+        Error1(n.LOC(), "'.at(order)' requires a one-dimensional event "
+                        "array.");
+        SetNodeType(n, MakeUnknownType());
+        return false;
+      }
+      if (!isa<ScalarIntegerType>(rty) && !isa<BoundedType>(rty)) {
+        Error1(n.GetR()->LOC(), "event order must be an integer expression.");
+        SetNodeType(n, MakeUnknownType());
+        return false;
+      }
+      SetNodeType(n, event_array->RemainderType(1));
+    } else if (auto aty = dyn_cast<ArrayType>(lty))
       SetNodeType(n, aty->RemainderType(1));
     else
       SetNodeType(n, lty);
@@ -2123,18 +2142,6 @@ bool EarlySemantics::Visit(AST::MMA& n) {
     std::string dst_sym = AST::FragName(op.LoadTo());
     ReportErrorWhenUseBeforeDefine(n.LOC(), dst_sym);
   } break;
-  case AST::MMAOperation::Desc: {
-    auto sty = GetSpannedType(op.DescFrom()->GetType());
-    if (!sty) Error1(n.LOC(), "Expected a spanned buffer for MMA desc.");
-    std::string operand_sym = AST::FragName(op.DescTo());
-    ReportErrorWhenViolateODR(
-        n.LOC(), operand_sym, __FILE__, __LINE__,
-        sty ? cast<SpannedType>(sty->Clone())
-            : MakeUnRankedSpannedType(BaseType::UNKSCALAR, Storage::SHARED));
-    if (sty)
-      ReportErrorWhenViolateODR(n.LOC(), operand_sym + ".span", __FILE__,
-                                __LINE__, sty->GetMDSpanType()->Clone());
-  } break;
   case AST::MMAOperation::Exec: {
     std::string op0_sym = AST::FragName(op.ExecOperand(0));
     std::string op1_sym = AST::FragName(op.ExecOperand(1));
@@ -2150,6 +2157,13 @@ bool EarlySemantics::Visit(AST::MMA& n) {
         !AST::FragIsArrayElem(op.ExecOperand(0)))
       Error1(op.ExecOperand(0)->LOC(),
              "Cannot use the whole fragment array in mma exec operation.");
+    if (op.HasExecFuture()) {
+      auto future_ty = MakeOperationFutureType(AsyncOperationKind::MMA);
+      auto future_sym = AST::FragName(op.ExecFuture());
+      ReportErrorWhenViolateODR(n.LOC(), future_sym, __FILE__, __LINE__,
+                                future_ty);
+      SetNodeType(*op.ExecFuture(), future_ty);
+    }
   } break;
   case AST::MMAOperation::Store: {
     std::string sto_from_sym = AST::FragName(op.StoreFrom());
@@ -2298,7 +2312,7 @@ bool EarlySemantics::Visit(AST::Wait& n) {
 
     auto ty = NodeType(*v);
 
-    if (auto fty = dyn_cast<FutureType>(ty)) {
+    if (auto fty = dyn_cast<FutureLikeType>(ty)) {
       if (!fty->IsAsync())
         Error1(n.LOC(), "non-async future '" + AST::GetName(*v).value() +
                             "` can not be waited.");
@@ -2338,6 +2352,28 @@ bool EarlySemantics::Visit(AST::Trigger& n) {
     if (!isa<EventType>(ty) && !isa<EventArrayType>(ty))
       Error1(v->LOC(),
              "expect `" + PSTR(v) + "' an event but got '" + PSTR(ty) + "'.");
+  }
+
+  if (n.HasDependencies()) {
+    for (auto& dependency : n.GetDependencies()) {
+      if (!AST::IsSymbolOrArrayRef(*dependency)) {
+        Error1(dependency->LOC(), "expect a future symbol but got '" +
+                                      AST::STR(*dependency) + "'.");
+        continue;
+      }
+      auto dependency_ty = NodeType(*dependency);
+      if (!IsFutureLikeType(dependency_ty)) {
+        Error1(dependency->LOC(), "trigger-after dependency '" +
+                                      PSTR(dependency) +
+                                      "' must be an async future, but got '" +
+                                      PSTR(dependency_ty) + "'.");
+        continue;
+      }
+      if (auto future_ty = dyn_cast<FutureLikeType>(dependency_ty);
+          future_ty && !future_ty->IsAsync())
+        Error1(dependency->LOC(),
+               "trigger-after dependency must be asynchronous.");
+    }
   }
 
   return true;
@@ -2380,9 +2416,10 @@ bool EarlySemantics::Visit(AST::Call& n) {
   }
 
   if (n.IsBIF()) {
+    const auto func_name = n.function->name;
+
     if (n.template_args)
       Error1(n.LOC(), "the built-in functions are not function templates.");
-    const auto func_name = n.function->name;
 
     // Namespace-based target validation for croq:: qualified BIFs
     if (func_name.rfind("croq::cuda::", 0) == 0) {
@@ -2412,6 +2449,30 @@ bool EarlySemantics::Visit(AST::Call& n) {
       auto sty = NodeType(*n.arguments->ValueAt(1));
       if (!isa<StringType>(sty))
         Error1(n.LOC(), "expect a string but got '" + PSTR(sty) + "'.");
+    } else if (func_name == "croq::cuda::evict_first" ||
+               func_name == "croq::cuda::evict_last") {
+      if (pl_depth == 0) {
+        Error1(n.LOC(), "'" + func_name +
+                            "' can only annotate a device-side TMA future.");
+      }
+      if (n.arguments->Count() != 1) {
+        Error1(n.LOC(), "'" + func_name +
+                            "' expects exactly one future argument, but got " +
+                            std::to_string(n.arguments->Count()) + ".");
+      } else {
+        auto argument = n.arguments->ValueAt(0);
+        auto argument_ty = NodeType(*argument);
+        if (!isa<FutureType>(argument_ty) ||
+            !cast<FutureType>(argument_ty)->IsAsync()) {
+          Error1(argument->LOC(), "'" + func_name +
+                                      "' expects an asynchronous data future, "
+                                      "but got '" +
+                                      PSTR(argument_ty) + "'.");
+        }
+        if (!AST::GetIdentifier(*argument))
+          Error1(argument->LOC(),
+                 "'" + func_name + "' requires a named TMA future.");
+      }
     } else if (func_name == "croq::cuda::setreg_inc" ||
                func_name == "croq::cuda::setreg_dec") {
       if (pl_depth == 0) {

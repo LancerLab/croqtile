@@ -1301,19 +1301,6 @@ bool ShapeInference::Visit(AST::MMA& n) {
   case AST::MMAOperation::LoadR: {
     // LoadR loads from shared into an existing fragment; no new symbol created
   } break;
-  case AST::MMAOperation::Desc: {
-    std::string operand_sym = AST::FragName(op.DescTo());
-    auto source_ty = GetSpannedType(op.DescFrom()->GetType());
-    assert(source_ty && "expect a spanned type for mma.desc source");
-    auto operand_span = operand_sym + ".span";
-    SymbolAliasNum(SSTab().ScopedName(operand_span), cur_vn);
-    // A descriptor preserves the shared view's shape, strides, and storage;
-    // it does not materialize a dense register fragment.
-    auto operand_ty = cast<SpannedType>(source_ty->Clone());
-    DefineASymbol(operand_sym, operand_ty);
-    DefineASymbol(operand_span, operand_ty->GetMDSpanType()->Clone());
-    SetNodeType(n, operand_ty);
-  } break;
   case AST::MMAOperation::Exec: {
     std::string op0_sym = AST::FragName(op.ExecOperand(0)); // mc
     auto lhs_ty = GetSpannedType(op.ExecOperand(1)->GetType());
@@ -1408,6 +1395,12 @@ bool ShapeInference::Visit(AST::MMA& n) {
     auto sym_ty = GetSymbolType(op0_sym);
     // always set the node type to spannedtype in exec.
     SetNodeType(n, GetSpannedType(sym_ty)->Clone());
+    if (op.HasExecFuture()) {
+      auto future_ty = MakeOperationFutureType(AsyncOperationKind::MMA);
+      auto future_sym = AST::FragName(op.ExecFuture());
+      DefineASymbol(future_sym, future_ty);
+      SetNodeType(*op.ExecFuture(), future_ty);
+    }
   } break;
   case AST::MMAOperation::Scale: {
     auto acc_sym = AST::FragName(op.ScaleAccumulator());
@@ -2294,6 +2287,7 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
   // mutable integers can now be valued
   // if (isa<ScalarIntegerType>(nty) && IsMutable(*nty)) return true;
   if (isa<EventType>(nty)) return false;
+  if (isa<OperationFutureType>(nty)) return false;
   if (isa<StringType>(nty)) return false;
   if (isa<VoidType>(nty)) return false;
   if (isa<StreamType>(nty)) return false;
@@ -2719,7 +2713,8 @@ const std::string
 ShapeInference::VNSymbolName(const AST::Identifier& id) const {
   auto sig = id.name;
   auto pty = NodeType(id);
-  if (isa<SpannedType>(pty) || GeneralFutureType(pty)) {
+  if (isa<SpannedType>(pty) ||
+      (GeneralFutureType(pty) && !isa<OperationFutureType>(pty))) {
     sig = RemoveSuffix(sig, ".span") +
           ".span"; // only cares about value inside the mdspan
   }

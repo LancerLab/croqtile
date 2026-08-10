@@ -24,6 +24,12 @@ struct VisitorWithScope;
 
 namespace AST {
 
+// Marks the generation-aware event access produced by `event.at(order)`.
+// The expression remains an ElemOf node so existing array-reference analyses
+// can recover its base symbol, while code generation uses the event extent to
+// derive both the physical slot and the barrier generation.
+inline constexpr char event_generation_at_note[] = "event_generation_at";
+
 // short hands
 template <typename T>
 using ptr = Choreo::ptr<T>;
@@ -2692,12 +2698,14 @@ struct DMAAttribute {
   int sparse_m = 0;
   // L2 TMA promotion: 0 = none; else 64/128/256 (CUDA CUtensorMapL2promotion).
   int l2_promote_bytes = 0;
+  TMAL2CacheHint l2_cache_hint = TMAL2CacheHint::NONE;
   DMAAttribute(SwizMode swiz = SwizMode::NONE, bool explicit_swiz = false,
                bool zf = false, bool sp = false, int sp_n = 0, int sp_m = 0,
-               bool mc = false, int l2_promote_bytes = 0)
+               bool mc = false, int l2_promote_bytes = 0,
+               TMAL2CacheHint l2_cache_hint = TMAL2CacheHint::NONE)
       : sw_mode(swiz), explicit_swizzle(explicit_swiz), zfill(zf),
         is_sparse(sp), multicast(mc), sparse_n(sp_n), sparse_m(sp_m),
-        l2_promote_bytes(l2_promote_bytes) {}
+        l2_promote_bytes(l2_promote_bytes), l2_cache_hint(l2_cache_hint) {}
 };
 
 struct DMAAsync {
@@ -2708,6 +2716,10 @@ struct DMAAsync {
   bool Async() const { return async; }
   bool HasEvent() const { return event != nullptr; }
   const ptr<AST::Expr>& Event() const { return event; }
+  void BindEvent(const ptr<AST::Expr>& e) {
+    async = true;
+    event = e;
+  }
 };
 
 struct DMA : public Node, public TypeIDProvider<DMA> {
@@ -2779,6 +2791,11 @@ public:
   bool HasExplicitSwizzle() const { return attr.explicit_swizzle; }
   void SetSwizzleMode(SwizMode sm) { attr.sw_mode = sm; }
   int GetL2PromoteBytes() const { return attr.l2_promote_bytes; }
+  TMAL2CacheHint GetL2CacheHint() const { return attr.l2_cache_hint; }
+  void SetL2CacheHint(TMAL2CacheHint hint) { attr.l2_cache_hint = hint; }
+  bool HasL2CacheHint() const {
+    return attr.l2_cache_hint != TMAL2CacheHint::NONE;
+  }
   const std::pair<int, int> GetSparsePattern() const {
     return {attr.sparse_n, attr.sparse_m};
   }
@@ -2836,6 +2853,16 @@ public:
   bool IsTMA() const { return enforce_tma; }
   bool IsMulticast() const { return attr.multicast; }
 
+  // Codegen preparation can fold `trigger event after future` into a TMA's
+  // native transaction barrier.  Once folded, no runtime future object is
+  // needed; the original name is retained as metadata for diagnostics.
+  void BindNativeCompletionEvent(const ptr<AST::Expr>& event) {
+    assert(IsTMA() && IsAsync() && !future.empty());
+    AddNote("native_completion_future", future);
+    dma_async.BindEvent(event);
+    future.clear();
+  }
+
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, DMA)
@@ -2843,7 +2870,7 @@ public:
 
 struct MMAOperation {
 public:
-  enum Kind { Fill, Load, LoadR, Desc, Exec, Store, Commit, Scale, Wait };
+  enum Kind { Fill, Load, LoadR, Exec, Store, Commit, Scale };
   enum ExecMethod { ROW_ROW, ROW_COL, COL_ROW, COL_COL };
 
   // NOTE: acc, lhs, rhs are not accepted in ast.cpp.
@@ -2876,11 +2903,14 @@ public:
     bool scale;
     ptr<ChunkAt> scale_a;
     ptr<Expr> scale_b;
+    std::vector<int> issue_order;
+    ptr<Expr> future;
   };
   struct StoreInfo {
     ptr<Expr> buffer;
     ptr<ChunkAt> st_expr;
     bool transpose;
+    bool async;
     ptr<Expr> row_mask;
     ptr<Expr> col_mask;
   };
@@ -2889,11 +2919,8 @@ public:
     ptr<ChunkAt> scaleA;
     ptr<Expr> scaleB;
   };
-  struct WaitInfo {
-    int wait_depth;
-  };
-  using InfoType = std::variant<FillInfo, LoadInfo, ExecInfo, StoreInfo,
-                                ScaleInfo, WaitInfo>;
+  using InfoType =
+      std::variant<FillInfo, LoadInfo, ExecInfo, StoreInfo, ScaleInfo>;
 
 private:
   Kind tag;
@@ -2914,37 +2941,32 @@ public:
                         bool explicit_swizzle = false)
       : tag(LoadR), info(LoadInfo{e, fu, a, swizzle, explicit_swizzle}) {}
 
-  struct DescTag {};
-  explicit MMAOperation(DescTag, const ptr<ChunkAt>& source,
-                        const ptr<Expr>& operand)
-      : tag(Desc),
-        info(LoadInfo{source, operand, false, SwizMode::NONE, false}) {}
-
   MMAOperation(ExecMethod m, const ptr<Expr>& o, const ptr<Expr>& l,
                const ptr<Expr>& r, bool sp = false)
       : tag(Exec),
-        info(ExecInfo{m, o, l, r, nullptr, sp, false, nullptr, nullptr}) {}
+        info(ExecInfo{
+            m, o, l, r, nullptr, sp, false, nullptr, nullptr, {}, nullptr}) {}
   MMAOperation(ExecMethod m, const ptr<Expr>& o, const ptr<Expr>& l,
                const ptr<Expr>& r, const ptr<Expr>& e, bool sp)
-      : tag(Exec), info(ExecInfo{m, o, l, r, e, sp, false, nullptr, nullptr}) {}
+      : tag(Exec),
+        info(
+            ExecInfo{m, o, l, r, e, sp, false, nullptr, nullptr, {}, nullptr}) {
+  }
   MMAOperation(ExecMethod m, const ptr<Expr>& o, const ptr<Expr>& l,
                const ptr<Expr>& r, const ptr<ChunkAt>& scale_a,
                const ptr<Expr>& scale_b)
       : tag(Exec),
-        info(ExecInfo{m, o, l, r, nullptr, false, true, scale_a, scale_b}) {}
+        info(ExecInfo{
+            m, o, l, r, nullptr, false, true, scale_a, scale_b, {}, nullptr}) {}
 
   MMAOperation(const ptr<Expr>& n, const ptr<ChunkAt>& c, bool trans = false)
-      : tag(Store), info(StoreInfo{n, c, trans, nullptr, nullptr}) {}
+      : tag(Store), info(StoreInfo{n, c, trans, false, nullptr, nullptr}) {}
 
   MMAOperation(const ptr<Expr>& n, const ptr<ChunkAt>& c, bool trans,
                const ptr<Expr>& row_mask, const ptr<Expr>& col_mask)
-      : tag(Store), info(StoreInfo{n, c, trans, row_mask, col_mask}) {}
+      : tag(Store), info(StoreInfo{n, c, trans, false, row_mask, col_mask}) {}
 
   MMAOperation() : tag(Commit), info() {}
-
-  struct WaitTag {};
-  explicit MMAOperation(WaitTag, int depth)
-      : tag(Wait), info(WaitInfo{depth}) {}
 
   MMAOperation(const ptr<Expr>& acc, const ptr<ChunkAt>& scaleA,
                const ptr<Expr>& scaleB)
@@ -2954,7 +2976,6 @@ public:
   bool IsKind(Kind k) const { return k == tag; }
   bool IsLoad() const { return tag == Load || tag == LoadR; }
   bool IsLoadR() const { return tag == LoadR; }
-  bool IsDesc() const { return tag == Desc; }
 
   const ptr<Expr> FillingTo() const {
     if (tag != Fill) choreo_unreachable("not a mma fill operation.");
@@ -3005,19 +3026,6 @@ public:
     return l_info.future;
   }
 
-  ptr<ChunkAt> DescFrom() {
-    if (!IsDesc()) choreo_unreachable("not a mma desc operation.");
-    return std::get<1>(info).ld_expr;
-  }
-  const ptr<ChunkAt> DescFrom() const {
-    if (!IsDesc()) choreo_unreachable("not a mma desc operation.");
-    return std::get<1>(info).ld_expr;
-  }
-  const ptr<Expr> DescTo() const {
-    if (!IsDesc()) choreo_unreachable("not a mma desc operation.");
-    return std::get<1>(info).future;
-  }
-
   ptr<ChunkAt> StoreTo() {
     if (tag != Store) choreo_unreachable("not a mma store operation.");
     return std::get<3>(info).st_expr;
@@ -3033,6 +3041,14 @@ public:
   bool StoreIsTranspose() const {
     if (tag != Store) choreo_unreachable("not a mma store operation.");
     return std::get<3>(info).transpose;
+  }
+  bool StoreIsAsync() const {
+    if (tag != Store) choreo_unreachable("not a mma store operation.");
+    return std::get<3>(info).async;
+  }
+  void SetStoreAsync(bool async = true) {
+    if (tag != Store) choreo_unreachable("not a mma store operation.");
+    std::get<3>(info).async = async;
   }
   bool StoreHasExplicitMask() const {
     if (tag != Store) return false;
@@ -3092,6 +3108,35 @@ public:
     return e_info.scale;
   }
 
+  bool HasIssueOrder() const {
+    return tag == Exec && !std::get<2>(info).issue_order.empty();
+  }
+
+  const std::vector<int>& IssueOrder() const {
+    if (tag != Exec) choreo_unreachable("not a mma exec operation.");
+    return std::get<2>(info).issue_order;
+  }
+
+  void SetIssueOrder(std::vector<int> order) {
+    if (tag != Exec) choreo_unreachable("not a mma exec operation.");
+    std::get<2>(info).issue_order = std::move(order);
+  }
+
+  bool HasExecFuture() const {
+    return tag == Exec && std::get<2>(info).future != nullptr;
+  }
+
+  const ptr<Expr>& ExecFuture() const {
+    if (!HasExecFuture())
+      choreo_unreachable("mma exec has no operation future.");
+    return std::get<2>(info).future;
+  }
+
+  void SetExecFuture(const ptr<Expr>& future) {
+    if (tag != Exec) choreo_unreachable("not a mma exec operation.");
+    std::get<2>(info).future = future;
+  }
+
   ptr<ChunkAt> ScaleA() const {
     if (tag == Exec) {
       auto e_info = std::get<2>(info);
@@ -3116,11 +3161,6 @@ public:
     choreo_unreachable("not a mma scale-bearing operation.");
   }
 
-  int WaitDepth() const {
-    if (tag != Wait) choreo_unreachable("not a mma wait operation.");
-    return std::get<5>(info).wait_depth;
-  }
-
   void SetFuture(const ptr<AST::Expr>& fut) {
     if (!IsLoad()) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
@@ -3137,12 +3177,10 @@ public:
   const ptr<Expr> GetFrag() const {
     if (tag == Fill) return FillingTo();
     if (IsLoad()) return LoadTo();
-    if (tag == Desc) return DescTo();
     if (tag == Exec) return ExecOperand(0);
     if (tag == Store) return StoreFrom();
     if (tag == Commit) return nullptr;
     if (tag == Scale) return ScaleAccumulator();
-    if (tag == Wait) return nullptr;
     choreo_unreachable("unexpected mma operation!");
     return nullptr;
   }
@@ -3184,28 +3222,33 @@ public:
                                 CloneP(l_info.future), l_info.async,
                                 l_info.swiz_mode, l_info.explicit_swizzle);
     }
-    case Desc:
-      return Make<MMAOperation>(DescTag{}, CloneP(DescFrom()),
-                                CloneP(DescTo()));
     case Exec: {
       auto e_info = std::get<2>(info);
-      if (e_info.scale)
-        return Make<MMAOperation>(
+      ptr<MMAOperation> copied;
+      if (e_info.scale) {
+        copied = Make<MMAOperation>(
             e_info.method, CloneP(e_info.acc), CloneP(e_info.lhs),
             CloneP(e_info.rhs), CloneP(e_info.scale_a), CloneP(e_info.scale_b));
-      return Make<MMAOperation>(e_info.method, CloneP(e_info.acc),
-                                CloneP(e_info.lhs), CloneP(e_info.rhs),
-                                CloneP(e_info.mdata), e_info.is_sparse);
+      } else {
+        copied = Make<MMAOperation>(e_info.method, CloneP(e_info.acc),
+                                    CloneP(e_info.lhs), CloneP(e_info.rhs),
+                                    CloneP(e_info.mdata), e_info.is_sparse);
+      }
+      copied->SetIssueOrder(e_info.issue_order);
+      if (e_info.future) copied->SetExecFuture(CloneP(e_info.future));
+      return copied;
     }
-    case Store:
-      return Make<MMAOperation>(CloneP(StoreFrom()), CloneP(StoreTo()),
-                                StoreIsTranspose(), CloneP(StoreRowMask()),
-                                CloneP(StoreColMask()));
+    case Store: {
+      auto copied = Make<MMAOperation>(
+          CloneP(StoreFrom()), CloneP(StoreTo()), StoreIsTranspose(),
+          CloneP(StoreRowMask()), CloneP(StoreColMask()));
+      copied->SetStoreAsync(StoreIsAsync());
+      return copied;
+    }
     case Commit: return Make<MMAOperation>();
     case Scale:
       return Make<MMAOperation>(CloneP(ScaleAccumulator()), CloneP(ScaleA()),
                                 CloneP(ScaleB()));
-    case Wait: return Make<MMAOperation>(WaitTag{}, WaitDepth());
     default: choreo_unreachable("unsupported MMA operation kind.");
     }
     return nullptr;
@@ -3225,11 +3268,16 @@ public:
       os << "MMA.LOAD" << ((l_info.async) ? ".ASYNC" : "") << " "
          << PSTR(l_info.ld_expr);
     } break;
-    case Desc:
-      os << PSTR(DescTo()) << " = MMA.DESC " << PSTR(DescFrom());
-      break;
     case Exec: {
       auto e_info = std::get<2>(info);
+      if (!e_info.issue_order.empty()) {
+        os << "[[schedule(k_tiles(";
+        for (size_t i = 0; i < e_info.issue_order.size(); ++i) {
+          if (i) os << ", ";
+          os << e_info.issue_order[i];
+        }
+        os << "))]] ";
+      }
       os << "MMA.EXEC";
       switch (e_info.method) {
       case ROW_ROW: os << ".ROW.ROW"; break;
@@ -3245,14 +3293,14 @@ public:
          << PSTR(e_info.rhs);
     } break;
     case Store: {
-      os << "MMA.STORE" << (StoreIsTranspose() ? ".TRANSP" : "")
+      os << "MMA.STORE" << (StoreIsAsync() ? ".ASYNC" : "")
+         << (StoreIsTranspose() ? ".TRANSP" : "")
          << (StoreHasExplicitMask() ? ".MASK" : "") << " " << PSTR(StoreFrom())
          << ", " << PSTR(StoreTo());
       if (StoreRowMask()) os << ", " << PSTR(StoreRowMask());
       if (StoreColMask()) os << ", " << PSTR(StoreColMask());
     } break;
     case Commit: os << "MMA.COMMIT"; break;
-    case Wait: os << "MMA.WAIT<" << WaitDepth() << ">"; break;
     case Scale:
       os << "MMA.SCALE " << PSTR(ScaleAccumulator()) << ", " << PSTR(ScaleA())
          << ", " << PSTR(ScaleB());
@@ -3462,7 +3510,8 @@ struct Wait : public Node, public TypeIDProvider<Wait> {
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
-    os << "\n" << prefix << "`- WAIT: ";
+    os << "\n" << prefix << "`- WAIT";
+    os << ": ";
     targets->Print(os, "", with_type);
   }
 
@@ -3475,15 +3524,21 @@ struct Wait : public Node, public TypeIDProvider<Wait> {
 
 struct Trigger : public Node, public TypeIDProvider<Trigger> {
   ptr<MultiValues> targets;
+  ptr<MultiValues> dependencies;
   bool cluster_scope = false;
 
-  Trigger(const location& l, const ptr<MultiValues>& t, bool cs = false)
-      : Node(l), targets(t), cluster_scope(cs) {}
+  Trigger(const location& l, const ptr<MultiValues>& t,
+          const ptr<MultiValues>& deps = nullptr, bool cs = false)
+      : Node(l), targets(t), dependencies(deps), cluster_scope(cs) {}
 
   bool IsClusterScope() const { return cluster_scope; }
+  bool HasDependencies() const {
+    return dependencies && dependencies->Count() > 0;
+  }
 
   ptr<Node> CloneImpl() const override {
-    return Make<Trigger>(LOC(), CloneP(targets), cluster_scope);
+    return Make<Trigger>(LOC(), CloneP(targets), CloneP(dependencies),
+                         cluster_scope);
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -3492,9 +3547,17 @@ struct Trigger : public Node, public TypeIDProvider<Trigger> {
     if (cluster_scope) os << ".CLUSTER";
     os << ": ";
     targets->Print(os, "", with_type);
+    if (HasDependencies()) {
+      os << " AFTER ";
+      dependencies->Print(os, "", with_type);
+    }
   }
 
   const NodeList& GetEvents() const { return targets->AllValues(); }
+  const NodeList& GetDependencies() const {
+    assert(HasDependencies());
+    return dependencies->AllValues();
+  }
 
   void accept(Visitor&) override;
 
@@ -4146,6 +4209,14 @@ inline void Expr::Print(std::ostream& os, const std::string& prefix,
     return;
   }
 
+  if (op == Op::ElemOf && HasNote(event_generation_at_note)) {
+    value_l->Print(os, prefix, with_type);
+    os << ".at(";
+    value_r->Print(os, "", with_type);
+    os << ")";
+    return;
+  }
+
   os << " (";
   switch (t) {
   case Unary:
@@ -4247,18 +4318,20 @@ inline bool HasUnrollHint(const ForeachBlock& n, int& factor) {
   return false;
 }
 
-inline bool ContainsMMAWait(const Node& n) {
+inline bool ContainsMMAOperationFuture(const Node& n) {
   if (auto* mma = dyn_cast<MMA>(&n)) {
-    if (mma->GetOperation()->Tag() == MMAOperation::Wait) return true;
+    auto operation = mma->GetOperation();
+    if (operation->Tag() == MMAOperation::Exec && operation->HasExecFuture())
+      return true;
   }
   if (n.HasBody()) {
     if (auto body = n.GetBody()) {
       for (auto& child : body->values)
-        if (ContainsMMAWait(*child)) return true;
+        if (ContainsMMAOperationFuture(*child)) return true;
     }
   } else if (auto* mn = dyn_cast<MultiNodes>(&n)) {
     for (auto& child : mn->values)
-      if (ContainsMMAWait(*child)) return true;
+      if (ContainsMMAOperationFuture(*child)) return true;
   }
   return false;
 }
@@ -4269,6 +4342,10 @@ inline bool IsSymbolOrArrayRef(const Node& n) {
   if (auto e = dyn_cast<Expr>(&n))
     if (e->op == Op::ElemOf) return true;
   return false;
+}
+
+inline bool IsEventGenerationAt(const Expr& n) {
+  return n.op == Op::ElemOf && n.HasNote(event_generation_at_note);
 }
 
 inline bool HasVectorizationHint(const ForeachBlock& n,

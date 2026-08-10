@@ -41,7 +41,8 @@ int main() {
 // GDB: ${{[0-9]+}} = 1
 // GDB: ${{[0-9]+}} = 1
 // GDB: ${{[0-9]+}} = 3
-// GDB: type = @local {{(struct )?}}{{.*}}choreo{{.*}}rtti{{.*}}bounded_ituple{{.*}}3{{.*}}
+// CUDA 13 may omit namespace qualifiers from device-local ptype output.
+// GDB: type = @local {{(struct )?([^ ]*::)?bounded_ituple<3>}}
 // GDB: ${{[0-9]+}} = 0
 // GDB: ${{[0-9]+}} = 0
 // GDB: ${{[0-9]+}} = 0

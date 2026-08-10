@@ -1375,9 +1375,6 @@ void LivenessAnalyzer::DumpMMA(const AST::MMA& mma, std::ostream& os) {
       os << "mma.load " << PSTR(op->LoadFrom());
       if (op->LoadTo()) os << ", " << PSTR(op->LoadTo());
     } break;
-    case AST::MMAOperation::Desc:
-      os << PSTR(op->DescTo()) << " = mma.desc " << PSTR(op->DescFrom());
-      break;
     case AST::MMAOperation::Exec: {
       os << "mma.exec";
       switch (op->GetMethod()) {
@@ -1394,14 +1391,12 @@ void LivenessAnalyzer::DumpMMA(const AST::MMA& mma, std::ostream& os) {
          << op->ExecOperand(2);
     } break;
     case AST::MMAOperation::Store: {
-      os << "mma.store" << (op->StoreIsTranspose() ? ".transp" : "") << " "
-         << op->StoreFrom() << ", " << PSTR(op->StoreTo());
+      os << "mma.store" << (op->StoreIsAsync() ? ".async" : "")
+         << (op->StoreIsTranspose() ? ".transp" : "") << " " << op->StoreFrom()
+         << ", " << PSTR(op->StoreTo());
     } break;
     case AST::MMAOperation::Commit: {
       os << "mma.commit";
-    } break;
-    case AST::MMAOperation::Wait: {
-      os << "mma.wait<" << op->WaitDepth() << ">";
     } break;
     case AST::MMAOperation::Scale: {
       os << "mma.scale " << PSTR(op->ScaleAccumulator()) << ", "
@@ -1724,6 +1719,21 @@ bool LivenessAnalyzer::AfterVisitImpl(AST::Node& n) {
       // ComputeLiveRange().
       stmt2binding_restore[&n].push_back(fut_name);
     }
+  } else if (auto trigger = dyn_cast<AST::Trigger>(&n);
+             trigger && trigger->HasDependencies()) {
+    // Publishing an event after a data future consumes that future just like
+    // an explicit wait.  Operation futures do not own DMA buffer bindings.
+    for (const auto& dependency : trigger->GetDependencies()) {
+      if (!isa<FutureType>(NodeType(*dependency))) continue;
+      auto id = AST::GetIdentifier(*dependency);
+      assert(id && "expecting an identifier in trigger-after.");
+      auto fut_name = InScopeName(id->name);
+      assert(future_buffers.count(fut_name) &&
+             "expecting the future to be in future_buffers.");
+      for (const auto& [src, dst] : future_buffers[fut_name])
+        RemoveBinding(fut_name, src);
+      stmt2binding_restore[&n].push_back(fut_name);
+    }
   } else if (auto ib = dyn_cast<AST::InThreadsBlock>(&n)) {
     if (ib->async) --inthreads_async_level;
 
@@ -1974,6 +1984,11 @@ bool LivenessAnalyzer::Visit(AST::MMA& n) {
   case AST::MMAOperation::Exec: {
     AddUse(current_stmt, GetAllSymbolicOperands(op->ExecOperand(1).get()));
     AddUse(current_stmt, GetAllSymbolicOperands(op->ExecOperand(2).get()));
+    if (op->HasExecFuture()) {
+      auto id = AST::GetIdentifier(*op->ExecFuture());
+      assert(id && "expecting an MMA operation future identifier.");
+      AddDef(current_stmt, id->name);
+    }
   } break;
   case AST::MMAOperation::Store: {
     AddUse(current_stmt, GetAllSymbolicOperands(op->StoreTo().get()));
@@ -1982,9 +1997,6 @@ bool LivenessAnalyzer::Visit(AST::MMA& n) {
   case AST::MMAOperation::LoadR: {
     AddUse(current_stmt, GetAllSymbolicOperands(op->LoadFrom().get()));
   } break;
-  case AST::MMAOperation::Desc:
-    AddUse(current_stmt, GetAllSymbolicOperands(op->DescFrom().get()));
-    break;
   default: break;
   }
   return true;
@@ -2154,6 +2166,23 @@ bool LivenessAnalyzer::Visit(AST::Trigger& n) {
       cur_hb_phase->signal_out = event_base;
       FinalizeHBPhase();
       StartNewHBPhase("");
+    }
+  }
+  if (n.HasDependencies()) {
+    for (const auto& dependency : n.GetDependencies()) {
+      auto id = AST::GetIdentifier(*dependency);
+      assert(id && "expecting a trigger-after future identifier.");
+      AddUse(current_stmt, id->name);
+      if (!isa<FutureType>(NodeType(*dependency))) continue;
+
+      stmt_linfo[current_stmt].buffer_related = true;
+      auto scoped_name = InScopeName(id->name);
+      assert(future_buffers.count(scoped_name) &&
+             "expecting the future to be in future_buffers.");
+      for (const auto& [src, dst] : future_buffers[scoped_name]) {
+        AddUse(current_stmt, src);
+        AddUse(current_stmt, dst);
+      }
     }
   }
   return true;

@@ -2,103 +2,174 @@
 
 ## Overview
 
-Events provide communication between asynchronous code blocks in Croqtile. They are the primary mechanism for ordering execution across `inthreads` paths and between different parallel levels.
-
-## Event Basics
-
-An event is a binary state variable: either **SET** or **UNSET**. Events are declared with a storage qualifier:
+Events communicate readiness between asynchronous Choreo paths. A future is a
+producer-local completion handle; an event is the published synchronization
+point that one or more consumers can wait on.
 
 ```choreo
-shared event e;           // single event
-shared event e[4], e1;    // event array + single event
+shared event full;
+
+load = tma.copy.async input => tile;
+trigger full after load;
 ```
 
-Events follow the same storage rules as spanned data -- `shared` events live inside `parallel-by` blocks, `global` events at the tileflow level.
+Native operation completion can be bound to an event with
+`trigger event after future`.
 
-## `trigger` and `wait`
+## Declaration and Initial State
 
-**`trigger`** changes an event from UNSET to SET:
+Events use ordinary storage and array syntax:
 
 ```choreo
-trigger e, e1;    // trigger multiple events
+shared event ready_for_compute;
+shared event full[2], empty[2] = ready;
 ```
 
-**`wait`** blocks until the event is SET, then **auto-resets** the event to UNSET:
+Generation zero is pending by default. `= ready` marks generation zero ready,
+which is useful for initially empty pipeline slots.
+
+The backend chooses the hardware synchronization primitive from the event's
+producer, consumers, scope, and participation. Source code does not select an
+mbarrier, named barrier, or transaction count.
+
+## Immediate Trigger
+
+`trigger` without dependencies publishes readiness at that point:
 
 ```choreo
-wait e;           // blocks if UNSET, then resets to UNSET
+trigger empty;
+trigger empty0, empty1;
 ```
 
-The auto-reset behavior means each `trigger` unblocks exactly one `wait`.
+This form is useful for releasing an empty buffer after its consumer is done
+or for explicit initialization. It does not represent completion of an
+earlier async operation unless that operation has already been waited on.
 
-## Chaining Asynchronous Code
+## Trigger After Future
 
-Events chain the execution order of async `inthreads` blocks:
+Use a dependency when readiness comes from an async operation:
 
 ```choreo
-parallel p by 2 {
-  shared event e;
-  inthreads.async (p == 1) { wait e; }      // waits for trigger
-  inthreads.async (p == 0) { trigger e; }   // triggers e
-  sync.shared;
-}
+load = tma.copy.async input => tile;
+trigger full after load;
 ```
 
-Thread 0 triggers `e`, which unblocks thread 1's `wait`. This ensures thread 0's `inthreads` completes before thread 1 proceeds.
-
-## Event Instances
-
-The number of event instances depends on the storage qualifier and parallel structure:
+Several futures can be joined into one event:
 
 ```choreo
-__co__ void foo() {
-  global event ge;          // 1 instance
+q_load = tma.copy.async q => q_s;
+k_load = tma.copy.async k => k_s;
+trigger qk_inputs_full after q_load, k_load;
+```
 
-  parallel p by 2 {
-    shared event se;        // 2 instances (1 per block)
-    parallel q by 6 {
-      local event le;       // 12 instances (6 per block)
+`after` is a binding clause, not an implicit wait. The statement does not block
+the producer path, and the compiler must not synthesize a wait. It is currently
+supported for global-to-shared TMA futures, whose hardware mbarrier completion
+can directly publish the event.
+
+Operations without native event binding use an explicit wait and a direct
+trigger. WGMMA is one example:
+
+```choreo
+qk = mma.row.row.async scores, q_s, k_s;
+wait qk;
+trigger qk_done;
+```
+
+Writing `wait qk; trigger qk_done after qk;` is rejected because the future was
+already consumed by the explicit wait. Inline event operands on DMA/TMA and
+special MMA wait-trigger statements are not part of the language.
+
+## Waiting
+
+`wait` blocks the current path until the selected event generation is ready:
+
+```choreo
+wait full;
+wait lhs_full, rhs_full;
+```
+
+Events are generation-based. A completed wait advances that path to the next
+generation. Repeated producer/consumer handoffs therefore reuse the event
+without a source-level reset operation.
+
+## Cyclic Event Generations
+
+Use `.at(order)` when an event array is a cyclic pipeline ring:
+
+```choreo
+slot = order % 2;
+wait empty.at(order);
+load = tma.copy.async input.at(order) => tile[slot];
+trigger full.at(order) after load;
+```
+
+The consumer uses the same logical order:
+
+```choreo
+slot = order % 2;
+wait full.at(order);
+// Consume tile[slot].
+trigger empty.at(order);
+```
+
+For `event[N]`, the compiler derives the physical event slot as `order % N`
+and its barrier phase as `(order / N) % 2`. The argument may be a monotonically
+increasing logical order or an equivalent order maintained modulo `2 * N`.
+For example, `(order + 1) & 3` is sufficient for `event[2]`. Reducing the
+argument modulo `N` is not sufficient because it discards the phase. A cyclic
+event ring is currently one-dimensional.
+
+`event[index]` remains ordinary physical array indexing. Its index is not
+interpreted as a logical order, so it is not an alias for `event.at(order)`.
+
+Shared data arrays remain ordinary arrays. Their physical slot is therefore
+written explicitly, as in `tile[slot]`; event generation and data indexing do
+not share a special source-level type.
+
+## Multiple Consumers
+
+Publish a future once, then use an event when multiple paths need the result:
+
+```choreo
+trigger tile_full after load;
+
+inthreads.async (consumer_a) { wait tile_full; }
+inthreads.async (consumer_b) { wait tile_full; }
+```
+
+The compiler derives event participation from the active scopes. Do not
+publish the same operation future separately for each consumer.
+
+For independent generations or independently released buffers, use an event
+array rather than making unrelated consumers race on one generation.
+
+## Producer-Consumer Example
+
+```choreo
+shared f16[128, 128] tile[2];
+shared event full[2], empty[2] = ready;
+
+parallel g by 2 : group-4 {
+  inthreads.async (g == 0) {
+    foreach {order} in [tile_count] {
+      slot = order % 2;
+      wait empty.at(order);
+      load = tma.copy.async input.at(order) => tile[slot];
+      trigger full.at(order) after load;
+    }
+  }
+
+  inthreads.async (g == 1) {
+    foreach {order} in [tile_count] {
+      slot = order % 2;
+      wait full.at(order);
+      // Compute with tile[slot].
+      trigger empty.at(order);
     }
   }
 }
 ```
 
-Each parallel group at the storage's level gets its own event instance.
-
-## Deadlock Avoidance
-
-Since `wait` auto-resets the event, multiple threads waiting on the same event can cause deadlocks:
-
-```choreo
-// DANGEROUS: deadlock possible
-parallel p by 1 {
-  shared event e;
-  trigger e;
-  parallel q by 2 {
-    wait e;      // thread 0 may reset before thread 1 sees SET
-  }
-}
-```
-
-Use event arrays to give each thread its own event:
-
-```choreo
-qc = 2;
-parallel p by 1 {
-  shared event e[qc];
-  trigger e;              // triggers e[0] and e[1]
-  parallel q by qc {
-    wait e[q];            // each thread waits its own event
-  }
-}
-```
-
-## Events in Practice
-
-Events are most commonly used in:
-
-- **Warp specialization**: Ordering producer and consumer warp groups.
-- **Software pipelining**: Signaling that a buffer is ready for consumption.
-- **Multi-stage pipelines**: Coordinating stages that overlap DMA and compute.
-
-*(Reference: `tests/parse/events.co`, `tests/infer/events.co`, `tests/gpu/check/event_validation.co`)*
+This is the complete pipeline vocabulary: async operations produce futures,
+events publish readiness, and `.at(order)` selects cyclic generations.

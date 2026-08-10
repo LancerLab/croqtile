@@ -1,0 +1,10 @@
+// RUN: not choreo -e %s 2>&1 | FileCheck %s
+
+__co__ void removed_stage() {
+  parallel b by 1 : block {
+    order = 0;
+    slot = stage<2>(order);
+  }
+}
+
+// CHECK: error: syntax error
