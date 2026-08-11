@@ -1062,9 +1062,11 @@ void LivenessAnalyzer::ComputeLiveRange() {
           });
         }
         if (i == 0) bb_info.in = sl.live_in;
-        // Restore binding relationship deleted by AST::Wait
+        // Restore binding relationships deleted by a wait or trigger-after.
         if (stmt2binding_restore.count(s)) {
-          assert(isa<AST::Wait>(s));
+          assert(isa<AST::Wait>(s) ||
+                 (isa<AST::Trigger>(s) &&
+                  cast<AST::Trigger>(s)->HasDependencies()));
           for (const auto& fut_name : stmt2binding_restore[s])
             for (const auto& [src, dst] : future_buffers[fut_name])
               AddBinding(fut_name, src);
