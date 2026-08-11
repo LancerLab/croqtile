@@ -302,19 +302,21 @@ private:
   }
 
   // Check if kernel return value i is an input argument (return-input pattern).
+  // The return may be nested inside control flow or a parallel block, so walk
+  // the whole kernel and use the first return found.
   int getReturnInputArgIdx(KernelOp kernel, unsigned retIdx) {
-    auto &body = kernel.getBody();
-    if (body.empty()) return -1;
-    for (auto &op : body.front().getOperations()) {
-      if (auto ret = dyn_cast<KernelReturnOp>(op)) {
-        if (retIdx < ret.getOperands().size()) {
-          Value v = ret.getOperands()[retIdx];
-          if (auto arg = dyn_cast<BlockArgument>(v))
-            return arg.getArgNumber();
-        }
+    int result = -1;
+    bool found = false;
+    kernel.walk([&](KernelReturnOp ret) {
+      if (found) return;
+      found = true;
+      if (retIdx < ret.getOperands().size()) {
+        Value v = ret.getOperands()[retIdx];
+        if (auto arg = dyn_cast<BlockArgument>(v))
+          result = arg.getArgNumber();
       }
-    }
-    return -1;
+    });
+    return result;
   }
 
   bool hasBlockParallel(KernelOp kernel) {
@@ -722,15 +724,15 @@ private:
       dynSpmEmitted_ = true;
     });
 
-    for (auto &op : body.front().getOperations()) {
-      if (auto ret = dyn_cast<KernelReturnOp>(op)) {
-        for (unsigned i = 0; i < ret.getOperands().size(); ++i) {
-          returnValues.insert(ret.getOperands()[i]);
-          if (getReturnInputArgIdx(kernel, i) < 0)
-            valueNames[ret.getOperands()[i]] = returnParamNames[i];
-        }
+    // Bind returned values to the output parameters. The return may be
+    // nested inside a parallel block or control flow, so walk the kernel.
+    kernel.walk([&](KernelReturnOp ret) {
+      for (unsigned i = 0; i < ret.getOperands().size(); ++i) {
+        returnValues.insert(ret.getOperands()[i]);
+        if (getReturnInputArgIdx(kernel, i) < 0)
+          valueNames[ret.getOperands()[i]] = returnParamNames[i];
       }
-    }
+    });
 
     // Device-side emission: parallel blocks, control-flow containing
     // parallel blocks, and pure computations (hoisted by lowering).
@@ -1635,39 +1637,39 @@ private:
              << "choreo::abend_true(topsMalloc((void**)&__result__device, "
              << resDynBytes << "));\n";
         bool emittedDynInit = false;
-        for (auto &op : body.front().getOperations()) {
-          if (auto ret = dyn_cast<KernelReturnOp>(op)) {
-            for (auto v : ret.getOperands()) {
-              if (isa<coir::TensorType>(v.getType())) {
-                valueNames[v] = "__result__device";
-                hostReturnTensors_.insert(v);
-                // A returned tensor declared with a non-literal initializer
-                // (e.g. `u8 [K] ans{x}`) must be filled on the host and
-                // copied to the device before launch, mirroring the choreo
-                // reference path.
-                if (!emittedDynInit) {
-                  if (auto alloc = v.getDefiningOp<TensorAllocOp>())
-                    if (auto dynInit =
-                            alloc->getAttrOfType<mlir::StringAttr>(
-                                "coir.dyn_init_expr"))
-                      if (!dynInit.getValue().empty()) {
-                        emittedDynInit = true;
-                        os() << getIndent()
-                             << "std::fill(__result.data(), __result.data() + "
-                                "__result.element_count(), static_cast<"
-                             << eType << ">(" << dynInit.getValue()
-                             << "));\n";
-                        os() << getIndent()
-                             << "choreo::abend_true(topsMemcpy("
-                                "__result__device, __result.data(), "
-                             << resDynBytes
-                             << ", topsMemcpyHostToDevice));\n";
-                      }
-                }
+        // The return may be nested inside a parallel block or control flow,
+        // so walk the kernel to bind every returned tensor.
+        kernel.walk([&](KernelReturnOp ret) {
+          for (auto v : ret.getOperands()) {
+            if (isa<coir::TensorType>(v.getType())) {
+              valueNames[v] = "__result__device";
+              hostReturnTensors_.insert(v);
+              // A returned tensor declared with a non-literal initializer
+              // (e.g. `u8 [K] ans{x}`) must be filled on the host and
+              // copied to the device before launch, mirroring the choreo
+              // reference path.
+              if (!emittedDynInit) {
+                if (auto alloc = v.getDefiningOp<TensorAllocOp>())
+                  if (auto dynInit =
+                          alloc->getAttrOfType<mlir::StringAttr>(
+                              "coir.dyn_init_expr"))
+                    if (!dynInit.getValue().empty()) {
+                      emittedDynInit = true;
+                      os() << getIndent()
+                           << "std::fill(__result.data(), __result.data() + "
+                              "__result.element_count(), static_cast<"
+                           << eType << ">(" << dynInit.getValue()
+                           << "));\n";
+                      os() << getIndent()
+                           << "choreo::abend_true(topsMemcpy("
+                              "__result__device, __result.data(), "
+                           << resDynBytes
+                           << ", topsMemcpyHostToDevice));\n";
+                    }
               }
             }
           }
-        }
+        });
       }
 
       emitEntryAssertions(kernel);
@@ -1968,9 +1970,11 @@ private:
       // A returned tensor declared with a non-literal initializer (e.g.
       // `u8 [K] ans{x}`) must be filled on the host and copied to the
       // device before launch, mirroring the choreo reference path.
-      for (auto &op : kernel.getBody().front().getOperations()) {
-        auto ret = dyn_cast<KernelReturnOp>(op);
-        if (!ret) continue;
+      // The return may be nested inside a parallel block or control flow,
+      // so walk the kernel and use the first returned tensor found.
+      bool emittedDynInit = false;
+      kernel.walk([&](KernelReturnOp ret) {
+        if (emittedDynInit) return;
         for (auto v : ret.getOperands()) {
           if (!isa<coir::TensorType>(v.getType())) continue;
           auto alloc = v.getDefiningOp<TensorAllocOp>();
@@ -1978,6 +1982,7 @@ private:
           auto dynInit =
               alloc->getAttrOfType<mlir::StringAttr>("coir.dyn_init_expr");
           if (!dynInit || dynInit.getValue().empty()) continue;
+          emittedDynInit = true;
           os() << "  std::fill(__result.data(), __result.data() + "
                   "__result.element_count(), static_cast<"
                << eType << ">(" << dynInit.getValue() << "));\n";
@@ -1991,8 +1996,7 @@ private:
                  << resDynBytes << ", topsMemcpyHostToDevice));\n";
           break;
         }
-        break;
-      }
+      });
       os() << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
          << bdims << (mr.hasSharedMR ? (", " + mr.spmSizeName) : "") << ">>>(";
       for (unsigned i = 0; i < numOrigInputs; ++i) {

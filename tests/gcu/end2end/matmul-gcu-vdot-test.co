@@ -1,7 +1,7 @@
 // REQUIRES: TARGET-GCU300
 // RUN: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-DOCKER: choreo -st -t topscc %s -o %s.result && %s.result | FileCheck --match-full-lines %s && rm -f %s.result
-// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // extern "C" void kernel(int * lhs, int * rhs, int * out, int m, int k, int n) {
