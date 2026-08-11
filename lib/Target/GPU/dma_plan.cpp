@@ -21,6 +21,10 @@ bool DMAPlan::Visit(AST::DMA& n) {
   return true;
 }
 
+bool DMAPlan::Visit(AST::BufferMap&) {
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Direction resolution -- inspect from/to span storage qualifiers.
 // ---------------------------------------------------------------------------

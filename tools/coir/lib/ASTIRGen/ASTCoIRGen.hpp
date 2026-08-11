@@ -40,8 +40,14 @@ private:
   coir::ParallelLevelAttr LowerParallelLevel(ParallelLevel pl);
 
   llvm::SmallVector<llvm::StringMap<mlir::Value>> value_stack;
-  void PushScope() { value_stack.push_back({}); }
-  void PopScope() { value_stack.pop_back(); }
+  void PushScope() {
+    value_stack.push_back({});
+    pendingBufferUnmaps_.push_back({});
+  }
+  void PopScope() {
+    pendingBufferUnmaps_.pop_back();
+    value_stack.pop_back();
+  }
   void MapValue(llvm::StringRef name, mlir::Value val) {
     value_stack.back()[name] = val;
   }
@@ -120,6 +126,24 @@ private:
   /// Build the assertion map for the current function from the assessor.
   void BuildAssertionMap();
 
+  /// Track mapped results: source mlir::Value -> latest destination
+  /// mapped mlir::Value, used for remap's existing operand.
+  llvm::DenseMap<mlir::Value, mlir::Value> bufferMapMappings_;
+
+  /// Per-scope stack of (source -> (mapped_value, size_value)) for
+  /// auto-unmap emission when leaving the scope.  Remap replaces the entry
+  /// for the same source so only the latest mapping is unmapped.
+  llvm::SmallVector<
+      llvm::DenseMap<mlir::Value, std::pair<mlir::Value, mlir::Value>>>
+      pendingBufferUnmaps_;
+
+  /// Emit coir.buffer.unmap for all pending mappings in the current scope.
+  void emitPendingBufferUnmaps();
+
+  /// Resolve the existing mapped tensor for a buffer.remap from the
+  /// bufferMapMappings_ table using the source value.
+  mlir::Value resolveRemapExisting(AST::BufferMap &n, mlir::Value srcVal);
+
   // Resolve a bounded variable (within or parallel-by) to its total
   // iteration extent by looking up bv_map -> MLIR values or BoundedType.
   int64_t ResolveBoundedVarExtent(llvm::StringRef rvName);
@@ -172,6 +196,7 @@ public:
   bool Visit(AST::Memory &) override { return true; }
   bool Visit(AST::SpanAs &) override;
   bool Visit(AST::DMA &) override;
+  bool Visit(AST::BufferMap &) override;
   bool Visit(AST::MMA &) override;
   bool Visit(AST::ChunkAt &) override { return true; }
   bool Visit(AST::Wait &) override;

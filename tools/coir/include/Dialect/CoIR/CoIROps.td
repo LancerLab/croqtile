@@ -759,4 +759,87 @@ def InThreadsOp : CoIR_Op<"inthreads", [SingleBlock, NoTerminator]> {
   let regions = (region SizedRegion<1>:$body);
 }
 
+//===----------------------------------------------------------------------===//
+// Buffer map/remap/unmap ops for explicit memory mapping
+//===----------------------------------------------------------------------===//
+
+def BufferMapOp : CoIR_Op<"buffer.map",
+                  [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+  let summary = "Map a source buffer region into destination memory";
+  let description = [{
+    Maps a rectangular region of a source-memory tensor into destination
+    address space using explicit memory mapping.  The mapped region
+    starts at `offset` and covers `size` elements.  The result is a
+    destination-memory tensor that aliases the source buffer region.
+
+    The source buffer must have a source memory space; the result type
+    must have a destination memory space and the same shape as the source.
+
+    Example:
+      %dst = coir.buffer.map %src[%off] size(%sz)
+               : !coir.tensor<128xf32, src_space>
+             -> !coir.tensor<128xf32, dst_space>
+  }];
+  let arguments = (ins
+    CoIR_TensorTypeC:$source,
+    Index:$offset,
+    Index:$size
+  );
+  let results = (outs CoIR_TensorTypeC:$result);
+  let hasCustomAssemblyFormat = 1;
+  let hasVerifier = 1;
+}
+
+def BufferRemapOp : CoIR_Op<"buffer.remap",
+                     [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+  let summary = "Change the mapping to a different source buffer region";
+  let description = [{
+    Changes an existing destination-memory mapping to point to a
+    different region of the same (or different) source-memory tensor.
+    The `existing` operand is the destination tensor returned by a
+    previous `buffer.map` or `buffer.remap`.  The new mapping starts
+    at `offset` in `source` and covers `size` elements.
+
+    The source buffer must have a source memory space; `existing` and
+    result must have destination memory space.
+
+    Example:
+      %dst2 = coir.buffer.remap %dst1, %src[%off2] size(%sz)
+                : !coir.tensor<128xf32, dst_space>
+              -> !coir.tensor<128xf32, dst_space>
+  }];
+  let arguments = (ins
+    CoIR_TensorTypeC:$existing,
+    CoIR_TensorTypeC:$source,
+    Index:$offset,
+    Index:$size
+  );
+  let results = (outs CoIR_TensorTypeC:$result);
+  let hasCustomAssemblyFormat = 1;
+  let hasVerifier = 1;
+}
+
+def BufferUnmapOp : CoIR_Op<"buffer.unmap",
+                     [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+  let summary = "Release an explicit memory mapping";
+  let description = [{
+    Releases the mapping for a destination-memory tensor previously
+    created by `buffer.map`.  The destination tensor becomes invalid
+    after this point.
+
+    Both the `mapped` tensor and `size` (number of mapped elements)
+    are required so that the runtime can properly tear down the
+    mapping.
+
+    Example:
+      coir.buffer.unmap %mapped, %sz : !coir.tensor<128xf32, dst_space>
+  }];
+  let arguments = (ins
+    CoIR_TensorTypeC:$local,
+    Index:$size
+  );
+  let results = (outs);
+  let hasCustomAssemblyFormat = 1;
+}
+
 #endif // COIR_OPS_TD

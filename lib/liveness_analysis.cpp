@@ -217,6 +217,10 @@ LivenessAnalyzer::ExactFirstLoopScope(const std::string& outer_scope,
 void LivenessAnalyzer::AddUse(const Stmt* s, const std::string& var,
                               bool add_extra_use) {
   std::string svar = InScopeNameForRef(RemoveSuffix(var, ".data"));
+  // A no-storage alias (e.g. buffer.map/remap result) owns no storage of its
+  // own.  Redirect its uses to the source buffer so the alias itself never
+  // gets a live range or a local allocation.
+  while (no_storage_alias_.count(svar)) svar = no_storage_alias_[svar];
   VST_DEBUG(dbgs() << "USE: " << svar << "\n");
   stmt_linfo[s].use.insert(svar);
   var_events[svar].push_back({EventKind::Use, SSTab().ScopeName()});
@@ -323,6 +327,17 @@ void LivenessAnalyzer::AddAlias(const std::string& alias_var,
   std::string soriginal = GetScopedName(original_var);
   VST_DEBUG(dbgs() << "Add alias: " << salias << " <-> " << soriginal << "\n");
   alias_[salias] = soriginal;
+}
+
+// m = input.map/remap(...), then m owns no storage of its own.  Uses of m are
+// redirected to input so that m never gets a live range or local allocation.
+void LivenessAnalyzer::AddNoStorageAlias(const std::string& alias_var,
+                                         const std::string& original_var) {
+  std::string salias = GetScopedName(alias_var);
+  std::string soriginal = GetScopedName(original_var);
+  VST_DEBUG(dbgs() << "Add no-storage alias: " << salias << " <-> " << soriginal
+                   << "\n");
+  no_storage_alias_[salias] = soriginal;
 }
 
 void LivenessAnalyzer::AddIsBinding(const Stmt* s,
@@ -1969,6 +1984,20 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
   if (!n.future.empty()) {
     RecordHBBufferAccess(InScopeName(n.ToSymbol()), "DMA-to");
     RecordHBBufferAccess(InScopeName(n.FromSymbol()), "DMA-from");
+  }
+
+  return true;
+}
+
+bool LivenessAnalyzer::Visit(AST::BufferMap& n) {
+  TraceEachVisit(n);
+
+  // The mapped result is just a view into the source buffer, not a new
+  // buffer allocation.  Uses of the result are redirected to the source so
+  // that the result never gets a live range or a local allocation.
+  if (!n.result.empty() && n.source) {
+    auto srcOps = GetAllSymbolicOperands(n.source.get());
+    for (const auto& src : srcOps) AddNoStorageAlias(n.result, src);
   }
 
   return true;

@@ -494,6 +494,7 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
       llvm::outs() << "\n";
     }
   } else if (isa<AST::ChoreoFunction>(&n)) {
+    emitPendingBufferUnmaps();
     auto *block = builder.getInsertionBlock();
     if (block) {
       bool insideKernel = false;
@@ -508,6 +509,7 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
     }
     PopScope();
   } else if (isa<AST::ParallelBy>(&n)) {
+    emitPendingBufferUnmaps();
     auto *block = builder.getInsertionBlock();
     if (block && (block->empty() || !block->back().hasTrait<mlir::OpTrait::IsTerminator>()))
       builder.create<coir::YieldOp>(builder.getUnknownLoc(), mlir::ValueRange{});
@@ -515,6 +517,7 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
     if (parentBlock) builder.setInsertionPointAfter(block->getParentOp());
     PopScope();
   } else if (isa<AST::ForeachBlock>(&n)) {
+    emitPendingBufferUnmaps();
     // Close inner nested foreachs (no iter_args) first.
     for (unsigned ri = foreachNestDepth; ri > 1; --ri) {
       auto *block = builder.getInsertionBlock();
@@ -629,6 +632,7 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
         UpdateValue(info.iterNames[i], scfWhile.getResult(i));
     }
   } else if (isa<AST::WithBlock>(&n)) {
+    emitPendingBufferUnmaps();
     PopScope();
   } else if (isa<AST::InThreadsBlock>(&n)) {
     auto *block = builder.getInsertionBlock();
@@ -3236,6 +3240,138 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
   pendingDmaAssignName.clear();
 
   return true;
+}
+
+bool ASTCoIRGen::Visit(AST::BufferMap &n) {
+  auto loc = Loc(n);
+
+  // The parser always produces a ChunkAt for buffer.map/remap source.
+  auto resolveVal = [&](AST::Node &node) -> mlir::Value {
+    if (auto *chunk = dyn_cast<AST::ChunkAt>(&node)) {
+      auto base = LookupValue(chunk->data->name);
+      if (base) return EmitChunkAtTile(*chunk, base);
+      return nullptr;
+    }
+    return nullptr;
+  };
+
+  // buffer.map and buffer.remap: require source buffer and result
+  if (!n.source) {
+    Error(n.LOC(), "explicit memory mapping requires a source buffer.");
+    return false;
+  }
+
+  auto srcVal = resolveVal(*n.source);
+  if (!srcVal) {
+    Error(n.LOC(), "explicit memory mapping: could not resolve source buffer.");
+    return false;
+  }
+
+  mlir::Value offsetVal = EmitExpr(*n.offset);
+  if (!offsetVal) {
+    Error(n.LOC(), "explicit memory mapping: could not resolve offset operand.");
+    return false;
+  }
+  mlir::Value sizeVal = EmitExpr(*n.size);
+  if (!sizeVal) {
+    Error(n.LOC(), "explicit memory mapping: could not resolve size operand.");
+    return false;
+  }
+
+  // BufferMapOp/RemapOp expect `index` operands; emit index casts if needed.
+  auto indexTy = builder.getIndexType();
+  if (offsetVal.getType() != indexTy)
+    offsetVal = builder.create<mlir::arith::IndexCastOp>(loc, indexTy, offsetVal);
+  if (sizeVal.getType() != indexTy)
+    sizeVal = builder.create<mlir::arith::IndexCastOp>(loc, indexTy, sizeVal);
+
+  mlir::Value result;
+
+  if (n.IsMap()) {
+    auto srcTensorTy = srcVal.getType().dyn_cast<coir::TensorType>();
+    if (!srcTensorTy) {
+      Error(n.LOC(), "buffer.map: source is not a tensor type.");
+      return false;
+    }
+    auto shape = srcTensorTy.getShape();
+    auto elemTy = srcTensorTy.getElementType();
+    auto resTy = coir::TensorType::get(
+        builder.getContext(), elemTy, shape,
+        (int32_t)coir::TensorMemorySpace::Local, llvm::ArrayRef<int64_t>());
+
+    auto mapOp = builder.create<coir::BufferMapOp>(loc, resTy, srcVal,
+                                                    offsetVal, sizeVal);
+    result = mapOp.getResult();
+
+    // Track the result for subsequent remap lookups (keyed on source value)
+    bufferMapMappings_[srcVal] = result;
+  } else {
+    // buffer.remap: look up the existing mapped tensor for this source
+    auto existingVal = resolveRemapExisting(n, srcVal);
+    if (!existingVal) {
+      Error(n.LOC(),
+            "buffer.remap: could not resolve existing mapped tensor for source.");
+      return false;
+    }
+    auto existingTy = existingVal.getType().dyn_cast<coir::TensorType>();
+    if (!existingTy) {
+      Error(n.LOC(), "buffer.remap: existing is not a tensor type.");
+      return false;
+    }
+    auto shape = existingTy.getShape();
+    auto elemTy = existingTy.getElementType();
+    auto resTy = coir::TensorType::get(
+        builder.getContext(), elemTy, shape,
+        (int32_t)coir::TensorMemorySpace::Local, llvm::ArrayRef<int64_t>());
+
+    auto remapOp = builder.create<coir::BufferRemapOp>(
+        loc, resTy, existingVal, srcVal, offsetVal, sizeVal);
+    result = remapOp.getResult();
+
+    // Update the tracked result
+    bufferMapMappings_[srcVal] = result;
+  }
+
+  // Register the result
+  if (!n.result.empty()) {
+    MapValue(n.result, result);
+    MapValue(n.result + ".data", result);
+    MapValue(n.result + ".span", result);
+  }
+
+  // Track for auto-unmap at scope exit (keyed by global source;
+  // remap replaces the previous entry for the same source).
+  if (!pendingBufferUnmaps_.empty())
+    pendingBufferUnmaps_.back()[srcVal] = {result, sizeVal};
+
+  return true;
+}
+
+void ASTCoIRGen::emitPendingBufferUnmaps() {
+  if (pendingBufferUnmaps_.empty()) return;
+  auto &currentUnmaps = pendingBufferUnmaps_.back();
+  auto loc = builder.getUnknownLoc();
+  for (auto &[srcVal, entry] : currentUnmaps)
+    builder.create<coir::BufferUnmapOp>(loc, entry.first, entry.second);
+  currentUnmaps.clear();
+}
+
+mlir::Value ASTCoIRGen::resolveRemapExisting(AST::BufferMap &n,
+                                              mlir::Value srcVal) {
+  // Look up the most recent map/remap result for the same global source.
+  auto it = bufferMapMappings_.find(srcVal);
+  if (it != bufferMapMappings_.end())
+    return it->second;
+  // Fallback: try to look up the source name as a previously-mapped result
+  if (auto *id = dyn_cast<AST::Identifier>(n.source.get())) {
+    auto name = id->name;
+    auto val = LookupValue(name);
+    if (val && val != srcVal) {
+      // The name points to a local tensor (result of a prior map)
+      return val;
+    }
+  }
+  return nullptr;
 }
 
 bool ASTCoIRGen::Visit(AST::MMA &n) {

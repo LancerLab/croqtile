@@ -57,7 +57,7 @@ namespace CoIR {
 ///   "coir.has_dma"    -- whether the target needs DMA for global<->local
 void StampTargetOnModule(mlir::ModuleOp module, llvm::StringRef target,
                          llvm::StringRef arch, llvm::StringRef mma_target,
-                         bool has_tma, bool has_dma);
+                         bool has_tma, bool has_dma, bool has_buffer_map);
 
 /// Read MMA target strategy from module attributes.
 /// Returns empty string if not set.
@@ -68,6 +68,9 @@ bool HasTMA(mlir::ModuleOp module);
 
 /// Read whether the target needs hardware DMA for global<->local transfers.
 bool HasDMA(mlir::ModuleOp module);
+
+/// Read whether the target supports explicit memory mapping.
+bool HasBufferMap(mlir::ModuleOp module);
 
 /// Read the architecture string from module attributes.
 llvm::StringRef GetArch(mlir::ModuleOp module);

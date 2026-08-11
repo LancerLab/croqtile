@@ -204,6 +204,7 @@ public:
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::WithBlock&) override;
   bool Visit(AST::DMA&) override;
+  bool Visit(AST::BufferMap&) override;
   bool Visit(AST::MMA&) override;
   bool Visit(AST::ChunkAt&) override;
   bool Visit(AST::Wait&) override;
@@ -266,6 +267,10 @@ private:
   // -- Alias and binding tracking --
   // one to one. Alias of buffer. Could happen in spanas, etc.
   std::unordered_map<std::string, std::string> alias_;
+  // one to one. Alias that owns no storage of its own (e.g. buffer.map/remap
+  // result). Uses of such an alias are attributed directly to the source
+  // buffer, so the alias itself never gets a live range or local allocation.
+  std::unordered_map<std::string, std::string> no_storage_alias_;
   // one to many. Bind var to other vars. Could happen in select, dma, etc.
   std::unordered_map<std::string, VarSet> bindings_;
   // record the binding info to do restoration in ComputeLiveInOut().
@@ -414,6 +419,8 @@ private:
               bool is_buffer_or_future = false);
   void AddIsAlias(const Stmt* s, const std::string& alias_var);
   void AddAlias(const std::string& alias_var, const std::string& original_var);
+  void AddNoStorageAlias(const std::string& alias_var,
+                         const std::string& original_var);
   void AddIsBinding(const Stmt* s, const std::string& bind_res);
   void AddBinding(const std::string& bind_res, const std::string& bind_src);
   void RemoveBinding(const std::string& bind_res, const std::string& bind_src);

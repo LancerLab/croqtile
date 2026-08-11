@@ -37,6 +37,7 @@ enum class ChoreoFeature {
   BARRIER,
   FENCE,
   COOPERATIVE_LAUNCH,
+  BUFFER_MAP,
 };
 
 inline static const std::string STR(ChoreoFeature cf) {
@@ -59,6 +60,7 @@ inline static const std::string STR(ChoreoFeature cf) {
   case ChoreoFeature::BARRIER: return "barrier";
   case ChoreoFeature::FENCE: return "fence";
   case ChoreoFeature::COOPERATIVE_LAUNCH: return "cooperative_launch";
+  case ChoreoFeature::BUFFER_MAP: return "buffer_map";
   default: choreo_unreachable("unsupported feature kind.");
   }
 }
@@ -94,6 +96,9 @@ inline static const std::string Description(ChoreoFeature cf) {
     return "Memory fence for ordering memory operations.";
   case ChoreoFeature::COOPERATIVE_LAUNCH:
     return "Cooperative kernel launch for grid-level synchronization.";
+  case ChoreoFeature::BUFFER_MAP:
+    return "Explicit memory mapping (map/remap/unmap) for zero-copy "
+           "source-to-destination memory aliasing.";
   default: choreo_unreachable("unsupported feature kind.");
   }
 }
@@ -339,6 +344,17 @@ public:
   virtual bool HasDMA(const ArchId& arch) const {
     return IsFeatureSupported(arch, STR(ChoreoFeature::ASYNC_DMA));
   }
+
+  // Whether the target supports hardware MMU buffer mapping (map_mem_m /
+  // remap_mem_m / unmap_mem_m) for global-to-local memory aliasing.
+  virtual bool HasBufferMap(const ArchId& arch) const {
+    return IsFeatureSupported(arch, STR(ChoreoFeature::BUFFER_MAP));
+  }
+
+  // Whether the given src->dst storage pair is valid for buffer mapping
+  // on the given architecture.  Default: only GLOBAL->LOCAL.
+  virtual bool IsBufferMappingValid(const ArchId& arch, Storage src,
+                                    Storage dst) const;
 
   // Whether the target's code generation only produces binaries (no text
   // source or script emission).  Targets that return true default to

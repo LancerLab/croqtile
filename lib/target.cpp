@@ -33,3 +33,11 @@ Storage Target::GetDefaultFenceMemory(const ArchId&,
   default: return Storage::NONE;
   }
 }
+
+bool Target::IsBufferMappingValid(const ArchId& arch, Storage src,
+                                  Storage dst) const {
+  (void)arch;
+  (void)src;
+  (void)dst;
+  return false;
+}

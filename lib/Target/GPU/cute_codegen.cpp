@@ -5067,6 +5067,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   return true;
 }
 
+bool CuteCodeGen::Visit(AST::BufferMap&) {
+  return true;
+}
+
 bool CuteCodeGen::Visit(AST::MMA& n) {
   auto& op = *n.GetOperation();
 

@@ -569,6 +569,8 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
   "nullptr"  return Choreo::Parser::make_NULLPTR(yytext, loc);
   "dma"      return Choreo::Parser::make_DMA(yytext, loc);
   "tma"      return Choreo::Parser::make_TMA(yytext, loc);
+  ".map"     return Choreo::Parser::make_MAP(yytext, loc);
+  ".remap"   return Choreo::Parser::make_REMAP(yytext, loc);
   ".copy"    return Choreo::Parser::make_COPY(yytext, loc);
   ".transp"  return Choreo::Parser::make_TRANSPOSE(yytext, loc);
   ".pad"     return Choreo::Parser::make_PAD(yytext, loc);

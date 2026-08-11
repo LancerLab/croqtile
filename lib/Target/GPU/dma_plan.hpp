@@ -276,6 +276,7 @@ struct DMAPlan : public CodeGenerator {
 
   // -- Visitor interface -----------------------------------------------------
   bool Visit(AST::DMA& n) override;
+  bool Visit(AST::BufferMap&) override;
 
   // -- lookup (called by CuteCodeGen after this pass has run) ----------------
   //

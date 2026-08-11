@@ -19,7 +19,7 @@ namespace CoIR {
 
 void StampTargetOnModule(mlir::ModuleOp module, llvm::StringRef target,
                          llvm::StringRef arch, llvm::StringRef mma_target,
-                         bool has_tma, bool has_dma) {
+                         bool has_tma, bool has_dma, bool has_buffer_map) {
   auto *ctx = module.getContext();
   if (!target.empty())
     module->setAttr("coir.target", mlir::StringAttr::get(ctx, target));
@@ -29,6 +29,8 @@ void StampTargetOnModule(mlir::ModuleOp module, llvm::StringRef target,
     module->setAttr("coir.mma_target", mlir::StringAttr::get(ctx, mma_target));
   module->setAttr("coir.has_tma", mlir::BoolAttr::get(ctx, has_tma));
   module->setAttr("coir.has_dma", mlir::BoolAttr::get(ctx, has_dma));
+  module->setAttr("coir.has_buffer_map",
+                  mlir::BoolAttr::get(ctx, has_buffer_map));
 }
 
 llvm::StringRef GetMMATarget(mlir::ModuleOp module) {
@@ -45,6 +47,13 @@ bool HasTMA(mlir::ModuleOp module) {
 
 bool HasDMA(mlir::ModuleOp module) {
   if (auto attr = module->getAttrOfType<mlir::BoolAttr>("coir.has_dma"))
+    return attr.getValue();
+  return false;
+}
+
+bool HasBufferMap(mlir::ModuleOp module) {
+  if (auto attr =
+          module->getAttrOfType<mlir::BoolAttr>("coir.has_buffer_map"))
     return attr.getValue();
   return false;
 }

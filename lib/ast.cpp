@@ -234,6 +234,17 @@ void DMA::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+void BufferMap::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+
+  if (source) source->accept(v);
+  if (offset) offset->accept(v);
+  if (size) size->accept(v);
+
+  v.Visit(*this);
+  v.AfterVisit(*this);
+}
+
 void MMA::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 

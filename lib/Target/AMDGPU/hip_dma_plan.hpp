@@ -83,6 +83,7 @@ struct HIPDMAPlan : public CodeGenerator {
   ~HIPDMAPlan() override = default;
 
   bool Visit(AST::DMA& n) override;
+  bool Visit(AST::BufferMap&) override;
 
   static const HIPDMALoweringDecision* Lookup(const AST::DMA* n) {
     auto it = decisions().find(n);

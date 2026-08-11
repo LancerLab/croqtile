@@ -1248,6 +1248,10 @@ void HIPCodeGen::EmitDMATranspose(AST::DMA&, const HIPDMALoweringDecision& dec,
   ds << d_indent << "}\n";
 }
 
+bool HIPCodeGen::Visit(AST::BufferMap&) {
+  return true;
+}
+
 // ============================================================================
 // Assignment
 // ============================================================================

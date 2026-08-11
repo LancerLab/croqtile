@@ -1119,6 +1119,10 @@ bool CCCodeGen::Visit(AST::DMA& n) {
   return true;
 }
 
+bool CCCodeGen::Visit(AST::BufferMap&) {
+  return true;
+}
+
 bool CCCodeGen::Visit(AST::MMA& n) {
   TraceEachVisit(n);
   auto& op = *n.GetOperation();
