@@ -1634,12 +1634,36 @@ private:
         os() << getIndent()
              << "choreo::abend_true(topsMalloc((void**)&__result__device, "
              << resDynBytes << "));\n";
+        bool emittedDynInit = false;
         for (auto &op : body.front().getOperations()) {
           if (auto ret = dyn_cast<KernelReturnOp>(op)) {
             for (auto v : ret.getOperands()) {
               if (isa<coir::TensorType>(v.getType())) {
                 valueNames[v] = "__result__device";
                 hostReturnTensors_.insert(v);
+                // A returned tensor declared with a non-literal initializer
+                // (e.g. `u8 [K] ans{x}`) must be filled on the host and
+                // copied to the device before launch, mirroring the choreo
+                // reference path.
+                if (!emittedDynInit) {
+                  if (auto alloc = v.getDefiningOp<TensorAllocOp>())
+                    if (auto dynInit =
+                            alloc->getAttrOfType<mlir::StringAttr>(
+                                "coir.dyn_init_expr"))
+                      if (!dynInit.getValue().empty()) {
+                        emittedDynInit = true;
+                        os() << getIndent()
+                             << "std::fill(__result.data(), __result.data() + "
+                                "__result.element_count(), static_cast<"
+                             << eType << ">(" << dynInit.getValue()
+                             << "));\n";
+                        os() << getIndent()
+                             << "choreo::abend_true(topsMemcpy("
+                                "__result__device, __result.data(), "
+                             << resDynBytes
+                             << ", topsMemcpyHostToDevice));\n";
+                      }
+                }
               }
             }
           }
@@ -1940,6 +1964,34 @@ private:
       } else {
         os() << "  choreo::abend_true(topsMalloc((void**)&__result__device, " << resDynBytes
            << "));\n";
+      }
+      // A returned tensor declared with a non-literal initializer (e.g.
+      // `u8 [K] ans{x}`) must be filled on the host and copied to the
+      // device before launch, mirroring the choreo reference path.
+      for (auto &op : kernel.getBody().front().getOperations()) {
+        auto ret = dyn_cast<KernelReturnOp>(op);
+        if (!ret) continue;
+        for (auto v : ret.getOperands()) {
+          if (!isa<coir::TensorType>(v.getType())) continue;
+          auto alloc = v.getDefiningOp<TensorAllocOp>();
+          if (!alloc) continue;
+          auto dynInit =
+              alloc->getAttrOfType<mlir::StringAttr>("coir.dyn_init_expr");
+          if (!dynInit || dynInit.getValue().empty()) continue;
+          os() << "  std::fill(__result.data(), __result.data() + "
+                  "__result.element_count(), static_cast<"
+               << eType << ">(" << dynInit.getValue() << "));\n";
+          if (resDynBytes.empty())
+            os() << "  choreo::abend_true(topsMemcpy(__result__device, "
+                    "__result.data(), "
+                 << resBytes << "ULL, topsMemcpyHostToDevice));\n";
+          else
+            os() << "  choreo::abend_true(topsMemcpy(__result__device, "
+                    "__result.data(), "
+                 << resDynBytes << ", topsMemcpyHostToDevice));\n";
+          break;
+        }
+        break;
       }
       os() << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
          << bdims << (mr.hasSharedMR ? (", " + mr.spmSizeName) : "") << ">>>(";
