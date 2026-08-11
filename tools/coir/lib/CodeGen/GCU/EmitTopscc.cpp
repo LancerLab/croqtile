@@ -1853,7 +1853,8 @@ private:
          << bdims << (mr.hasSharedMR ? (", " + mr.spmSizeName) : "") << ">>>(";
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os() << ", ";
-        os() << hostParamName(i) << "__device";
+        auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+        os() << hostParamName(i) << (tty ? "__device" : "");
       }
       for (auto &da : dimArgMeta)
         os() << ", (int)" << hostParamName(da.paramIdx) << ".shape()[" << da.dimIdx << "]";
@@ -1872,7 +1873,7 @@ private:
       }
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
-        if (tty && isDeviceGlobal(tty)) continue;
+        if (!tty || isDeviceGlobal(tty)) continue;
         os() << "  choreo::abend_true(topsFree(" << hostParamName(i) << "__device));\n";
       }
       os() << "  return choreo::copy_as_spanned(" << hostParamName(retInputIdx)
@@ -1892,7 +1893,8 @@ private:
          << bdims << (mr.hasSharedMR ? (", " + mr.spmSizeName) : "") << ">>>(";
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os() << ", ";
-        os() << hostParamName(i) << "__device";
+        auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+        os() << hostParamName(i) << (tty ? "__device" : "");
       }
       for (auto &da : dimArgMeta)
         os() << ", (int)" << hostParamName(da.paramIdx) << ".shape()[" << da.dimIdx << "]";
@@ -1922,7 +1924,7 @@ private:
       }
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
-        if (tty && isDeviceGlobal(tty)) continue;
+        if (!tty || isDeviceGlobal(tty)) continue;
         os() << "  choreo::abend_true(topsFree(" << hostParamName(i) << "__device));\n";
       }
       os() << "  choreo::abend_true(topsFree(__result__device));\n";
@@ -3862,25 +3864,31 @@ private:
         if (idx < numInputs) {
           auto inTy = fnType.getInput(idx);
           if (inTy.isIndex() || inTy.isInteger(32) || inTy.isInteger(64)) {
-            // This is a dim arg — find its paramIdx/dimIdx.
-            unsigned dimArgIdx = 0;
-            for (unsigned i = 0; i < numInputs; ++i) {
-              auto ty = fnType.getInput(i);
-              if (ty.isIndex() || ty.isInteger(32) || ty.isInteger(64)) {
-                if (i == idx && dimArgIdx < dimArgMeta.size()) {
-                  auto &da = dimArgMeta[dimArgIdx];
-                  std::string name = hostParamName(da.paramIdx) +
-                                     ".shape()[" +
-                                     std::to_string(da.dimIdx) + "]";
-                  hostNames[v] = name;
-                  return name;
-                }
-                ++dimArgIdx;
+            // Determine numOrigInputs capped by coir.param_names so we know
+            // where dim args start.  (This avoids miscounting when user-
+            // supplied scalar params like PF interleave with dim args.)
+            unsigned numOrig = numInputs;
+            if (auto pn = kernel->getAttrOfType<mlir::ArrayAttr>("coir.param_names"))
+              numOrig = std::min(numOrig, static_cast<unsigned>(pn.size()));
+            if (idx >= numOrig) {
+              unsigned dimArgIdx = idx - numOrig;
+              if (dimArgIdx < dimArgMeta.size()) {
+                auto &da = dimArgMeta[dimArgIdx];
+                std::string name = hostParamName(da.paramIdx) +
+                                   ".shape()[" +
+                                   std::to_string(da.dimIdx) + "]";
+                hostNames[v] = name;
+                return name;
               }
             }
           }
         }
-        std::string name = hostParamName(idx);
+        std::string name;
+        auto vit = valueNames.find(v);
+        if (vit != valueNames.end())
+          name = vit->second;
+        else
+          name = hostParamName(idx);
         hostNames[v] = name;
         return name;
       }
@@ -3956,6 +3964,15 @@ private:
   void emitEntryAssertions(KernelOp kernel) {
     auto dimArgMeta = getDimArgs(kernel);
     DenseMap<Value, std::string> hostNames;
+    // Seed hostNames from valueNames (kernel block arg → host expression)
+    // so that emitExprInHostScope can resolve block arguments without
+    // re-deriving them from dim arg metadata (which can miscount when
+    // scalar params like PF interleave with dim args).
+    for (auto arg : kernel.getBody().getArguments()) {
+      auto it = valueNames.find(arg);
+      if (it != valueNames.end())
+        hostNames[arg] = it->second;
+    }
     for (auto &ea : entryAssertions) {
       auto cond = emitExprInHostScope(ea.op.getCondition(), kernel, hostNames,
                                       dimArgMeta);
