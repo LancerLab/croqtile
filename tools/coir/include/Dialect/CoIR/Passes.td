@@ -9,6 +9,32 @@
 
 include "mlir/Pass/PassBase.td"
 
+def Cleanup : Pass<"coir-cleanup"> {
+  let summary = "Clean up redundant frontend IR (constant folding, CSE)";
+  let description = [{
+    Runs the MLIR canonicalizer followed by CSE to remove
+    semantically neutral noise introduced by the frontend:
+
+    - Folds arith.index_cast(arith.constant) pairs into a single
+      typed constant. The frontend emits integer literals as i32 and
+      then casts them to index for coir.tensor.tile /
+      coir.tensor.load_elem indices.
+    - Eliminates duplicate casts and other common subexpressions
+      (the frontend re-emits the same cast at every use site).
+    - Removes identity index_cast round trips (i64 -> index -> i64)
+      produced by the DMA 2^32 size-check assertions.
+    - Drops trivially dead ops left behind.
+
+    The pass is semantics-preserving and is intended to run before
+    lowering. It does not hoist code across regions or change any
+    control structure.
+  }];
+
+  let constructor = "::coir::createCleanupPass()";
+
+  let dependentDialects = ["::mlir::arith::ArithDialect"];
+}
+
 def ClassifyCopies : Pass<"coir-classify-copies"> {
   let summary = "Validate copy ops against target capabilities";
   let description = [{

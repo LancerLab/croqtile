@@ -130,8 +130,8 @@ target_include_directories(MLIRCoIRTransforms PUBLIC
   ${COIR_GEN_DIR}
 )
 target_link_libraries(MLIRCoIRTransforms PUBLIC
-  MLIRCoIRDialect MLIRIR MLIRPass MLIRTransformUtils MLIRSupport
-  MLIRArithDialect MLIRGPUDialect MLIRSCFDialect
+  MLIRCoIRDialect MLIRIR MLIRPass MLIRTransformUtils MLIRTransforms
+  MLIRSupport MLIRArithDialect MLIRGPUDialect MLIRSCFDialect
 )
 
 # ------------------------------------------------------------------

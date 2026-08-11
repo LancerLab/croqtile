@@ -19,6 +19,7 @@
 // MLIR dialect passes live in lowercase `coir` namespace (MLIR convention).
 namespace coir {
 
+std::unique_ptr<mlir::Pass> createCleanupPass();
 std::unique_ptr<mlir::Pass> createClassifyCopiesPass();
 std::unique_ptr<mlir::Pass> createLowerDMADescPass();
 std::unique_ptr<mlir::Pass> createHoistDMAConfigPass();
@@ -97,7 +98,8 @@ public:
   bool InstrumentSafety();
 
   /// Run CoIR optimization passes (skipped by --no-opt / -O0).
-  /// Currently empty; future home for real optimizations.
+  /// Currently runs coir-cleanup (canonicalize + CSE) to remove
+  /// redundant frontend IR such as constant index_casts.
   bool Optimize();
 
   /// Run shared CoIR lowering passes (DMA/MMA classification and hoisting).

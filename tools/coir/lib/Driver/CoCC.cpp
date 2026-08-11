@@ -263,6 +263,15 @@ int main(int argc, char *argv[]) {
 
   // --- Emit IR early exit ---
   if (emit_coir) {
+    // Clean up frontend emission noise (redundant index_casts etc.) so
+    // the dumped IR matches what the optimized pipeline consumes. Like
+    // clang -emit-llvm, the raw IR is kept under --no-opt / -O0.
+    if (!no_opt && CCtx().GetOptimizationLevel() > 0) {
+      if (!pipeline.Optimize()) {
+        errs() << "cocc: optimization failed\n";
+        return 1;
+      }
+    }
     if (!output.WasExplicitlySet() || output.GetValue() == "-") {
       pipeline.EmitCoIR(llvm::outs());
     } else {

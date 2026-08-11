@@ -76,7 +76,12 @@ bool Pipeline::InstrumentSafety() {
 }
 
 bool Pipeline::Optimize() {
-  return true;
+  mlir::PassManager pm(&ctx_);
+  if (mlir::failed(mlir::applyPassManagerCLOptions(pm)))
+    return false;
+
+  pm.addPass(coir::createCleanupPass());
+  return mlir::succeeded(pm.run(module_));
 }
 
 bool Pipeline::Lower() {
