@@ -1,0 +1,66 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -t topscc -gs -arch=gcu300 %s | bash -s | FileCheck --match-full-lines %s
+// RUN: cocc -t topscc -gs -arch=gcu300 %s | bash -s -- --execute | FileCheck --match-full-lines %s
+
+// End-to-end test: use buffer.remap to slide a window over the input
+// buffer, modifying elements in place through three remap positions.
+// The caller verifies the modified input directly since Choreo
+// passes buffers by reference.
+
+#include "choreo.h"
+
+__co__ void buffer_remap_slide(s32 [128] & input) {
+  parallel p by 1 {
+    u32 slide = 32;
+
+    // Window 0: map [0, 64), add 2 in place
+    w0 = input.map<local>(0, 64);
+    foreach {i} in [64] {
+      w0.data.at(i) = w0.data.at(i) + 2;
+    }
+
+    // Window 1: remap to [32, 96), add 10 in place
+    w1 = input.remap<local>(slide, 64);
+    foreach {i} in [64] {
+      w1.data.at(i) = w1.data.at(i) + 10;
+    }
+
+    // Window 2: remap to [64, 128), add 20 in place
+    w2 = input.remap<local>(slide * 2, 64);
+    foreach {i} in [64] {
+      w2.data.at(i) = w2.data.at(i) + 20;
+    }
+  }
+}
+
+int main() {
+  choreo::s32 a[128] = {0};
+  for (int i = 0; i < 128; ++i) a[i] = i;
+
+  auto a_data = choreo::make_spanview<1, choreo::s32>((int*)a, {128});
+  buffer_remap_slide(a_data);
+
+  bool passed = true;
+
+  // The three windows overlap in place:
+  //   window 0 covers [0, 64)    and adds 2
+  //   window 1 covers [32, 96)   and adds 10
+  //   window 2 covers [64, 128)  and adds 20
+  // An index inside more than one window accumulates each contribution, so
+  // verify the final in-place value directly rather than per-window.
+  for (int i = 0; i < 128; ++i) {
+    int expected = i;
+    if (i < 64) expected += 2;
+    if (i >= 32 && i < 96) expected += 10;
+    if (i >= 64) expected += 20;
+    if (a_data[i] != expected) {
+      std::cout << "FAIL at index " << i << ": expected " << expected
+                << " got " << a_data[i] << std::endl;
+      passed = false;
+    }
+  }
+
+  if (passed)
+    std::cout << "TEST PASSED" << std::endl;
+  // CHECK: TEST PASSED
+}

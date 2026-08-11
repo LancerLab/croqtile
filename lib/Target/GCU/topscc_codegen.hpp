@@ -100,6 +100,7 @@ public:
   bool Visit(AST::Assignment&) override;
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::DMA&) override;
+  bool Visit(AST::BufferMap&) override;
   bool Visit(AST::Wait&) override;
   bool Visit(AST::Trigger&) override;
   bool Visit(AST::Break&) override;
@@ -174,6 +175,13 @@ private:
   };
   std::map<std::string, NoFutureInfo> nofuture_vars;
   std::vector<std::string> pld_checklist = {};
+
+  // Track buffer.map/remap results keyed by source buffer symbol,
+  // so that remap can find the existing mapped handle and unmap
+  // can invalidate mappings at scope exit.
+  // value: {mapped_result_name, bts, size_expr_str}
+  std::map<std::string, std::tuple<std::string, std::string, std::string>>
+      pending_mapped_buffers_;
 
   std::set<std::string> global_buffers;   // global buffers
   bool current_pb_is_cooperative = false; // set before EmitDeviceFuncDecl

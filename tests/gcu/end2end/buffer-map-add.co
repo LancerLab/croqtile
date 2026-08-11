@@ -1,0 +1,49 @@
+// REQUIRES: TARGET-GCU300
+// RUN: choreo -t topscc -gs -arch=gcu300 %s | bash -s | FileCheck --match-full-lines %s
+// RUN: cocc -t topscc -gs -arch=gcu300 %s | bash -s -- --execute | FileCheck --match-full-lines %s
+
+// End-to-end test: map a global buffer into local memory,
+// perform an add operation on the mapped region, copy the result
+// back, and verify correctness.
+
+#include "choreo.h"
+
+__co__ s32 [128] buffer_map_add_two(s32 [128] input) {
+  s32[input.span] output;
+
+  parallel p by 1 {
+    // Map: aliases global input into local address space.
+    // This avoids an explicit DMA copy.
+    mapped_input = input.map<local>(0, |input.span|);
+
+    local s32[|mapped_input.span|] local_out;
+    foreach {i} in [|mapped_input.span|] {
+      local_out.at(i) = mapped_input.data.at(i) + 2;
+    }
+    dma.copy local_out => output;
+  }
+
+  return output;
+}
+
+int main() {
+  choreo::s32 a[128] = {0};
+  for (int i = 0; i < 128; ++i) a[i] = i;
+
+  auto a_data = choreo::make_spanview<1, choreo::s32>((int*)a, {128});
+  auto res = buffer_map_add_two(a_data);
+
+  std::cout << res.shape()[0] << std::endl;
+  // CHECK: 128
+  bool passed = true;
+  for (int i = 0; i < 128; ++i) {
+    if (res[i] != i + 2) {
+      std::cout << "FAIL at index " << i << ": expected " << (i + 2)
+                << " got " << res[i] << std::endl;
+      passed = false;
+    }
+  }
+  if (passed)
+    std::cout << "TEST PASSED" << std::endl;
+  // CHECK: TEST PASSED
+}

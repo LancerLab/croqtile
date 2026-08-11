@@ -2884,6 +2884,61 @@ public:
   __UDT_TYPE_INFO__(Node, DMA)
 };
 
+enum class BufferMapKind { MAP, REMAP };
+
+struct BufferMap : public Node, public TypeIDProvider<BufferMap> {
+  BufferMapKind op;
+  Storage storage = Storage::LOCAL; // destination storage (e.g., LOCAL)
+  std::string result;               // result ssa name (empty for unmap)
+  ptr<Node> source = nullptr;       // source buffer
+  ptr<Expr> offset = nullptr;       // offset into the source buffer
+  ptr<Expr> size = nullptr;         // number of elements to map
+
+  explicit BufferMap(const location& l, BufferMapKind k, Storage sto,
+                     const std::string& r, const ptr<Node>& src,
+                     const ptr<Expr>& off, const ptr<Expr>& sz)
+      : Node(l, MakePlaceHolderFutureType()), op(k), storage(sto), result(r),
+        source(src), offset(off), size(sz) {}
+
+  bool IsMap() const { return op == BufferMapKind::MAP; }
+  bool IsRemap() const { return op == BufferMapKind::REMAP; }
+
+  ptr<Node> CloneImpl() const override {
+    return Make<BufferMap>(LOC(), op, storage, result, CloneP(source),
+                           CloneP(offset), CloneP(size));
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    switch (op) {
+    case BufferMapKind::MAP:
+      os << "\n" << prefix << "`- buffer.map<" << STR(storage) << ">";
+      break;
+    case BufferMapKind::REMAP:
+      os << "\n" << prefix << "`- buffer.remap<" << STR(storage) << ">";
+      break;
+    }
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
+    if (!result.empty()) os << "\n" << prefix << "  `- result: " << result;
+    if (source) {
+      os << "\n" << prefix << "  `- source: ";
+      source->Print(os, prefix + "     ", with_type);
+    }
+    if (offset) {
+      os << "\n" << prefix << "  `- offset: ";
+      offset->Print(os, prefix + "     ", with_type);
+    }
+    if (size) {
+      os << "\n" << prefix << "  `- size: ";
+      size->Print(os, prefix + "     ", with_type);
+    }
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, BufferMap)
+};
+
 struct MMAOperation {
 public:
   enum Kind { Fill, Load, LoadR, Exec, Store, Commit, Scale };

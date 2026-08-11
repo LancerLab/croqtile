@@ -88,6 +88,7 @@ struct Visitor {
   virtual bool Visit(AST::Memory&) = 0;
   virtual bool Visit(AST::SpanAs&) = 0;
   virtual bool Visit(AST::DMA&) = 0;
+  virtual bool Visit(AST::BufferMap&) = 0;
   virtual bool Visit(AST::MMA&) = 0;
   virtual bool Visit(AST::ApplyBlock&) = 0;
   virtual bool Visit(AST::FragTransfer&) = 0;
@@ -625,6 +626,7 @@ public:
   bool Visit(AST::Memory&) override { return true; }
   bool Visit(AST::SpanAs&) override { return true; }
   bool Visit(AST::DMA&) override { return true; }
+  bool Visit(AST::BufferMap&) override { return true; }
   bool Visit(AST::MMA&) override { return true; }
   bool Visit(AST::ApplyBlock&) override { return true; }
   bool Visit(AST::FragTransfer&) override { return true; }
@@ -857,6 +859,10 @@ public:
     TraceEachVisit(n);
     return VisitNode(n);
   }
+  bool Visit(AST::BufferMap& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
   bool Visit(AST::MMA& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
@@ -977,6 +983,7 @@ public:
   virtual bool VisitNode(AST::Memory&) { return true; }
   virtual bool VisitNode(AST::SpanAs&) { return true; }
   virtual bool VisitNode(AST::DMA&) { return true; }
+  virtual bool VisitNode(AST::BufferMap&) { return true; }
   virtual bool VisitNode(AST::MMA&) { return true; }
   virtual bool VisitNode(AST::ApplyBlock&) { return true; }
   virtual bool VisitNode(AST::ChunkAt&) { return true; }
@@ -1113,6 +1120,7 @@ private:
   bool Visit(AST::Memory&) final { return true; }
   bool Visit(AST::SpanAs&) final { return true; }
   bool Visit(AST::DMA&) final { return true; }
+  bool Visit(AST::BufferMap&) final { return true; }
   bool Visit(AST::MMA&) final { return true; }
   bool Visit(AST::ApplyBlock&) final { return true; }
   bool Visit(AST::FragTransfer&) final { return true; }

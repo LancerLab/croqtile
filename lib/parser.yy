@@ -214,6 +214,7 @@ extern int yylex();
 %token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
 %token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST EVICT_FIRST EVICT_LAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC BARRIER FENCE CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG
+%token <std::string> MAP REMAP
 %token DLBRAKT
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN SCALE MASK
@@ -249,7 +250,7 @@ extern int yylex();
 %nterm <AST::ptr<AST::Call>> call_stmt
 %nterm <PBAttributes> pb_attribute
 %nterm <AST::DMAAsync> tdma_async
-%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block apply_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt mma_stmt frag_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
+%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block apply_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt buffer_map_stmt mma_stmt frag_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls named_fragment_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims step_list opt_step_list opt_stride_list at_list opt_at_list opt_from_list
 %nterm <std::pair<AST::ptr<AST::MultiValues>, AST::ptr<AST::MultiValues>>> shape_stride
@@ -746,6 +747,7 @@ statement
     : declarations SEMCOL        { $$ = $1; }
     | assignments  SEMCOL        { $$ = $1; }
     | dma_stmt     SEMCOL        { $$ = $1; }
+    | buffer_map_stmt SEMCOL     { $$ = $1; }
     | mma_schedule_attribute mma_stmt SEMCOL {
         auto mma = cast<AST::MMA>($2);
         auto op = mma->GetOperation();
@@ -2053,6 +2055,19 @@ dma_stmt
     | IDENTIFIER ASSIGN tdma NONE {
         symtab.AddSymbol($1, MakePlaceHolderFutureType());
         $$ = AST::Make<AST::DMA>(@1, $1, $3);
+      }
+    ;
+
+buffer_map_stmt
+    : IDENTIFIER ASSIGN chunkat_expr MAP LT STORAGE GT LPAREN s_expr COMMA s_expr RPAREN {
+        symtab.AddSymbol($1, MakePlaceHolderFutureType());
+        $$ = AST::Make<AST::BufferMap>(@3, AST::BufferMapKind::MAP, $6,
+                                        $1, $3, $9, $11);
+      }
+    | IDENTIFIER ASSIGN chunkat_expr REMAP LT STORAGE GT LPAREN s_expr COMMA s_expr RPAREN {
+        symtab.AddSymbol($1, MakePlaceHolderFutureType());
+        $$ = AST::Make<AST::BufferMap>(@3, AST::BufferMapKind::REMAP, $6,
+                                        $1, $3, $9, $11);
       }
     ;
 

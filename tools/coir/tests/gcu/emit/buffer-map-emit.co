@@ -1,0 +1,26 @@
+// RUN: cocc -t topscc -es %s -o - 2>&1 | FileCheck %s
+//
+// Emission test: verify buffer.map emits tops::map_mem_m / tops::unmap_mem_m,
+// and buffer.remap emits tops::remap_mem_m calls.
+
+// CHECK-LABEL: test_buffer_map
+__co__ void test_buffer_map(global f32 [128] a) {
+  parallel p by 1 {
+    mapped = a.map<local>(0, 64);
+  }
+  // CHECK: tops::map_mem_m((generic_ptr)
+  // CHECK-SAME: * sizeof(float)))
+  // CHECK: tops::unmap_mem_m(
+  // CHECK-SAME: * sizeof(float)))
+}
+
+// CHECK-LABEL: test_buffer_remap
+__co__ void test_buffer_remap(global f32 [128] a) {
+  parallel p by 1 {
+    m1 = a.map<local>(0, 32);
+    m2 = a.remap<local>(32, 64);
+  }
+  // CHECK: tops::map_mem_m((generic_ptr)
+  // CHECK: tops::remap_mem_m(
+  // CHECK: tops::unmap_mem_m(
+}

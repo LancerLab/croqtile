@@ -69,6 +69,17 @@ public:
     return 1;
   }
 
+  bool IsBufferMappingValid(const ArchId& arch, Storage src,
+                            Storage dst) const override {
+    // GCU MMU only supports mapping global memory into local address space,
+    // and only when the BUFFER_MAP feature is available for the architecture.
+    // DEFAULT storage for function parameters resolves to GLOBAL at this
+    // point in the pipeline, so accept it as a valid source.
+    return HasBufferMap(arch) &&
+           (src == Storage::GLOBAL || src == Storage::DEFAULT) &&
+           dst == Storage::LOCAL;
+  }
+
   // Per-architecture limits for parallel-by levels.
   size_t GetMaxParallelByCount(ParallelLevel pl,
                                const ArchId& arch) const override {

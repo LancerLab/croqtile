@@ -1047,6 +1047,26 @@ bool TypeInference::Visit(AST::DMA& n) {
   return true;
 }
 
+bool TypeInference::Visit(AST::BufferMap& n) {
+  TraceEachVisit(n);
+
+  if (!n.result.empty()) {
+    // SpannedType was set by shape inference.
+    auto sty = GetSpannedType(NodeType(n));
+    if (!sty) {
+      Error1(n.LOC(), "fail to infer the type of `" + n.result + "'.");
+      return false;
+    }
+
+    AssignSymbolWithType(n.LOC(), n.result + ".span",
+                         sty->GetMDSpanType()->Clone());
+    AssignSymbolWithType(n.LOC(), n.result + ".data", sty->Clone());
+    AssignSymbolWithType(n.LOC(), n.result, sty->Clone());
+  }
+
+  return true;
+}
+
 bool TypeInference::Visit(AST::MMA& n) {
   TraceEachVisit(n);
 

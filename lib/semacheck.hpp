@@ -80,6 +80,7 @@ public:
   bool VisitNode(AST::WithIn&) override;
   bool VisitNode(AST::SpanAs&) override;
   bool VisitNode(AST::DMA&) override;
+  bool VisitNode(AST::BufferMap&) override;
   bool VisitNode(AST::MMA&) override;
   bool VisitNode(AST::ChunkAt&) override;
   bool VisitNode(AST::Wait&) override;

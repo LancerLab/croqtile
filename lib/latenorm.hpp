@@ -531,6 +531,7 @@ public:
   }
 };
 
+
 struct BufferInfoCollect : public LateNormBase {
 public:
   BufferInfoCollect(const ptr<SymbolTable> s_tab)

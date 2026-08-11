@@ -103,6 +103,15 @@ protected:
   void emitTensorLoadElem(TensorLoadElemOp op);
   void emitTensorStoreElem(TensorStoreElemOp op);
 
+  // -- Element access name hook --
+  // Returns the C++ name used for tensor element (vld/st) accesses. Targets
+  // with explicit memory mapping (buffer.map/remap) override this to redirect
+  // element accesses to the L3-mapped alias while DTE/mdspan consumers keep
+  // using the raw pointer.
+  virtual std::string getElemAccessName(mlir::Value tensor) {
+    return getName(tensor);
+  }
+
   // -- Overridable ops with default impls --
   virtual void emitWhileOp(mlir::scf::WhileOp op);
   virtual void emitCoIRWhileOp(coir::CoIRWhileOp op);
@@ -127,6 +136,11 @@ protected:
   virtual void emitMMALoad(MMALoadOp op) = 0;
   virtual void emitMMAExec(MMAExecOp op) = 0;
   virtual void emitMMAStore(MMAStoreOp op) = 0;
+
+  // -- Buffer map ops (override for targets with explicit memory mapping) --
+  virtual void emitBufferMap(BufferMapOp op) { (void)op; }
+  virtual void emitBufferRemap(BufferRemapOp op) { (void)op; }
+  virtual void emitBufferUnmap(BufferUnmapOp op) { (void)op; }
 
   // -- Target-specific op hooks (no-op by default) --
   virtual void emitFutureRotate(FutureRotateOp op) { (void)op; }

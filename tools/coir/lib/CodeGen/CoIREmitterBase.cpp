@@ -346,6 +346,12 @@ void CoIREmitterBase::emitOp(Operation *op) {
     emitBarrier(barrier);
   else if (auto fence = dyn_cast<FenceOp>(op))
     emitFence(fence);
+  else if (auto bufferMap = dyn_cast<BufferMapOp>(op))
+    emitBufferMap(bufferMap);
+  else if (auto bufferRemap = dyn_cast<BufferRemapOp>(op))
+    emitBufferRemap(bufferRemap);
+  else if (auto bufferUnmap = dyn_cast<BufferUnmapOp>(op))
+    emitBufferUnmap(bufferUnmap);
   else if (auto wait = dyn_cast<WaitOp>(op))
     emitWait(wait);
   else if (auto rotate = dyn_cast<FutureRotateOp>(op))
@@ -584,7 +590,7 @@ void CoIREmitterBase::emitSelect(arith::SelectOp op) {
 
 void CoIREmitterBase::emitTensorLoadElem(TensorLoadElemOp op) {
   std::string name = getName(op.getResult());
-  std::string src = getName(op.getSource());
+  std::string src = getElemAccessName(op.getSource());
   auto tty = cast<TensorType>(op.getSource().getType());
   os() << getIndent() << emitType(op.getResult().getType()) << " " << name
        << " = " << src << "[";
@@ -593,7 +599,7 @@ void CoIREmitterBase::emitTensorLoadElem(TensorLoadElemOp op) {
 }
 
 void CoIREmitterBase::emitTensorStoreElem(TensorStoreElemOp op) {
-  std::string dst = getName(op.getDest());
+  std::string dst = getElemAccessName(op.getDest());
   std::string val = getName(op.getValue());
   auto tty = cast<TensorType>(op.getDest().getType());
   os() << getIndent() << dst << "[";

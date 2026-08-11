@@ -77,6 +77,10 @@ __co_any__ inline static float bf16_to_f32(bf16 value) {
     #undef __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
   #endif // __CHOREO_TARGET_NATIVE_BF16_SUPPORT__ && __GCU_ARCH__
 
+  #if __GCU_ARCH__ >= 300
+    #include <krt/mmu.h>
+  #endif
+
 namespace choreo {
 
 using stream_t = topsStream_t;

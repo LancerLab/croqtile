@@ -1,0 +1,25 @@
+// RUN: co2ir -t topscc -arch=gcu300 %s | FileCheck %s
+
+// IRGen test: verify buffer.map/remap lowering with auto-unmap.
+
+// CHECK-LABEL: sym_name = "test_buffer_map"
+// CHECK: coir.buffer.map
+// CHECK: coir.buffer.unmap
+
+__co__ void test_buffer_map(global f32 [128] a) {
+  parallel p by 1 {
+    mapped = a.map<local>(0, 64);
+  }
+}
+
+// CHECK-LABEL: sym_name = "test_buffer_remap"
+// CHECK: coir.buffer.map
+// CHECK: coir.buffer.remap
+// CHECK: coir.buffer.unmap
+
+__co__ void test_buffer_remap(global f32 [128] a) {
+  parallel p by 1 {
+    m1 = a.map<local>(0, 32);
+    m2 = a.remap<local>(32, 64);
+  }
+}

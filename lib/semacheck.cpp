@@ -1231,6 +1231,29 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
   return true;
 }
 
+bool SemaChecker::VisitNode(AST::BufferMap& n) {
+  if (!n.source)
+    return true;
+
+  auto srcTy = GetSpannedType(NodeType(*n.source));
+  if (!srcTy)
+    return true; // earlysema already reported the error
+
+  auto dense = srcTy->IsDense();
+  if (dense == Modality::NOT) {
+    Error1(n.source->LOC(),
+           "buffer.map/remap requires a dense (contiguous) source buffer, "
+           "but the source is non-contiguous.");
+    return false;
+  }
+  if (dense == Modality::MAY) {
+    Warning(n.source->LOC(),
+            "buffer.map/remap: the source buffer may be non-contiguous.");
+  }
+
+  return true;
+}
+
 bool SemaChecker::VisitNode(AST::MMA& n) {
   auto& op = *n.GetOperation();
   switch (op.Tag()) {

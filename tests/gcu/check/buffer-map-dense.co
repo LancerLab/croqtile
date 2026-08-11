@@ -1,0 +1,16 @@
+// RUN: not choreo -t topscc %s -sa=check 2>&1 | FileCheck %s
+// REQUIRES: TARGET-GCUALL
+
+// Guard the dense (contiguous) check for explicit buffer mapping.
+// buffer.map/remap require a dense source buffer. A strided (non-contiguous)
+// view must be rejected during the check pass.
+
+__co__ void buffer_map_noncontiguous(s32 [64, 32] a) {
+  parallel p by 1 {
+    // strided view: shape [16, 8] with strides [12, 3] is non-contiguous
+    b = a.view(16, 8: 12, 3);
+    m = b.map<local>(0, 64);
+  }
+}
+
+// CHECK: error: buffer.map/remap requires a dense (contiguous) source buffer, but the source is non-contiguous.

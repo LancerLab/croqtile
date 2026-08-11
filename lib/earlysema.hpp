@@ -127,6 +127,7 @@ public:
   bool Visit(AST::Memory&) override;
   bool Visit(AST::SpanAs&) override;
   bool Visit(AST::DMA&) override;
+  bool Visit(AST::BufferMap&) override;
   bool Visit(AST::MMA&) override;
   bool Visit(AST::ChunkAt&) override;
   bool Visit(AST::Wait&) override;

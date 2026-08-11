@@ -37,6 +37,7 @@ public:
   bool Visit(AST::WhileBlock&) override;
   bool Visit(AST::Assignment&) override;
   bool Visit(AST::DMA&) override;
+  bool Visit(AST::BufferMap&) override;
   bool Visit(AST::Break&) override;
   bool Visit(AST::Continue&) override;
   bool Visit(AST::Call&) override;

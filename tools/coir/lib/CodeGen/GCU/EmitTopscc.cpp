@@ -30,6 +30,8 @@ public:
   void emitModule(ModuleOp module, llvm::raw_ostream &out) override {
     os_ = &out;
     resetState();
+    bufferMapL3Names_.clear();
+    bufferMapSizeBytes_.clear();
     // Read target arch for per-arch DTE type selection.
     archStr = CoIR::GetArch(module).str();
     archNum = parseArchNum(archStr);
@@ -111,6 +113,15 @@ public:
 private:
   std::string archStr;
   int archNum = 0;
+
+  /// Maps a BufferMapOp/RemapOp result tensor to its L3 access pointer name
+  /// (e.g. `v6_l3`). Element (vld/st) accesses are redirected to this alias;
+  /// DTE/mdspan consumers keep using the raw global pointer name.
+  llvm::DenseMap<mlir::Value, std::string> bufferMapL3Names_;
+  /// Maps a BufferMapOp/RemapOp result tensor to its mapped byte-size C++
+  /// expression (e.g. `(int)(v3 * sizeof(int))`). Used as the old byte count
+  /// when a subsequent buffer.remap rebinds the same global source.
+  llvm::DenseMap<mlir::Value, std::string> bufferMapSizeBytes_;
 
   struct EntryAssertion { AssertOp op; };
   llvm::SmallVector<EntryAssertion> entryAssertions;
@@ -987,6 +998,15 @@ private:
     if (auto bind = tensor.getDefiningOp<TensorBindDimsOp>())
       tensor = bind.getSource();
     return tensor;
+  }
+
+  /// Redirect element (vld/st) accesses on a mapped buffer to its L3 alias.
+  /// DTE/mdspan consumers resolve through getName() and keep the raw pointer.
+  std::string getElemAccessName(Value tensor) override {
+    auto it = bufferMapL3Names_.find(getTensorDefOp(tensor));
+    if (it != bufferMapL3Names_.end())
+      return it->second;
+    return getName(tensor);
   }
 
   /// Emit a single dimension expression.  Returns the static value as a
@@ -2547,6 +2567,12 @@ private:
       emitTensorStoreTile(storeTile);
     else if (auto tmaCopy = dyn_cast<TmaCopyOp>(op))
       emitTmaCopyDiagnostic(tmaCopy);
+    else if (auto bufferMap = dyn_cast<BufferMapOp>(op))
+      emitBufferMap(bufferMap);
+    else if (auto bufferRemap = dyn_cast<BufferRemapOp>(op))
+      emitBufferRemap(bufferRemap);
+    else if (auto bufferUnmap = dyn_cast<BufferUnmapOp>(op))
+      emitBufferUnmap(bufferUnmap);
     else
       CoIREmitterBase::emitOpFallback(op);
   }
@@ -4196,6 +4222,84 @@ private:
       llvm_unreachable("unexpected fence memory scope");
       break;
     }
+  }
+
+  void emitBufferMap(BufferMapOp op) override {
+    std::string name = getName(op.getResult());
+    std::string src = getName(op.getSource());
+    auto tty = cast<coir::TensorType>(op.getResult().getType());
+
+    // Compute the raw global pointer from the source address. This is the
+    // address handed to map_mem_m and any DTE that consumes the buffer
+    // directly.
+    std::string elemType = emitElementType(tty.getElementType());
+    os() << getIndent() << elemType << "* " << name << " = ("
+         << elemType << "*)("
+         << "(char*)" << src << " + " << getName(op.getOffset())
+         << " * sizeof(" << elemType << "));\n";
+
+    // MMU mapping: set up the page table entry for the local->global mapping.
+    // Returns a mapped_ptr handle used later for unmap/remap.
+    std::string szName = getName(op.getSize());
+    std::string sizeBytes = "(int)(" + szName + " * sizeof(" + elemType + "))";
+    os() << getIndent() << "mapped_ptr " << name << "_mmu = "
+         << "tops::map_mem_m((generic_ptr)" << name << ", "
+         << sizeBytes << ");\n";
+
+    // vld/st can only access L3-mapped addresses, so derive the typed access
+    // pointer from the returned handle and redirect element accesses to it.
+    os() << getIndent() << elemType << "* " << name << "_l3 = "
+         << "reinterpret_cast<" << elemType << "*>(" << name << "_mmu);\n";
+    bufferMapL3Names_[op.getResult()] = name + "_l3";
+    bufferMapSizeBytes_[op.getResult()] = sizeBytes;
+  }
+
+  void emitBufferRemap(BufferRemapOp op) override {
+    std::string name = getName(op.getResult());
+    std::string src = getName(op.getSource());
+    std::string existing = getName(op.getExisting());
+    auto tty = cast<coir::TensorType>(op.getResult().getType());
+
+    // Recompute the raw global pointer from new offset.
+    std::string elemType = emitElementType(tty.getElementType());
+    os() << getIndent() << elemType << "* " << name << " = ("
+         << elemType << "*)("
+         << "(char*)" << src << " + " << getName(op.getOffset())
+         << " * sizeof(" << elemType << "));\n";
+
+    // Remap: update existing MMU entry to the new local/global mapping.
+    // The second argument to remap_mem_m is the OLD mapped byte count, which
+    // we track per mapped buffer; the fourth is the new byte count.
+    std::string szName = getName(op.getSize());
+    std::string newSizeBytes = "(int)(" + szName + " * sizeof(" + elemType + "))";
+    std::string oldSizeBytes = newSizeBytes;
+    auto oldIt = bufferMapSizeBytes_.find(op.getExisting());
+    if (oldIt != bufferMapSizeBytes_.end())
+      oldSizeBytes = oldIt->second;
+    os() << getIndent() << "mapped_ptr " << name << "_mmu = "
+         << "tops::remap_mem_m("
+         << existing << "_mmu, "
+         << oldSizeBytes << ", "
+         << "(generic_ptr)" << name << ", "
+         << newSizeBytes << ");\n";
+
+    // Redirect element accesses on the remapped buffer to its L3 alias.
+    os() << getIndent() << elemType << "* " << name << "_l3 = "
+         << "reinterpret_cast<" << elemType << "*>(" << name << "_mmu);\n";
+    bufferMapL3Names_[op.getResult()] = name + "_l3";
+    bufferMapSizeBytes_[op.getResult()] = newSizeBytes;
+  }
+
+  void emitBufferUnmap(BufferUnmapOp op) override {
+    std::string local = getName(op.getLocal());
+    auto tty = cast<coir::TensorType>(op.getLocal().getType());
+
+    // Invalidate the MMU mapping using the mapped_ptr handle from map/remap.
+    std::string szName = getName(op.getSize());
+    os() << getIndent() << "tops::unmap_mem_m("
+         << local << "_mmu, "
+         << "(int)(" << szName << " * sizeof("
+         << emitElementType(tty.getElementType()) << ")));\n";
   }
 
   std::string emitExprInHostScope(

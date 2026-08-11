@@ -1,0 +1,55 @@
+// RUN: choreo -dv=liveness -sa=liveness -t topscc %s -o - 2>&1 | FileCheck %s
+// REQUIRES: TARGET-GCUALL
+
+// Liveness test: verify that buffer.map and buffer.remap record the mapped
+// result as a no-storage alias of the source buffer. Uses of the result are
+// redirected to the source, so the result must NOT get its own USE or live
+// range (which would otherwise trigger a local allocation for it).
+
+#include "choreo.h"
+
+__co__ void test_buffer_map_liveness(s32 [128] & input) {
+  parallel p by 1 {
+    // buffer.map: the mapped result (m) aliases input.
+    // The source (input) is NOT re-DEF'd; only the alias is recorded.
+    m = input.map<local>(0, 64);
+    foreach {i} in [64] {
+      m.data.at(i) = m.data.at(i) + 2;
+    }
+  }
+}
+
+__co__ void test_buffer_remap_liveness(s32 [128] & input) {
+  parallel p by 1 {
+    // m0: map [0, 64)
+    m0 = input.map<local>(0, 64);
+    foreach {i} in [64] {
+      m0.data.at(i) = m0.data.at(i) + 1;
+    }
+
+    // m1: remap to [32, 96) -- source (input) appears as USE
+    u32 off = 32;
+    m1 = input.remap<local>(off, 64);
+    foreach {i} in [64] {
+      m1.data.at(i) = m1.data.at(i) + 10;
+    }
+  }
+}
+
+// CHECK: test_buffer_map_liveness(s32 mdspan<1> [128] input) {
+// CHECK: DEF: ::test_buffer_map_liveness::input
+// CHECK: USE: ::test_buffer_map_liveness::input
+// CHECK: Add no-storage alias: ::test_buffer_map_liveness::paraby_0::paraby_1::m <-> ::test_buffer_map_liveness::input
+// CHECK-NOT: USE: ::test_buffer_map_liveness::paraby_0::paraby_1::m
+
+// CHECK: test_buffer_remap_liveness(s32 mdspan<1> [128] input) {
+// CHECK: DEF: ::test_buffer_remap_liveness::input
+// CHECK: USE: ::test_buffer_remap_liveness::input
+// CHECK: Add no-storage alias: ::test_buffer_remap_liveness::paraby_2::paraby_3::m0 <-> ::test_buffer_remap_liveness::input
+// CHECK-NOT: USE: ::test_buffer_remap_liveness::paraby_2::paraby_3::m0
+// CHECK: USE: ::test_buffer_remap_liveness::input
+// CHECK: Add no-storage alias: ::test_buffer_remap_liveness::paraby_2::paraby_3::m1 <-> ::test_buffer_remap_liveness::input
+// CHECK-NOT: USE: ::test_buffer_remap_liveness::paraby_2::paraby_3::m1
+// CHECK-NOT: VAR    ::test_buffer_map_liveness::paraby_0::paraby_1::m
+// CHECK-NOT: VAR    ::test_buffer_remap_liveness::paraby_2::paraby_3::m0
+// CHECK-NOT: VAR    ::test_buffer_remap_liveness::paraby_2::paraby_3::m1

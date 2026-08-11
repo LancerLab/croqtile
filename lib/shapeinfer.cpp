@@ -1255,6 +1255,35 @@ bool ShapeInference::Visit(AST::DMA& n) {
   return true;
 }
 
+bool ShapeInference::Visit(AST::BufferMap& n) {
+  TraceEachVisit(n);
+
+  if (cannot_proceed) return true;
+
+  if (!n.result.empty()) {
+    auto source_vn = GetValNo(*n.source, VNKind::VNK_MDSPAN);
+
+    auto source_sty = GetSpannedType(NodeType(*n.source));
+    assert(source_sty && "expected spanned type for buffer.map source");
+
+    auto size_vn = GetValNo(*n.size);
+    auto size_shape = GenShape(size_vn);
+    auto map_sty = MakeDenseSpannedType(source_sty->ElementType(), size_shape,
+                                        n.storage);
+    SetNodeType(n, map_sty);
+
+    auto s = GenShape(source_vn);
+
+    std::string f_span = n.result + ".span";
+    SymbolAliasNum(SSTab().ScopedName(f_span), source_vn);
+    DefineASymbol(n.result, map_sty);
+    DefineASymbol(f_span, MakeMDSpanType(s));
+  }
+
+  cur_vn.Invalidate();
+  return true;
+}
+
 bool ShapeInference::Visit(AST::MMA& n) {
   TraceEachVisit(n);
   // NOTE: The node type maybe differ from symbol type!

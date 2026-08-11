@@ -94,6 +94,8 @@ public:
   SupportedFeatures(const ArchId& arch) const override {
     if (ArchNum(arch) >= 400)
       return {
+          {STR(ChoreoFeature::BUFFER_MAP),
+           Description(ChoreoFeature::BUFFER_MAP)},
           {STR(ChoreoFeature::MGM), Description(ChoreoFeature::MGM)},
           {STR(ChoreoFeature::DSDMA), Description(ChoreoFeature::DSDMA)},
           {STR(ChoreoFeature::ASYNC_DMA),
@@ -115,6 +117,8 @@ public:
       };
     else if (ArchNum(arch) >= 300)
       return {
+          {STR(ChoreoFeature::BUFFER_MAP),
+           Description(ChoreoFeature::BUFFER_MAP)},
           {STR(ChoreoFeature::MGM), Description(ChoreoFeature::MGM)},
           {STR(ChoreoFeature::DSDMA), Description(ChoreoFeature::DSDMA)},
           {STR(ChoreoFeature::ASYNC_DMA),

@@ -287,6 +287,19 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
+  // --- Stamp target info onto module for lowering passes and op verifiers ---
+  // Must run before safety instrumentation: the BufferMapOp verifier checks
+  // coir.has_buffer_map, which is only known from the target here.
+  {
+    auto& target = CCtx().GetTarget();
+    auto arch = CCtx().GetArch();
+    CoIR::StampTargetOnModule(session.Module(), CCtx().TargetName(), arch,
+                              target.MMATargetName(arch),
+                              target.HasTMA(arch),
+                              target.HasDMA(arch),
+                              target.HasBufferMap(arch));
+  }
+
   // --- Safety instrumentation (always runs) ---
   if (!pipeline.InstrumentSafety()) {
     errs() << "cocc: safety instrumentation failed\n";
@@ -299,16 +312,6 @@ int main(int argc, char *argv[]) {
       errs() << "cocc: optimization failed\n";
       return 1;
     }
-  }
-
-  // --- Stamp target info onto module for lowering passes ---
-  {
-    auto& target = CCtx().GetTarget();
-    auto arch = CCtx().GetArch();
-    CoIR::StampTargetOnModule(session.Module(), CCtx().TargetName(), arch,
-                              target.MMATargetName(arch),
-                              target.HasTMA(arch),
-                              target.HasDMA(arch));
   }
 
   // --- Shared lowering (DMA/MMA classification, hoisting) ---

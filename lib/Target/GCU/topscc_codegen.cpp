@@ -617,6 +617,13 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       device_defers_launch = false;
       deferred_device_pb = nullptr;
     } else if (pb->IsOuter() || was_device_deferred_block) {
+      // Emit pending buffer unmaps before closing the parallel scope.
+      for (auto &[src_sym, entry] : pending_mapped_buffers_) {
+        auto &res_name = std::get<0>(entry);
+        ds << d_indent << "tops::unmap_mem_m(" << res_name << "_mmu, "
+           << std::get<2>(entry) << ");\n";
+      }
+      pending_mapped_buffers_.clear();
       ds << d_indent << "} // end parallel-by\n";
       DecrDeviceIndent();
       ds << "}\n\n";
@@ -2695,6 +2702,82 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   return true;
 }
 
+bool TopsccCodeGen::Visit(AST::BufferMap& n) {
+  TraceEachVisit(n);
+
+  if (IsHost()) return true;
+
+  auto src_ca = dyn_cast<AST::ChunkAt>(n.source.get());
+  if (!src_ca || !src_ca->data) {
+    Error1(n.LOC(), "buffer.map/remap requires a valid source buffer.");
+    return false;
+  }
+  auto src_sym = src_ca->data->name;
+
+  auto src_ty = GetSymbolType(src_sym);
+  auto src_sty = GetSpannedType(src_ty);
+  if (!src_sty) {
+    Error1(n.LOC(),
+           "buffer.map/remap: could not resolve spanned type for source.");
+    return false;
+  }
+
+  std::string bts = NameBaseType(src_sty->ElementType(), false);
+  std::string src_name = SSMName(src_sym, false);
+  std::string res_name = SSMName(n.result, false);
+
+  // Emit offset and size as device-side C++ expressions. Parenthesize so
+  // the trailing `* sizeof(...)` byte conversion applies to the whole
+  // expression (e.g. an offset of `slide * 2` must not become
+  // `slide * 2 * sizeof` -> `slide + 2 * sizeof`).
+  std::string offset_str = "(" + ExprSTR(n.offset, false) + ")";
+  std::string size_str = "(" + ExprSTR(n.size, false) + ")";
+
+  // Compute the raw global pointer from the source address. This is the
+  // address handed to the MMU map/remap API (and any DTE that consumes the
+  // buffer directly), distinct from the mapped handle used for vld/st.
+  ds << d_indent << bts << "* " << res_name << " = (" << bts << "*)((char*)"
+     << src_name << " + " << offset_str << " * sizeof(" << bts << "));\n";
+
+  std::string size_bytes =
+      "(int)(" + size_str + " * sizeof(" + bts + "))";
+
+  if (n.IsMap()) {
+    ds << d_indent << "mapped_ptr " << res_name << "_mmu = "
+       << "tops::map_mem_m((generic_ptr)" << res_name << ", "
+       << size_bytes << ");\n";
+  } else {
+    // Remap: look up the existing mapped handle for the same source.
+    auto it = pending_mapped_buffers_.find(src_sym);
+    if (it == pending_mapped_buffers_.end()) {
+      Error1(n.LOC(),
+             "buffer.remap: no existing mapping found for source `" +
+                 src_sym + "'.");
+      return false;
+    }
+    auto &existing_name = std::get<0>(it->second);
+    auto &old_size_bytes = std::get<2>(it->second);
+    ds << d_indent << "mapped_ptr " << res_name << "_mmu = "
+       << "tops::remap_mem_m(" << existing_name << "_mmu, "
+       << old_size_bytes << ", (generic_ptr)" << res_name << ", "
+       << size_bytes << ");\n";
+  }
+
+  // vld/st (vector load/store) on GCU can only access L3-mapped addresses, so
+  // derive the typed access pointer from the returned mapped_ptr handle rather
+  // than the raw global pointer.
+  ds << d_indent << bts << "* " << res_name
+     << "_l3 = reinterpret_cast<" << bts << "*>(" << res_name << "_mmu);\n";
+
+  // Map .data element accesses on the mapped buffer to the L3 pointer.
+  ssm.MapDeviceSymbol(InScopeName(n.result) + ".data", res_name + "_l3");
+
+  // Track this mapping for subsequent remap lookups and scope-exit unmap.
+  pending_mapped_buffers_[src_sym] = {n.result, bts, size_bytes};
+
+  return true;
+}
+
 bool TopsccCodeGen::Visit(AST::Rotate& n) {
   TraceEachVisit(n);
 
@@ -4456,8 +4539,9 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       for (auto iv_name : bv_map.at(InScopeNameForRef(id->name)))
         oss << ((i++ == 0) ? "" : ", ")
             << UnScopedName(ssm.DeviceName(iv_name));
-    } else
+    } else {
       oss << UnScopedName(SSMName(InScopeNameForRef(id->name), is_host));
+    }
   } else if (auto np = dyn_cast<AST::Nullptr>(e)) {
     oss << "nullptr";
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {

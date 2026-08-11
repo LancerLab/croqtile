@@ -982,3 +982,159 @@ void TensorBindDimsOp::print(OpAsmPrinter &printer) {
 //===----------------------------------------------------------------------===//
 // ElementCopyOp (uses declarative format, no custom parse/print needed)
 //===----------------------------------------------------------------------===//
+
+//===----------------------------------------------------------------------===//
+// BufferMapOp
+//===----------------------------------------------------------------------===//
+
+void BufferMapOp::getEffects(
+    llvm::SmallVectorImpl<
+        mlir::SideEffects::EffectInstance<mlir::MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(mlir::MemoryEffects::Read::get());
+  effects.emplace_back(mlir::MemoryEffects::Write::get());
+  effects.emplace_back(mlir::MemoryEffects::Allocate::get());
+}
+
+ParseResult BufferMapOp::parse(OpAsmParser &parser, OperationState &result) {
+  OpAsmParser::UnresolvedOperand source, offset, size;
+  Type sourceType, resultType;
+  if (parser.parseOperand(source) || parser.parseLSquare() ||
+      parser.parseOperand(offset) || parser.parseRSquare())
+    return failure();
+  if (parser.parseKeyword("size") || parser.parseLParen() ||
+      parser.parseOperand(size) || parser.parseRParen())
+    return failure();
+  if (parser.parseOptionalAttrDict(result.attributes) ||
+      parser.parseColon() || parser.parseType(sourceType) ||
+      parser.parseArrow() || parser.parseType(resultType))
+    return failure();
+  if (parser.resolveOperand(source, sourceType, result.operands) ||
+      parser.resolveOperand(offset, parser.getBuilder().getIndexType(),
+                            result.operands) ||
+      parser.resolveOperand(size, parser.getBuilder().getIndexType(),
+                            result.operands))
+    return failure();
+  result.addTypes(resultType);
+  return success();
+}
+
+void BufferMapOp::print(OpAsmPrinter &printer) {
+  printer << " " << getSource() << "[" << getOffset() << "] size("
+          << getSize() << ")";
+  printer.printOptionalAttrDict((*this)->getAttrs());
+  printer << " : " << getSource().getType() << " -> " << getResult().getType();
+}
+
+LogicalResult BufferMapOp::verify() {
+  auto module = (*this)->getParentOfType<mlir::ModuleOp>();
+  if (!module)
+    return success();
+  bool hasBufferMap = false;
+  if (auto attr =
+          module->getAttrOfType<BoolAttr>("coir.has_buffer_map"))
+    hasBufferMap = attr.getValue();
+  if (!hasBufferMap)
+    return emitOpError(
+        "requires explicit memory mapping support but target does not "
+        "provide it; use dma.copy instead or target a "
+        "buffer-map-capable architecture");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// BufferRemapOp
+//===----------------------------------------------------------------------===//
+
+void BufferRemapOp::getEffects(
+    llvm::SmallVectorImpl<
+        mlir::SideEffects::EffectInstance<mlir::MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(mlir::MemoryEffects::Read::get());
+  effects.emplace_back(mlir::MemoryEffects::Write::get());
+}
+
+ParseResult BufferRemapOp::parse(OpAsmParser &parser, OperationState &result) {
+  OpAsmParser::UnresolvedOperand existing, source, offset, size;
+  Type existingType, resultType;
+  if (parser.parseOperand(existing) || parser.parseComma() ||
+      parser.parseOperand(source) || parser.parseLSquare() ||
+      parser.parseOperand(offset) || parser.parseRSquare())
+    return failure();
+  if (parser.parseKeyword("size") || parser.parseLParen() ||
+      parser.parseOperand(size) || parser.parseRParen())
+    return failure();
+  if (parser.parseOptionalAttrDict(result.attributes) ||
+      parser.parseColon() || parser.parseType(existingType) ||
+      parser.parseArrow() || parser.parseType(resultType))
+    return failure();
+  if (parser.resolveOperand(existing, existingType, result.operands) ||
+      parser.resolveOperand(source, parser.getBuilder().getIndexType(),
+                            result.operands) ||
+      parser.resolveOperand(offset, parser.getBuilder().getIndexType(),
+                            result.operands) ||
+      parser.resolveOperand(size, parser.getBuilder().getIndexType(),
+                            result.operands))
+    return failure();
+  result.addTypes(resultType);
+  return success();
+}
+
+void BufferRemapOp::print(OpAsmPrinter &printer) {
+  printer << " " << getExisting() << ", " << getSource() << "["
+          << getOffset() << "] size(" << getSize() << ")";
+  printer.printOptionalAttrDict((*this)->getAttrs());
+  printer << " : " << getExisting().getType() << " -> "
+          << getResult().getType();
+}
+
+LogicalResult BufferRemapOp::verify() {
+  auto module = (*this)->getParentOfType<mlir::ModuleOp>();
+  if (!module)
+    return success();
+  bool hasBufferMap = false;
+  if (auto attr =
+          module->getAttrOfType<BoolAttr>("coir.has_buffer_map"))
+    hasBufferMap = attr.getValue();
+  if (!hasBufferMap)
+    return emitOpError(
+        "requires explicit memory mapping support but target does not "
+        "provide it; use dma.copy instead or target a "
+        "buffer-map-capable architecture");
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// BufferUnmapOp
+//===----------------------------------------------------------------------===//
+
+void BufferUnmapOp::getEffects(
+    llvm::SmallVectorImpl<
+        mlir::SideEffects::EffectInstance<mlir::MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(mlir::MemoryEffects::Read::get());
+  effects.emplace_back(mlir::MemoryEffects::Write::get());
+  effects.emplace_back(mlir::MemoryEffects::Free::get());
+}
+
+ParseResult BufferUnmapOp::parse(OpAsmParser &parser, OperationState &result) {
+  OpAsmParser::UnresolvedOperand local, size;
+  Type localType;
+  if (parser.parseOperand(local) || parser.parseComma() ||
+      parser.parseOperand(size))
+    return failure();
+  if (parser.parseOptionalAttrDict(result.attributes) ||
+      parser.parseColonType(localType))
+    return failure();
+  if (parser.resolveOperand(local, localType, result.operands) ||
+      parser.resolveOperand(size, parser.getBuilder().getIndexType(),
+                            result.operands))
+    return failure();
+  return success();
+}
+
+void BufferUnmapOp::print(OpAsmPrinter &printer) {
+  printer << " " << getLocal() << ", " << getSize();
+  printer.printOptionalAttrDict((*this)->getAttrs());
+  printer << " : " << getLocal().getType();
+}

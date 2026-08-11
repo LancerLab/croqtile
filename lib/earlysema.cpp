@@ -2129,6 +2129,54 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::BufferMap& n) {
+  TraceEachVisit(n);
+
+  if (!CCtx().GetArch().empty() &&
+      !CCtx().HasFeature(ChoreoFeature::BUFFER_MAP, CCtx().GetArch())) {
+    Error1(n.LOC(),
+           "explicit memory mapping is not supported by this target.");
+    return false;
+  }
+
+  // buffer.map and buffer.remap: require source buffer
+  if (!n.source) {
+    Error1(n.LOC(), "buffer.map/remap requires a source buffer.");
+    return false;
+  }
+
+  auto srcTy = GetSpannedType(NodeType(*n.source));
+  if (!srcTy) {
+    Error1(n.source->LOC(),
+           "buffer.map/remap source must be a spanned type, got: " +
+               PSTR(NodeType(*n.source)));
+    return false;
+  }
+  // buffer.map and buffer.remap require a dense (contiguous) source buffer.
+  // This is checked in a later pass once shape information is available.
+  if (!CCtx().GetTarget().IsBufferMappingValid(
+          CCtx().GetArch(), srcTy->GetStorage(), n.storage)) {
+    Error1(n.source->LOC(),
+           "buffer.map/remap: invalid storage mapping " +
+               STR(srcTy->GetStorage()) + " -> " + STR(n.storage));
+    return false;
+  }
+
+  // Register result symbol.  Buffer mapping creates new symbols;
+  // reassignment is not permitted.
+  if (!n.result.empty()) {
+    auto spannedTy = MakeRankedSpannedType(
+        srcTy->GetShape().Rank(), srcTy->ElementType(), n.storage);
+    SSTab().DefineSymbol(n.result, MakeFutureType(spannedTy, false));
+    ReportErrorWhenViolateODR(n.LOC(), n.result + ".data", __FILE__, __LINE__,
+                              spannedTy);
+    ReportErrorWhenViolateODR(n.LOC(), n.result + ".span", __FILE__, __LINE__,
+                              spannedTy->GetMDSpanType()->Clone());
+  }
+
+  return true;
+}
+
 bool EarlySemantics::Visit(AST::MMA& n) {
   if (!CCtx().TargetSupportMMA()) {
     Error1(n.LOC(), "mma is not supported by the target: " +
