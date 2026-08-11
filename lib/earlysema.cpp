@@ -88,7 +88,7 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
         SSTab().DefineSymbol(scoped_p, MakeIntegerType());
     }
   } else if (auto fr = dyn_cast<AST::FragReduce>(&n)) {
-    if (fr->dim != 1)
+    if (!fr->IsAllReduce() && fr->dim != 1)
       Error1(fr->LOC(),
              "frag.reduce currently only supports dim=1 (column reduction).");
   }

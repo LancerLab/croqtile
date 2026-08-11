@@ -1,0 +1,13 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s
+
+__co__ void frag_all_reduce_sum_invalid() {
+  parallel b by 1 : block {
+    parallel g by 1 : group-4 {
+      frag f32[64] values {1.0f};
+      all_reduce_sum(values);
+    }
+  }
+}
+
+// CHECK: all_reduce_sum requires a replicated 1D fragment layout.
