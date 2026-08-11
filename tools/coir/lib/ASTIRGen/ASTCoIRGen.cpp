@@ -1014,7 +1014,8 @@ bool ASTCoIRGen::Visit(AST::ParallelBy &pb) {
   auto parallelOp = builder.create<coir::ParallelOp>(
       loc, levelAttr,
       mlir::DenseI64ArrayAttr::get(&IRContext(), bounds),
-      /*stream=*/nullptr, /*is_async=*/nullptr);
+      /*stream=*/nullptr, /*is_async=*/nullptr,
+      /*cooperative=*/pb.IsCooperative() ? builder.getBoolAttr(true) : nullptr);
 
   // Dynamic bounds are stored as the kDynamic sentinel in the dense bounds
   // attribute, which codegen must not emit as a literal.  Record the source
@@ -1112,6 +1113,10 @@ bool ASTCoIRGen::Visit(AST::ParallelBy &pb) {
     if (pb.IsAsync())
       parallelOp.setIsAsyncAttr(mlir::BoolAttr::get(&IRContext(), true));
   }
+
+  if (pb.IsCooperative())
+    parallelOp.setCooperativeAttr(
+        mlir::BoolAttr::get(&IRContext(), true));
 
   auto &bodyRegion = parallelOp.getBody();
   auto *block = new mlir::Block();
