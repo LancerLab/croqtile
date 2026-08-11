@@ -497,7 +497,7 @@ def EventWaitOp : CoIR_Op<"event.wait", []> {
   let assemblyFormat = "$event_name (`[` $subscript^ `]`)? attr-dict";
 }
 
-def EventRefOp : CoIR_Op<"event.ref", [Pure]> {
+def EventRefOp : CoIR_Op<"event.ref", []> {
   let summary = "Read the current value of a named event variable";
   let description = [{
     Returns the current boolean value of a shared event variable.

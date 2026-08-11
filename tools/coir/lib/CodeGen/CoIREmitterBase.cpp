@@ -385,6 +385,18 @@ void CoIREmitterBase::emitOp(Operation *op) {
          << getName(extSI.getResult()) << " = (" << emitType(resTy) << ")"
          << getName(extSI.getIn()) << ";\n";
   }
+  else if (auto extUI = dyn_cast<arith::ExtUIOp>(op)) {
+    auto resTy = extUI.getResult().getType();
+    os() << getIndent() << emitType(resTy) << " "
+         << getName(extUI.getResult()) << " = (" << emitType(resTy) << ")"
+         << getName(extUI.getIn()) << ";\n";
+  }
+  else if (auto truncI = dyn_cast<arith::TruncIOp>(op)) {
+    auto resTy = truncI.getResult().getType();
+    os() << getIndent() << emitType(resTy) << " "
+         << getName(truncI.getResult()) << " = (" << emitType(resTy) << ")"
+         << getName(truncI.getIn()) << ";\n";
+  }
   else if (auto extF = dyn_cast<arith::ExtFOp>(op)) {
     auto resTy = extF.getResult().getType();
     os() << getIndent() << emitType(resTy) << " " << getName(extF.getResult())

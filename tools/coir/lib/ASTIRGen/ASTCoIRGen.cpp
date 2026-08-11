@@ -3427,6 +3427,107 @@ bool ASTCoIRGen::Visit(AST::Trigger &trig) {
   return true;
 }
 
+bool ASTCoIRGen::Visit(AST::AsmStmt &asmStmt) {
+  auto loc = Loc(asmStmt);
+
+  // check we are inside a kernel
+  auto *block = builder.getInsertionBlock();
+  if (block) {
+    bool insideKernel = false;
+    if (auto *parentOp = block->getParentOp())
+      for (auto *op = parentOp; op; op = op->getParentOp())
+        if (mlir::isa<coir::KernelOp>(op)) { insideKernel = true; break; }
+    if (!insideKernel) return true;
+  }
+
+  // Emit input operand expressions (do inputs first so we can reference
+  // their types for uninitialized output operands).
+  llvm::SmallVector<mlir::Value> inVals;
+  llvm::SmallVector<mlir::Attribute> inConstraintAttrs;
+  for (auto &op : asmStmt.inputOperands) {
+    auto val = EmitExpr(*op->expression->GetR());
+    if (!val) {
+      if (auto *id = dynamic_cast<AST::Identifier *>(op->expression->GetR().get()))
+        val = LookupValue(id->name);
+    }
+    if (val) {
+      inVals.push_back(val);
+      inConstraintAttrs.push_back(
+          mlir::StringAttr::get(&IRContext(), op->constraint));
+    }
+  }
+
+  // Emit output operand expressions.  For write-only outputs ("=r")
+  // referencing uninitialized variables, create a placeholder value so
+  // the asm op has an output position - the matching constraint "0"
+  // on input operands needs a valid output operand index.
+  llvm::SmallVector<mlir::Value> outVals;
+  llvm::SmallVector<mlir::Attribute> outConstraintAttrs;
+  for (auto &op : asmStmt.outputOperands) {
+    auto val = EmitExpr(*op->expression->GetR());
+    if (!val) {
+      if (auto *id = dynamic_cast<AST::Identifier *>(op->expression->GetR().get()))
+        val = LookupValue(id->name);
+    }
+    if (!val && op->constraint[0] == '=' && !inVals.empty()) {
+      // Write-only output with no prior value: create a non-const
+      // placeholder of the same type as the first input.  We use an
+      // identity arithmetic op (add-zero) rather than a ConstantOp
+      // because the emitter emits ConstantOp results as "const", which
+      // would be an invalid lvalue for the asm output constraint.
+      auto ty = inVals[0].getType();
+      if (mlir::isa<mlir::IntegerType>(ty)) {
+        auto zero = builder.create<mlir::arith::ConstantIntOp>(loc, 0, ty);
+        val = builder.create<mlir::arith::AddIOp>(loc, inVals[0], zero);
+      } else if (mlir::isa<mlir::FloatType>(ty)) {
+        auto zero = builder.create<mlir::arith::ConstantFloatOp>(
+            loc, llvm::APFloat(0.0f), mlir::cast<mlir::FloatType>(ty));
+        val = builder.create<mlir::arith::AddFOp>(loc, inVals[0], zero);
+      }
+    }
+    if (val) {
+      outVals.push_back(val);
+      outConstraintAttrs.push_back(
+          mlir::StringAttr::get(&IRContext(), op->constraint));
+    }
+  }
+
+  // Emit clobbers
+  llvm::SmallVector<mlir::Attribute> clobberAttrs;
+  for (auto &c : asmStmt.clobbers)
+    clobberAttrs.push_back(mlir::StringAttr::get(&IRContext(), c));
+
+  // Build result types (same as output operand types)
+  llvm::SmallVector<mlir::Type> resultTypes;
+  for (auto &v : outVals)
+    resultTypes.push_back(v.getType());
+
+  auto asmOp = builder.create<coir::AsmOp>(
+      loc,
+      resultTypes,
+      mlir::StringAttr::get(&IRContext(), asmStmt.templateStr),
+      asmStmt.isVolatile
+          ? mlir::BoolAttr::get(&IRContext(), true)
+          : mlir::BoolAttr(),
+      mlir::ArrayAttr::get(&IRContext(), outConstraintAttrs),
+      outVals,
+      mlir::ArrayAttr::get(&IRContext(), inConstraintAttrs),
+      inVals,
+      mlir::ArrayAttr::get(&IRContext(), clobberAttrs));
+
+  // Update value mappings for output operands
+  for (unsigned i = 0; i < asmStmt.outputOperands.size() && i < outVals.size();
+       ++i) {
+    if (auto *id =
+            dynamic_cast<AST::Identifier *>(asmStmt.outputOperands[i]
+                                                ->expression->GetR().get())) {
+      UpdateValue(id->name, asmOp.getResult(i));
+    }
+  }
+
+  return true;
+}
+
 bool ASTCoIRGen::Visit(AST::Synchronize &sync) {
   auto loc = Loc(sync);
   coir::ParallelLevel scope;

@@ -402,8 +402,8 @@ private:
   /// Pure ops are safe to emit in both host and device functions.
   static bool isPureOp(Operation *op) {
     return isa<arith::ConstantOp, arith::IndexCastOp, arith::SelectOp,
-               arith::ExtSIOp, arith::ExtFOp, arith::TruncIOp,
-               arith::TruncFOp, TensorBindDimsOp>(op) ||
+               arith::ExtSIOp, arith::ExtUIOp, arith::ExtFOp,
+               arith::TruncIOp, arith::TruncFOp, TensorBindDimsOp>(op) ||
            op->hasTrait<mlir::OpTrait::IsCommutative>() ||
            // All standard arith binary/unary ops:
            isa<arith::AddIOp, arith::AddFOp, arith::SubIOp, arith::SubFOp,
