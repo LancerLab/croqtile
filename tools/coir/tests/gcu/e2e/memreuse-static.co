@@ -2,10 +2,12 @@
 // RUN: cocc -t topscc -es %s | FileCheck --check-prefix=IR %s
 //
 // Static memory reuse verification:
-// The generated topscc device code must contain a single __spm_N pool
-// with four pointer aliases at offsets 0,512,0,512 — proving the two
-// buffer pairs reuse the same scratchpad space.  Without memreuse each
-// buffer would get its own independent array.
+// The generated topscc device code must contain a single __spm_N pool whose
+// 1024-byte size shows the four buffers reuse two 512-byte slots.  Without
+// memreuse each buffer would get its own independent array (or the pool would
+// double to 2048).  The cleanup pass CSEs the identical SPM pointer
+// computations of each reused buffer pair, so each slot's offset is declared
+// once and shared by both buffers of the pair.
 //
 // Runtime execution requires GCU hardware; pass --execute to test.
 
@@ -27,10 +29,12 @@ __co__ void memreuse_static(s32 [256] a, s32 [256] b, s32 [256] out) {
   }
 }
 
-// One pool array (not four independent arrays):
-// IR: __spm_
-// Four pointer aliases into the same pool, reusing offsets 0 and 512:
-// IR: + 0);
-// IR: + 512);
+// One pool array (not four independent arrays).  Its 1024-byte size is the
+// reuse proof: four 512-byte buffers collapsed into two slots.  Without
+// memreuse this would be a 2048-byte pool (or four separate arrays).
+// IR: {{__spm_[0-9]+\[1024\]}}
+// The two reused slots sit at offsets 0 and 512.  Each is declared once and
+// shared by the buffer pair that reuses it (CSE merged the duplicate pointer
+// computations, so the historical 0,512,0,512 alias list is now 0,512).
 // IR: + 0);
 // IR: + 512);
