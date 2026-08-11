@@ -2638,6 +2638,30 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
     return v;
   };
 
+  // A chunk index that names a multi-dim foreach IV (e.g. `index` of
+  // `foreach index in [17, 4]`) spans one tile dim per foreach dimension.
+  // Expand it into the decomposed per-dim values (index__elem__0, ...)
+  // mapped by the foreach lowering; without this the flat linearized IV
+  // would land in a single tile dim and the remaining dims would get no
+  // index at all.
+  auto expandMultiDimIV = [&](AST::Node *idx) -> llvm::SmallVector<mlir::Value> {
+    llvm::SmallVector<mlir::Value> elems;
+    AST::Node *inner = idx;
+    if (auto *expr = dyn_cast<AST::Expr>(idx))
+      if (expr->GetForm() == AST::Expr::Reference)
+        inner = expr->GetR().get();
+    auto *id = dyn_cast<AST::Identifier>(inner);
+    if (!id) return elems;
+    for (unsigned d = 0;; ++d) {
+      auto elemName = id->name + "__elem__" + std::to_string(d);
+      auto ev = LookupValue(elemName);
+      if (!ev) ev = LookupValue(UnScopedName(elemName));
+      if (!ev) break;
+      elems.push_back(ev);
+    }
+    return elems;
+  };
+
   // Use the pre-computed block shape from shape inference when available.
   // ChunkAt::GetBlockShape() gives the actual tile shape after applying
   // tiling operations (e.g., Chunk(4) on a [256] tensor yields [64]).
@@ -2836,15 +2860,31 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
                                   : 1);
           auto zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
           idxVals.push_back(zero);
-        } else {
-          auto v = emitIdx(idx.get());
-          if (v) {
-            idxVals.push_back(v);
+          dimIdx++;
+          continue;
+        }
+        auto elems = expandMultiDimIV(idx.get());
+        if (!elems.empty()) {
+          for (auto ev : elems) {
+            if (!mlir::isa<mlir::IndexType>(ev.getType()))
+              ev = builder.create<mlir::arith::IndexCastOp>(
+                  loc, mlir::IndexType::get(&IRContext()), ev);
+            idxVals.push_back(ev);
             if (dimIdx < blockDims.size())
               tileShape.push_back(blockDims[dimIdx]);
             else
               tileShape.push_back(1);
+            dimIdx++;
           }
+          continue;
+        }
+        auto v = emitIdx(idx.get());
+        if (v) {
+          idxVals.push_back(v);
+          if (dimIdx < blockDims.size())
+            tileShape.push_back(blockDims[dimIdx]);
+          else
+            tileShape.push_back(1);
         }
         dimIdx++;
       }
@@ -2859,15 +2899,31 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
                                 : 1);
         auto zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
         idxVals.push_back(zero);
-      } else {
-        auto v = emitIdx(idx.get());
-        if (v) {
-          idxVals.push_back(v);
+        dimIdx++;
+        continue;
+      }
+      auto elems = expandMultiDimIV(idx.get());
+      if (!elems.empty()) {
+        for (auto ev : elems) {
+          if (!mlir::isa<mlir::IndexType>(ev.getType()))
+            ev = builder.create<mlir::arith::IndexCastOp>(
+                loc, mlir::IndexType::get(&IRContext()), ev);
+          idxVals.push_back(ev);
           if (dimIdx < blockDims.size())
             tileShape.push_back(blockDims[dimIdx]);
           else
             tileShape.push_back(1);
+          dimIdx++;
         }
+        continue;
+      }
+      auto v = emitIdx(idx.get());
+      if (v) {
+        idxVals.push_back(v);
+        if (dimIdx < blockDims.size())
+          tileShape.push_back(blockDims[dimIdx]);
+        else
+          tileShape.push_back(1);
       }
       dimIdx++;
     }
