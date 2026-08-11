@@ -1,0 +1,200 @@
+// Non-persistent c459 pipeline: one CTA owns one query tile. K/V are consumed
+// from the diagonal tile toward tile zero so only the prologue needs masking.
+
+#define BLOCK_M 128
+#define BLOCK_N 128
+#define WG_M 64
+#define SWIZ 128
+#define K_STAGES 2
+#define V_STAGES 2
+
+#define DIM 128
+
+__co__ void flash_atten(
+  global bf16[B, Q_SEQ, H, DIM] Q,
+  global bf16[B, KV_SEQ, H, DIM] K,
+  global bf16[B, KV_SEQ, H, DIM] V,
+  global bf16[B, Q_SEQ, H, DIM] O
+) {
+  [[launch_bounds(_, 1)]]
+  // Keep each head contiguous for K/V reuse and launch long causal tiles
+  // first so the non-persistent grid finishes with short CTAs.
+  parallel.async {tile, head, batch}
+      by [cdiv(Q_SEQ, BLOCK_M), H, B] : block {
+    bm = cdiv(Q_SEQ, BLOCK_M) - 1 - tile;
+    Q_head = Q.subspan(1, Q_SEQ, 1, DIM)
+        .at(batch, 0, head, 0).sqz();
+    K_head = K.subspan(1, KV_SEQ, 1, DIM)
+        .at(batch, 0, head, 0).sqz();
+    V_head = V.subspan(1, KV_SEQ, 1, DIM)
+        .at(batch, 0, head, 0).sqz();
+    O_head = O.subspan(1, Q_SEQ, 1, DIM)
+        .at(batch, 0, head, 0).sqz();
+
+    shared bf16[BLOCK_M, DIM] q_shared;
+    shared bf16[BLOCK_N, DIM] k_buf[K_STAGES];
+    shared bf16[BLOCK_N, DIM] v_buf[V_STAGES];
+    shared bf16[BLOCK_M, DIM] o_buf;
+
+    shared event qf;
+    shared event kf[K_STAGES], vf[V_STAGES];
+    shared event ke[K_STAGES] = ready, ve[V_STAGES] = ready;
+
+    kv_bound = bm + 1;
+    parallel p by [BLOCK_M / WG_M + 1] : group-4 {
+      inthreads.async (p == 0) {
+        call croq::cuda::setreg_dec(40);
+
+        q_load = tma.load.async.evict_first.swiz<SWIZ>
+          Q_head.subspan(BLOCK_M, DIM).at(bm, 0) => q_shared;
+        trigger qf after q_load;
+
+        mutable u32 k_pipe_order = 0;
+        mutable u32 v_pipe_order = 0;
+        foreach {issue} in [kv_bound] {
+          bn = bm - issue;
+          k_slot = k_pipe_order % K_STAGES;
+          v_slot = v_pipe_order % V_STAGES;
+
+          wait ke.at(k_pipe_order);
+          k_load = tma.load.async.evict_last.swiz<SWIZ>
+            K_head.subspan(BLOCK_N, DIM).at(bn, 0) => k_buf[k_slot];
+          trigger kf.at(k_pipe_order++) after k_load;
+
+          wait ve.at(v_pipe_order);
+          v_load = tma.load.async.evict_last.swiz<SWIZ>
+            V_head.subspan(BLOCK_N, DIM).at(bn, 0) => v_buf[v_slot];
+          trigger vf.at(v_pipe_order++) after v_load;
+        }
+      }
+
+      inthreads.async (p > 0) {
+        call croq::cuda::setreg_inc(232);
+        cid = p - 1;
+        mutable u32 k_pipe_order = 0;
+        mutable u32 v_pipe_order = 0;
+
+        wait qf;
+
+        frag f32[WG_M] scores_max {-inf};
+        frag f32[WG_M] scores_max_prev;
+        frag f32[WG_M] scores_scale;
+        frag f32[WG_M] scores_sum {0.0f};
+        frag f32[WG_M] logsum {0.0f};
+        frag bf16[WG_M, BLOCK_N] acc_s_cast;
+
+        // QK prologue: the diagonal tile is the only masked score tile.
+        acc_s = mma.fill.f32 0.0f;
+        first_k_slot = k_pipe_order % K_STAGES;
+        wait kf.at(k_pipe_order);
+        first_qk = mma.row.row.async acc_s,
+          q_shared.subspan(WG_M, DIM).at(cid, 0), k_buf[first_k_slot];
+        wait first_qk;
+        trigger ke.at(k_pipe_order++);
+
+        apply {i, j} in acc_s.span {
+          if (j > cid * WG_M + i)
+            acc_s.at(i, j) = -inf;
+        }
+
+        reduce_max(scores_max, acc_s, 1);
+        apply {i, j} in acc_s.span
+          acc_s.at(i, j) = __exp2f(
+            acc_s.at(i, j) * 0.12751743f -
+            scores_max.at(i) * 0.12751743f);
+        apply {i, j} in acc_s.span
+          scores_sum.at(i) = scores_sum.at(i) + acc_s.at(i, j);
+        apply {i} in logsum.span
+          logsum.at(i) = scores_sum.at(i);
+        apply {i, j} in acc_s_cast.span
+          acc_s_cast.at(i, j) = __to<bf16>(acc_s.at(i, j));
+
+        // Keep the output accumulator out of the prologue live range.
+        acc_o = mma.fill.f32 0.0f;
+
+        // QK[current] and PV[previous] are separate asynchronous groups.
+        foreach {step} in [kv_bound - 1] {
+          k_slot = k_pipe_order % K_STAGES;
+          prev_v_slot = v_pipe_order % V_STAGES;
+
+          acc_s = mma.fill.f32 0.0f;
+          wait kf.at(k_pipe_order);
+          qk = mma.row.row.async acc_s,
+            q_shared.subspan(WG_M, DIM).at(cid, 0), k_buf[k_slot];
+
+          wait vf.at(v_pipe_order);
+          pv = mma.row.col.async acc_o, acc_s_cast, v_buf[prev_v_slot];
+
+          wait qk;
+          // QK no longer reads K once its future completes. Release this slot
+          // while softmax and the independent PV group are still running.
+          trigger ke.at(k_pipe_order++);
+
+          copy(scores_max_prev, scores_max);
+          reduce_max(scores_max, acc_s, 1);
+          apply {i} in scores_max.span {
+            scores_max.at(i) =
+              __max(scores_max.at(i), scores_max_prev.at(i));
+            scores_scale.at(i) = __exp2f(
+              scores_max_prev.at(i) * 0.12751743f -
+              scores_max.at(i) * 0.12751743f);
+          }
+          // Match FA3's online-softmax schedule: rescale the carried row sum
+          // before the 64 score exponentials, then only add the new partial
+          // sum after reduction. This shortens the post-reduction chain.
+          apply {i} in logsum.span
+            logsum.at(i) = logsum.at(i) * scores_scale.at(i);
+          apply {i, j} in acc_s.span
+            acc_s.at(i, j) = __exp2f(
+              acc_s.at(i, j) * 0.12751743f -
+              scores_max.at(i) * 0.12751743f);
+          apply {i} in scores_sum.span
+            scores_sum.at(i) = 0.0f;
+          apply {i, j} in acc_s.span
+            scores_sum.at(i) = scores_sum.at(i) + acc_s.at(i, j);
+          apply {i} in logsum.span
+            logsum.at(i) = logsum.at(i) + scores_sum.at(i);
+
+          wait pv;
+          trigger ve.at(v_pipe_order++);
+
+          apply {i, j} in acc_s_cast.span
+            acc_s_cast.at(i, j) = __to<bf16>(acc_s.at(i, j));
+          apply {i, j} in acc_o.span
+            acc_o.at(i, j) = acc_o.at(i, j) * scores_scale.at(i);
+        }
+
+        // Final PV overlaps cross-lane row-sum finalization and reciprocals.
+        final_v_slot = v_pipe_order % V_STAGES;
+        wait vf.at(v_pipe_order);
+        final_pv = mma.row.col.async acc_o, acc_s_cast, v_buf[final_v_slot];
+        all_reduce_sum(logsum);
+        apply {i} in scores_scale.span
+          scores_scale.at(i) = 1.0f / logsum.at(i);
+        wait final_pv;
+        trigger ve.at(v_pipe_order++);
+
+        apply {i, j} in acc_o.span
+          acc_o.at(i, j) = acc_o.at(i, j) * scores_scale.at(i);
+        mma.store acc_o, o_buf.subspan(WG_M, DIM).at(cid, 0);
+        tma.copy o_buf => O_head.subspan(BLOCK_M, DIM).at(bm, 0);
+      }
+    }
+  }
+}
+
+#define MHA_DIM DIM
+#define MHA_DTYPE choreo::bf16
+#include "../../fa_helper.hpp"
+
+int main() {
+  #include "build/bench_configs.inc"
+  return mha_helper::RunBenchmarks(
+      "Choreo Flash Attention v4 non-persistent (D=128 bf16 causal)",
+      kBenchConfigs, kBenchConfigCount,
+      [&](const mha_helper::BenchConfig& cfg,
+          const mha_helper::TensorViews& views) {
+        (void)cfg;
+        flash_atten(views.Q, views.K, views.V, views.O);
+      });
+}
