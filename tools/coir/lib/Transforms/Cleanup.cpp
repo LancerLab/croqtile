@@ -17,13 +17,16 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/Passes.h"
+#include "llvm/ADT/StringRef.h"
 
 #define DEBUG_TYPE "coir-cleanup"
 
@@ -37,10 +40,36 @@ using namespace mlir;
 
 namespace {
 
+constexpr llvm::StringLiteral allocCSEGuardAttr = "coir.cleanup_cse_guard";
+
 struct CleanupPass : public ::coir::impl::CleanupBase<CleanupPass> {
   using CleanupBase::CleanupBase;
 
   void runOnOperation() override {
+    Operation* root = getOperation();
+
+    // TensorAllocOp is currently modeled as having no memory effect because it
+    // represents storage reuse rather than a physical allocation. Generic CSE
+    // would consequently merge distinct tensor.alloc results. Protect them
+    // with temporary unique attributes until that modeling is refined.
+    bool hasGuardCollision = false;
+    root->walk([&](coir::TensorAllocOp alloc) {
+      if (alloc->hasAttr(allocCSEGuardAttr)) {
+        alloc.emitError("reserved cleanup CSE guard attribute is already set");
+        hasGuardCollision = true;
+      }
+    });
+    if (hasGuardCollision) {
+      signalPassFailure();
+      return;
+    }
+
+    mlir::Builder builder(&getContext());
+    int64_t nextGuard = 0;
+    root->walk([&](coir::TensorAllocOp alloc) {
+      alloc->setAttr(allocCSEGuardAttr, builder.getI64IntegerAttr(nextGuard++));
+    });
+
     // Schedule canonicalize + CSE through the current pipeline executor.
     // (A nested PassManager::run() would re-initialize dialects and trip
     // the "appending to the dialect registry while in a multi-threaded
@@ -48,8 +77,13 @@ struct CleanupPass : public ::coir::impl::CleanupBase<CleanupPass> {
     OpPassManager pipeline;
     pipeline.addPass(createCanonicalizerPass());
     pipeline.addPass(createCSEPass());
-    if (failed(runPipeline(pipeline, getOperation())))
-      signalPassFailure();
+    auto result = runPipeline(pipeline, root);
+
+    root->walk([&](coir::TensorAllocOp alloc) {
+      alloc->removeAttr(allocCSEGuardAttr);
+    });
+
+    if (failed(result)) signalPassFailure();
   }
 };
 
