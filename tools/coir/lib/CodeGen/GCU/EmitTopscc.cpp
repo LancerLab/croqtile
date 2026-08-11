@@ -349,9 +349,45 @@ private:
     SmallVector<int64_t> groupDims;  // GROUP bounds -> blockDim (gcu400+)
     SmallVector<int64_t> threadDims; // THREAD bounds -> blockDim (gcu300) or
                                      // __thread_dims__ (gcu400+)
+    // Source expressions (host scope) for dynamic (kDynamic) bounds, aligned
+    // with the corresponding *Dims vectors; empty string for static bounds.
+    SmallVector<std::string> blockExprs;
+    SmallVector<std::string> groupExprs;
+    SmallVector<std::string> threadExprs;
     std::string streamName;
     bool isAsync = false;
   };
+
+  /// Return the host-scope source expression recorded for dynamic bound #i
+  /// of `p` (coir.dyn_bound_exprs), or "" if the bound is static or has no
+  /// recorded expression.
+  static std::string dynBoundExpr(ParallelOp p, unsigned i) {
+    if (auto attr = p->getAttrOfType<mlir::ArrayAttr>("coir.dyn_bound_exprs"))
+      if (i < attr.size())
+        return mlir::cast<mlir::StringAttr>(attr[i]).getValue().str();
+    return "";
+  }
+
+  /// Append `bounds` (and their dynamic-bound expressions) to `dims`/`exprs`,
+  /// multiplying static bounds by `mult` and wrapping dynamic expressions.
+  static void appendBounds(ArrayRef<int64_t> bounds, ParallelOp p,
+                           llvm::SmallVectorImpl<int64_t> &dims,
+                           llvm::SmallVectorImpl<std::string> &exprs,
+                           int64_t mult = 1) {
+    for (unsigned i = 0; i < bounds.size(); ++i) {
+      int64_t b = bounds[i];
+      std::string e = dynBoundExpr(p, i);
+      if (b == mlir::ShapedType::kDynamic) {
+        dims.push_back(b);
+        if (!e.empty() && mult != 1)
+          e = "(" + e + ") * " + std::to_string(mult);
+        exprs.push_back(e);
+      } else {
+        dims.push_back(b * mult);
+        exprs.push_back("");
+      }
+    }
+  }
 
   LaunchConfig collectLaunchConfig(KernelOp kernel) {
     LaunchConfig lc;
@@ -359,20 +395,20 @@ private:
       auto bounds = p.getBounds();
       switch (p.getLevel()) {
       case ParallelLevel::BLOCK:
-        for (auto b : bounds) lc.blockDims.push_back(b);
+        appendBounds(bounds, p, lc.blockDims, lc.blockExprs);
         if (p.getStreamAttr())
           lc.streamName = p.getStreamAttr().getValue().str();
         if (p.getIsAsyncAttr() && p.getIsAsyncAttr().getValue())
           lc.isAsync = true;
         break;
       case ParallelLevel::GROUP:
-        for (auto b : bounds) lc.groupDims.push_back(b);
+        appendBounds(bounds, p, lc.groupDims, lc.groupExprs);
         break;
       case ParallelLevel::GROUPx4:
-        for (auto b : bounds) lc.groupDims.push_back(b * 4);
+        appendBounds(bounds, p, lc.groupDims, lc.groupExprs, 4);
         break;
       case ParallelLevel::THREAD:
-        for (auto b : bounds) lc.threadDims.push_back(b);
+        appendBounds(bounds, p, lc.threadDims, lc.threadExprs);
         break;
       default:
         break;
@@ -381,14 +417,30 @@ private:
     return lc;
   }
 
-  std::string emitDim3(ArrayRef<int64_t> dims) {
+  std::string emitDim3(ArrayRef<int64_t> dims,
+                       ArrayRef<std::string> exprs = {}) {
     std::string s;
     llvm::raw_string_ostream ss(s);
-    auto d = [&](unsigned i) -> int64_t {
-      return i < dims.size() ? dims[i] : 1;
-    };
-    ss << "dim3(" << d(0) << ", " << d(1) << ", " << d(2) << ")";
+    ss << "dim3(";
+    for (unsigned i = 0; i < 3; ++i) {
+      if (i > 0) ss << ", ";
+      int64_t d = i < dims.size() ? dims[i] : 1;
+      if (d == mlir::ShapedType::kDynamic && i < exprs.size() &&
+          !exprs[i].empty())
+        ss << exprs[i];
+      else
+        ss << d;
+    }
+    ss << ")";
     return s;
+  }
+
+  /// Emit one launch-dim token: the recorded host-scope expression for
+  /// dynamic bounds, otherwise the literal value.
+  static std::string dimToken(int64_t d, const std::string &expr) {
+    if (d == mlir::ShapedType::kDynamic && !expr.empty())
+      return expr;
+    return std::to_string(d);
   }
 
   /// Check if a region contains any ParallelOp (recursively).
@@ -1761,10 +1813,10 @@ private:
     int64_t resN = getTensorNumElems(resTy);
     int64_t resBytes = getTensorBytes(resTy);
     auto lc = collectLaunchConfig(kernel);
-    std::string gdims = emitDim3(lc.blockDims);
+    std::string gdims = emitDim3(lc.blockDims, lc.blockExprs);
     std::string bdims = hasGroupLevel()
-                            ? emitDim3(lc.groupDims)
-                            : emitDim3(lc.threadDims);
+                            ? emitDim3(lc.groupDims, lc.groupExprs)
+                            : emitDim3(lc.threadDims, lc.threadExprs);
     bool isMultiDevice = hasDeviceParallel(kernel);
     int64_t devCount = isMultiDevice ? getDeviceBound(kernel) : 1;
 
@@ -1943,10 +1995,10 @@ private:
       numOrigInputs = std::min(numOrigInputs,
                                static_cast<unsigned>(pn.size()));
     auto lc = collectLaunchConfig(kernel);
-    std::string gdims = emitDim3(lc.blockDims);
+    std::string gdims = emitDim3(lc.blockDims, lc.blockExprs);
     std::string bdims = hasGroupLevel()
-                            ? emitDim3(lc.groupDims)
-                            : emitDim3(lc.threadDims);
+                            ? emitDim3(lc.groupDims, lc.groupExprs)
+                            : emitDim3(lc.threadDims, lc.threadExprs);
     bool isMultiDevice = hasDeviceParallel(kernel);
     int64_t devCount = isMultiDevice ? getDeviceBound(kernel) : 1;
 
@@ -2280,7 +2332,7 @@ private:
         // Compute launch dims from THIS block and its nested parallels only.
         LaunchConfig lc;
         auto bounds = op.getBounds();
-        for (auto b : bounds) lc.blockDims.push_back(b);
+        appendBounds(bounds, op, lc.blockDims, lc.blockExprs);
         if (op.getStreamAttr())
           lc.streamName = op.getStreamAttr().getValue().str();
         if (op.getIsAsyncAttr() && op.getIsAsyncAttr().getValue())
@@ -2290,21 +2342,21 @@ private:
           auto b = p.getBounds();
           switch (p.getLevel()) {
           case ParallelLevel::GROUP:
-            for (auto v : b) lc.groupDims.push_back(v);
+            appendBounds(b, p, lc.groupDims, lc.groupExprs);
             break;
           case ParallelLevel::GROUPx4:
-            for (auto v : b) lc.groupDims.push_back(v * 4);
+            appendBounds(b, p, lc.groupDims, lc.groupExprs, 4);
             break;
           case ParallelLevel::THREAD:
-            for (auto v : b) lc.threadDims.push_back(v);
+            appendBounds(b, p, lc.threadDims, lc.threadExprs);
             break;
           default: break;
           }
         });
-        std::string gdims = emitDim3(lc.blockDims);
+        std::string gdims = emitDim3(lc.blockDims, lc.blockExprs);
         std::string bdims = hasGroupLevel()
-                                ? emitDim3(lc.groupDims)
-                                : emitDim3(lc.threadDims);
+                                ? emitDim3(lc.groupDims, lc.groupExprs)
+                                : emitDim3(lc.threadDims, lc.threadExprs);
 
         // Dynamic shared memory size for shared-MR buffers.
         auto mrInfo = getMRInfo(kernel);
@@ -2430,7 +2482,8 @@ private:
         valueNames[args[i]] = name;
         unsigned dim = std::min(i, 2u);
         os() << getIndent() << "int " << name << " = " << idPrefix
-           << dimName[dim] << "();  // bound=" << bounds[i] << "\n";
+           << dimName[dim] << "();  // bound="
+           << dimToken(bounds[i], dynBoundExpr(op, i)) << "\n";
       }
       os() << getIndent() << "{\n";
       incIndent();
@@ -3018,7 +3071,8 @@ private:
   }
 
   std::string emitSliceOffsets(TensorTileOp tile, const std::string &prefix,
-                               int64_t fallbackSize = -1) {
+                               int64_t fallbackSize = -1,
+                               Value counterpart = nullptr) {
     auto tileTy = cast<coir::TensorType>(tile.getResult().getType());
     auto baseTy = cast<coir::TensorType>(tile.getSource().getType());
     auto tileShape = tileTy.getShape();
@@ -3028,6 +3082,31 @@ private:
     // ELEMENT offset (already multiplied by the strides), so emit the index
     // values directly instead of multiplying by a chunk size.
     bool elementOffset = tile->hasAttr("coir.element_offset");
+    // A chunkat tile's result type (e.g. 1x1x1) is only a chunk ANCHOR: the
+    // real per-dim chunk extents live on the DMA counterpart (the local
+    // buffer for a slice load, the local source for a deslice store).  When
+    // the tile shape is 1 in a dim but the counterpart extent is not, the
+    // chunk index must be scaled by that extent so the offset lands at the
+    // start of the chunk instead of inside it.
+    auto counterpartExtent = [&](unsigned i) -> std::string {
+      if (!counterpart)
+        return "";
+      auto cTy = dyn_cast<coir::TensorType>(counterpart.getType());
+      if (!cTy || i >= cTy.getShape().size())
+        return "";
+      int64_t d = cTy.getShape()[i];
+      if (d == 1)
+        return "";
+      if (!mlir::ShapedType::isDynamic(d))
+        return std::to_string(d);
+      // Only resolve dynamic extents we know how to name safely.
+      auto defVal = getTensorDefOp(counterpart);
+      if (defVal.getDefiningOp<TensorAllocOp>() ||
+          defVal.getDefiningOp<TensorBindDimsOp>() ||
+          isa<mlir::BlockArgument>(defVal))
+        return emitDimExpr(counterpart, i);
+      return "";
+    };
     std::string arrName = prefix + "__off__";
     os() << getIndent() << "int " << arrName << "[] = {";
     for (unsigned i = 0; i < baseShape.size(); ++i) {
@@ -3073,8 +3152,12 @@ private:
             if (needCast) os() << ")";
           }
         } else {
+          std::string mult = std::to_string(chunkDim);
+          if (chunkDim == 1)
+            if (auto ce = counterpartExtent(i); !ce.empty())
+              mult = ce;
           if (needCast) os() << "(int)(";
-          os() << getName(indices[i]) << " * " << chunkDim;
+          os() << getName(indices[i]) << " * " << mult;
           if (needCast) os() << ")";
         }
       } else {
@@ -3149,7 +3232,8 @@ private:
         std::string dstMds = emitMdspanWithShape(op.getDest());
         std::string srcMds = emitFullBaseMdspan(srcTile);
         std::string offArr =
-            emitSliceOffsets(srcTile, futName, tensorElems(op.getDest()));
+            emitSliceOffsets(srcTile, futName, tensorElems(op.getDest()),
+                             op.getDest());
         apiCall = (isAsync ? "tops::slice_async" : "tops::slice");
         apiCall += "(*" + futName + ".get_ctx(), " + dstMds + ", " +
                    srcMds + ", " + offArr + ")";
@@ -3157,7 +3241,8 @@ private:
         std::string srcMds = emitMdspanWithShape(op.getSource());
         std::string dstMds = emitFullBaseMdspan(dstTile);
         std::string offArr =
-            emitSliceOffsets(dstTile, futName, tensorElems(op.getSource()));
+            emitSliceOffsets(dstTile, futName, tensorElems(op.getSource()),
+                             op.getSource());
         apiCall = (isAsync ? "tops::deslice_async" : "tops::deslice");
         apiCall += "(*" + futName + ".get_ctx(), " + dstMds + ", " +
                    srcMds + ", " + offArr + ")";
