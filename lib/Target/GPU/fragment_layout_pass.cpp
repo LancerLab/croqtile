@@ -146,6 +146,10 @@ bool FragmentLayoutPass::Visit(AST::MMA& n) {
 }
 
 bool FragmentLayoutPass::Visit(AST::FragReduce& n) {
+  // all_reduce_sum preserves the operand's logical and physical layout. Its
+  // legality is checked after layout inference by the target code generator.
+  if (n.IsAllReduce()) return true;
+
   auto dst_scoped = InScopeName(n.DstName());
   auto src_scoped = InScopeName(n.SrcName());
 

@@ -105,6 +105,31 @@ trigger qk_done;
 WGMMA wait. The compiler infers WGMMA commit and wait depth from explicit
 future waits. There is no source-level `mma.wait` statement.
 
+## Fragment Reductions
+
+`reduce_sum` and `reduce_max` reduce a logical tensor dimension and write a
+lower-rank fragment:
+
+```choreo
+reduce_sum(row_sum, scores, 1);
+reduce_max(row_max, scores, 1);
+```
+
+`all_reduce_sum` instead preserves a replicated 1D fragment. It combines the
+partial value held by each cooperating owner and broadcasts the sum back to
+all of them:
+
+```choreo
+apply {i, j} in scores.span
+  row_sum.at(i) = row_sum.at(i) + scores.at(i, j);
+all_reduce_sum(row_sum);
+```
+
+The compiler infers the participating width from the fragment layout. No
+thread count, lane mask, or hardware shuffle width is exposed in source. The
+operand must have a replicated 1D layout, normally inferred from an `apply`
+over an MMA accumulator.
+
 ## K-Tile Issue Schedule
 
 A dense auto-split WGMMA can request a semantic K-tile permutation:

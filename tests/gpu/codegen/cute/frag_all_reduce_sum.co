@@ -1,0 +1,39 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void frag_all_reduce_sum() {
+  parallel b by 1 : block {
+    shared bf16[64, 128] lhs;
+    shared bf16[128, 128] rhs;
+    parallel g by 1 : group-4 {
+      frag bf16[64, 128] probabilities {0.0f};
+      scores = mma.fill.f32 0.0f;
+      qk = mma.row.row.async scores, lhs, rhs;
+      wait qk;
+
+      frag f32[64] row_sum {0.0f};
+      apply {i, j} in scores.span
+        row_sum.at(i) = row_sum.at(i) + scores.at(i, j);
+
+      output = mma.fill.f32 0.0f;
+      final = mma.row.col.async output, probabilities, rhs;
+      all_reduce_sum(row_sum);
+      wait final;
+    }
+  }
+}
+
+// CHECK-LABEL: __choreo_device_frag_all_reduce_sum
+// CHECK: MMA_64x128x16_F32BF16BF16_RS
+// CHECK: warpgroup_commit_batch();
+// CHECK-NOT: warpgroup_wait<0>();
+// CHECK: { // frag.all_reduce_sum row_sum
+// CHECK: for (int __row = 0; __row < 2; ++__row) {
+// CHECK: float __all_reduce = row_sum[__row];
+// CHECK: __shfl_xor_sync(0xffffffff, __all_reduce, 2);
+// CHECK: __all_reduce += __all_reduce_shfl_0;
+// CHECK: __shfl_xor_sync(0xffffffff, __all_reduce, 1);
+// CHECK: __all_reduce += __all_reduce_shfl_1;
+// CHECK: row_sum[__row] = __all_reduce;
+// CHECK: } // frag.all_reduce_sum
+// CHECK: warpgroup_wait<0>();

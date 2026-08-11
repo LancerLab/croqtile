@@ -3465,7 +3465,9 @@ struct FragTransfer : public Node, public TypeIDProvider<FragTransfer> {
 // frag.reduce_max src, dst, dim;
 // frag.reduce_sum src, dst, dim;
 // Row-wise (dim=1) reduction of a 2D fragment into a 1D fragment.
-enum class FragReduceOp { MAX, SUM };
+// frag.all_reduce_sum value;
+// Cross-owner reduction and broadcast of a replicated 1D fragment.
+enum class FragReduceOp { MAX, SUM, ALL_REDUCE_SUM };
 
 struct FragReduce : public Node, public TypeIDProvider<FragReduce> {
   FragReduceOp op;
@@ -3481,6 +3483,7 @@ struct FragReduce : public Node, public TypeIDProvider<FragReduce> {
     switch (op) {
     case FragReduceOp::MAX: return "frag.reduce_max";
     case FragReduceOp::SUM: return "frag.reduce_sum";
+    case FragReduceOp::ALL_REDUCE_SUM: return "frag.all_reduce_sum";
     }
     return "frag.reduce_?";
   }
@@ -3493,6 +3496,7 @@ struct FragReduce : public Node, public TypeIDProvider<FragReduce> {
              bool with_type = false) const override {
     os << prefix << OpName() << " ";
     src->Print(os, "", with_type);
+    if (op == FragReduceOp::ALL_REDUCE_SUM) return;
     os << ", ";
     dst->Print(os, "", with_type);
     os << ", " << dim;
@@ -3509,6 +3513,8 @@ struct FragReduce : public Node, public TypeIDProvider<FragReduce> {
     assert(id && "frag.reduce dst must be an identifier");
     return id->name;
   }
+
+  bool IsAllReduce() const { return op == FragReduceOp::ALL_REDUCE_SUM; }
 
   void accept(Visitor&) override;
 

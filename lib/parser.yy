@@ -223,7 +223,7 @@ extern int yylex();
 %token <std::string> BAR_ARRIVE BAR_SYNC
 %token <std::string> LIB_CALL
 %token <std::string> FRAG
-%token <std::string> APPLY REDUCE_MAX_STMT REDUCE_SUM_STMT COPY_STMT
+%token <std::string> APPLY REDUCE_MAX_STMT REDUCE_SUM_STMT ALL_REDUCE_SUM_STMT COPY_STMT
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH RET WHERE WHILE BREAK CONTINUE YIELD COOPERATIVE
 %token <std::string> VECTORIZE
@@ -2421,6 +2421,10 @@ frag_stmt
       }
     | REDUCE_SUM_STMT LPAREN frag_expr COMMA frag_expr COMMA integer_value RPAREN {
         $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::SUM, $5, $3, $7);
+      }
+    | ALL_REDUCE_SUM_STMT LPAREN frag_expr RPAREN {
+        $$ = AST::Make<AST::FragReduce>(
+            @1, AST::FragReduceOp::ALL_REDUCE_SUM, $3, $3, -1);
       }
     | COPY_STMT LPAREN frag_expr COMMA frag_expr RPAREN {
         $$ = AST::Make<AST::FragTransfer>(@1, AST::FragTransferKind::COPY, $3, $5);

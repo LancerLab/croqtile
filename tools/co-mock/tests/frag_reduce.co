@@ -1,5 +1,5 @@
 // RUN: co-mock %s 2>&1 | FileCheck %s
-// Test reduce_sum and reduce_max on 2D arrays.
+// Test logical fragment reductions.
 
 __co__ void frag_reduce_test() {
   s32[3, 4] mat;
@@ -17,6 +17,7 @@ __co__ void frag_reduce_test() {
 
   reduce_sum(rsum, mat, 1);
   reduce_max(rmax, mat, 1);
+  all_reduce_sum(rsum);
 
   foreach i in 3 {
     println("sum[", i, "] =", rsum.at(i));

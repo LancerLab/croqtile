@@ -9248,12 +9248,75 @@ bool CuteCodeGen::Visit(AST::FragTransfer& n) {
 bool CuteCodeGen::Visit(AST::FragReduce& n) {
   TraceEachVisit(n);
   if (IsHost()) return true;
-  if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent, true);
+  if (has_pending_wgmma_finalize)
+    EmitWGMMAFinalize(ds, d_indent, !n.IsAllReduce());
 
   // ---- Prepare: resolve symbols, compute all parameters ----
 
   auto src_scoped = InScopeNameForRef(n.SrcName());
   auto dst_scoped = InScopeNameForRef(n.DstName());
+
+  if (n.IsAllReduce()) {
+    if (!FCtx(fname).HasFragmentLayout(src_scoped)) {
+      Error1(n.LOC(), "all_reduce_sum requires an inferred fragment layout.");
+      return true;
+    }
+
+    auto& fl = FCtx(fname).GetFragmentLayout(src_scoped);
+    if (fl.kind != LayoutKind::REPLICATED_1D) {
+      Error1(n.LOC(),
+             "all_reduce_sum requires a replicated 1D fragment layout.");
+      return true;
+    }
+
+    size_t width = fl.replicate;
+    if (width == 0 || (width & (width - 1)) != 0) {
+      Error1(n.LOC(),
+             "all_reduce_sum requires a power-of-two replication width.");
+      return true;
+    }
+
+    auto value_sym = UnScopedName(SSMName(src_scoped, false));
+    std::string ws_name = "__all_reduce_ws_" + n.SrcName();
+
+    IndStream() << "{ // " << n.OpName() << " " << n.SrcName() << "\n";
+    IncrIndent();
+    if (width > 32) {
+      IndStream() << "__shared__ float " << ws_name << "[" << fl.thread_count
+                  << "];\n";
+    }
+
+    IndStream() << "#pragma unroll\n";
+    IndStream() << "for (int __row = 0; __row < " << fl.regs_per_thread
+                << "; ++__row) {\n";
+    IncrIndent();
+    IndStream() << "float __all_reduce = " << value_sym << "[__row];\n";
+
+    if (width <= 32) {
+      size_t offset = width / 2;
+      int round = 0;
+      while (offset >= 1) {
+        std::string vname = "__all_reduce_shfl_" + std::to_string(round);
+        IndStream() << "float " << vname
+                    << " = __shfl_xor_sync(0xffffffff, __all_reduce, " << offset
+                    << ");\n";
+        IndStream() << "__all_reduce += " << vname << ";\n";
+        if (offset == 1) break;
+        offset /= 2;
+        round++;
+      }
+    } else {
+      IndStream() << "__all_reduce = choreo::AllReduce<choreo::SumOp, " << width
+                  << ", 1>::run(__all_reduce, " << ws_name << ");\n";
+    }
+
+    IndStream() << value_sym << "[__row] = __all_reduce;\n";
+    DecrIndent();
+    IndStream() << "}\n";
+    DecrIndent();
+    IndStream() << "} // " << n.OpName() << "\n";
+    return true;
+  }
 
   if (!FCtx(fname).HasFragmentLayout(src_scoped) ||
       !FCtx(fname).HasFragmentLayout(dst_scoped)) {

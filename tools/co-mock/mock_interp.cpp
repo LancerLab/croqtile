@@ -1466,8 +1466,8 @@ void MockInterpreter::ExecMMA(AST::MMA& n) {
                        MakeScalarOf(bt, v.AsDouble() * sb));
     }
 
-  } else if (op.IsKind(MMAOp::Commit) || op.IsKind(MMAOp::Wait)) {
-    // No-ops for single-threaded mock.
+  } else if (op.IsKind(MMAOp::Commit)) {
+    // No-op for the single-threaded mock.
   } else {
     Warning(n.LOC(), "mock: unhandled MMA operation kind.");
   }
@@ -1516,10 +1516,14 @@ void MockInterpreter::ExecApply(AST::ApplyBlock& n) {
 }
 
 // -----------------------------------------------------------------------
-// FragReduce -- row/column reduction of a 2D array into a 1D array
-// reduce_sum(dst, src, dim)  /  reduce_max(dst, src, dim)
+// FragReduce -- logical reduction operations
+// reduce_sum(dst, src, dim) / reduce_max(dst, src, dim) / all_reduce_sum(value)
 // -----------------------------------------------------------------------
 void MockInterpreter::ExecFragReduce(AST::FragReduce& n) {
+  // The mock owns the complete logical fragment rather than per-thread
+  // physical replicas, so the cross-owner reduction is already materialized.
+  if (n.IsAllReduce()) return;
+
   auto src_name = n.SrcName();
   auto dst_name = n.DstName();
 
