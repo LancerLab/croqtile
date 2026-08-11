@@ -2470,6 +2470,7 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
       }
     }
     mlir::TypedAttr initAttr;
+    std::string dynInitExpr;
     if (nvd.init_value) {
       auto *valNode = nvd.init_value.get();
       if (auto *expr = dyn_cast<AST::Expr>(valNode))
@@ -2486,6 +2487,12 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
         double v =
             std::visit([](auto x) -> double { return x; }, fl->value);
         initAttr = builder.getFloatAttr(tty.getElementType(), v);
+      } else {
+        // Non-literal initializer (e.g. `u8 [K] ans{x}`): the value is only
+        // known in host scope, so record the source expression (aligned with
+        // the `coir.dyn_bound_exprs` pattern) for backends to emit a
+        // host-side fill + copy instead of a compile-time constant.
+        dynInitExpr = UnScopedExpr(PSTR(nvd.init_value));
       }
     }
     mlir::StringAttr reuseSpm;
@@ -2523,6 +2530,9 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
       allocOp->setAttr("dyn_offset_arg",
                        builder.getStringAttr(dynOffsetName));
     }
+    if (!dynInitExpr.empty())
+      allocOp->setAttr("coir.dyn_init_expr",
+                       builder.getStringAttr(dynInitExpr));
     MapValue(nvd.GetName(), allocOp.getResult());
   } else {
     if (nvd.init_expr) {
