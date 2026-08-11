@@ -961,20 +961,45 @@ bool ASTCoIRGen::Visit(AST::ParallelBy &pb) {
   auto levelAttr = LowerParallelLevel(pb.GetLevel());
 
   llvm::SmallVector<int64_t> bounds;
+  llvm::SmallVector<ValueItem> boundVals;
   if (pb.HasSubPVs()) {
     for (auto &bnd : pb.AllBoundExprs())
       if (auto *expr = dyn_cast<AST::Expr>(bnd.get()))
-        if (expr->Opts().HasVal())
+        if (expr->Opts().HasVal()) {
           bounds.push_back(EvalToInt(expr->Opts().GetVal()));
+          boundVals.push_back(expr->Opts().GetVal());
+        }
   } else {
     auto bv = pb.BoundValue();
     bounds.push_back(EvalToInt(bv));
+    boundVals.push_back(bv);
   }
 
   auto parallelOp = builder.create<coir::ParallelOp>(
       loc, levelAttr,
       mlir::DenseI64ArrayAttr::get(&IRContext(), bounds),
       /*stream=*/nullptr, /*is_async=*/nullptr);
+
+  // Dynamic bounds are stored as the kDynamic sentinel in the dense bounds
+  // attribute, which codegen must not emit as a literal.  Record the source
+  // expression of each dynamic bound (aligned with `bounds`, empty for
+  // static ones) so backends can resolve it to a runtime value.
+  {
+    llvm::SmallVector<mlir::Attribute> exprAttrs;
+    bool anyDyn = false;
+    for (size_t i = 0; i < bounds.size(); ++i) {
+      std::string expr;
+      if (bounds[i] == mlir::ShapedType::kDynamic && i < boundVals.size() &&
+          boundVals[i])
+        expr = UnScopedExpr(PSTR(boundVals[i]));
+      if (!expr.empty())
+        anyDyn = true;
+      exprAttrs.push_back(builder.getStringAttr(expr));
+    }
+    if (anyDyn)
+      parallelOp->setAttr("coir.dyn_bound_exprs",
+                          mlir::ArrayAttr::get(&IRContext(), exprAttrs));
+  }
 
   // For GROUP-level parallel with dynamic bounds, record the param/dim
   // mapping so EmitCUDA can generate the correct block expression.
