@@ -3107,10 +3107,15 @@ private:
 
   std::string emitFullBaseMdspan(TensorTileOp tile) {
     Value base = getTensorDefOp(tile.getSource());
-    auto baseTy = cast<coir::TensorType>(base.getType());
+    // The mdspan shape space is the tile's DIRECT source: for a chunkat on a
+    // span_as alias (tile-of-tile) the indices live in the reinterpreted
+    // shape, so the slice/deslice must address that view, not the raw base.
+    // For a plain chunkat the direct source IS the root buffer, so this is
+    // unchanged.
+    auto mdsTy = cast<coir::TensorType>(tile.getSource().getType());
     std::string name = getName(base);
     std::string space;
-    int32_t ms = baseTy.getMemorySpace();
+    int32_t ms = mdsTy.getMemorySpace();
     if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Local))
       space = "tops::Private";
     else if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Shared))
@@ -3118,8 +3123,8 @@ private:
     else
       space = "tops::Global";
     return "tops::mdspan(" + space + ", (" +
-           emitType(baseTy.getElementType()) + "*)" + name +
-           ", " + emitTensorShape(base) + ")";
+           emitType(mdsTy.getElementType()) + "*)" + name +
+           ", " + emitTensorShape(tile.getSource()) + ")";
   }
 
   std::string emitSliceOffsets(TensorTileOp tile, const std::string &prefix,
@@ -3145,6 +3150,14 @@ private:
         return "";
       auto cTy = dyn_cast<coir::TensorType>(counterpart.getType());
       if (!cTy || i >= cTy.getShape().size())
+        return "";
+      // The counterpart's per-position extents only correspond to the tile's
+      // dims when both live in the same shape space.  A span_as alias base
+      // gives the tile a reinterpreted rank that can differ from the DMA
+      // counterpart's raw rank (e.g. tile 4x1x64 over a 2x2x16x4 buffer);
+      // substituting extents by position would then scale chunk indices by
+      // unrelated dims.
+      if (cTy.getShape().size() != tileShape.size())
         return "";
       int64_t d = cTy.getShape()[i];
       if (d == 1)
@@ -3260,6 +3273,11 @@ private:
 
     auto srcTile = getTileDefiningOp(op.getSource());
     auto dstTile = getTileDefiningOp(op.getDest());
+    // Index-free tiles are span_as alias views (buffer reinterpretations),
+    // not chunk slices: treat them as plain tensors so the DMA uses the
+    // reinterpreted shape directly instead of a slice/deslice with offsets.
+    if (srcTile && srcTile.getIndices().empty()) srcTile = nullptr;
+    if (dstTile && dstTile.getIndices().empty()) dstTile = nullptr;
 
     int64_t srcElems = tensorElems(op.getSource());
     int64_t dstElems = tensorElems(op.getDest());

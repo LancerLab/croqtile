@@ -284,6 +284,42 @@ int64_t EvalToInt(const ValueItem &vi) {
   return mlir::ShapedType::kDynamic;
 }
 
+/// Collect the static integer dims described by a span/shape node.  The
+/// parser wraps shape lists inconsistently: plain `span_as(16, 2, 4)` gives
+/// direct IntLiterals while the bracketed `span_as([4, 1, 64])` wraps the
+/// whole list in one Expr referencing a MultiDimSpans node whose own list
+/// holds the values.  Unwrap all forms recursively; set allStatic=false on
+/// anything not resolvable to a constant.
+void CollectStaticShapeDims(AST::Node *n, llvm::SmallVector<int64_t> &out,
+                            bool &allStatic) {
+  AST::Node *cur = n;
+  if (auto *e = dyn_cast<AST::Expr>(cur))
+    if (e->GetForm() == AST::Expr::Reference)
+      cur = e->GetR().get();
+  if (auto *lit = dyn_cast<AST::IntLiteral>(cur)) {
+    out.push_back(lit->Val());
+    return;
+  }
+  if (auto *mds = dyn_cast<AST::MultiDimSpans>(cur)) {
+    if (mds->list)
+      CollectStaticShapeDims(mds->list.get(), out, allStatic);
+    else
+      allStatic = false;
+    return;
+  }
+  if (auto *mv = dyn_cast<AST::MultiValues>(cur)) {
+    for (auto &v : mv->AllValues())
+      CollectStaticShapeDims(v.get(), out, allStatic);
+    return;
+  }
+  if (auto *e = dyn_cast<AST::Expr>(n))
+    if (e->Opts().HasVal()) {
+      out.push_back(EvalToInt(e->Opts().GetVal()));
+      return;
+    }
+  allStatic = false;
+}
+
 } // namespace
 
 mlir::Type ASTCoIRGen::LowerBaseType(BaseType bt) {
@@ -1668,24 +1704,22 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
 
   if (auto *sa = dyn_cast<AST::SpanAs>(&n)) {
     auto srcVal = LookupValue(sa->id->name);
+    // A span_as source may name a DMA future: resolve it to the future's
+    // data buffer the same way the DMA lowering does.
+    if (srcVal && mlir::isa<coir::AsyncTokenType>(srcVal.getType())) {
+      auto dataVal = LookupValue(sa->id->name + ".data");
+      if (dataVal) srcVal = dataVal;
+    }
     if (!srcVal) return nullptr;
     auto srcTy = mlir::dyn_cast<coir::TensorType>(srcVal.getType());
     if (!srcTy) return srcVal;
 
     llvm::SmallVector<int64_t> newShape;
-    if (sa->list) {
-      for (auto &v : sa->list->AllValues()) {
-        if (auto *il = dyn_cast<AST::IntLiteral>(v.get())) {
-          int64_t val =
-              std::visit([](auto x) -> int64_t { return x; }, il->value);
-          newShape.push_back(val);
-        } else if (auto *expr = dyn_cast<AST::Expr>(v.get())) {
-          if (expr->Opts().HasVal())
-            newShape.push_back(EvalToInt(expr->Opts().GetVal()));
-        }
-      }
-    }
-    if (newShape.empty()) return srcVal;
+    bool allStatic = true;
+    if (sa->list)
+      for (auto &v : sa->list->AllValues())
+        CollectStaticShapeDims(v.get(), newShape, allStatic);
+    if (newShape.empty() || !allStatic) return srcVal;
 
     auto reshapedTy = coir::TensorType::get(
         &IRContext(), srcTy.getElementType(), newShape,
@@ -2376,6 +2410,22 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
   if (auto sty = dyn_cast<SpannedType>(symType)) {
     auto loc = Loc(nvd);
 
+    // `x = y.span_as(...)` declares an alias view over y's buffer, not a
+    // fresh buffer.  Materialize it as an index-free tile so subsequent
+    // DMA ops see the reinterpreted shape on the same storage (the choreo
+    // reference lowers it to `x = y.data()`).
+    AST::Node *initNode = nvd.init_expr.get();
+    if (initNode)
+      if (auto *expr = dyn_cast<AST::Expr>(initNode))
+        initNode = expr->GetR().get();
+    if (initNode && isa<AST::SpanAs>(initNode)) {
+      auto aliasVal = EmitExpr(*initNode);
+      if (aliasVal) {
+        MapValue(nvd.GetName(), aliasVal);
+        return true;
+      }
+    }
+
     // Register-storage spanned types with init are MMA operand fragments
     if (sty->m_type == Storage::REG && (nvd.init_expr || nvd.init_value)) {
       auto elemTy = LowerBaseType(sty->ElementType());
@@ -2548,25 +2598,23 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl &nvd) {
 
 bool ASTCoIRGen::Visit(AST::SpanAs &sa) {
   auto srcVal = LookupValue(sa.id->name);
+  // A span_as source may name a DMA future: resolve it to the future's
+  // data buffer the same way the DMA lowering does.
+  if (srcVal && mlir::isa<coir::AsyncTokenType>(srcVal.getType())) {
+    auto dataVal = LookupValue(sa.id->name + ".data");
+    if (dataVal) srcVal = dataVal;
+  }
   if (!srcVal) return true;
   auto srcTy = mlir::dyn_cast<coir::TensorType>(srcVal.getType());
   if (!srcTy) return true;
 
   auto loc = Loc(sa);
   llvm::SmallVector<int64_t> newShape;
-  if (sa.list) {
-    for (auto &v : sa.list->AllValues()) {
-      if (auto *il = dyn_cast<AST::IntLiteral>(v.get())) {
-        int64_t val =
-            std::visit([](auto x) -> int64_t { return x; }, il->value);
-        newShape.push_back(val);
-      } else if (auto *expr = dyn_cast<AST::Expr>(v.get())) {
-        if (expr->Opts().HasVal())
-          newShape.push_back(EvalToInt(expr->Opts().GetVal()));
-      }
-    }
-  }
-  if (newShape.empty()) return true;
+  bool allStatic = true;
+  if (sa.list)
+    for (auto &v : sa.list->AllValues())
+      CollectStaticShapeDims(v.get(), newShape, allStatic);
+  if (newShape.empty() || !allStatic) return true;
 
   auto reshapedTy = coir::TensorType::get(
       &IRContext(), srcTy.getElementType(), newShape,
@@ -2609,6 +2657,15 @@ mlir::Value getTensorLenValue(mlir::Value tensor) {
 mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
                                         mlir::Value baseVal) {
   auto loc = Loc(chunk);
+  // A span_as between the buffer and the chunkat reinterprets the shape
+  // the chunk indices operate in (e.g.
+  // `input.span_as([3,16,16]).chunkat(a4, a5, b#c#d)`): materialize the
+  // reinterpretation as an index-free tile first so the chunk tile below
+  // is indexed in the reinterpreted space instead of the raw base shape.
+  if (chunk.sa) {
+    if (auto saVal = EmitExpr(*chunk.sa))
+      baseVal = saVal;
+  }
   auto baseTy = mlir::dyn_cast<coir::TensorType>(baseVal.getType());
   if (!baseTy) return baseVal;
 
@@ -2696,6 +2753,29 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
 
   if (chunk.HasOperation()) {
     for (auto &sop : chunk.AllOperations()) {
+      if (auto *reshapeOp = dyn_cast<AST::SOP::Reshape>(sop.get())) {
+        // span_as reinterpretation inside a chunkat chain (e.g.
+        // `input.span_as([3,16,16]).chunkat(a4, a5, b#c#d)`): the
+        // following chunk indices operate in the NEW shape space.
+        // Materialize the reinterpretation as an index-free tile alias so
+        // the chunk tile below is indexed against the reinterpreted shape.
+        llvm::SmallVector<int64_t> newShape;
+        bool allStatic = true;
+        if (auto newSpan = reshapeOp->GetNewSpan())
+          for (auto &v : newSpan->AllValues())
+            CollectStaticShapeDims(v.get(), newShape, allStatic);
+        if (!newShape.empty() && allStatic) {
+          auto reTy = coir::TensorType::get(
+              &IRContext(), baseTy.getElementType(), newShape,
+              baseTy.getMemorySpace(), llvm::ArrayRef<int64_t>{});
+          auto aliasOp = builder.create<coir::TensorTileOp>(
+              loc, reTy, baseVal, mlir::ValueRange{});
+          baseVal = aliasOp.getResult();
+          baseTy = reTy;
+          baseShape = baseTy.getShape();
+        }
+        continue;
+      }
       if (auto *viewOp = dyn_cast<AST::SOP::View>(sop.get())) {
         auto offsets = viewOp->GetOffsets();
         auto subspan = viewOp->GetSubSpan();
