@@ -1,7 +1,7 @@
 // REQUIRES: TARGET-SM_86+
 // RUN: choreo -gs -t cute -arch=sm_86 %s -o %s.cute.result && bash %s.cute.result --execute | FileCheck --match-full-lines %s && rm -f %s.cute.result
-// cocc not yet tested: CoIR emitBarrier does not support grid-level sync
-// or cooperative launch attributes.
+// RUN: cocc -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gpu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // Cooperative launch end2end test: validates that grid-level sync works
 // correctly when multiple blocks exchange data through global memory.

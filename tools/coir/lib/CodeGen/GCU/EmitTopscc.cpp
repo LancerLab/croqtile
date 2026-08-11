@@ -358,6 +358,7 @@ private:
     SmallVector<std::string> threadExprs;
     std::string streamName;
     bool isAsync = false;
+    bool isCooperative = false;
   };
 
   /// Return the host-scope source expression recorded for dynamic bound #i
@@ -391,6 +392,18 @@ private:
     }
   }
 
+  /// Check whether any BLOCK-level ParallelOp in the kernel has the
+  /// cooperative attribute.
+  bool isKernelCooperative(KernelOp kernel) {
+    bool found = false;
+    kernel.walk([&](ParallelOp p) {
+      if (p.getLevel() == ParallelLevel::BLOCK &&
+          p.getCooperativeAttr() && p.getCooperativeAttr().getValue())
+        found = true;
+    });
+    return found;
+  }
+
   LaunchConfig collectLaunchConfig(KernelOp kernel) {
     LaunchConfig lc;
     kernel.walk([&](ParallelOp p) {
@@ -402,6 +415,8 @@ private:
           lc.streamName = p.getStreamAttr().getValue().str();
         if (p.getIsAsyncAttr() && p.getIsAsyncAttr().getValue())
           lc.isAsync = true;
+        if (p.getCooperativeAttr() && p.getCooperativeAttr().getValue())
+          lc.isCooperative = true;
         break;
       case ParallelLevel::GROUP:
         appendBounds(bounds, p, lc.groupDims, lc.groupExprs);
@@ -539,10 +554,36 @@ private:
     entryAssertions.clear();
     preCollectStubs(kernel);
     bool isMultiDevice = hasDeviceParallel(kernel);
+    bool isCooperative = isKernelCooperative(kernel);
 
     if (!stubDeclCode.empty()) {
       os() << stubDeclCode;
       stubDeclCode.clear();
+    }
+
+    // Pre-scan for global tensor.alloc ops to promote to kernel parameters.
+    // Only needed for cooperative kernels where tensors must live in device
+    // global memory for cross-block communication.
+    globalTensorParams_.clear();
+    globalTensorValues_.clear();
+    if (isCooperative) {
+      kernel.walk([&](TensorAllocOp alloc) {
+        auto tty = cast<coir::TensorType>(alloc.getResult().getType());
+        auto ms = tty.getMemorySpace();
+        if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Global) ||
+            ms == -1) {
+          GlobalTensorInfo info;
+          info.name = getName(alloc.getResult());
+          int64_t totalElems = 1;
+          for (auto d : tty.getShape()) totalElems *= d;
+          info.totalElems = totalElems;
+          unsigned elemBits = tty.getElementType().getIntOrFloatBitWidth();
+          info.totalBytes = totalElems * (elemBits / 8);
+          info.eType = emitElementType(tty.getElementType());
+          globalTensorParams_.push_back(info);
+          globalTensorValues_.insert(alloc.getResult());
+        }
+      });
     }
 
     auto fnType = kernel.getFunctionType();
@@ -567,7 +608,10 @@ private:
          << ")\n";
     }
 
-    os() << "__device__ ";
+    if (isCooperative)
+      os() << "__cooperative__ __global__ ";
+    else
+      os() << "__device__ ";
     if (auto lb = kernel.getLaunchBoundsAttr()) {
       if (lb.getMaxThreadsPerBlock() > 0) {
         if (supportsLaunchBounds()) {
@@ -644,6 +688,12 @@ private:
     if (isMultiDevice) {
       if (paramIdx > 0) os() << ", ";
       os() << "int __device_id";
+    }
+    // Global tensor.alloc promoted to kernel params.
+    for (auto &gt : globalTensorParams_) {
+      if (paramIdx > 0) os() << ", ";
+      os() << gt.eType << "* " << gt.name;
+      paramIdx++;
     }
     os() << ") {\n";
     incIndent();
@@ -1122,6 +1172,16 @@ private:
     std::string name;
   };
 
+  /// Global tensor.alloc promoted to kernel parameter.
+  struct GlobalTensorInfo {
+    std::string name;     // kernel param name
+    std::string eType;    // element type string
+    int64_t totalBytes;
+    int64_t totalElems;
+  };
+  llvm::SmallVector<GlobalTensorInfo> globalTensorParams_;
+  llvm::DenseSet<mlir::Value> globalTensorValues_;
+
   llvm::SmallVector<DimArgMeta> getDimArgs(KernelOp kernel) {
     llvm::SmallVector<DimArgMeta> result;
     auto attr = kernel->getAttrOfType<ArrayAttr>("coir.dim_args");
@@ -1385,10 +1445,12 @@ private:
     auto mrInfo = getMRInfo(kernel);
     auto dimArgMeta = getDimArgs(kernel);
     unsigned numMrExtra = mrInfo.hasDynamicMR ? mrInfo.numOffsetArgs + (mrInfo.hasSharedMR ? 1 : 0) : 0;
+    bool isCooperative = isKernelCooperative(kernel);
 
     // __global__ trampoline — when device offload is needed.
-    // Skip for nested parallel (per-block functions replace the trampoline).
-    if (needsDevice && !hasNestedParallel_) {
+    // Skip for nested parallel (per-block functions replace the trampoline)
+    // and for cooperative kernels (launched via topsLaunchCooperativeKernel).
+    if (needsDevice && !hasNestedParallel_ && !isCooperative) {
       bool isMultiDevice = hasDeviceParallel(kernel);
 
       if (hasGroupLevel()) {
@@ -1419,6 +1481,15 @@ private:
         if (hasPrevParam) os() << ", ";
         os() << "int __device_id";
       }
+      // Global tensor params promoted from kernel body.
+      llvm::SmallVector<std::string> globalGtNames;
+      for (auto &gt : globalTensorParams_) {
+        if (hasPrevParam) os() << ", ";
+        // Use __gt_ prefix convention for global tensor host pointers.
+        os() << gt.eType << "* __gt_g_" << gt.name;
+        hasPrevParam = true;
+        globalGtNames.push_back(gt.name);
+      }
       os() << ") {\n";
       os() << "  __choreo_device_" << name.str() << "(";
       bool hasArg = false;
@@ -1435,6 +1506,11 @@ private:
       if (isMultiDevice) {
         if (hasArg) os() << ", ";
         os() << "__device_id";
+      }
+      for (auto &gtn : globalGtNames) {
+        if (hasArg) os() << ", ";
+        os() << "__gt_g_" << gtn;
+        hasArg = true;
       }
       os() << ");\n";
       os() << "}\n\n";
@@ -1720,11 +1796,10 @@ private:
       // then post-parallel. This preserves the source ordering.
       isEmittingHost_ = true;
       if (!body.empty()) {
-        bool seenParallel = false;
         // Phase 1: emit ops before the first parallel block.
         for (auto &op : body.front().getOperations()) {
           if (isa<KernelReturnOp>(&op)) continue;
-          if (isa<ParallelOp>(&op)) { seenParallel = true; break; }
+          if (isa<ParallelOp>(&op)) break;
           emitOp(&op);
         }
       }
@@ -1793,14 +1868,52 @@ private:
     os() << "}\n\n";
   }
 
-  /// Emit hoisted computation parameters in kernel launch.
-  /// These are integer values computed in the host function that the
-  /// device function receives as block arguments.
-  void emitHoistedLaunchArgs(KernelOp kernel, unsigned numOrigInputs,
-                             const llvm::SmallVectorImpl<DimArgMeta> &dimArgMeta,
-                             const MRInfo &mr) {
-    for (auto &name : hoistedParamNames_)
-      os() << ", (int)" << name;
+  /// Emit all launch arg variable names, materializing dim/MR/N args into
+  /// locals.  The same variable names work for both triple-chevron launches
+  /// (as rvalues) and cooperative launches (as lvalues for &var).
+  void emitLaunchArgs(
+      unsigned numOrigInputs,
+      const llvm::SmallVectorImpl<DimArgMeta> &dimArgMeta, const MRInfo &mr,
+      llvm::SmallVectorImpl<std::string> &vars, bool hasResultDevice,
+      const std::string *dynN = nullptr, int64_t staticN = -1) {
+    // Input device pointers (already lvalues from topsMalloc).
+    for (unsigned i = 0; i < numOrigInputs; ++i)
+      vars.push_back(hostParamName(i) + "__device");
+    // Dim args: materialize into locals.
+    for (unsigned di = 0; di < dimArgMeta.size(); ++di) {
+      std::string v = "__coir_dim_" + std::to_string(di);
+      os() << "  int " << v << " = (int)"
+           << hostParamName(dimArgMeta[di].paramIdx)
+           << ".shape()[" << dimArgMeta[di].dimIdx << "];\n";
+      vars.push_back(v);
+    }
+    // Hoisted params: already variables.
+    for (auto &hn : hoistedParamNames_)
+      vars.push_back(hn);
+    // MR args: materialize into locals.
+    if (mr.hasDynamicMR) {
+      for (unsigned i = 0; i < mr.numOffsetArgs; ++i) {
+        std::string v = "__coir_mr_" + std::to_string(i);
+        os() << "  int " << v << " = (int)" << mr.offsetsName << "[" << i
+             << "];\n";
+        vars.push_back(v);
+      }
+      std::string spm = "__coir_spm";
+      os() << "  int " << spm << " = (int)" << mr.spmSizeName << ";\n";
+      vars.push_back(spm);
+    }
+    // Result device pointer (already an lvalue).
+    if (hasResultDevice) vars.push_back("__result__device");
+    // N parameter (must be lvalue for topsLaunchCooperativeKernel).
+    if (dynN) {
+      std::string nv = "__coir_N";
+      os() << "  int " << nv << " = (int)(" << *dynN << ");\n";
+      vars.push_back(nv);
+    } else if (staticN >= 0) {
+      std::string nv = "__coir_N";
+      os() << "  int " << nv << " = " << staticN << ";\n";
+      vars.push_back(nv);
+    }
   }
 
   void emitMRLaunchArgs(const MRInfo &mr) {
@@ -1814,6 +1927,57 @@ private:
         os() << ", (int)" << mr.offsetsName << "[" << i << "]";
       os() << ", (int)" << mr.spmSizeName;
     }
+  }
+
+  /// Emit a kernel launch using either triple-chevron syntax (non-cooperative)
+  /// or topsLaunchCooperativeKernel (cooperative).
+  void emitKernelLaunch(StringRef kernelName, const std::string &gdims,
+                        const std::string &bdims,
+                        ArrayRef<std::string> argVars, bool isCooperative) {
+    if (isCooperative) {
+      os() << "  {\n";
+      os() << "    void* __choreo_coop_args[] = {";
+      for (size_t i = 0; i < argVars.size(); ++i) {
+        if (i > 0) os() << ", ";
+        os() << "&" << argVars[i];
+      }
+      os() << "};\n";
+      os() << "    topsLaunchCooperativeKernel((const void*)__choreo_device_"
+           << kernelName << ", " << gdims << ", " << bdims
+           << ", __choreo_coop_args, 0, 0);\n";
+      os() << "  }\n";
+    } else {
+      os() << "  __coir_global_" << kernelName << "<<<" << gdims << ", "
+           << bdims << ">>>(";
+      for (size_t i = 0; i < argVars.size(); ++i) {
+        if (i > 0) os() << ", ";
+        os() << argVars[i];
+      }
+      os() << ");\n";
+    }
+  }
+
+  /// Emit device memory allocations for global tensor params (host side).
+  void emitGlobalTensorAllocs() {
+    for (auto &gt : globalTensorParams_) {
+      std::string ptrName = "__gt_" + gt.name;
+      os() << "  " << gt.eType << "* " << ptrName << " = nullptr;\n";
+      os() << "  choreo::abend_true(topsMalloc((void**)&" << ptrName
+           << ", " << gt.totalBytes << "ULL));\n";
+    }
+  }
+
+  /// Append global tensor device pointer names to coopVars for cooperative
+  /// launch.  The names refer to host-side pointer lvalues.
+  void appendGlobalTensorArgs(llvm::SmallVectorImpl<std::string> &vars) {
+    for (auto &gt : globalTensorParams_)
+      vars.push_back("__gt_" + gt.name);
+  }
+
+  /// Emit topsFree for global tensor device pointers (host side).
+  void emitGlobalTensorFree() {
+    for (auto &gt : globalTensorParams_)
+      os() << "  choreo::abend_true(topsFree(__gt_" << gt.name << "));\n";
   }
 
   bool isDeviceGlobal(coir::TensorType tty) {
@@ -1877,6 +2041,10 @@ private:
       }
     }
 
+    // Allocate device memory for global tensor params.
+    if (!globalTensorParams_.empty())
+      emitGlobalTensorAllocs();
+
     // Build shape string for result tensor; use dynamic expressions for
     // dynamic dims via dimArgMeta.
     std::string shapeStr;
@@ -1927,18 +2095,13 @@ private:
     }
 
     if (retInputIdx >= 0) {
-      os() << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
-         << bdims << (mr.hasSharedMR ? (", " + mr.spmSizeName) : "") << ">>>(";
-      for (unsigned i = 0; i < numOrigInputs; ++i) {
-        if (i > 0) os() << ", ";
-        auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
-        os() << hostParamName(i) << (tty ? "__device" : "");
-      }
-      for (auto &da : dimArgMeta)
-        os() << ", (int)" << hostParamName(da.paramIdx) << ".shape()[" << da.dimIdx << "]";
-      emitHoistedLaunchArgs(kernel, numOrigInputs, dimArgMeta, mr);
-      emitMRLaunchArgs(mr);
-      os() << ");\n";
+      bool isCooperative = isKernelCooperative(kernel);
+      llvm::SmallVector<std::string> args;
+      emitLaunchArgs(numOrigInputs, dimArgMeta, mr, args,
+                     /*hasResultDevice=*/false);
+      if (!globalTensorParams_.empty())
+        appendGlobalTensorArgs(args);
+      emitKernelLaunch(name.str(), gdims, bdims, args, isCooperative);
       os() << "  choreo::abend_true(topsDeviceSynchronize());\n";
       if (resDynBytes.empty()) {
         os() << "  choreo::abend_true(topsMemcpy(const_cast<" << eType << "*>(" << hostParamName(retInputIdx)
@@ -1954,6 +2117,8 @@ private:
         if (!tty || isDeviceGlobal(tty)) continue;
         os() << "  choreo::abend_true(topsFree(" << hostParamName(i) << "__device));\n";
       }
+      if (!globalTensorParams_.empty())
+        emitGlobalTensorFree();
       os() << "  return choreo::copy_as_spanned(" << hostParamName(retInputIdx)
          << ".data(), " << hostParamName(retInputIdx) << ".shape());\n";
     } else {
@@ -1997,31 +2162,35 @@ private:
           break;
         }
       });
-      os() << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
-         << bdims << (mr.hasSharedMR ? (", " + mr.spmSizeName) : "") << ">>>(";
-      for (unsigned i = 0; i < numOrigInputs; ++i) {
-        if (i > 0) os() << ", ";
-        auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
-        os() << hostParamName(i) << (tty ? "__device" : "");
-      }
-      for (auto &da : dimArgMeta)
-        os() << ", (int)" << hostParamName(da.paramIdx) << ".shape()[" << da.dimIdx << "]";
-      emitHoistedLaunchArgs(kernel, numOrigInputs, dimArgMeta, mr);
-      emitMRLaunchArgs(mr);
-      // Kernel N parameter: dynamic element count or static.
-      if (!resDynBytes.empty()) {
-        // Strip " * elemBytes" suffix to get element count.
-        unsigned elemBytes = resTy.getElementType().getIntOrFloatBitWidth() / 8;
-        std::string resDynN = resDynBytes;
-        if (elemBytes > 1) {
-          auto pos = resDynN.rfind(" * " + std::to_string(elemBytes));
-          if (pos != std::string::npos)
-            resDynN = resDynN.substr(0, pos);
-        }
-        os() << ", __result__device, (int)(" << resDynN << "));\n";
+      bool isCooperative = isKernelCooperative(kernel);
+      llvm::SmallVector<std::string> args;
+      if (isCooperative) {
+        emitLaunchArgs(numOrigInputs, dimArgMeta, mr, args,
+                       /*hasResultDevice=*/true);
       } else {
-        os() << ", __result__device, " << resN << ");\n";
+        // Compute N expression for non-cooperative launch.
+        const std::string *dynNPtr = nullptr;
+        int64_t staticN = -1;
+        std::string dynNStorage;
+        if (!resDynBytes.empty()) {
+          unsigned elemBytes =
+              resTy.getElementType().getIntOrFloatBitWidth() / 8;
+          dynNStorage = resDynBytes;
+          if (elemBytes > 1) {
+            auto pos = dynNStorage.rfind(" * " + std::to_string(elemBytes));
+            if (pos != std::string::npos)
+              dynNStorage = dynNStorage.substr(0, pos);
+          }
+          dynNPtr = &dynNStorage;
+        } else {
+          staticN = resN;
+        }
+        emitLaunchArgs(numOrigInputs, dimArgMeta, mr, args,
+                       /*hasResultDevice=*/true, dynNPtr, staticN);
       }
+      if (!globalTensorParams_.empty())
+        appendGlobalTensorArgs(args);
+      emitKernelLaunch(name.str(), gdims, bdims, args, isCooperative);
       os() << "  choreo::abend_true(topsDeviceSynchronize());\n";
       if (resDynBytes.empty()) {
         os() << "  choreo::abend_true(topsMemcpy(__result.data(), __result__device, "
@@ -2036,6 +2205,8 @@ private:
         os() << "  choreo::abend_true(topsFree(" << hostParamName(i) << "__device));\n";
       }
       os() << "  choreo::abend_true(topsFree(__result__device));\n";
+      if (!globalTensorParams_.empty())
+        emitGlobalTensorFree();
       os() << "  return __result;\n";
     }
   }
@@ -2163,22 +2334,17 @@ private:
       }
     }
 
-    os() << "  __coir_global_" << name.str() << "<<<" << gdims << ", "
-       << bdims << (mr.hasSharedMR ? (", " + mr.spmSizeName) : "") << ">>>(";
-    bool first = true;
-    for (unsigned i = 0; i < numOrigInputs; ++i) {
-      auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
-      if (!first) os() << ", ";
-      first = false;
-      if (tty)
-        os() << hostParamName(i) << "__device";
-      else
-        os() << hostParamName(i);
-    }
-    for (auto &da : dimArgMeta)
-      os() << ", (int)" << hostParamName(da.paramIdx) << ".shape()[" << da.dimIdx << "]";
-    emitMRLaunchArgs(mr);
-    os() << ");\n";
+    // Allocate device memory for global tensor params.
+    if (!globalTensorParams_.empty())
+      emitGlobalTensorAllocs();
+
+    bool isCooperative = isKernelCooperative(kernel);
+    llvm::SmallVector<std::string> args;
+    emitLaunchArgs(numOrigInputs, dimArgMeta, mr, args,
+                   /*hasResultDevice=*/false);
+    if (!globalTensorParams_.empty())
+      appendGlobalTensorArgs(args);
+    emitKernelLaunch(name.str(), gdims, bdims, args, isCooperative);
     os() << "  choreo::abend_true(topsDeviceSynchronize());\n";
 
     // D2H for reference output parameters (e.g. &C)
@@ -2207,6 +2373,8 @@ private:
       if (!tty || isDeviceGlobal(tty)) continue;
       os() << "  choreo::abend_true(topsFree(" << hostParamName(i) << "__device));\n";
     }
+    if (!globalTensorParams_.empty())
+      emitGlobalTensorFree();
   }
 
   void emitMultiDeviceOffloadBody(KernelOp kernel, coir::TensorType resTy,
@@ -3832,6 +4000,9 @@ private:
 
   void emitTensorAlloc(TensorAllocOp op) override {
     if (returnValues.count(op.getResult())) return;
+
+    // Global tensor.alloc promoted to kernel parameter — skip.
+    if (globalTensorValues_.count(op.getResult())) return;
 
     auto tensorTy = cast<coir::TensorType>(op.getResult().getType());
     std::string name = getName(op.getResult());

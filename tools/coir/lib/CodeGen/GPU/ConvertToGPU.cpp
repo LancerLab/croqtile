@@ -89,6 +89,8 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
     Attribute addrSpace;
     if (ms == 1)
       addrSpace = IntegerAttr::get(IntegerType::get(tty.getContext(), 64), 3);
+    else if (ms == 0 || ms == -1)
+      addrSpace = IntegerAttr::get(IntegerType::get(tty.getContext(), 64), 0);
     return MemRefType::get(tty.getShape(), tty.getElementType(),
                            AffineMap{}, addrSpace);
   }

@@ -189,7 +189,8 @@ def ParallelOp : CoIR_Op<"parallel", [SingleBlock, NoTerminator]> {
     CoIR_ParallelLevelAttr:$level,
     DenseI64ArrayAttr:$bounds,
     OptionalAttr<StrAttr>:$stream,
-    OptionalAttr<BoolAttr>:$is_async
+    OptionalAttr<BoolAttr>:$is_async,
+    OptionalAttr<BoolAttr>:$cooperative
   );
   let regions = (region SizedRegion<1>:$body);
 

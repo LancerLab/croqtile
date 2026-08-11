@@ -86,7 +86,7 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
     if (ms == 1)
       addrSpace = IntegerAttr::get(IntegerType::get(tty.getContext(), 64),
                                  kGCUAddrWorkgroup);
-    else if (ms == 0)
+    else  // Global for ms==0 (explicit) or ms==-1 (default→global)
       addrSpace = IntegerAttr::get(IntegerType::get(tty.getContext(), 64),
                                  kGCUAddrGlobal);
     return MemRefType::get(tty.getShape(), tty.getElementType(),
