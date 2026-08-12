@@ -153,14 +153,14 @@ endef
 # ---- coir-only (no CoIR) ----
 define build-coir-only
 	@echo "=== Building CoIR tools ($(1)) ==="
-	$(CMAKE) -S $(WORK_DIR) -B $(COIR_BUILD_DIR) \
+	$(CMAKE) -S $(WORK_DIR) -B $(2) \
 		-G Ninja \
 		-DCMAKE_BUILD_TYPE=$(1) \
 		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) \
 		'-DCROQ_PROJECT=coir' \
 		'-DCROQ_TARGET=$(CROQ_TARGET)'
-	ninja -C $(COIR_BUILD_DIR) co2ir coir-opt cocc
-	@$(MAKE) --no-print-directory COIR_BUILD_DIR=$(COIR_BUILD_DIR) symlink-coir
+	ninja -C $(2) co2ir coir-opt cocc
+	@$(MAKE) --no-print-directory COIR_BUILD_DIR=$(2) symlink-coir
 endef
 
 .PHONY: choreo choreo-only choreo-debug choreo-release
