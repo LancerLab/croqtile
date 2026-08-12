@@ -45,6 +45,7 @@ inline ptr<T> Make(Args&&... args) {
 struct Identifier;
 struct DataType;
 struct MultiNodes;
+struct CompilerDirective;
 struct Node;
 
 using NodeList = std::vector<ptr<Node>>;
@@ -331,6 +332,29 @@ struct MultiNodes : public Node, public TypeIDProvider<MultiNodes> {
   void accept(Visitor& visitor) override;
 
   __UDT_TYPE_INFO__(Node, MultiNodes)
+};
+
+struct CompilerDirective : public Node,
+                           public TypeIDProvider<CompilerDirective> {
+  enum Kind { IntrinsicPrefix, IntrinsicNamespace };
+  Kind kind;
+  std::string value;
+
+  CompilerDirective(const location& l, Kind k, std::string v)
+      : Node(l), kind(k), value(std::move(v)) {}
+
+  ptr<Node> CloneImpl() const override {
+    return Make<CompilerDirective>(LOC(), kind, value);
+  }
+
+  void Print(std::ostream&, const std::string& = {},
+             bool = false) const override {
+    // Side effects already applied in the parser; nothing to emit.
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, CompilerDirective)
 };
 
 inline bool Block::Contains(const ptr<Node>& n) const {
@@ -1542,7 +1566,8 @@ struct Call : public Node, public TypeIDProvider<Call> {
     EXPR = 0x8,
     ANNO = 0x10,
     LIBCALL = 0x20,
-    ATOMIC = 0x40
+    ATOMIC = 0x40,
+    INTRINSIC = 0x80
   };
   // Overload bitwise OR
   friend constexpr CallAttr operator|(CallAttr lhs, CallAttr rhs) {
@@ -1581,11 +1606,13 @@ public:
   bool IsAnno() const { return (bool)(attr & ANNO); }
   bool IsAtomic() const { return (bool)(attr & ATOMIC); }
   bool IsLibCall() const { return (bool)(attr & LIBCALL); }
+  bool IsIntrinsic() const { return (bool)(attr & INTRINSIC); }
 
   void SetBIF() { attr = attr | BIF; }
   void SetCompileTimeEval() { attr = attr | COMPTIME; }
   void SetArith() { attr = attr | ARITH; }
   void SetExpr() { attr = attr | EXPR; }
+  void SetIntrinsic() { attr = attr | INTRINSIC; }
 
   ptr<Node> CloneImpl() const override {
     auto n = Make<Call>(LOC(), CloneP(function), CloneP(arguments),

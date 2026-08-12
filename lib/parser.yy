@@ -226,12 +226,15 @@ extern int yylex();
 %token <std::string> FRAG
 %token <std::string> APPLY REDUCE_MAX_STMT REDUCE_SUM_STMT ALL_REDUCE_SUM_STMT COPY_STMT
 %token <std::string> ASM ASM_VOLATILE ASM_GOTO
+%token <std::string> INTRINSIC_PREFIX
+%token <std::string> INTRINSIC_NAMESPACE
+%token <std::string> INTRINSIC_IDENTIFIER
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH RET WHERE WHILE BREAK CONTINUE YIELD COOPERATIVE
 %token <std::string> VECTORIZE
 
 // non-terminals
-%nterm <std::string> builtin_print_func arith_operation spanid cstrings arith_builtin_func atomic_builtin_func align_func id_with_namespace
+%nterm <std::string> builtin_print_func arith_operation spanid cstrings arith_builtin_func atomic_builtin_func align_func id_with_namespace intrinsic_id
 %nterm <ptr<DMAConfig>> dma_config
 %nterm <Choreo::SwizMode> swiz_mode swiz_value
 %nterm <int> promote_value
@@ -251,7 +254,7 @@ extern int yylex();
 %nterm <AST::ptr<AST::Call>> call_stmt
 %nterm <PBAttributes> pb_attribute
 %nterm <AST::DMAAsync> tdma_async
-%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block apply_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt buffer_map_stmt mma_stmt frag_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt asm_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
+%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block apply_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt buffer_map_stmt mma_stmt frag_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt asm_stmt intrinsic_decl range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls named_fragment_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims step_list opt_step_list opt_stride_list at_list opt_at_list opt_from_list
 %nterm <std::pair<AST::ptr<AST::MultiValues>, AST::ptr<AST::MultiValues>>> shape_stride
@@ -778,6 +781,7 @@ statement
     | break_stmt   SEMCOL        { $$ = $1; }
     | continue_stmt  SEMCOL      { $$ = $1; }
     | yield_stmt     SEMCOL      { $$ = $1; }
+    | intrinsic_decl SEMCOL      { $$ = $1; }
     | paraby_block               { $$ = $1; }
     | within_block               { $$ = $1; }
     | inthreads_block            { $$ = $1; }
@@ -786,6 +790,19 @@ statement
     | foreach_block              { $$ = $1; }
     | apply_block               { $$ = $1; }
     | asm_stmt     SEMCOL        { $$ = $1; }
+    ;
+
+intrinsic_decl
+    : INTRINSIC_PREFIX LPAREN STRING RPAREN {
+        CCtx().AddIntrinsicPrefix($3);
+        $$ = AST::Make<AST::CompilerDirective>(
+            @1, AST::CompilerDirective::IntrinsicPrefix, $3);
+      }
+    | INTRINSIC_NAMESPACE LPAREN STRING RPAREN {
+        CCtx().AddIntrinsicNamespace($3);
+        $$ = AST::Make<AST::CompilerDirective>(
+            @1, AST::CompilerDirective::IntrinsicNamespace, $3);
+      }
     ;
 
 sync_stmt
@@ -2841,7 +2858,16 @@ cstrings /* concatenate strings */
 
 id_with_namespace
     : id_with_namespace DCOLS IDENTIFIER { $$ = $1 + "::" + $3; }
+    | id_with_namespace DCOLS INTRINSIC_IDENTIFIER { $$ = $1 + "::" + $3; }
     | IDENTIFIER { $$ = $1; }
+    | INTRINSIC_IDENTIFIER { $$ = $1; }
+    ;
+
+intrinsic_id
+    : intrinsic_id DCOLS IDENTIFIER { $$ = $1 + "::" + $3; }
+    | intrinsic_id DCOLS INTRINSIC_IDENTIFIER { $$ = $1 + "::" + $3; }
+    | INTRINSIC_IDENTIFIER { $$ = $1; }
+    ;
 
 inlcpp_stmt
     : INLCPP LPAREN cstrings RPAREN {
@@ -2888,6 +2914,23 @@ call_stmt
     | BAR_SYNC LPAREN value_list RPAREN {
         $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), $3,
                                   AST::Call::BIF);
+      }
+    // Intrinsic passthrough calls. The `SetExpr` flag is applied by the
+    // enclosing `assignment` production when the call is used as an
+    // expression (e.g. `y = some_intrinsic(x, z)`), but must not be set here
+    // or statement-position intrinsic calls (e.g. `mylib::fence();`)
+    // are skipped by code generation.
+    | intrinsic_id LPAREN device_passables RPAREN {
+        auto call = AST::Make<AST::Call>(@1,
+            AST::Make<AST::Identifier>(@1, $1), $3);
+        call->SetIntrinsic();
+        $$ = call;
+      }
+    | intrinsic_id template_params LPAREN device_passables RPAREN {
+        auto call = AST::Make<AST::Call>(@1,
+            AST::Make<AST::Identifier>(@1, $1), $4, $2);
+        call->SetIntrinsic();
+        $$ = call;
       }
     ;
 

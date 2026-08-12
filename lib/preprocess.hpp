@@ -2,6 +2,7 @@
 #define __CHOREO_PRE_PROCESS_HPP__
 
 #include <iostream>
+#include <set>
 #include <stack>
 #include <string>
 #include <unordered_map>
@@ -104,6 +105,12 @@ protected:
   void HandleOneUserLine(const std::string& line);
   void HandleOneKernelLine(const std::string& line, bool handle_comment = true);
   void HandleOneChoreoLine(const std::string& line, bool handle_comment = true);
+  bool IsPragmaCroqIntrinsic(const std::string& line) const;
+  std::string TransformPragmaCroqIntrinsic(const std::string& line,
+                                           bool register_global = true);
+
+  /// Track intrinsic prefixes seen so far for duplicate detection.
+  std::set<std::string> seen_intrinsic_prefixes;
 
 public:
   virtual bool ExtractDeviceKernel(std::ostream& cok_ss);

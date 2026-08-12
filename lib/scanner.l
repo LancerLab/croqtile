@@ -21,6 +21,7 @@
 #include "loc.hpp"
 #include "options.hpp"
 #include "command_line.hpp"
+#include "context.hpp"
 
 typedef Choreo::Parser::token::token_kind_type token_type;
 static int scope = 0;
@@ -630,6 +631,8 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
   "copy"     return Choreo::Parser::make_COPY_STMT(yytext, loc);
   "wait"     return Choreo::Parser::make_WAIT(yytext, loc);
   "call"     return Choreo::Parser::make_CALL(yytext, loc);
+  "__pragma_croq_intrinsic_prefix"        return Choreo::Parser::make_INTRINSIC_PREFIX(yytext, loc);
+  "__pragma_croq_intrinsic_namespace"     return Choreo::Parser::make_INTRINSIC_NAMESPACE(yytext, loc);
   "select"   return Choreo::Parser::make_SELECT(yytext, loc);
   "return"   return Choreo::Parser::make_RET(yytext, loc);
   "where"    return Choreo::Parser::make_WHERE(yytext, loc);
@@ -689,15 +692,23 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
                }
                return Choreo::Parser::make_RBRAKT (loc);
              }
-  "{"        { scope++; return Choreo::Parser::make_LBRACE(loc); }
-  "}"        { if (--scope == 0) { BEGIN(INITIAL); }
+  "{"        { scope++; CCtx().PushIntrinsicPrefixScope();
+               return Choreo::Parser::make_LBRACE(loc); }
+  "}"        { CCtx().PopIntrinsicPrefixScope();
+               if (--scope == 0) BEGIN(INITIAL);
                return Choreo::Parser::make_RBRACE(loc);
              }
   "|"        { return Choreo::Parser::make_PIPE(loc); }
   "^"        { return Choreo::Parser::make_CARET(loc); }
   "~"        { return Choreo::Parser::make_TILDE(loc); }
   "__cpp__"  { return Choreo::Parser::make_INLCPP(loc); }
-  {id}       { return Choreo::Parser::make_IDENTIFIER(yytext, loc); }
+  {id}       {
+               std::string id_str(yytext);
+               if (CCtx().MatchIntrinsicPrefix(id_str) ||
+                   CCtx().IsIntrinsicNamespace(id_str))
+                 return Choreo::Parser::make_INTRINSIC_IDENTIFIER(yytext, loc);
+               return Choreo::Parser::make_IDENTIFIER(yytext, loc);
+             }
   R\"\(      { BEGIN(RAW_STRING); }
   R\"{id}\(  { std::string a {yytext};
                rawstr_delimiter = a.substr(2, a.size() - 3);

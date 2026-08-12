@@ -1869,7 +1869,10 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
           tplStrs.empty() ? nullptr : builder.getStrArrayAttr(tplStrs),
           call->IsLibCall() ? builder.getBoolAttr(true) : nullptr,
           call->IsBIF() ? builder.getBoolAttr(true) : nullptr,
-          builder.getBoolAttr(true));
+          builder.getBoolAttr(true),  // is_expr
+          (call->IsIntrinsic() || CCtx().MatchIntrinsicPrefix(fname))
+              ? builder.getBoolAttr(true)
+              : nullptr);  // is_intrinsic
       return callOp.getResult();
     }
     // Handle device function calls used as expressions
@@ -1925,7 +1928,10 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
           tplStrs.empty() ? nullptr : builder.getStrArrayAttr(tplStrs),
           nullptr, // not lib call
           nullptr, // not BIF
-          builder.getBoolAttr(true)); // is_expr
+          builder.getBoolAttr(true), // is_expr
+          (call->IsIntrinsic() || CCtx().MatchIntrinsicPrefix(fname))
+              ? builder.getBoolAttr(true)
+              : nullptr);  // is_intrinsic
       return callOp.getResult();
     }
   }
@@ -2045,7 +2051,8 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
           auto callOp = builder.create<coir::CallOp>(
               loc, resTy, funcName, operands,
               mlir::ArrayAttr{},
-              mlir::BoolAttr{}, mlir::BoolAttr{}, mlir::BoolAttr{});
+              mlir::BoolAttr{}, mlir::BoolAttr{}, mlir::BoolAttr{},
+              mlir::BoolAttr{});  // is_intrinsic
           return callOp.getResult();
         }
       }
@@ -4305,7 +4312,10 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
                       : builder.getStrArrayAttr(tplStrs),
       call.IsLibCall() ? builder.getBoolAttr(true) : nullptr,
       call.IsBIF() ? builder.getBoolAttr(true) : nullptr,
-      call.IsExpr() ? builder.getBoolAttr(true) : nullptr);
+      call.IsExpr() ? builder.getBoolAttr(true) : nullptr,
+      (call.IsIntrinsic() || CCtx().MatchIntrinsicPrefix(fname))
+          ? builder.getBoolAttr(true)
+          : nullptr);
   if (!printFormatStr.empty())
     callOp->setAttr("format_str", builder.getStringAttr(printFormatStr));
   (void)callOp;

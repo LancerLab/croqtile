@@ -1,0 +1,59 @@
+// RUN: not choreo -e -DTEST_NAMESPACE %s 2>&1 | FileCheck %s --check-prefix=NS
+// RUN: not choreo -e -DTEST_PREFIX %s 2>&1 | FileCheck %s --check-prefix=PREFIX
+// RUN: not choreo -e -DTEST_BLOCK %s 2>&1 | FileCheck %s --check-prefix=BLOCK
+
+// Scope-based intrinsic prefix/namespace invalidity.
+//
+// Function-scoped prefixes/namespaces do not leak into later functions, and
+// block-scoped prefixes do not leak past their block.
+
+#ifdef TEST_NAMESPACE
+// A function-scoped namespace does not leak into a later function.
+__co__ auto declares_namespace(s32 [32, 4] a) {
+  #pragma croq intrinsic namespace funclib
+  parallel by 1 {
+    funclib::device_flush();
+  }
+  return 0;
+}
+__co__ auto namespace_out_of_scope(s32 [32, 4] a) {
+  parallel by 1 {
+    // NS: error: syntax error, unexpected ::
+    funclib::device_flush();
+  }
+  return 0;
+}
+#endif
+
+#ifdef TEST_PREFIX
+// A function-scoped prefix does not leak into a later function.
+__co__ auto declares_prefix(s32 [32, 4] a) {
+  #pragma croq intrinsic prefix func_
+  parallel by 1 {
+    func_activate(0);
+  }
+  return 0;
+}
+__co__ auto prefix_out_of_scope(s32 [32, 4] a) {
+  parallel by 1 {
+    // PREFIX: error: syntax error, unexpected (
+    func_activate(0);
+  }
+  return 0;
+}
+#endif
+
+#ifdef TEST_BLOCK
+// A block-scoped prefix is invalid after its block; the surrounding
+// function-scoped prefix remains valid (covered by the positive test).
+__co__ auto block_scope(s32 [32, 4] a) {
+  #pragma croq intrinsic prefix outer_
+  parallel by 1 {
+    #pragma croq intrinsic prefix inner_
+    inner_activate(0);
+  }
+  // BLOCK: error: syntax error, unexpected (
+  inner_fail();
+  return 0;
+}
+#endif

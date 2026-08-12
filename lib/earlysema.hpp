@@ -41,6 +41,12 @@ private:
   std::unordered_set<std::string>
       with_syms; // symbol defined in with-in statement
 
+  // Intrinsic passthrough: prefixes registered via __pragma_croq_intrinsic
+  // are stored in CCtx() and checked via CCtx().MatchIntrinsicPrefix().
+  bool MatchIntrinsicPrefix(const std::string& name) const {
+    return CCtx().MatchIntrinsicPrefix(name);
+  }
+
   FutureBufferInfo& FBInfo() { return FCtx(fname).GetFutureBufferInfo(); }
 
 private:

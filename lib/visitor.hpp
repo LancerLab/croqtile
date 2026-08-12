@@ -60,6 +60,7 @@ struct Visitor {
 
   // For any visitor, it should implement all the necessary steps
   virtual bool Visit(AST::MultiNodes&) = 0;
+  virtual bool Visit(AST::CompilerDirective&) = 0;
   virtual bool Visit(AST::MultiValues&) = 0;
   virtual bool Visit(AST::Nullptr&) = 0;
   virtual bool Visit(AST::NoValue&) = 0;
@@ -599,6 +600,7 @@ public:
 public:
   // provide the defaults
   bool Visit(AST::MultiNodes&) override { return true; }
+  bool Visit(AST::CompilerDirective&) override { return true; }
   bool Visit(AST::MultiValues&) override { return true; }
   bool Visit(AST::Nullptr&) override { return true; }
   bool Visit(AST::NoValue&) override { return true; }
@@ -745,6 +747,10 @@ public:
 
   // delegate to VisitNode
   bool Visit(AST::MultiNodes& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::CompilerDirective& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
   }
@@ -956,6 +962,7 @@ public:
 public:
   // provide default
   virtual bool VisitNode(AST::MultiNodes&) { return true; }
+  virtual bool VisitNode(AST::CompilerDirective&) { return true; }
   virtual bool VisitNode(AST::MultiValues&) { return true; }
   virtual bool VisitNode(AST::Nullptr&) { return true; }
   virtual bool VisitNode(AST::NoValue&) { return true; }
@@ -1093,6 +1100,7 @@ private:
   // disable the interfaces
   bool InMidVisit(AST::Node&) final { return true; }
   bool Visit(AST::MultiNodes&) final { return true; }
+  bool Visit(AST::CompilerDirective&) final { return true; }
   bool Visit(AST::MultiValues&) final { return true; }
   bool Visit(AST::Nullptr&) final { return true; }
   bool Visit(AST::NoValue&) final { return true; }

@@ -725,6 +725,7 @@ def CallOp : CoIR_Op<"call", []> {
     `is_lib_call` marks __lib_* builtins for target-specific lowering.
     `is_bif` marks compiler built-in functions (assert, print, arith, lib).
     `is_expr` marks calls whose return value is used.
+    `is_intrinsic` marks intrinsic passthrough calls (verbatim emission).
   }];
   let arguments = (ins
     StrAttr:$callee,
@@ -732,7 +733,8 @@ def CallOp : CoIR_Op<"call", []> {
     OptionalAttr<StrArrayAttr>:$template_args,
     OptionalAttr<BoolAttr>:$is_lib_call,
     OptionalAttr<BoolAttr>:$is_bif,
-    OptionalAttr<BoolAttr>:$is_expr
+    OptionalAttr<BoolAttr>:$is_expr,
+    OptionalAttr<BoolAttr>:$is_intrinsic
   );
   let results = (outs Optional<AnyType>:$result);
 }

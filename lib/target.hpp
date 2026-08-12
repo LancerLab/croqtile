@@ -39,6 +39,7 @@ enum class ChoreoFeature {
   COOPERATIVE_LAUNCH,
   BUFFER_MAP,
   ASM,
+  INTRINSIC_PASSTHROUGH,
 };
 
 inline static const std::string STR(ChoreoFeature cf) {
@@ -63,6 +64,7 @@ inline static const std::string STR(ChoreoFeature cf) {
   case ChoreoFeature::COOPERATIVE_LAUNCH: return "cooperative_launch";
   case ChoreoFeature::BUFFER_MAP: return "buffer_map";
   case ChoreoFeature::ASM: return "asm";
+  case ChoreoFeature::INTRINSIC_PASSTHROUGH: return "intrinsic_passthrough";
   default: choreo_unreachable("unsupported feature kind.");
   }
 }
@@ -103,6 +105,8 @@ inline static const std::string Description(ChoreoFeature cf) {
            "source-to-destination memory aliasing.";
   case ChoreoFeature::ASM:
     return "Inline assembly support via GCC extended asm syntax.";
+  case ChoreoFeature::INTRINSIC_PASSTHROUGH:
+    return "Intrinsic passthrough via #pragma croq intrinsic prefix.";
   default: choreo_unreachable("unsupported feature kind.");
   }
 }
@@ -292,6 +296,12 @@ public:
 
   virtual bool IsAtomicStorageSupported(const ArchId& arch, Storage sto) const {
     return SupportedAtomicStorages(arch).count(sto) > 0;
+  }
+
+  // Intrinsic passthrough: allow bare identifier calls matching a declared
+  // prefix to be auto-rewritten into Call nodes and emitted verbatim.
+  virtual bool IsIntrinsicPassthroughSupported(const ArchId& /*arch*/) const {
+    return false;
   }
 
   virtual bool IsAtomicSupported(const ArchId& arch, AtomicOp op, BaseType ty,
