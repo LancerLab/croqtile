@@ -873,6 +873,12 @@ void TopsccCodeGen::EmitFixedHostHead() {
 #if __GCU_ARCH__ >= 300
 #include "tcle.h"
 #endif // __GCU_ARCH__ >= 300
+
+// Choreo intrinsic-prefix pragma is emitted as a no-op macro in the
+// generated source so that topscc does not reject it as an unknown
+// identifier. The choreo parser consumes the pragma before codegen.
+#define __pragma_croq_intrinsic_prefix(x)
+#define __pragma_croq_intrinsic_namespace(x)
 )";
 
   oss << "// include the choreo header;\n";

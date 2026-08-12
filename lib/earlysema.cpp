@@ -30,6 +30,7 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
   } else if (isa<AST::ChoreoFunction>(&n)) {
     VST_DEBUG(dbgs() << "Before " << GetName() << " - " << STR(FBInfo())
                      << "\n");
+    CCtx().PushIntrinsicPrefixScope();
     requires_return = false;
     return_deduction = false;
     found_return = false;
@@ -100,6 +101,7 @@ bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
   if (auto f = dyn_cast<AST::ChoreoFunction>(&n)) {
     VST_DEBUG(dbgs() << "After " << GetName() << " - " << STR(FBInfo())
                      << "\n");
+    CCtx().PopIntrinsicPrefixScope();
     if (return_deduction) {
       // maybe this can be moved to type inference
       if (!found_return && f->f_decl.ret_type->IsUnknown()) {
@@ -303,8 +305,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
       SetNodeType(n, MakeITupleType(ty->Dims()));
     else
       choreo_unreachable("unexpect");
-  } else if (n.op == Op::PreInc || n.op == Op::PreDec ||
-             n.op == Op::PostInc || n.op == Op::PostDec) {
+  } else if (n.op == Op::PreInc || n.op == Op::PreDec || n.op == Op::PostInc ||
+             n.op == Op::PostDec) {
     auto ty = NodeType(*n.GetR());
     auto sty = dyn_cast<ScalarIntegerType>(ty);
     assert(!isa<BooleanType>(ty) &&
@@ -1304,6 +1306,11 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
       Error1(n.da->LOC(), "must assign to a mutable value.");
     }
 
+    // For intrinsic calls in expression position, propagate the
+    // LHS type before doing the type-comparison check.
+    if (isa<AST::Call>(n.value)) SetNodeType(*n.value, ety);
+    vty = NodeType(*n.value);
+
     if (!ety->ApprxEqual(*vty)) {
       // consider taking value of bounded variables
       if (!(isa<ScalarIntegerType>(ety) && CanYieldAnInteger(vty))) {
@@ -1451,6 +1458,13 @@ bool EarlySemantics::Visit(AST::Identifier& n) {
 
   // to check in parent node
   if (n.name == assign_id) return true;
+
+  // Intrinsic passthrough: identifiers matching an active prefix are
+  // allowed without declaration (they will be emitted verbatim).
+  if (MatchIntrinsicPrefix(n.name)) {
+    SetNodeType(n, MakeVoidType());
+    return true;
+  }
 
   if (in_decl) {
     if (allow_named_dim) {
@@ -2704,6 +2718,13 @@ bool EarlySemantics::Visit(AST::Call& n) {
       choreo_unreachable("unsupported bif '" + func_name + "'.");
 
     return ec == error_count;
+  }
+
+  // Intrinsic passthrough: skip function resolution for calls whose
+  // name matches an active intrinsic prefix (set by parser).
+  if (n.IsIntrinsic() || MatchIntrinsicPrefix(n.function->name)) {
+    if (!n.IsExpr()) SetNodeType(n, MakeVoidType());
+    return true;
   }
 
   if (resolve_fns && !n.IsBIF()) {

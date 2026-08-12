@@ -14,6 +14,7 @@
 #include <memory>
 #include <set>
 #include <sstream>
+#include <stack>
 #include <unordered_map>
 #include <utility>
 
@@ -585,6 +586,10 @@ private:
   std::vector<std::string> library_paths;
   std::vector<std::string> libraries;
   std::vector<std::string> source_lines;
+  std::vector<std::string> m_intrinsic_prefixes;
+  std::stack<size_t> m_intrinsic_prefix_scope;
+  std::vector<std::string> m_intrinsic_namespaces;
+  std::stack<size_t> m_intrinsic_namespace_scope;
 
   std::unordered_map<int, std::vector<MacroSub>> line_macro_subs;
 
@@ -943,6 +948,50 @@ public:
   }
   auto TargetSwizzleModes() const {
     return GetTarget().SupportedSwizzleModes(GetArch());
+  }
+
+  // Intrinsic passthrough: prefixes and namespaces registered via
+  // __pragma_croq_intrinsic_prefix / __pragma_croq_intrinsic_namespace.
+  // Stored in insertion order so scope push/pop can restore correctly.
+  void AddIntrinsicPrefix(const std::string& prefix) {
+    m_intrinsic_prefixes.push_back(prefix);
+  }
+  void AddIntrinsicNamespace(const std::string& ns) {
+    m_intrinsic_namespaces.push_back(ns);
+  }
+  bool MatchIntrinsicPrefix(const std::string& name) const {
+    for (const auto& p : m_intrinsic_prefixes)
+      if (name.rfind(p, 0) == 0) return true;
+    // Also match namespace-qualified names (e.g. "mylib::fence" matches
+    // a registered namespace "mylib").
+    for (const auto& ns : m_intrinsic_namespaces) {
+      std::string ns_prefix = ns + "::";
+      if (name.rfind(ns_prefix, 0) == 0) return true;
+    }
+    return false;
+  }
+  // Check if `name` is a registered intrinsic namespace.
+  bool IsIntrinsicNamespace(const std::string& name) const {
+    for (const auto& ns : m_intrinsic_namespaces)
+      if (ns == name) return true;
+    // Backward-compat: also check if `name` is a leading namespace
+    // component of any registered prefix (e.g. "mylib" matches prefix
+    // "mylib::").
+    std::string ns_prefix = name + "::";
+    for (const auto& p : m_intrinsic_prefixes)
+      if (p.rfind(ns_prefix, 0) == 0) return true;
+    return false;
+  }
+  void PushIntrinsicPrefixScope() {
+    m_intrinsic_prefix_scope.push(m_intrinsic_prefixes.size());
+    m_intrinsic_namespace_scope.push(m_intrinsic_namespaces.size());
+  }
+  void PopIntrinsicPrefixScope() {
+    if (m_intrinsic_prefix_scope.empty()) return;
+    m_intrinsic_prefixes.resize(m_intrinsic_prefix_scope.top());
+    m_intrinsic_prefix_scope.pop();
+    m_intrinsic_namespaces.resize(m_intrinsic_namespace_scope.top());
+    m_intrinsic_namespace_scope.pop();
   }
 
 public:

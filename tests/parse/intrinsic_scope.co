@@ -1,0 +1,59 @@
+// RUN: choreo -e %s | FileCheck %s
+
+// Scope-based intrinsic prefix/namespace validity.
+//
+// File-scope (outer) prefixes/namespaces remain valid inside any __co__
+// function and across functions. Function-scope and block-scope (inner)
+// prefixes/namespaces are valid only within the scope that declares them.
+
+// File-scope declarations.
+#pragma croq intrinsic prefix file_
+#pragma croq intrinsic namespace filelib
+
+// File-scope prefixes/namespaces are valid inside any function.
+__co__ auto check_file_scope(s32 [32, 4] a) {
+  parallel by 1 {
+    // CHECK: Call: filelib::device_init
+    filelib::device_init();
+    // CHECK: Call: file_transfer
+    file_transfer(0, 0, 0);
+  }
+  return 0;
+}
+
+// Function-scope prefixes/namespaces are valid within the declaring function.
+__co__ auto check_func_scope(s32 [32, 4] a) {
+  #pragma croq intrinsic prefix func_
+  #pragma croq intrinsic namespace funclib
+  parallel by 1 {
+    // CHECK: Call: funclib::device_flush
+    funclib::device_flush();
+    // CHECK: Call: func_activate
+    func_activate(0);
+  }
+  return 0;
+}
+
+// A block-scoped prefix is valid within its block; the surrounding
+// function-scoped prefix remains valid after the block.
+__co__ auto check_block_scope(s32 [32, 4] a) {
+  #pragma croq intrinsic prefix outer_
+  parallel by 1 {
+    #pragma croq intrinsic prefix inner_
+    // CHECK: Call: inner_activate
+    inner_activate(0);
+  }
+  // CHECK: Call: outer_pass
+  outer_pass();
+  return 0;
+}
+
+// File-scope prefixes remain valid after function-scoped declarations have
+// been popped (the resize-based scope restore must not clobber them).
+__co__ auto check_file_scope_again(s32 [32, 4] a) {
+  parallel by 1 {
+    // CHECK: Call: file_transfer
+    file_transfer(0, 0, 0);
+  }
+  return 0;
+}

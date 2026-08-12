@@ -798,6 +798,18 @@ void Preprocess::HandleOneUserLine(const std::string& line) {
   auto bline = std::regex_replace(line, std::regex("^\\s+|\\s+$"), "");
   bool cur_cond = uc_condition_stack.empty() || uc_condition_stack.top();
   bool cur_skip = !uc_skip_stack.empty() && uc_skip_stack.top();
+
+  // Transform #pragma croq/choreo intrinsic prefix before other directives.
+  if (IsPragmaCroqIntrinsic(bline)) {
+    if (cur_cond && !cur_skip) {
+      auto emitted = TransformPragmaCroqIntrinsic(bline);
+      if (!emitted.empty() && !uc_skip_line) output << emitted << '\n';
+    }
+    // Emit a line directive to preserve line numbering.
+    if (!uc_skip_line) output << "// #line " << line_num + 1 << "\n";
+    return;
+  }
+
   if (isDirective(bline, "#ifdef")) {
     std::regex ifdefRegex("#ifdef\\s+(\\w+)");
     std::smatch match;
@@ -986,6 +998,8 @@ void Preprocess::HandleOneUserLine(const std::string& line) {
     return;
   }
 
+  // Parser handles bare intrinsic calls via intrinsic_id in call_expr
+  // and call_stmt; no need for a text-level transform here.
   output << line << '\n';
 }
 
@@ -1036,6 +1050,137 @@ void Preprocess::HandleOneKernelLine(const std::string& line,
   HandleOneUserLine(aline.substr(end_pos + 1));
 }
 
+bool Preprocess::IsPragmaCroqIntrinsic(const std::string& line) const {
+  // Match: #pragma croq intrinsic or #pragma choreo intrinsic
+  static const std::regex re(R"(^#pragma\s+(croq|choreo)\s+intrinsic(\s|$))");
+  return std::regex_search(line, re);
+}
+
+std::string Preprocess::TransformPragmaCroqIntrinsic(const std::string& line,
+                                                     bool register_global) {
+  // Validate and extract the pragma namespace.
+  static const std::regex ns_re(R"(^#pragma\s+(croq|choreo)\s+intrinsic)");
+  std::smatch ns_match;
+  if (!std::regex_search(line, ns_match, ns_re)) {
+    // Detect wrong spelling of croq/choreo for a helpful error.
+    static const std::regex bad_ns_re(R"(^#pragma\s+(\w+)\s+intrinsic)");
+    std::smatch bad;
+    if (std::regex_search(line, bad, bad_ns_re)) {
+      errs() << "copp: error: unknown pragma \"" << bad[1].str()
+             << "\"; did you mean \"croq\" or \"choreo\"?\n";
+    } else {
+      errs() << "copp: error: malformed pragma; expected \"#pragma croq "
+                "intrinsic prefix <ident>\"\n";
+    }
+    abort();
+  }
+
+  // Extract the remainder after "#pragma (croq|choreo) intrinsic".
+  auto tail = line.substr(ns_match[0].length());
+  // Strip leading whitespace.
+  size_t pos = tail.find_first_not_of(" \t");
+  if (pos == std::string::npos) {
+    errs() << "copp: error: expected \"prefix\" or \"namespace\" after "
+              "\"croq intrinsic\"\n";
+    abort();
+  }
+  tail = tail.substr(pos);
+
+  std::string result;
+  while (!tail.empty()) {
+    // Match a keyword: "prefix" or "namespace" followed by an identifier.
+    static const std::regex kw_re(R"(^(prefix|namespace)\s+(\S+))");
+    std::smatch kw_match;
+    if (!std::regex_search(tail, kw_match, kw_re)) {
+      // No known keyword -- check if it's an unknown keyword.
+      static const std::regex bad_kw_re(R"(^(\w+)\s+(\S*))");
+      std::smatch bad;
+      if (std::regex_search(tail, bad, bad_kw_re)) {
+        errs() << "copp: error: unknown keyword \"" << bad[1].str()
+               << "\" after \"croq intrinsic\"; did you mean "
+                  "\"prefix\" or \"namespace\"?\n";
+      } else {
+        errs() << "copp: error: expected \"prefix\" or \"namespace\" after "
+                  "\"croq intrinsic\"\n";
+      }
+      abort();
+    }
+
+    bool is_namespace = (kw_match[1].str() == "namespace");
+    std::string ident = kw_match[2].str();
+    // Strip trailing semicolon if present (copp passes through pragmas).
+    if (!ident.empty() && ident.back() == ';') ident.pop_back();
+
+    if (ident.empty()) {
+      errs() << "copp: error: expected identifier after \"" << kw_match[1].str()
+             << "\"\n";
+      abort();
+    }
+
+    if (is_namespace) {
+      // Reject namespaces named "croq" (reserved for BIFs).
+      if (ident == "croq") {
+        errs() << "copp: error: 'croq' is reserved for Choreo built-in "
+               << "functions. '" << ident << "' cannot be used as an "
+               << "intrinsic namespace\n";
+        tail = tail.substr(kw_match[0].length());
+        pos = tail.find_first_not_of(" \t");
+        if (pos == std::string::npos) break;
+        tail = tail.substr(pos);
+        continue;
+      }
+
+      // Detect duplicate intrinsic namespaces.
+      if (!seen_intrinsic_prefixes.insert(ident).second) {
+        errs() << "copp: warning: duplicate intrinsic namespace '" << ident
+               << "'\n";
+      }
+
+      // Register in the global context so the scanner can recognize
+      // namespace-qualified intrinsic calls (e.g. mylib::f()). Function-scope
+      // pragmas skip global registration; they are re-registered by the
+      // parser (intrinsic_decl) with proper scope tracking.
+      if (register_global) CCtx().AddIntrinsicNamespace(ident);
+      result += "__pragma_croq_intrinsic_namespace(\"" + ident + "\"); ";
+    } else {
+      // Reject prefixes starting with "croq::" (reserved for BIFs).
+      if (ident.rfind("croq::", 0) == 0) {
+        errs() << "copp: error: 'croq::' is reserved for Choreo built-in "
+               << "functions. '" << ident << "' cannot be used as an "
+               << "intrinsic prefix\n";
+        tail = tail.substr(kw_match[0].length());
+        pos = tail.find_first_not_of(" \t");
+        if (pos == std::string::npos) break;
+        tail = tail.substr(pos);
+        continue;
+      }
+
+      // Detect duplicate intrinsic prefixes.
+      if (!seen_intrinsic_prefixes.insert(ident).second) {
+        errs() << "copp: warning: duplicate intrinsic prefix '" << ident
+               << "'\n";
+      }
+
+      // Register in the global context so the scanner can recognize
+      // bare intrinsic calls (e.g. some_intrinsic(...)). Function-scope
+      // pragmas skip global registration; they are re-registered by the
+      // parser (intrinsic_decl) with proper scope tracking.
+      if (register_global) CCtx().AddIntrinsicPrefix(ident);
+      result += "__pragma_croq_intrinsic_prefix(\"" + ident + "\"); ";
+    }
+
+    // Advance past this keyword+identifier pair.
+    tail = tail.substr(kw_match[0].length());
+    // Strip leading whitespace for the next iteration.
+    pos = tail.find_first_not_of(" \t");
+    if (pos == std::string::npos) break;
+    tail = tail.substr(pos);
+  }
+
+  if (result.empty()) return ""; // All entries rejected; absorb silently.
+  return result;
+}
+
 void Preprocess::HandleOneChoreoLine(const std::string& line,
                                      bool handle_comment) {
   if (debug) dbgs() << "[C] " << line << " [C]\n";
@@ -1057,6 +1202,18 @@ void Preprocess::HandleOneChoreoLine(const std::string& line,
   auto bline = std::regex_replace(line, std::regex("^\\s+|\\s+$"), "");
   bool cur_cond = co_condition_stack.empty() || co_condition_stack.top();
   bool cur_skip = !co_skip_stack.empty() && co_skip_stack.top();
+
+  // Transform #pragma croq/choreo intrinsic prefix before other directives.
+  if (IsPragmaCroqIntrinsic(bline)) {
+    if (cur_cond && !cur_skip) {
+      auto emitted = TransformPragmaCroqIntrinsic(bline, false);
+      if (!emitted.empty() && !co_skip_line) output << emitted << '\n';
+    }
+    // Emit a line directive to preserve line numbering.
+    if (!co_skip_line) output << "#line " << line_num + 1 << "\n";
+    return;
+  }
+
   if (isDirective(bline, "#ifdef")) {
     std::regex ifdefRegex("#ifdef\\s+(\\w+)");
     std::smatch match;

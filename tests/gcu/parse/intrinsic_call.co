@@ -1,0 +1,22 @@
+// RUN: choreo -t topscc -e %s 2>&1 | FileCheck %s
+
+// Test that the parser recognizes intrinsic prefixes and namespaces
+// and emits intrinsic Call AST nodes for bare calls (no CALL keyword
+// needed).
+
+#include "choreo.h"
+
+#pragma croq intrinsic prefix mydev_
+#pragma croq intrinsic namespace mylib
+
+__co__ auto test_intrinsic_ast(s32 [32, 4] a) {
+  parallel by 1 {
+    // CHECK: Call: mylib::init_device
+    mylib::init_device();
+
+    // CHECK: Call: mydev_memcpy
+    // CHECK:   `- with arguments: 0, 0, 0
+    mydev_memcpy(0, 0, 0);
+  }
+  return 0;
+}

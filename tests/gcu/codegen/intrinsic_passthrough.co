@@ -1,0 +1,40 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -t topscc -gs %s 2>/dev/null | FileCheck %s --check-prefixes=CHECK,ALIAS
+// RUN: choreo -t topscc -gs %s 2>&1 >/dev/null | FileCheck %s --check-prefixes=DUP,REJECT
+
+#pragma croq intrinsic prefix __dtu_
+#pragma croq intrinsic prefix tcle::
+
+// DUP: warning: duplicate intrinsic prefix 'common_prefix'
+
+#include "choreo.h"
+
+// Test intrinsic passthrough in a __co__ Choreo DSL function.
+__co__ auto test_intrinsic() {
+  parallel by 1 {
+    // CHECK: tcle::cache_control
+    tcle::cache_control();
+
+    // CHECK: __dtu_memcpy
+    __dtu_memcpy(0, 0, 0);
+  }
+  return 0;
+}
+
+// Test #pragma choreo alias.
+#pragma choreo intrinsic prefix nsvr_start
+__co__ auto test_alias() {
+  parallel by 1 {
+    // ALIAS: nsvr_start
+    nsvr_start(0);
+  }
+  return 0;
+}
+
+// Test duplicate prefix warning.
+#pragma croq intrinsic prefix common_prefix
+#pragma croq intrinsic prefix common_prefix
+
+// Test rejection of croq:: as intrinsic prefix (reserved for BIFs).
+#pragma croq intrinsic prefix croq::some_func
+// REJECT: 'croq::' is reserved for Choreo built-in functions

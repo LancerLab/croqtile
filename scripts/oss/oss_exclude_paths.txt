@@ -13,6 +13,7 @@ lib/Target/GCU/
 
 # GCU tests
 tests/gcu/
+tests/parse/intrinsic_call.co
 
 # Benchmarks (internal)
 benchmark/

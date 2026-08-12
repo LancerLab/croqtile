@@ -1,0 +1,56 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -t topscc -gs %s | bash -s -- --execute 2>&1 | FileCheck --match-full-lines %s
+
+// End-to-end elementwise add using the real __dtu_add_a_s intrinsic
+// from extern/lib/clang/11.0.0/include/gcuintrin.h, dispatched
+// through Choreo's intrinsic passthrough mechanism
+// (#pragma croq intrinsic prefix __dtu_).
+
+#include "choreo.h"
+
+#pragma croq intrinsic prefix __dtu_
+
+__co__ s32 [6, 17, 64] ele_add(s32 [6, 17, 64] lhs, s32 [6, 17, 64] rhs) { /// device program
+  s32[lhs.span] output;
+
+  parallel p by 6
+    foreach index in [17, 4] {
+      lhs_load = dma.copy.async lhs.chunkat(p, index) => local;
+      rhs_load = dma.copy.async rhs.chunkat(p, index) => local;
+      wait lhs_load, rhs_load;
+
+      local s32[lhs_load.span] l1_out;
+
+      // Direct bare call to the real __dtu_add_a_s intrinsic.
+      foreach i in [l1_out.span]
+        l1_out.at(i) = __dtu_add_a_s(lhs_load.data.at(i), rhs_load.data.at(i));
+
+      dma.copy l1_out => output.chunkat(p, index);
+    }
+  return output;
+}
+
+int main() { /// host program
+  auto a = choreo::make_spandata<choreo::s32>(6, 17, 64);
+  auto b = choreo::make_spandata<choreo::s32>(6, 17, 64);
+  a.fill_random(-10, 10);
+  b.fill_random(-10, 10);
+
+  auto res = ele_add(a.view(), b.view());
+  std::cout << res.shape()[0] << std::endl;
+  std::cout << res.shape()[1] << std::endl;
+  std::cout << res.shape()[2] << std::endl;
+
+  // verification
+  for (size_t i = 0; i < res.shape()[0]; ++i)
+    for (size_t j = 0; j < res.shape()[1]; ++j)
+      for (size_t k = 0; k < res.shape()[2]; ++k) {
+        if (a[i][j][k] + b[i][j][k] != res[i][j][k]) {
+          choreo::choreo_assert(a[i][j][k] + b[i][j][k] == res[i][j][k], "values are not equal.");
+        }
+      }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

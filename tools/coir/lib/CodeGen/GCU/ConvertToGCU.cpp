@@ -292,6 +292,11 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
     }
     // Lower coir.call to func.call for external device functions
     if (auto callOp = dyn_cast<coir::CallOp>(op)) {
+      // Intrinsic passthrough calls are emitted verbatim by the
+      // target codegen; skip lowering to func.call.
+      if (callOp.getIsIntrinsic() && *callOp.getIsIntrinsic())
+        return true;
+
       auto callee = callOp.getCallee().str();
       // Map operands through the convert context (tensor -> memref)
       SmallVector<Value> mappedOperands;

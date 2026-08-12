@@ -1,0 +1,16 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -t topscc -es %s 2>/dev/null | FileCheck %s
+
+// Test that intrinsic calls are emitted verbatim in generated device code.
+
+#include "choreo.h"
+
+#pragma croq intrinsic prefix __dtu_
+
+__co__ auto intrinsic_codegen(s32 [32, 4] a) {
+  parallel by 1 {
+    // CHECK: __dtu_memcpy(0, 0, 0);
+    __dtu_memcpy(0, 0, 0);
+  }
+  return 0;
+}

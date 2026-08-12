@@ -243,6 +243,10 @@ public:
   }
 
   bool DefaultUseTargetLib() const override { return true; }
+
+  bool IsIntrinsicPassthroughSupported(const ArchId&) const override {
+    return true;
+  }
 };
 
 } // end namespace Choreo
