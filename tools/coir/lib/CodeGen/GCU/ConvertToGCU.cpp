@@ -93,6 +93,16 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
                            AffineMap{}, addrSpace);
   }
 
+  void preScanKernel(KernelOp kernel, OpBuilder &builder,
+                     mgpu::GPUModuleOp gpuModule) override {
+    kernel.getBody().walk([&](coir::ParallelOp par) {
+      if (par.getLevel() == coir::ParallelLevel::BLOCK &&
+          par.getCooperativeAttr() && par.getCooperativeAttr().getValue()) {
+        gpuModule->setAttr("coir.cooperative", builder.getUnitAttr());
+      }
+    });
+  }
+
   /// Build a MemRefType for a memref.view target that shares the pool's
   /// workgroup address space (reuse allocs always alias into shared memory).
   MemRefType viewMemRefType(coir::TensorType tty) {

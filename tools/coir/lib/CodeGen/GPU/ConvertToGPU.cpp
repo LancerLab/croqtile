@@ -474,6 +474,15 @@ private:
     for (auto idx : storeElem.getIndices())
       indices.push_back(mapping.lookup(idx));
     dst = flattenIfNeeded(builder, loc, dst, indices.size());
+    auto elemTy = cast<MemRefType>(dst.getType()).getElementType();
+    if (val.getType() != elemTy) {
+      if (isa<IndexType>(val.getType()) && isa<IntegerType>(elemTy))
+        val = builder.create<arith::IndexCastOp>(loc, elemTy, val);
+      else if (isa<IntegerType>(val.getType()) && isa<IndexType>(elemTy))
+        val = builder.create<arith::IndexCastOp>(loc, elemTy, val);
+      else if (isa<IntegerType>(val.getType()) && isa<IntegerType>(elemTy))
+        val = builder.create<arith::TruncIOp>(loc, elemTy, val);
+    }
     builder.create<memref::StoreOp>(loc, val, dst, indices);
   }
 

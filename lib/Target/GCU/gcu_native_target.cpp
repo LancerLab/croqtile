@@ -39,6 +39,8 @@ public:
         {STR(ChoreoFeature::MMA), Description(ChoreoFeature::MMA)},
         {STR(ChoreoFeature::MMA_UKERNEL),
          Description(ChoreoFeature::MMA_UKERNEL)},
+        {STR(ChoreoFeature::COOPERATIVE_LAUNCH),
+         Description(ChoreoFeature::COOPERATIVE_LAUNCH)},
     };
   }
 
