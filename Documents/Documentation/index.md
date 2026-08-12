@@ -49,19 +49,20 @@ This reference (level-2) is for readers who want to understand the language in d
 
 19. [Events](events.md) -- Generations, `ready`, staged access, and completion publication
 20. [Futures and Async](futures-and-async.md) -- Data/operation futures, event generations, and native completion bindings
+21. [Cooperative Kernel Launch](cooperative-launch.md) -- Grid-level synchronization, `block<cooperative>`, `sync.barrier : block` (target-specific)
 
 ### Part G -- C++ Interop
 
-21. [Calling Device Code](call-and-device.md) -- `call`, `__co_device__`, template calls
-22. [I/O and Linking](io-and-linking.md) -- Parameters, `make_spanned`, return values, streams, linking
-23. [Macros](macros.md) -- `#define`, conditional compilation, preprocessing order
+22. [Calling Device Code](call-and-device.md) -- `call`, `__co_device__`, template calls
+23. [I/O and Linking](io-and-linking.md) -- Parameters, `make_spanned`, return values, streams, linking
+24. [Macros](macros.md) -- `#define`, conditional compilation, preprocessing order
 
 ### Part H -- Advanced Topics
 
-24. [Assertions](assertions.md) -- `assert`, compile-time vs runtime evaluation, hoisting, `--runtime-check`
+25. [Assertions](assertions.md) -- `assert`, compile-time vs runtime evaluation, hoisting, `--runtime-check`
 
 ### Appendix
 
-25. [Syntax Quick Reference](syntax-quick-ref.md) -- Lookup tables for all constructs
-26. [Operator Gallery](operator-gallery.md) -- Curated index of example `.co` files
-27. [Tileflow Optimization Patterns](tileflow-opt.md) -- Matmul and optimization case studies
+26. [Syntax Quick Reference](syntax-quick-ref.md) -- Lookup tables for all constructs
+27. [Operator Gallery](operator-gallery.md) -- Curated index of example `.co` files
+28. [Tileflow Optimization Patterns](tileflow-opt.md) -- Matmul and optimization case studies

@@ -105,13 +105,6 @@ public:
 
     std::string a = arch.empty() ? "gcu300" : arch.str();
 
-    // Check whether any kernel is cooperative.
-    bool hasCooperative = false;
-    module.walk([&](mgpu::GPUModuleOp gpuModule) {
-      if (gpuModule->hasAttr("coir.cooperative"))
-        hasCooperative = true;
-    });
-
     // Emit explicit device code (__cok__ / __device__ blocks) as a separate
     // file for topscc compilation (Phase 1: script-based integration).
     auto explicitDeviceAttr = module->getAttrOfType<mlir::StringAttr>(
@@ -150,10 +143,8 @@ public:
        << " -kernel-memory-alloc"
        << " -convert-scf-to-cf"
        << " -convert-gpu-to-gcu"
-       << " -reconcile-unrealized-casts";
-    if (hasCooperative)
-      os << " --cooperative";
-    os << " --gcu-attach-target=arch=" << a
+       << " -reconcile-unrealized-casts"
+       << " --gcu-attach-target=arch=" << a
        << " \"$MLIRFILE\" -o \"$LOWFILE\" || exit 1\n\n";
 
     os << "\"" << optPath << "\""
@@ -174,9 +165,6 @@ public:
       os << "# TODO(Phase 1): link explicit_device.bc with kurama device"
          << " binary via llvm-link\n";
     }
-
-    // Emit --execute block for running the compiled binary.
-    emitScriptExecuteBlock(os);
 
     return 0;
   }

@@ -382,7 +382,7 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
     os << "      __fn, " << ki.gridDims[0] << ", " << ki.gridDims[1] << ", "
        << ki.gridDims[2] << ", " << ki.blockDims[0] << ", " << ki.blockDims[1]
        << ", " << ki.blockDims[2] << ",\n";
-    os << "      0, nullptr, __args, nullptr);\n";
+    os << "      0, nullptr, __args);\n";
   } else {
     os << "cuLaunchKernel(\n";
     os << "      __fn, " << ki.gridDims[0] << ", " << ki.gridDims[1] << ", "

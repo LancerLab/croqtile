@@ -1872,13 +1872,16 @@ private:
   /// locals.  The same variable names work for both triple-chevron launches
   /// (as rvalues) and cooperative launches (as lvalues for &var).
   void emitLaunchArgs(
-      unsigned numOrigInputs,
+      mlir::FunctionType fnType, unsigned numOrigInputs,
       const llvm::SmallVectorImpl<DimArgMeta> &dimArgMeta, const MRInfo &mr,
       llvm::SmallVectorImpl<std::string> &vars, bool hasResultDevice,
       const std::string *dynN = nullptr, int64_t staticN = -1) {
-    // Input device pointers (already lvalues from topsMalloc).
-    for (unsigned i = 0; i < numOrigInputs; ++i)
-      vars.push_back(hostParamName(i) + "__device");
+    // Input params: tensors get __device suffix (have device copies),
+    // scalars and other non-tensor types do not.
+    for (unsigned i = 0; i < numOrigInputs; ++i) {
+      auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
+      vars.push_back(hostParamName(i) + (tty ? "__device" : ""));
+    }
     // Dim args: materialize into locals.
     for (unsigned di = 0; di < dimArgMeta.size(); ++di) {
       std::string v = "__coir_dim_" + std::to_string(di);
@@ -1890,17 +1893,26 @@ private:
     // Hoisted params: already variables.
     for (auto &hn : hoistedParamNames_)
       vars.push_back(hn);
-    // MR args: materialize into locals.
+    // MR args: materialize into locals.  Local offsets first, then
+    // shared offsets, then shared spm size.
     if (mr.hasDynamicMR) {
-      for (unsigned i = 0; i < mr.numOffsetArgs; ++i) {
-        std::string v = "__coir_mr_" + std::to_string(i);
-        os() << "  int " << v << " = (int)" << mr.offsetsName << "[" << i
+      for (unsigned i = 0; i < mr.numLocalOffsets; ++i) {
+        std::string v = "__coir_local_mr_" + std::to_string(i);
+        os() << "  int " << v << " = (int)" << mr.localOffsetsName << "[" << i
              << "];\n";
         vars.push_back(v);
       }
-      std::string spm = "__coir_spm";
-      os() << "  int " << spm << " = (int)" << mr.spmSizeName << ";\n";
-      vars.push_back(spm);
+      if (mr.hasSharedMR) {
+        for (unsigned i = 0; i < mr.numSharedOffsets; ++i) {
+          std::string v = "__coir_mr_" + std::to_string(i);
+          os() << "  int " << v << " = (int)" << mr.offsetsName << "[" << i
+               << "];\n";
+          vars.push_back(v);
+        }
+        std::string spm = "__coir_spm";
+        os() << "  int " << spm << " = (int)" << mr.spmSizeName << ";\n";
+        vars.push_back(spm);
+      }
     }
     // Result device pointer (already an lvalue).
     if (hasResultDevice) vars.push_back("__result__device");
@@ -2097,7 +2109,7 @@ private:
     if (retInputIdx >= 0) {
       bool isCooperative = isKernelCooperative(kernel);
       llvm::SmallVector<std::string> args;
-      emitLaunchArgs(numOrigInputs, dimArgMeta, mr, args,
+      emitLaunchArgs(fnType, numOrigInputs, dimArgMeta, mr, args,
                      /*hasResultDevice=*/false);
       if (!globalTensorParams_.empty())
         appendGlobalTensorArgs(args);
@@ -2165,7 +2177,7 @@ private:
       bool isCooperative = isKernelCooperative(kernel);
       llvm::SmallVector<std::string> args;
       if (isCooperative) {
-        emitLaunchArgs(numOrigInputs, dimArgMeta, mr, args,
+        emitLaunchArgs(fnType, numOrigInputs, dimArgMeta, mr, args,
                        /*hasResultDevice=*/true);
       } else {
         // Compute N expression for non-cooperative launch.
@@ -2185,7 +2197,7 @@ private:
         } else {
           staticN = resN;
         }
-        emitLaunchArgs(numOrigInputs, dimArgMeta, mr, args,
+        emitLaunchArgs(fnType, numOrigInputs, dimArgMeta, mr, args,
                        /*hasResultDevice=*/true, dynNPtr, staticN);
       }
       if (!globalTensorParams_.empty())
@@ -2340,7 +2352,7 @@ private:
 
     bool isCooperative = isKernelCooperative(kernel);
     llvm::SmallVector<std::string> args;
-    emitLaunchArgs(numOrigInputs, dimArgMeta, mr, args,
+    emitLaunchArgs(fnType, numOrigInputs, dimArgMeta, mr, args,
                    /*hasResultDevice=*/false);
     if (!globalTensorParams_.empty())
       appendGlobalTensorArgs(args);
@@ -4141,9 +4153,18 @@ private:
 
   void emitBarrier(BarrierOp op) override {
     switch (op.getScope()) {
-    case coir::ParallelLevel::BLOCK:
-      os() << getIndent() << "__syncthreads();\n";
+    case coir::ParallelLevel::BLOCK: {
+      // A block-level barrier is a grid-wide sync (all blocks resident) in a
+      // cooperative kernel, so it must lower to __syncblocks(); otherwise it
+      // degrades to a thread-block barrier (matching the AST codegen's
+      // current_pb_is_cooperative handling).
+      auto kernel = op->getParentOfType<KernelOp>();
+      if (kernel && isKernelCooperative(kernel))
+        os() << getIndent() << "__syncblocks();\n";
+      else
+        os() << getIndent() << "__syncthreads();\n";
       break;
+    }
     case coir::ParallelLevel::GROUP:
     case coir::ParallelLevel::GROUPx4:
       os() << getIndent() << "__syncthreads();\n";

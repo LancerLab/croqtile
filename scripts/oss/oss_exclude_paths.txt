@@ -19,6 +19,7 @@ benchmark/
 
 # Internal documentation
 Documents/internal/
+Documents/plans/
 Documents/Documentation/target/
 Documents/GPU-Examples/
 

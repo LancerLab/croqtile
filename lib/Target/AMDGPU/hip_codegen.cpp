@@ -865,21 +865,43 @@ bool HIPCodeGen::Visit(AST::ParallelBy& n) {
   hs << h_indent << grid_str.substr(0, 4) << " __grid(" << grid_str.substr(5)
      << ";\n";
   hs << h_indent << "dim3 __block(" << bdim_str.substr(5) << ";\n";
-  hs << h_indent << device_fn << "<<<__grid, __block>>>";
-  hs << "(";
-  first = true;
-  for (auto& item : cgi.GetDeviceAllIns(fname)) {
-    if (!first) hs << ", ";
-    if (dyn_cast<SpannedType>(item.type)) {
-      hs << ssm.HostName(item.name + "__device");
-    } else if (isa<EventArrayType>(item.type) || isa<EventType>(item.type)) {
-      hs << ssm.HostName(item.name);
-    } else {
-      hs << ssm.HostName(item.name);
+
+  if (n.IsCooperative()) {
+    // Emit hipLaunchCooperativeKernel with args array.
+    hs << h_indent << "void* __" << fname << "_coop_args[] = {";
+    first = true;
+    for (auto& item : cgi.GetDeviceAllIns(fname)) {
+      if (!first) hs << ", ";
+      if (dyn_cast<SpannedType>(item.type)) {
+        hs << "(void*)&" << ssm.HostName(item.name + "__device");
+      } else if (isa<EventArrayType>(item.type) || isa<EventType>(item.type)) {
+        hs << "(void*)&" << ssm.HostName(item.name);
+      } else {
+        hs << "(void*)&" << ssm.HostName(item.name);
+      }
+      first = false;
     }
-    first = false;
+    hs << "};\n";
+    hs << h_indent << "choreo::abend_true(hipLaunchCooperativeKernel((void*)"
+       << device_fn << ", __grid, __block, __" << fname
+       << "_coop_args, 0, 0));\n";
+  } else {
+    hs << h_indent << device_fn << "<<<__grid, __block>>>";
+    hs << "(";
+    first = true;
+    for (auto& item : cgi.GetDeviceAllIns(fname)) {
+      if (!first) hs << ", ";
+      if (dyn_cast<SpannedType>(item.type)) {
+        hs << ssm.HostName(item.name + "__device");
+      } else if (isa<EventArrayType>(item.type) || isa<EventType>(item.type)) {
+        hs << ssm.HostName(item.name);
+      } else {
+        hs << ssm.HostName(item.name);
+      }
+      first = false;
+    }
+    hs << ");\n";
   }
-  hs << ");\n";
 
   return true;
 }
@@ -2120,6 +2142,7 @@ void HIPCodeGen::EmitFixedHostHead() {
 #include "choreo.h"
 
 #include <hip/hip_runtime.h>
+#include <hip/hip_cooperative_groups.h>
 
 )";
   code_segments.push_back(oss.str());

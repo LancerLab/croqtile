@@ -416,6 +416,16 @@ private:
     return async;
   }
 
+  bool isCooperativeLaunch(KernelOp kernel) {
+    bool coop = false;
+    kernel.getBody().walk([&](ParallelOp par) {
+      if (par.getLevel() == coir::ParallelLevel::BLOCK &&
+          par.getCooperativeAttr() && par.getCooperativeAttr().getValue())
+        coop = true;
+    });
+    return coop;
+  }
+
   LaunchDims getLaunchDims(KernelOp kernel) {
     LaunchDims dims;
     int64_t groupWarps = 0;
@@ -590,22 +600,44 @@ private:
       emitEntryAssertions(kernel, numOrigInputs, dimArgMeta);
       emitDimChecks(kernel);
       bool asyncLaunch = isAsyncLaunch(kernel);
+      bool coopLaunch = isCooperativeLaunch(kernel);
 
-      os() << "  " << devName << "<<<" << dims.gridStr() << ", "
-           << dims.blockStr();
-      if (!dynShmem.empty() || !streamName.empty())
-        os() << ", " << (dynShmem.empty() ? "0" : dynShmem);
-      if (!streamName.empty())
-        os() << ", " << streamName;
-      os() << ">>>(";
-      for (unsigned i = 0; i < numOrigInputs; ++i) {
-        if (i > 0) os() << ", ";
-        os() << "p" << i << "__device";
+      if (coopLaunch) {
+        // Extract dimension args to temporaries for address-of in launch.
+        for (auto &da : dimArgMeta)
+          os() << "  int __dim_" << da.paramIdx << "_" << da.dimIdx
+               << " = (int)p" << da.paramIdx << ".shape()[" << da.dimIdx
+               << "];\n";
+        os() << "  void* __coop_args[] = {";
+        for (unsigned i = 0; i < numOrigInputs; ++i) {
+          if (i > 0) os() << ", ";
+          os() << "(void*)&p" << i << "__device";
+        }
+        for (auto &da : dimArgMeta)
+          os() << ", (void*)&__dim_" << da.paramIdx << "_" << da.dimIdx;
+        os() << "};\n";
+        os() << "  hipLaunchCooperativeKernel((void*)" << devName
+             << ", " << dims.gridStr() << ", " << dims.blockStr()
+             << ", __coop_args, "
+             << (dynShmem.empty() ? "0" : dynShmem) << ", "
+             << (streamName.empty() ? "0" : streamName) << ");\n";
+      } else {
+        os() << "  " << devName << "<<<" << dims.gridStr() << ", "
+             << dims.blockStr();
+        if (!dynShmem.empty() || !streamName.empty())
+          os() << ", " << (dynShmem.empty() ? "0" : dynShmem);
+        if (!streamName.empty())
+          os() << ", " << streamName;
+        os() << ">>>(";
+        for (unsigned i = 0; i < numOrigInputs; ++i) {
+          if (i > 0) os() << ", ";
+          os() << "p" << i << "__device";
+        }
+        for (auto &da : dimArgMeta) {
+          os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+        }
+        os() << ");\n";
       }
-      for (auto &da : dimArgMeta) {
-        os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
-      }
-      os() << ");\n";
       if (!asyncLaunch) {
         if (!streamName.empty())
           os() << "  (void)hipStreamSynchronize(" << streamName << ");\n";
@@ -706,22 +738,44 @@ private:
     emitEntryAssertions(kernel, numOrigInputs, dimArgMeta);
     emitDimChecks(kernel);
     bool asyncLaunch = isAsyncLaunch(kernel);
+    bool coopLaunch = isCooperativeLaunch(kernel);
 
-    os() << "  " << devName << "<<<" << dims.gridStr() << ", "
-         << dims.blockStr();
-    if (!dynShmem.empty() || !streamName.empty())
-      os() << ", " << (dynShmem.empty() ? "0" : dynShmem);
-    if (!streamName.empty())
-      os() << ", " << streamName;
-    os() << ">>>(";
-    for (unsigned i = 0; i < numOrigInputs; ++i) {
-      if (i > 0) os() << ", ";
-      os() << "p" << i << "__device";
+    if (coopLaunch) {
+      for (auto &da : dimArgMeta)
+        os() << "  int __dim_" << da.paramIdx << "_" << da.dimIdx
+             << " = (int)p" << da.paramIdx << ".shape()[" << da.dimIdx
+             << "];\n";
+      os() << "  void* __coop_args[] = {";
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
+        if (i > 0) os() << ", ";
+        os() << "(void*)&p" << i << "__device";
+      }
+      for (auto &da : dimArgMeta)
+        os() << ", (void*)&__dim_" << da.paramIdx << "_" << da.dimIdx;
+      os() << ", (void*)&__result__device";
+      os() << "};\n";
+      os() << "  hipLaunchCooperativeKernel((void*)" << devName
+           << ", " << dims.gridStr() << ", " << dims.blockStr()
+           << ", __coop_args, "
+           << (dynShmem.empty() ? "0" : dynShmem) << ", "
+           << (streamName.empty() ? "0" : streamName) << ");\n";
+    } else {
+      os() << "  " << devName << "<<<" << dims.gridStr() << ", "
+           << dims.blockStr();
+      if (!dynShmem.empty() || !streamName.empty())
+        os() << ", " << (dynShmem.empty() ? "0" : dynShmem);
+      if (!streamName.empty())
+        os() << ", " << streamName;
+      os() << ">>>(";
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
+        if (i > 0) os() << ", ";
+        os() << "p" << i << "__device";
+      }
+      for (auto &da : dimArgMeta) {
+        os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+      }
+      os() << ", __result__device);\n";
     }
-    for (auto &da : dimArgMeta) {
-      os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
-    }
-    os() << ", __result__device);\n";
     if (!asyncLaunch) {
       if (!streamName.empty())
         os() << "  (void)hipStreamSynchronize(" << streamName << ");\n";

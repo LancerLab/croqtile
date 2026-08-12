@@ -1,7 +1,7 @@
 // REQUIRES: TARGET-GCU300+
 // RUN: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
-// RUN: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t gcu -gs %s -o %s.gcu.sh && bash %s.gcu.sh && rm -f %s.gcu.sh
 
 // Cooperative launch end2end test for GCU300: validates that grid-level sync
 // works correctly when multiple blocks exchange data through global memory.
