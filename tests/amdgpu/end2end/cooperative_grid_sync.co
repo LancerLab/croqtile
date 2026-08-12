@@ -1,0 +1,33 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: choreo -gs %target %amdgpu_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t hip -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+
+// Cooperative launch end2end test for AMDGPU: validates that grid-level
+// sync works correctly when multiple blocks exchange data through global
+// memory. Without cooperative launch, block 0 could read a[1] before
+// block 1 writes it, producing stale (0) values.
+
+#include "choreo.h"
+
+__co__ s32[2] coop_grid_sync() {
+  s32[2] a;
+  s32[2] b;
+
+  parallel bx by 2 : block<cooperative> {
+    a.at(bx) = bx + 1;       // block 0 writes 1, block 1 writes 2
+    sync.barrier : block;    // grid-level sync
+    b.at(bx) = a.at(1 - bx); // read neighbor's value
+  }
+  return b;
+}
+
+int main() {
+  auto res = coop_grid_sync();
+  choreo::choreo_assert(res[0] == 2,
+    "block 0 should see block 1's value (2)");
+  choreo::choreo_assert(res[1] == 1,
+    "block 1 should see block 0's value (1)");
+  std::cout << "Test Passed\n";
+}
+
+// CHECK: Test Passed
