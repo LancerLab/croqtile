@@ -45,6 +45,7 @@ struct KernelInfo {
   SmallVector<int64_t> ret_shape; // static shape from tensor type
   int64_t gridDims[3] = {1, 1, 1};
   int64_t blockDims[3] = {1, 1, 1};
+  bool isCooperative = false;
 };
 
 /// Return the choreo:: qualified C++ type for a choreo element type name.
@@ -115,6 +116,8 @@ std::vector<KernelInfo> collectKernels(ModuleOp module) {
       if (lvl == coir::ParallelLevel::BLOCK) {
         for (unsigned i = 0; i < bounds.size() && i < 3; ++i)
           ki.gridDims[i] = bounds[i];
+        if (par.getCooperativeAttr() && par.getCooperativeAttr().getValue())
+          ki.isCooperative = true;
       } else if (lvl == coir::ParallelLevel::THREAD) {
         hasThreadLevel = true;
         for (unsigned i = 0; i < bounds.size() && i < 3; ++i)
@@ -373,13 +376,23 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
 
   os << "  __nargs = " << idx << ";\n\n";
 
-  os << "  CUresult __launch_err = cuLaunchKernel(\n";
-  os << "      __fn, " << ki.gridDims[0] << ", " << ki.gridDims[1] << ", "
-     << ki.gridDims[2] << ", " << ki.blockDims[0] << ", " << ki.blockDims[1]
-     << ", " << ki.blockDims[2] << ",\n";
-  os << "      0, nullptr, __args, nullptr);\n";
+  os << "  CUresult __launch_err = ";
+  if (ki.isCooperative) {
+    os << "cuLaunchCooperativeKernel(\n";
+    os << "      __fn, " << ki.gridDims[0] << ", " << ki.gridDims[1] << ", "
+       << ki.gridDims[2] << ", " << ki.blockDims[0] << ", " << ki.blockDims[1]
+       << ", " << ki.blockDims[2] << ",\n";
+    os << "      0, nullptr, __args, nullptr);\n";
+  } else {
+    os << "cuLaunchKernel(\n";
+    os << "      __fn, " << ki.gridDims[0] << ", " << ki.gridDims[1] << ", "
+       << ki.gridDims[2] << ", " << ki.blockDims[0] << ", " << ki.blockDims[1]
+       << ", " << ki.blockDims[2] << ",\n";
+    os << "      0, nullptr, __args, nullptr);\n";
+  }
   os << "  if (__launch_err != CUDA_SUCCESS) {\n";
-  os << "    std::cerr << \"cuLaunchKernel failed: \" << __launch_err"
+  os << "    std::cerr << \"" << (ki.isCooperative ? "cuLaunchCooperativeKernel" : "cuLaunchKernel")
+     << " failed: \" << __launch_err"
      << " << std::endl;\n";
   os << "    std::exit(1);\n";
   os << "  }\n";
