@@ -80,6 +80,7 @@ SHOW_BASELINE=0
 DRY_RUN=0
 MAX_CATCHUP=5     # max commits per --catchup run
 SCAN_WINDOW=100   # max oss/main commits to inspect
+PATCH_ID_WINDOW=200  # main commits to scan for duplicate public patches
 # Allow override via env for testing
 BASELINE_FILE="${BASELINE_FILE:-$SCRIPT_DIR/oss-pull-baseline.txt}"
 while [[ $# -gt 0 ]]; do
@@ -300,11 +301,51 @@ get_public_files() {
   done < <(git diff-tree --no-commit-id -r --name-only --diff-filter=d "$sha" 2>/dev/null)
 }
 
+# Compute the patch-id of commit $1 restricted to its public files. This
+# fingerprint ignores private/test-only changes so a commit that landed on
+# main under a different SHA (e.g. with extra internal-only edits) is still
+# recognized as already-present.
+commit_patch_id() {
+  local sha="$1" patch_id
+  [[ -z "$sha" ]] && return 0
+  get_public_files "$sha"
+  [[ ${#pub_files[@]} -eq 0 ]] && return 0
+  patch_id="$(
+    git diff-tree -p --no-commit-id "$sha" -- "${pub_files[@]}" 2>/dev/null \
+      | git patch-id --stable \
+      | cut -d' ' -f1
+  )"
+  printf '%s' "$patch_id"
+}
+
+# Populate MAIN_PATCH_IDS with the public-file patch-ids of recent main commits.
+build_main_patch_ids() {
+  local main_sha patch_id
+  while IFS= read -r main_sha; do
+  [[ -z "$main_sha" ]] && continue
+  patch_id="$(commit_patch_id "$main_sha")"
+  if [[ -n "$patch_id" ]]; then
+    MAIN_PATCH_IDS["$patch_id"]=1
+  fi
+  done < <(git log "$TARGET_BRANCH" --no-merges \
+           --max-count="$PATCH_ID_WINDOW" --format='%H' 2>/dev/null)
+}
+
+# True (0) if the public-file change of commit $1 already exists on main.
+is_already_on_main() {
+  local patch_id
+  patch_id="$(commit_patch_id "$1")"
+  [[ -z "$patch_id" ]] && return 1
+  [[ -n "${MAIN_PATCH_IDS[$patch_id]:-}" ]]
+}
+
 # -------- --last mode: find newest unpulled oss/main commit --------
 
 if [[ $PULL_LAST -eq 1 ]]; then
   declare -A PULLED_SHAS=()
   build_pulled_sha_set
+  declare -A MAIN_PATCH_IDS=()
+  build_main_patch_ids
 
   [[ -n "$PULL_BASELINE" ]] && echo "Baseline: $bl_short (commits after this are considered)"
   found_last=""
@@ -319,6 +360,7 @@ if [[ $PULL_LAST -eq 1 ]]; then
   [[ -n "${PULLED_SHAS[$oss_sha]:-}" ]] && continue
   get_public_files "$oss_sha"
   [[ ${#pub_files[@]} -eq 0 ]] && continue
+  is_already_on_main "$oss_sha" && continue
   git diff --quiet HEAD "$OSS_BRANCH" -- "${pub_files[@]}" 2>/dev/null && continue
   found_last="$oss_sha"
   break
@@ -342,10 +384,13 @@ fi
 #   2. SHA in recent cherry-pick trailers on main  (already pulled)
 #   3. No public files (all private/excluded)
 #   4. All touched public files identical on main and oss/main
+#   5. Public-file change already present on main (duplicate patch)
 
 if [[ $PULL_CATCHUP -eq 1 ]]; then
   declare -A PULLED_SHAS=()
   build_pulled_sha_set
+  declare -A MAIN_PATCH_IDS=()
+  build_main_patch_ids
 
   [[ -n "$PULL_BASELINE" ]] && echo "Baseline: $bl_short (scanning commits after this)"
 
@@ -361,6 +406,7 @@ if [[ $PULL_CATCHUP -eq 1 ]]; then
   [[ -n "${PULLED_SHAS[$oss_sha]:-}" ]] && continue
   get_public_files "$oss_sha"
   [[ ${#pub_files[@]} -eq 0 ]] && continue
+  is_already_on_main "$oss_sha" && continue
   git diff --quiet HEAD "$OSS_BRANCH" -- "${pub_files[@]}" 2>/dev/null && continue
   found_all+=("$oss_sha")
   done < <(git rev-list "$REV_RANGE")

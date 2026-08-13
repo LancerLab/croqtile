@@ -186,15 +186,18 @@ for commit in "${COMMITS[@]}"; do
 
   if is_conflict_zone "$f"; then
     # DIVERGED: main has private (unsynced) changes to this file that
-    # are not yet in oss/main.  Pulling a public commit that also
-    # touches the file risks a conflict and needs human review.
-    # Compare main vs oss/main directly — if they match, oss/main
-    # already has all of main's changes for this file (cherry-picked),
-    # so the incoming public commit applies cleanly regardless of how
-    # old the merge-base is.
+    # are not yet on the public side.  Pulling a public commit that
+    # also touches the file risks a conflict and needs human review.
+    #
+    # Compare main's version against the incoming commit's PARENT
+    # (the true base of the change), NOT the oss/main tip.  The oss
+    # branch tip already contains this commit, so comparing against it
+    # would always differ for the file this commit touches and flag a
+    # false positive.  If main matches the commit's parent, the patch
+    # applies cleanly regardless of how old the merge-base is.
     main_hash="$(git rev-parse "$MAIN_BRANCH:$f" 2>/dev/null || echo "MISSING")"
-    oss_hash="$(git rev-parse "$OSS_BRANCH:$f" 2>/dev/null || echo "MISSING")"
-    if [[ "$main_hash" != "$oss_hash" ]]; then
+    base_hash="$(git rev-parse "$commit^:$f" 2>/dev/null || echo "MISSING")"
+    if [[ "$main_hash" != "$base_hash" ]]; then
     diverged_hits+=("$f (main has unsynced private changes vs oss/main)")
     else
     conflict_zone_hits+=("$f")
