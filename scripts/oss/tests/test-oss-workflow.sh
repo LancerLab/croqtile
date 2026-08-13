@@ -5,7 +5,7 @@ set -euo pipefail
 # Creates temporary git repos, populates them, and validates
 # oss-push, oss-pull, and oss-scan end-to-end.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMPBASE=""
 PASS=0
 FAIL=0
@@ -502,10 +502,12 @@ test_pull_preserves_author() {
   assert_eq "pull author preserved" "External Dev <ext@community.org>" "$author"
 }
 
-# -------- Tests for oss-pull-scan.sh false-positive fix --------
-# Verifies that the DIVERGED check compares main vs oss/main directly,
-# not main vs merge-base.  The old logic gave false positives whenever
-# main had any commit since the last common ancestor with oss/main.
+# -------- Tests for oss-pull-scan.sh divergence check --------
+# The DIVERGED check compares main's version of a conflict-zone file
+# against the incoming commit's PARENT (the true base of the change),
+# not the oss/main tip.  Comparing against the tip gave false positives
+# whenever the tip had moved past the commit being scanned.  A genuine
+# divergence is only flagged when main differs from the commit's parent.
 
 test_pull_scan_no_false_positive_when_synced() {
   local sandbox
@@ -575,8 +577,10 @@ test_pull_scan_real_divergence_detected() {
   git -C "$sandbox/repo" add CMakeLists.txt
   git -C "$sandbox/repo" commit -m "main: private cmake config" >/dev/null 2>&1
 
-  # A "public" commit also touches CMakeLists.txt
-  git -C "$sandbox/repo" checkout -b tmp_pub >/dev/null 2>&1
+  # A "public" commit also touches CMakeLists.txt.  It is based on
+  # oss/main (which lacks main's private config), so main has genuinely
+  # diverged from the commit's parent and the scan must flag it.
+  git -C "$sandbox/repo" checkout -b tmp_pub oss/main >/dev/null 2>&1
   echo "cmake_minimum_required(VERSION 3.16)" > "$sandbox/repo/CMakeLists.txt"
   git -C "$sandbox/repo" add CMakeLists.txt
   git -C "$sandbox/repo" commit -m "public: cmake update" >/dev/null 2>&1

@@ -9,12 +9,12 @@
 # - Basic dry-run functionality
 # - Integration between scripts
 #
-# Usage: bash scripts/oss/test-oss-scripts.sh [--quick]
-#        bash scripts/oss/test-oss-scripts.sh --suite <push|pull|sync>
+# Usage: bash scripts/oss/tests/test-oss-scripts.sh [--quick]
+#        bash scripts/oss/tests/test-oss-scripts.sh --suite <push|pull|sync>
 
 set -eu
 
-SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 PASS=0
 FAIL=0
 QUICK=0

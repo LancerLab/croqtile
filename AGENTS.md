@@ -295,29 +295,31 @@ will be synced to the public `oss/main` branch. Before committing, you MUST ensu
    
    ```bash
    # Quick smoke test (baseline/catchup logic):
-   bash scripts/oss/test-oss-pull-baseline.sh --quick
+   bash scripts/oss/tests/test-oss-pull-baseline.sh --quick
    
    # For option parsing or filtering changes:
-   bash scripts/oss/test-oss-scripts.sh --quick
+   bash scripts/oss/tests/test-oss-scripts.sh --quick
    
    # Full validation before merge (if modifying core logic):
-   bash scripts/oss/test-oss-pull-baseline.sh
-   bash scripts/oss/test-oss-scripts.sh
+   bash scripts/oss/tests/test-oss-pull-baseline.sh
+   bash scripts/oss/tests/test-oss-scripts.sh
    ```
    
    Tests run in isolated sandboxes and clean up automatically (~47s quick, ~120s full).
-   See `/oss-merge` skill "Unit Testing OSS Scripts" for detailed guidance.
+   See `scripts/oss/tests/README.md` and the `/oss-merge` skill for detailed guidance.
 
 ---
 
 ## OSS Test Suites
 
-Two comprehensive test suites validate OSS script functionality:
+Three comprehensive test suites validate OSS script functionality. They live in
+`scripts/oss/tests/` (see `scripts/oss/tests/README.md` for design and usage).
 
 | Test File | Purpose | Coverage | Runtime |
 |-----------|---------|----------|---------|
-| `scripts/oss/test-oss-pull-baseline.sh` | Core pull/catchup logic | Baseline, catchup, filtering, commit detection | ~56s (full), ~47s (quick) |
-| `scripts/oss/test-oss-scripts.sh` | Individual script options | push, pull, sync options; roundtrip workflows | ~4min (full), ~2min (quick) |
+| `scripts/oss/tests/test-oss-pull-baseline.sh` | Core pull/catchup logic | Baseline, catchup, filtering, commit detection | ~56s (full), ~47s (quick) |
+| `scripts/oss/tests/test-oss-scripts.sh` | Individual script options | push, pull, sync options; roundtrip workflows | ~4min (full), ~2min (quick) |
+| `scripts/oss/tests/test-oss-workflow.sh` | End-to-end integration | push/pull/scan roundtrip; diverged sync; author preservation | ~1min |
 
 **When to run:**
 - Before ANY commit touching `scripts/oss/*.sh`

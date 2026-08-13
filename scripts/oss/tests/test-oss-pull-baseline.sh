@@ -2,12 +2,12 @@
 # Integration tests for oss-pull.sh --baseline / --catchup / --last
 # Runs in a temporary sandbox clone (never mutates the caller's repo).
 #
-# Usage: bash scripts/oss/test-oss-pull-baseline.sh
-#        bash scripts/oss/test-oss-pull-baseline.sh --quick
+# Usage: bash scripts/oss/tests/test-oss-pull-baseline.sh
+#        bash scripts/oss/tests/test-oss-pull-baseline.sh --quick
 
 set -euo pipefail
 
-SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 CHOREO_ROOT=""
 SCRIPTS=""
 PID=$$
@@ -59,7 +59,7 @@ create_sandbox() {
   done < <(git -C "$SOURCE_ROOT" ls-files --others --exclude-standard -- scripts/oss)
 
   # Always overlay this test file itself.
-  overlay_seen["scripts/oss/test-oss-pull-baseline.sh"]=1
+  overlay_seen["scripts/oss/tests/test-oss-pull-baseline.sh"]=1
 
   git -C "$sandbox_repo" config user.name "OSS Pull Test"
   git -C "$sandbox_repo" config user.email "oss-pull-test@example.com"
@@ -295,3 +295,74 @@ OUT="$(run_pull --catchup)"
 log "catchup: $OUT"
 assert_contains "$OUT" "Nothing to pull"
 ok "private-only commit correctly skipped (no public files)"
+
+# ============================================================
+# G: conflict-zone file (Makefile) applies cleanly when main has
+#    no private divergence (regression for false-positive DIVERGED)
+# ============================================================
+log ""
+log "=== SCENARIO G: conflict-zone file no false DIVERGED ==="
+OUT="$(run_pull --set-baseline "$(git rev-parse "$TEST_OSS")")"
+log "reset baseline"
+
+# A public commit touching a conflict-zone file that main has NOT
+# independently changed must pull cleanly (main matches the commit's
+# parent), not be flagged DIVERGED against the oss/main tip.
+add_commit "$TEST_OSS" "build(makefile): tweak coir-only helper" "Makefile" "# test: coir-only helper tweak"
+log "Added Makefile-modifying commit $(tip "$TEST_OSS")"
+
+OUT="$(run_pull --catchup)"
+log "catchup: $OUT"
+assert_contains "$OUT" "1 pulled"
+assert_not_contains "$OUT" "DIVERGED"
+has_file "Makefile" && ok "conflict-zone Makefile change pulled without false DIVERGED" || fail "Makefile change not pulled"
+
+# ============================================================
+# H: conflict-zone file with genuine private divergence is still
+#    flagged (guard against an over-permissive scan)
+# ============================================================
+log ""
+log "=== SCENARIO H: conflict-zone file genuine DIVERGED ==="
+OUT="$(run_pull --set-baseline "$(git rev-parse "$TEST_OSS")")"
+log "reset baseline"
+
+# Independent private (main-only) change, then a public change to the
+# same conflict-zone file.  main differs from the public commit's
+# parent, so the scan must flag DIVERGED and halt.
+add_commit "$TEST_MAIN" "internal: private Makefile tweak" "Makefile" "# test: private tweak"
+add_commit "$TEST_OSS" "build: public Makefile tweak" "Makefile" "# test: public tweak"
+log "Added private main tweak + public oss tweak to same file"
+
+OUT="$(run_pull --catchup)"
+log "catchup: $OUT"
+assert_contains "$OUT" "DIVERGED"
+assert_contains "$OUT" "Sync halted"
+ok "genuine conflict-zone divergence still flagged and halted"
+
+# ============================================================
+# I: duplicate public patch already on main (different SHA, no
+#    oss-push trailer) is skipped via public-file patch-id dedup
+# ============================================================
+log ""
+log "=== SCENARIO I: duplicate patch already on main skipped ==="
+OUT="$(run_pull --set-baseline "$(git rev-parse "$TEST_OSS")")"
+log "reset baseline"
+
+# Equivalent public change lands on main natively (no trailer, different
+# message so its SHA differs), then the same public change arrives on
+# oss/main under its own SHA followed by a later edit to the same file
+# (so a naive tip-vs-tip file compare would NOT notice the duplicate).
+add_commit "$TEST_MAIN" "feat: public feature I (main-native)" "public-I.txt" "feature-I line"
+add_commit "$TEST_OSS" "feat: public feature I" "public-I.txt" "feature-I line"
+add_commit "$TEST_OSS" "chore: follow-up tweak I" "public-I.txt" "feature-I follow-up"
+log "main-native dup + oss dup + oss follow-up created"
+
+OUT="$(run_pull --catchup)"
+log "catchup: $OUT"
+assert_contains "$OUT" "Catchup: 1 commit"
+assert_contains "$OUT" "chore: follow-up tweak I"
+assert_not_contains "$OUT" "feat: public feature I"
+assert_contains "$OUT" "1 pulled"
+git show "$TEST_MAIN:public-I.txt" | grep -q "feature-I follow-up" \
+  && ok "follow-up content cherry-picked to $TEST_MAIN" \
+  || fail "follow-up content missing on $TEST_MAIN"
