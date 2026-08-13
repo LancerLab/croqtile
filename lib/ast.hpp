@@ -3608,10 +3608,18 @@ struct Rotate : public Node, public TypeIDProvider<Rotate> {
 // but triggers a warning.
 struct Synchronize : public Node, public TypeIDProvider<Synchronize> {
   Storage buf_ty;
+  std::vector<int> wg_ids;
 
   Synchronize(const location& loc, Storage s) : Node(loc), buf_ty(s) {}
+  Synchronize(const location& loc, std::vector<int> wgs)
+      : Node(loc), buf_ty(Storage::NONE), wg_ids(std::move(wgs)) {}
+
+  bool IsWarpGroupSync() const { return !wg_ids.empty(); }
+  const std::vector<int>& WarpGroupIds() const { return wg_ids; }
+  int NumWarpGroupThreads() const { return static_cast<int>(wg_ids.size()) * 128; }
 
   ptr<Node> CloneImpl() const override {
+    if (IsWarpGroupSync()) return Make<Synchronize>(LOC(), wg_ids);
     return Make<Synchronize>(LOC(), buf_ty);
   }
 
@@ -3619,10 +3627,14 @@ struct Synchronize : public Node, public TypeIDProvider<Synchronize> {
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool = false) const override {
-    os << "\n" << prefix << "`- " << "Synchronize: " << STR(buf_ty);
+    if (IsWarpGroupSync()) {
+      os << "\n" << prefix << "`- " << "Synchronize: wg";
+      for (size_t i = 0; i < wg_ids.size(); ++i) os << (i ? ", " : " ") << wg_ids[i];
+    } else {
+      os << "\n" << prefix << "`- " << "Synchronize: " << STR(buf_ty);
+    }
   }
   void accept(Visitor&) override;
-
   __UDT_TYPE_INFO__(Node, Synchronize)
 };
 

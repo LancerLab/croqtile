@@ -1049,6 +1049,13 @@ public:
   bool Visit(AST::Synchronize& n) override {
     auto pl = Level();
 
+    if (n.IsWarpGroupSync()) {
+      if (pl != ParallelLevel::BLOCK && pl != ParallelLevel::GROUP &&
+          pl != ParallelLevel::GROUPx4 && pl != ParallelLevel::THREAD)
+        Error1(n.LOC(), "sync.wg is only valid inside a block/group scope.");
+      return true;
+    }
+
     switch (n.Resource()) {
     case Storage::GLOBAL:
       if ((pl == ParallelLevel::BLOCK) || (pl == ParallelLevel::GROUP) ||

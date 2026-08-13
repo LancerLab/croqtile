@@ -6859,6 +6859,13 @@ bool CuteCodeGen::Visit(AST::Rotate& n) {
 bool CuteCodeGen::Visit(AST::Synchronize& n) {
   TraceEachVisit(n);
 
+  if (n.IsWarpGroupSync()) {
+    int nthreads = n.NumWarpGroupThreads();
+    ds << d_indent << "asm volatile(\"bar.sync 14, " << nthreads
+       << ";\\n\" ::: \"memory\");\n";
+    return true;
+  }
+
   switch (n.Resource()) {
   case Storage::GLOBAL:
     hs << h_indent << "cudaDeviceSynchronize();\n";

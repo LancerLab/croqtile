@@ -2871,6 +2871,12 @@ bool EarlySemantics::Visit(AST::Call& n) {
 bool EarlySemantics::Visit(AST::Synchronize& n) {
   TraceEachVisit(n);
 
+  if (n.IsWarpGroupSync()) {
+    if (n.WarpGroupIds().size() < 2)
+      Error1(n.LOC(), "sync.wg requires at least 2 warp group IDs.");
+    return true;
+  }
+
   Warning(n.LOC(), "'sync.<storage>' is deprecated; use 'sync.barrier' "
                    "or 'sync.fence' for explicit synchronization.");
 

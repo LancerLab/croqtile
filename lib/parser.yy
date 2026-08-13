@@ -213,7 +213,8 @@ extern int yylex();
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
 %token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
-%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC BARRIER FENCE CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG
+%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST EVICT_FIRST EVICT_LAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC DOTWG BARRIER FENCE CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG
+
 %token DLBRAKT
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD DESC STORE ROW COLUMN SCALE MASK MMAWAIT
@@ -273,6 +274,7 @@ extern int yylex();
 %nterm <AST::ptr<AST::ParallelBy>> paraby_block parabys paraby
 %nterm <AST::ptr<AST::Return>> return_stmt
 %nterm <AST::ptr<AST::Synchronize>> sync_stmt
+%nterm <std::vector<int>> int_list
 %nterm <AST::ptr<AST::Barrier>> barrier_stmt
 %nterm <AST::ptr<AST::Fence>> fence_stmt
 %nterm <std::vector<ptr<AST::SpannedOperation>>> spanned_ops
@@ -770,6 +772,9 @@ statement
 
 sync_stmt
     : SYNC DOT STORAGE {
+        $$ = AST::Make<AST::Synchronize>(@1, $3);
+      }
+    | SYNC DOTWG int_list {
         $$ = AST::Make<AST::Synchronize>(@1, $3);
       }
     ;
@@ -2315,6 +2320,11 @@ frag_stmt
       }
     ;
 
+
+int_list
+    : NUM { $$ = std::vector<int>{$1}; }
+    | int_list COMMA NUM { $1.push_back($3); $$ = std::move($1); }
+    ;
 
 data_element
     : IDENTIFIER AT LPAREN data_indices RPAREN {

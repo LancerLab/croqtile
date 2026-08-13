@@ -922,8 +922,30 @@ void LivenessAnalyzer::BuildHBGraph(const std::string& paraby_scope) {
     graph.Dump(dbgs());
   });
 
+  {
+    std::map<int, std::vector<int>> wg_phases;
+    for (size_t i = 0; i < n; ++i) wg_phases[graph.phases[i].wg_id].push_back(i);
+    for (const auto& [wg_id, phases] : wg_phases) {
+      if (phases.size() < 2) continue;
+      const auto& last = graph.phases[phases.back()];
+      if (!last.multi_instance) continue;
+      if (!last.signal_out.empty()) continue;
+      bool prev_has_signal = false;
+      for (auto it = phases.rbegin() + 1; it != phases.rend(); ++it)
+        if (!graph.phases[*it].signal_out.empty()) { prev_has_signal = true; break; }
+      if (!prev_has_signal) continue;
+      if (!last.has_cta_barrier_before) {
+        errs() << "warning: multi-consumer epilogue (WG scope " << wg_id
+               << ", phase " << last.phase_id << ", " << last.multi_instance_count
+               << " instances) has no sync.wg barrier.\n"
+               << "  SALA cannot safely overlap buffers without a "
+                  "sync.wg at the mainloop-epilogue boundary.\n"
+               << "  Add 'sync.wg <consumer_wg_ids>;' ("
+               << last.multi_instance_count * 128 << " threads) before mma.store.\n";
+      }
+    }
+  }
   if (CCtx().DumpHB()) graph.DumpDot(errs(), paraby_scope);
-
   hb_graphs[paraby_scope] = std::move(graph);
 }
 
@@ -2120,7 +2142,10 @@ bool LivenessAnalyzer::Visit(AST::Synchronize& n) {
   }
   adding_synthetic_uses = false;
   visiting_synchronize = false;
-  if (cur_hb_state) cta_barrier_since_last_inthreads = true;
+  if (cur_hb_state) {
+    cta_barrier_since_last_inthreads = true;
+    if (cur_hb_phase) cur_hb_phase->has_cta_barrier_before = true;
+  }
   return true;
 }
 
@@ -2135,7 +2160,10 @@ bool LivenessAnalyzer::Visit(AST::Barrier& n) {
   }
   adding_synthetic_uses = false;
   visiting_synchronize = false;
-  if (cur_hb_state) cta_barrier_since_last_inthreads = true;
+  if (cur_hb_state) {
+    cta_barrier_since_last_inthreads = true;
+    if (cur_hb_phase) cur_hb_phase->has_cta_barrier_before = true;
+  }
   return true;
 }
 
