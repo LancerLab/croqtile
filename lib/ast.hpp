@@ -3984,18 +3984,24 @@ struct ForeachBlock : public Block, public TypeIDProvider<ForeachBlock> {
 // Plain data container (not an AST Node), like SpannedOperation.
 struct AsmOperand {
   location loc;
-  std::string constraint;  // e.g., "=r", "r", "memory"
-  ptr<Expr> expression;    // Choreo expression (variable, data access, etc.)
+  std::string symbolicName;  // optional "[name]" reference (empty = unnamed)
+  std::string constraint;    // e.g., "=r", "r", "memory"
+  ptr<Expr> expression;      // Choreo expression (variable, data access, etc.)
 
   explicit AsmOperand(const location& l) : loc(l) {}
 
   AsmOperand(const location& l, const std::string& c, const ptr<Expr>& e)
       : loc(l), constraint(c), expression(e) {}
 
+  AsmOperand(const location& l, const std::string& name,
+             const std::string& c, const ptr<Expr>& e)
+      : loc(l), symbolicName(name), constraint(c), expression(e) {}
+
   const location& LOC() const { return loc; }
 
   ptr<AsmOperand> Clone() const {
-    return std::make_shared<AsmOperand>(loc, constraint, expression);
+    return std::make_shared<AsmOperand>(loc, symbolicName, constraint,
+                                        expression);
   }
 };
 
@@ -4032,6 +4038,7 @@ struct AsmStmt : public Node, public TypeIDProvider<AsmStmt> {
       os << "\n" << prefix << "   `- outputs:";
       for (auto& op : outputOperands) {
         os << "\n" << prefix << "      ";
+        if (!op->symbolicName.empty()) os << "[" << op->symbolicName << "] ";
         os << "[" << op->expression << "] \"" << op->constraint << "\"";
       }
     }
@@ -4039,6 +4046,7 @@ struct AsmStmt : public Node, public TypeIDProvider<AsmStmt> {
       os << "\n" << prefix << "   `- inputs:";
       for (auto& op : inputOperands) {
         os << "\n" << prefix << "      ";
+        if (!op->symbolicName.empty()) os << "[" << op->symbolicName << "] ";
         os << "[" << op->expression << "] \"" << op->constraint << "\"";
       }
     }

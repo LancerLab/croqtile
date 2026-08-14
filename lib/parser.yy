@@ -3024,6 +3024,13 @@ asm_op
       op->expression = dyn_cast<AST::Expr>($3);
       $$ = op;
     }
+  | LBRAKT IDENTIFIER RBRAKT STRING LPAREN g_expr RPAREN {
+      auto op = AST::Make<AST::AsmOperand>(@$);
+      op->symbolicName = $2;
+      op->constraint = $4;
+      op->expression = dyn_cast<AST::Expr>($6);
+      $$ = op;
+    }
   ;
 
 asm_clobber_list

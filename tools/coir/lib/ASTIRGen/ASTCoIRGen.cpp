@@ -3763,6 +3763,7 @@ bool ASTCoIRGen::Visit(AST::AsmStmt &asmStmt) {
   // their types for uninitialized output operands).
   llvm::SmallVector<mlir::Value> inVals;
   llvm::SmallVector<mlir::Attribute> inConstraintAttrs;
+  llvm::SmallVector<mlir::Attribute> inSymbolicNameAttrs;
   for (auto &op : asmStmt.inputOperands) {
     auto val = EmitExpr(*op->expression->GetR());
     if (!val) {
@@ -3773,6 +3774,8 @@ bool ASTCoIRGen::Visit(AST::AsmStmt &asmStmt) {
       inVals.push_back(val);
       inConstraintAttrs.push_back(
           mlir::StringAttr::get(&IRContext(), op->constraint));
+      inSymbolicNameAttrs.push_back(
+          mlir::StringAttr::get(&IRContext(), op->symbolicName));
     }
   }
 
@@ -3782,6 +3785,7 @@ bool ASTCoIRGen::Visit(AST::AsmStmt &asmStmt) {
   // on input operands needs a valid output operand index.
   llvm::SmallVector<mlir::Value> outVals;
   llvm::SmallVector<mlir::Attribute> outConstraintAttrs;
+  llvm::SmallVector<mlir::Attribute> outSymbolicNameAttrs;
   for (auto &op : asmStmt.outputOperands) {
     auto val = EmitExpr(*op->expression->GetR());
     if (!val) {
@@ -3808,6 +3812,8 @@ bool ASTCoIRGen::Visit(AST::AsmStmt &asmStmt) {
       outVals.push_back(val);
       outConstraintAttrs.push_back(
           mlir::StringAttr::get(&IRContext(), op->constraint));
+      outSymbolicNameAttrs.push_back(
+          mlir::StringAttr::get(&IRContext(), op->symbolicName));
     }
   }
 
@@ -3829,8 +3835,10 @@ bool ASTCoIRGen::Visit(AST::AsmStmt &asmStmt) {
           ? mlir::BoolAttr::get(&IRContext(), true)
           : mlir::BoolAttr(),
       mlir::ArrayAttr::get(&IRContext(), outConstraintAttrs),
+      mlir::ArrayAttr::get(&IRContext(), outSymbolicNameAttrs),
       outVals,
       mlir::ArrayAttr::get(&IRContext(), inConstraintAttrs),
+      mlir::ArrayAttr::get(&IRContext(), inSymbolicNameAttrs),
       inVals,
       mlir::ArrayAttr::get(&IRContext(), clobberAttrs));
 

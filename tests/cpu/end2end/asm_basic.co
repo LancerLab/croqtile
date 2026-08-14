@@ -29,12 +29,28 @@ __co__ auto test_operand_copy(s32 val) {
   return result;
 }
 
+// Test asm with named operands (symbolic names) instead of %0/%1.
+__co__ auto test_named_copy(s32 val) {
+  s32 result;
+  parallel p by 1 {
+    __asm__ volatile(
+      "mov %[dst], %[src]"
+      : [dst] "=r"(result)
+      : [src] "r"(val)
+    );
+  }
+  return result;
+}
+
 int main() {
   test_volatile_asm();
   test_basic_asm();
 
   auto r = test_operand_copy(42);
   choreo::choreo_assert(r == 42, "operand copy should return 42");
+
+  auto rn = test_named_copy(42);
+  choreo::choreo_assert(rn == 42, "named operand copy should return 42");
 
   std::cout << "All CPU asm tests passed." << std::endl;
 }

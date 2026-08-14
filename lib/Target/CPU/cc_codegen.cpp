@@ -1382,6 +1382,8 @@ bool CCCodeGen::Visit(AST::AsmStmt& n) {
       for (auto& op : n.outputOperands) {
         if (!first) IndStream() << ",\n      ";
         first = false;
+        if (!op->symbolicName.empty())
+          IndStream() << "[" << op->symbolicName << "] ";
         IndStream() << "\"" << op->constraint << "\"("
                     << OpName(op) << ")";
       }
@@ -1397,6 +1399,8 @@ bool CCCodeGen::Visit(AST::AsmStmt& n) {
       for (auto& op : n.inputOperands) {
         if (!first) IndStream() << ",\n      ";
         first = false;
+        if (!op->symbolicName.empty())
+          IndStream() << "[" << op->symbolicName << "] ";
         IndStream() << "\"" << op->constraint << "\"("
                     << OpName(op) << ")";
       }
