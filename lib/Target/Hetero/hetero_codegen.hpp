@@ -39,6 +39,7 @@ public:
   bool Visit(AST::DMA&) override;
   bool Visit(AST::BufferMap&) override;
   bool Visit(AST::Break&) override;
+  bool Visit(AST::AsmStmt&) override;
   bool Visit(AST::Continue&) override;
   bool Visit(AST::Call&) override;
   bool Visit(AST::NamedVariableDecl&) override;

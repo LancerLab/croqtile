@@ -1,0 +1,44 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: choreo -gs %target %amdgpu_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// End-to-end test for GCC extended asm inside AMDGPU device code.
+
+// Test volatile asm with clobber (s_nop is a safe no-op on AMD GPUs).
+__co__ void test_volatile_nop() {
+  parallel p by 1 {
+    __asm__ volatile("s_nop 0" : : : "memory");
+  }
+}
+
+// Test non-volatile asm with no operands.
+__co__ void test_basic_nop() {
+  parallel p by 1 {
+    __asm__("s_nop 0");
+  }
+}
+
+// Test asm with output and input operands (copy scalar via asm).
+__co__ void test_operand_copy(s32 val, s32 [1] result) {
+  parallel p by 1 {
+    s32 r;
+    __asm__ volatile(
+      "v_mov_b32 %0, %1"
+      : "=v"(r)
+      : "v"(val)
+    );
+    result.at(p) = r;
+  }
+}
+
+int main() {
+  test_volatile_nop();
+  test_basic_nop();
+
+  auto result = choreo::make_spandata<choreo::s32>(1);
+  test_operand_copy(42, result.view());
+  choreo::choreo_assert(result[0] == 42, "operand copy should return 42");
+
+  printf("All AMDGPU asm tests passed.\n");
+  return 0;
+}
+
+// CHECK: All AMDGPU asm tests passed.

@@ -55,6 +55,8 @@ public:
   static TargetID Id() { return reinterpret_cast<TargetID>(&id); }
   std::string HostCXXCompiler() const override { return "nvcc"; }
 
+  bool IsAsmSupported(const ArchId&) const override { return true; }
+
   int DefaultOptLevel(const ArchId&) const override { return 3; }
 
   const std::set<SwizMode>

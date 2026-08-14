@@ -108,6 +108,7 @@ struct Visitor {
   virtual bool Visit(AST::Return&) = 0;
   virtual bool Visit(AST::LoopRange&) = 0;
   virtual bool Visit(AST::ForeachBlock&) = 0;
+  virtual bool Visit(AST::AsmStmt&) { return true; }
   virtual bool Visit(AST::InThreadsBlock&) = 0;
   virtual bool Visit(AST::WhileBlock&) = 0;
   virtual bool Visit(AST::IfElseBlock&) = 0;

@@ -769,6 +769,9 @@ struct CodeGenerator : public VisitorWithSymTab {
   CodeGenerator(const std::string& n)
       : VisitorWithSymTab(n), cgi(CodeGenInfo::Get()) {}
 
+  // Default asm: pass through unchanged; targets that support asm override.
+  bool Visit(AST::AsmStmt&) override { return true; }
+
   virtual void TraceEachVisit(AST::Node& n, bool detail = false,
                               const std::string& m = "") const {
     if (!trace_visit) return;

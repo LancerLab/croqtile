@@ -3953,6 +3953,82 @@ struct ForeachBlock : public Block, public TypeIDProvider<ForeachBlock> {
   __UDT_TYPE_INFO__(Block, ForeachBlock)
 };
 
+// GCC extended asm operand: [symbolicName] constraint (expression)
+// Plain data container (not an AST Node), like SpannedOperation.
+struct AsmOperand {
+  location loc;
+  std::string constraint;  // e.g., "=r", "r", "memory"
+  ptr<Expr> expression;    // Choreo expression (variable, data access, etc.)
+
+  explicit AsmOperand(const location& l) : loc(l) {}
+
+  AsmOperand(const location& l, const std::string& c, const ptr<Expr>& e)
+      : loc(l), constraint(c), expression(e) {}
+
+  const location& LOC() const { return loc; }
+
+  ptr<AsmOperand> Clone() const {
+    return std::make_shared<AsmOperand>(loc, constraint, expression);
+  }
+};
+
+// GCC extended asm statement: __asm__ [volatile] (template : outputs : inputs :
+// clobbers)
+struct AsmStmt : public Node, public TypeIDProvider<AsmStmt> {
+  bool isVolatile = false;
+  std::string templateStr;                     // asm template string
+  std::vector<ptr<AsmOperand>> outputOperands; // colon 1
+  std::vector<ptr<AsmOperand>> inputOperands;  // colon 2
+  std::vector<std::string> clobbers;           // colon 3
+
+  explicit AsmStmt(const location& l) : Node(l) {}
+
+  ptr<Node> CloneImpl() const override {
+    auto n = Make<AsmStmt>(LOC());
+    n->isVolatile = isVolatile;
+    n->templateStr = templateStr;
+    for (auto& op : outputOperands)
+      n->outputOperands.push_back(op->Clone());
+    for (auto& op : inputOperands)
+      n->inputOperands.push_back(op->Clone());
+    n->clobbers = clobbers;
+    return n;
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << "\n" << prefix << "`- AsmStmt";
+    if (isVolatile) os << " volatile";
+    os << ": \"" << templateStr << "\"";
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
+    if (!outputOperands.empty()) {
+      os << "\n" << prefix << "   `- outputs:";
+      for (auto& op : outputOperands) {
+        os << "\n" << prefix << "      ";
+        os << "[" << op->expression << "] \"" << op->constraint << "\"";
+      }
+    }
+    if (!inputOperands.empty()) {
+      os << "\n" << prefix << "   `- inputs:";
+      for (auto& op : inputOperands) {
+        os << "\n" << prefix << "      ";
+        os << "[" << op->expression << "] \"" << op->constraint << "\"";
+      }
+    }
+    if (!clobbers.empty()) {
+      os << "\n" << prefix << "   `- clobbers: ";
+      for (size_t i = 0; i < clobbers.size(); ++i) {
+        if (i > 0) os << ", ";
+        os << "\"" << clobbers[i] << "\"";
+      }
+    }
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, AsmStmt)
+};
+
 struct InThreadsBlock : public PredBlock,
                         public TypeIDProvider<InThreadsBlock> {
   bool async = false;

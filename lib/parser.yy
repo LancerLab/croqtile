@@ -225,6 +225,7 @@ extern int yylex();
 %token <std::string> LIB_CALL
 %token <std::string> FRAG
 %token <std::string> APPLY REDUCE_MAX_STMT REDUCE_SUM_STMT ALL_REDUCE_SUM_STMT COPY_STMT
+%token <std::string> ASM ASM_VOLATILE ASM_GOTO
 // control related
 %token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH RET WHERE WHILE BREAK CONTINUE YIELD COOPERATIVE
 %token <std::string> VECTORIZE
@@ -250,7 +251,7 @@ extern int yylex();
 %nterm <AST::ptr<AST::Call>> call_stmt
 %nterm <PBAttributes> pb_attribute
 %nterm <AST::DMAAsync> tdma_async
-%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block apply_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt buffer_map_stmt mma_stmt frag_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
+%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block apply_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt buffer_map_stmt mma_stmt frag_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt asm_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls named_fragment_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims step_list opt_step_list opt_stride_list at_list opt_at_list opt_from_list
 %nterm <std::pair<AST::ptr<AST::MultiValues>, AST::ptr<AST::MultiValues>>> shape_stride
@@ -314,6 +315,11 @@ extern int yylex();
 %nonassoc HOST_CODE_REDUCE
 %left HOST_CODE_SHIFT
 %left HOST_CODE
+
+%type<bool> asm_volatile_opt
+%type<std::vector<ptr<AST::AsmOperand>>> asm_op_list
+%type<ptr<AST::AsmOperand>> asm_op
+%type<std::vector<std::string>> asm_clobber_list
 
 %%
 
@@ -779,6 +785,7 @@ statement
     | if_else_block              { $$ = $1; }
     | foreach_block              { $$ = $1; }
     | apply_block               { $$ = $1; }
+    | asm_stmt     SEMCOL        { $$ = $1; }
     ;
 
 sync_stmt
@@ -2913,6 +2920,74 @@ break_stmt : BREAK { $$ = AST::Make<AST::Break>(@1); }
 continue_stmt : CONTINUE { $$ = AST::Make<AST::Continue>(@1); }
 
 yield_stmt : YIELD { $$ = AST::Make<AST::Yield>(@1); }
+
+// Extended asm: __asm__ [volatile] ( template [: outputs [: inputs [: clobbers ]]] )
+asm_stmt
+  : ASM asm_volatile_opt LPAREN STRING RPAREN {
+      auto s = AST::Make<AST::AsmStmt>(@$);
+      s->isVolatile = $2;
+      s->templateStr = $4;
+      $$ = s;
+    }
+  | ASM asm_volatile_opt LPAREN STRING COL asm_op_list RPAREN {
+      auto s = AST::Make<AST::AsmStmt>(@$);
+      s->isVolatile = $2;
+      s->templateStr = $4;
+      s->outputOperands = $6;
+      $$ = s;
+    }
+  | ASM asm_volatile_opt LPAREN STRING COL asm_op_list COL asm_op_list RPAREN {
+      auto s = AST::Make<AST::AsmStmt>(@$);
+      s->isVolatile = $2;
+      s->templateStr = $4;
+      s->outputOperands = $6;
+      s->inputOperands = $8;
+      $$ = s;
+    }
+  | ASM asm_volatile_opt LPAREN STRING COL asm_op_list COL asm_op_list COL asm_clobber_list RPAREN {
+      auto s = AST::Make<AST::AsmStmt>(@$);
+      s->isVolatile = $2;
+      s->templateStr = $4;
+      s->outputOperands = $6;
+      s->inputOperands = $8;
+      s->clobbers = $10;
+      $$ = s;
+    }
+  | ASM ASM_GOTO {
+      Parser::error(@1, "__asm__ goto is not supported.");
+      YYERROR;
+    }
+  | ASM error {
+      Parser::error(@1, "invalid __asm__ syntax.");
+      YYERROR;
+    }
+  ;
+
+asm_volatile_opt
+  : ASM_VOLATILE { $$ = true; }
+  | %empty       { $$ = false; }
+  ;
+
+asm_op_list
+  : asm_op                         { $$ = {$1}; }
+  | asm_op_list COMMA asm_op       { $$ = $1; $$.push_back($3); }
+  | %empty                         { $$ = {}; }
+  ;
+
+asm_op
+  : STRING LPAREN g_expr RPAREN {
+      auto op = AST::Make<AST::AsmOperand>(@$);
+      op->constraint = $1;
+      op->expression = dyn_cast<AST::Expr>($3);
+      $$ = op;
+    }
+  ;
+
+asm_clobber_list
+  : STRING                           { $$ = {$1}; }
+  | asm_clobber_list COMMA STRING    { $$ = $1; $$.push_back($3); }
+  | %empty                           { $$ = {}; }
+  ;
 
 %%
 

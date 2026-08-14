@@ -1,0 +1,62 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// End-to-end test for GCC extended asm inside GPU (CUTE/CUDA) device code.
+
+// Volatile asm with output and input operands plus a memory clobber.
+// The output operand is written directly to an array element, which the
+// compiler lowers through a temporary and writes back.
+__co__ s32 [1] test_volatile_copy(s32 val) {
+  s32[1] output;
+  parallel p by 1 {
+    __asm__ volatile(
+      "mov.u32 %0, %1;"
+      : "=r"(output.at(p))
+      : "r"(val)
+      : "memory"
+    );
+  }
+  return output;
+}
+
+// Non-volatile asm with output and input operands and no clobber.
+__co__ s32 [1] test_basic_copy(s32 val) {
+  s32[1] output;
+  parallel p by 1 {
+    __asm__(
+      "mov.u32 %0, %1;"
+      : "=r"(output.at(p))
+      : "r"(val)
+    );
+  }
+  return output;
+}
+
+// Read-write operand ("+r") moves a value through itself as a no-op.
+// The array element is initialized first, then updated in place.
+__co__ s32 [1] test_readwrite(s32 val) {
+  s32[1] output;
+  parallel p by 1 {
+    output.at(p) = val;
+    __asm__(
+      "mov.u32 %0, %0;"
+      : "+r"(output.at(p))
+    );
+  }
+  return output;
+}
+
+int main() {
+  auto r1 = test_volatile_copy(42);
+  choreo::choreo_assert(r1[0] == 42, "volatile copy should return 42");
+
+  auto r2 = test_basic_copy(7);
+  choreo::choreo_assert(r2[0] == 7, "basic copy should return 7");
+
+  auto r3 = test_readwrite(99);
+  choreo::choreo_assert(r3[0] == 99, "read-write move should return 99");
+
+  printf("All GPU asm tests passed.\n");
+  return 0;
+}
+
+// CHECK: All GPU asm tests passed.

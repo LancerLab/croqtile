@@ -38,6 +38,7 @@ enum class ChoreoFeature {
   FENCE,
   COOPERATIVE_LAUNCH,
   BUFFER_MAP,
+  ASM,
 };
 
 inline static const std::string STR(ChoreoFeature cf) {
@@ -61,6 +62,7 @@ inline static const std::string STR(ChoreoFeature cf) {
   case ChoreoFeature::FENCE: return "fence";
   case ChoreoFeature::COOPERATIVE_LAUNCH: return "cooperative_launch";
   case ChoreoFeature::BUFFER_MAP: return "buffer_map";
+  case ChoreoFeature::ASM: return "asm";
   default: choreo_unreachable("unsupported feature kind.");
   }
 }
@@ -99,6 +101,8 @@ inline static const std::string Description(ChoreoFeature cf) {
   case ChoreoFeature::BUFFER_MAP:
     return "Explicit memory mapping (map/remap/unmap) for zero-copy "
            "source-to-destination memory aliasing.";
+  case ChoreoFeature::ASM:
+    return "Inline assembly support via GCC extended asm syntax.";
   default: choreo_unreachable("unsupported feature kind.");
   }
 }
@@ -187,6 +191,10 @@ public:
   }
   virtual bool IsEventSupported() const { return false; }
   virtual bool IsMMASupported() const { return false; }
+  virtual bool IsAsmSupported(const ArchId& /*arch*/) const { return false; }
+  virtual std::string LowerAsmOperand(const std::string& varName) const {
+    return varName;
+  }
   virtual bool IsArchSupported(const ArchId& arch) const {
     for (auto& ai : SupportedArchs())
       if (ai.id == arch) return true;

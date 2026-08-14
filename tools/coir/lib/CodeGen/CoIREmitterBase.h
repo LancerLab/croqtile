@@ -149,6 +149,9 @@ protected:
   virtual void emitTensorReduceElem(TensorReduceElemOp op) { (void)op; }
   virtual void emitAtomic(AtomicOp op) { (void)op; }
 
+  // Asm op
+  virtual void emitAsm(AsmOp op);
+
   // -- Fallback for unhandled ops (override to add target ops) --
   virtual void emitOpFallback(mlir::Operation *op);
 
