@@ -30,11 +30,13 @@
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/Pass/Pass.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 
 using namespace mlir;
@@ -59,7 +61,8 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
   }
   void getDependentDialects(mlir::DialectRegistry &registry) const override {
     registry.insert<mgpu::GPUDialect, memref::MemRefDialect,
-                    arith::ArithDialect, scf::SCFDialect>();
+                    arith::ArithDialect, scf::SCFDialect,
+                    LLVM::LLVMDialect>();
   }
 
   void runOnOperation() override {
@@ -70,6 +73,11 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
       shmGlobalNames_.clear();
       shmGlobalTypes_.clear();
       adjustedBlockDims_.clear();
+      gblGlobalNames_.clear();
+      gblGlobalTypes_.clear();
+      gridCntGlobal_.clear();
+      gridGenGlobal_.clear();
+      isCooperative_ = false;
       if (failed(convertKernel(module, kernel)))
         return signalPassFailure();
       if (!adjustedBlockDims_.empty()) {
@@ -115,6 +123,55 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
           builder.getStringAttr("private"),
           memTy, Attribute(), /*constant=*/false, IntegerAttr());
     });
+
+    isCooperative_ = isKernelCooperative(kernel);
+    if (isCooperative_) {
+      // Return-value allocs are passed back through output-buffer kernel
+      // arguments, so they must not be hoisted.
+      llvm::DenseSet<Value> returnVals;
+      kernelBody.walk([&](KernelReturnOp ret) {
+        for (auto v : ret.getOperands())
+          returnVals.insert(v);
+      });
+
+      // Hoist global (device) tensor allocs to device-global buffers so all
+      // blocks of a cooperative launch share them.
+      unsigned gblIdx = 0;
+      kernelBody.walk([&](TensorAllocOp alloc) {
+        auto tty = cast<coir::TensorType>(alloc.getResult().getType());
+        int32_t ms = tty.getMemorySpace();
+        if (ms != 0 && ms != -1) return;
+        if (returnVals.count(alloc.getResult())) return;
+        auto addrSpace =
+            IntegerAttr::get(IntegerType::get(loc.getContext(), 64), 1);
+        auto memTy = MemRefType::get(tty.getShape(), tty.getElementType(),
+                                     AffineMap{}, addrSpace);
+        std::string globalName =
+            ("__gbuf_" + symName + "_" + std::to_string(gblIdx++)).str();
+        gblGlobalNames_[alloc.getOperation()] = globalName;
+        gblGlobalTypes_[alloc.getOperation()] = memTy;
+        builder.setInsertionPointToStart(gpuModule.getBody());
+        builder.create<memref::GlobalOp>(
+            loc, globalName, builder.getStringAttr("private"), memTy,
+            builder.getUnitAttr(), /*constant=*/false, IntegerAttr());
+      });
+
+      // Device-global counters backing the grid barrier.
+      auto i32Type = builder.getI32Type();
+      auto cntMemTy = MemRefType::get(
+          {1}, i32Type, AffineMap{},
+          IntegerAttr::get(IntegerType::get(loc.getContext(), 64), 1));
+      gridCntGlobal_ = ("__coir_grid_cnt_" + symName).str();
+      gridGenGlobal_ = ("__coir_grid_gen_" + symName).str();
+      auto zeroInit = builder.getI32TensorAttr({0});
+      builder.setInsertionPointToStart(gpuModule.getBody());
+      builder.create<memref::GlobalOp>(
+          loc, gridCntGlobal_, builder.getStringAttr("private"), cntMemTy,
+          zeroInit, /*constant=*/false, IntegerAttr());
+      builder.create<memref::GlobalOp>(
+          loc, gridGenGlobal_, builder.getStringAttr("private"), cntMemTy,
+          zeroInit, /*constant=*/false, IntegerAttr());
+    }
 
     mmaFragRoles_.clear();
     mmaFragTranspose_.clear();
@@ -203,6 +260,13 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
         return true;
       }
     }
+    if (auto barrier = dyn_cast<BarrierOp>(op)) {
+      if (isCooperative_ && barrier.getScope() == ParallelLevel::BLOCK)
+        emitGridBarrier(builder, loc);
+      else
+        builder.create<mgpu::BarrierOp>(loc);
+      return true;
+    }
     if (auto tile = dyn_cast<TensorTileOp>(op)) {
       convertTensorTile(builder, loc, tile, ctx.mapping);
       return true;
@@ -269,6 +333,14 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
       auto memTy = shmGlobalTypes_[alloc.getOperation()];
       auto ref =
           builder.create<memref::GetGlobalOp>(loc, memTy, shmIt->second);
+      ctx.mapping.map(alloc.getResult(), ref.getResult());
+      return;
+    }
+    auto gblIt = gblGlobalNames_.find(alloc.getOperation());
+    if (gblIt != gblGlobalNames_.end()) {
+      auto memTy = gblGlobalTypes_[alloc.getOperation()];
+      auto ref =
+          builder.create<memref::GetGlobalOp>(loc, memTy, gblIt->second);
       ctx.mapping.map(alloc.getResult(), ref.getResult());
       return;
     }
@@ -415,6 +487,134 @@ private:
   DenseMap<Operation*, int64_t> mmaStoreShmElemsPerWarp_;
   int64_t warpsPerBlock_ = 1;
   SmallVector<int64_t, 3> adjustedBlockDims_;
+  bool isCooperative_ = false;
+  DenseMap<Operation*, std::string> gblGlobalNames_;
+  DenseMap<Operation*, MemRefType> gblGlobalTypes_;
+  std::string gridCntGlobal_;
+  std::string gridGenGlobal_;
+
+  bool isKernelCooperative(KernelOp kernel) {
+    bool found = false;
+    kernel.getBody().walk([&](ParallelOp p) {
+      if (p.getLevel() == ParallelLevel::BLOCK &&
+          p.getCooperativeAttr() && p.getCooperativeAttr().getValue())
+        found = true;
+    });
+    return found;
+  }
+
+  // Lower a BLOCK-scoped barrier in a cooperative kernel to a grid-wide
+  // barrier. The GPU/NVVM dialects have no grid-barrier op, so we synthesize
+  // one from a device-global arrival counter and generation counter using
+  // atomic RMW ops (release-acquire), mirroring cooperative_groups grid sync.
+  void emitGridBarrier(OpBuilder &builder, Location loc) {
+    auto i32Type = builder.getI32Type();
+    auto idxType = builder.getIndexType();
+    auto globalAS = builder.getIntegerAttr(builder.getIntegerType(64), 1);
+    auto cntMemTy = MemRefType::get({1}, i32Type, AffineMap{}, globalAS);
+
+    Value cntRef =
+        builder.create<memref::GetGlobalOp>(loc, cntMemTy, gridCntGlobal_);
+    Value genRef =
+        builder.create<memref::GetGlobalOp>(loc, cntMemTy, gridGenGlobal_);
+
+    Value zeroIdx = builder.create<arith::ConstantIndexOp>(loc, 0);
+    Value zeroI32 = builder.create<arith::ConstantOp>(
+        loc, builder.getI32IntegerAttr(0));
+    Value oneI32 = builder.create<arith::ConstantOp>(
+        loc, builder.getI32IntegerAttr(1));
+
+    // Total number of blocks in the launched grid (gridDim.x * y * z).
+    Value gx = builder.create<mgpu::GridDimOp>(loc, idxType,
+                                               mgpu::Dimension::x);
+    Value gy = builder.create<mgpu::GridDimOp>(loc, idxType,
+                                               mgpu::Dimension::y);
+    Value gz = builder.create<mgpu::GridDimOp>(loc, idxType,
+                                               mgpu::Dimension::z);
+    Value gxy = builder.create<arith::MulIOp>(loc, gx, gy);
+    Value gxyz = builder.create<arith::MulIOp>(loc, gxy, gz);
+    Value gridSize = builder.create<arith::IndexCastOp>(loc, i32Type, gxyz);
+    Value gridm1 = builder.create<arith::SubIOp>(loc, gridSize, oneI32);
+
+    // Only thread 0 of each block participates in the grid barrier.
+    Value tidX = builder.create<mgpu::ThreadIdOp>(loc, idxType,
+                                                  mgpu::Dimension::x);
+    Value isT0 = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
+                                               tidX, zeroIdx);
+
+    // Ensure every thread in this block has finished its prior writes before
+    // thread 0 publishes them with the grid-wide arrival.
+    builder.create<mgpu::BarrierOp>(loc);
+
+    // Phase 1 (thread 0): release any prior writes, capture the generation,
+    // then arrive. The last arriving block resets the arrival counter and
+    // bumps the generation.
+    auto phase1 = builder.create<scf::IfOp>(loc, TypeRange{i32Type}, isT0,
+                                            /*withElseRegion=*/true);
+    {
+      OpBuilder::InsertionGuard guard(builder);
+      builder.setInsertionPointToStart(&phase1.getThenRegion().front());
+      builder.create<LLVM::FenceOp>(loc, LLVM::AtomicOrdering::seq_cst);
+      Value gen = builder.create<memref::AtomicRMWOp>(
+          loc, i32Type, arith::AtomicRMWKind::addi, zeroI32, genRef,
+          ValueRange{zeroIdx});
+      Value old = builder.create<memref::AtomicRMWOp>(
+          loc, i32Type, arith::AtomicRMWKind::addi, oneI32, cntRef,
+          ValueRange{zeroIdx});
+      Value isLast = builder.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::eq, old, gridm1);
+      auto reset = builder.create<scf::IfOp>(loc, isLast,
+                                             /*withElseRegion=*/false);
+      {
+        OpBuilder::InsertionGuard g(builder);
+        builder.setInsertionPointToStart(&reset.getThenRegion().front());
+        builder.create<memref::AtomicRMWOp>(
+            loc, i32Type, arith::AtomicRMWKind::assign, zeroI32, cntRef,
+            ValueRange{zeroIdx});
+        builder.create<memref::AtomicRMWOp>(
+            loc, i32Type, arith::AtomicRMWKind::addi, oneI32, genRef,
+            ValueRange{zeroIdx});
+      }
+      builder.create<scf::YieldOp>(loc, gen);
+      builder.setInsertionPointToStart(&phase1.getElseRegion().front());
+      builder.create<scf::YieldOp>(loc, zeroI32);
+    }
+    Value myGen = phase1.getResult(0);
+
+    // Make the arrival visible to the other threads in this block.
+    builder.create<mgpu::BarrierOp>(loc);
+
+    // Phase 3 (thread 0): spin until the generation advances.
+    auto phase3 = builder.create<scf::IfOp>(loc, isT0,
+                                            /*withElseRegion=*/false);
+    {
+      OpBuilder::InsertionGuard guard(builder);
+      builder.setInsertionPointToStart(&phase3.getThenRegion().front());
+      Value falseVal = builder.create<arith::ConstantOp>(
+          loc, builder.getBoolAttr(false));
+      builder.create<scf::WhileOp>(
+          loc, TypeRange{builder.getI1Type()}, ValueRange{falseVal},
+          [&](OpBuilder &b, Location l, ValueRange args) {
+            Value g2 = b.create<memref::AtomicRMWOp>(
+                l, i32Type, arith::AtomicRMWKind::addi, zeroI32, genRef,
+                ValueRange{zeroIdx});
+            // Keep polling while the generation has not advanced yet.
+            Value stillWaiting = b.create<arith::CmpIOp>(
+                l, arith::CmpIPredicate::eq, g2, myGen);
+            b.create<scf::ConditionOp>(l, stillWaiting, args);
+          },
+          [&](OpBuilder &b, Location l, ValueRange args) {
+            b.create<scf::YieldOp>(l, args);
+          });
+      // Acquire: once the generation advances, make all prior global writes
+      // visible to this thread before it reads the buffers written by other
+      // blocks.
+      builder.create<LLVM::FenceOp>(loc, LLVM::AtomicOrdering::seq_cst);
+    }
+
+    // Re-sync all threads of this block after the spin.
+    builder.create<mgpu::BarrierOp>(loc);
+  }
 
   Value flattenIfNeeded(OpBuilder &builder, Location loc, Value memref,
                         unsigned numIndices) {
