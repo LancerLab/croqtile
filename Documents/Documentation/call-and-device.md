@@ -15,7 +15,10 @@ __co__ void foo(f32 [64] input) {
 }
 ```
 
-`call` is required (not optional) -- Croqtile functions cannot call C++ functions without it.
+`call` is required (not optional) for ordinary device functions -- Croqtile
+functions cannot call C++ functions without it. (The one exception is
+[intrinsic passthrough](#intrinsic-passthrough), which lets registered target
+intrinsics pass through verbatim without the `call` keyword.)
 
 ## Semantics
 
@@ -91,6 +94,75 @@ __co__ void foo() {
 ```
 
 Template arguments must be compile-time constants. The Croqtile compiler generates explicit template specializations in the target code.
+
+## Intrinsic Passthrough
+
+Some target backends expose low-level hardware or compiler intrinsics that
+have no Croqtile-language equivalent and must be emitted verbatim into the
+generated device code. Croqtile supports this through *intrinsic passthrough*:
+register a call prefix or a namespace with a `#pragma`, and any bare call (no
+`call` keyword) that matches is passed through unchanged.
+
+Two pragmas are available:
+
+```choreo
+#pragma croq intrinsic prefix <prefix>
+#pragma croq intrinsic namespace <namespace>
+```
+
+- `prefix` registers a leading token. Any identifier that *starts with* the
+  prefix becomes an intrinsic call; for example, prefix `hw_` matches
+  `hw_transfer(...)`. A namespace-style prefix such as `vendor::` is also
+  supported.
+- `namespace` registers a scope qualifier. Any call of the form
+  `namespace::name(...)` is treated as an intrinsic call; for example,
+  namespace `arch` matches `arch::device_init(...)`.
+
+```choreo
+#pragma croq intrinsic prefix hw_
+#pragma croq intrinsic namespace arch
+
+__co__ auto example(s32 [32, 4] a) {
+  parallel by 1 {
+    arch::device_init();   // emitted verbatim
+    hw_transfer(0, 0, 0);  // emitted verbatim
+  }
+  return 0;
+}
+```
+
+### Scope
+
+Intrinsic registrations are scoped:
+
+| Declaration site | Visibility |
+|------------------|------------|
+| File scope (outside any function) | All functions in the file |
+| Function scope | Within the declaring function only |
+| Block scope (e.g. inside `parallel-by`) | Within the enclosing block only |
+
+Registrations do not leak past their scope: a prefix declared in one function
+is not visible in a later function, and a prefix declared inside a block is
+not visible after that block ends. Outer (file-scope) registrations remain in
+effect after an inner scope ends.
+
+### Semantics
+
+- Intrinsic calls are emitted **verbatim**; Croqtile does not verify the
+  callee's name, signature, or return type. Errors are caught during target
+  compilation.
+- Matching is name-based only: any bare call whose name begins with a
+  registered prefix, or is qualified by a registered namespace, passes through
+  verbatim. This also applies to device code you have written yourself -- for
+  example, a `__co_device__` function or a host-side C++ device function whose
+  name happens to match a registered prefix or namespace is emitted verbatim,
+  bypassing normal `call` resolution and signature checking.
+- Intrinsic calls must appear in a device-code region (inside `parallel-by`),
+  like ordinary `call` statements.
+- Arguments follow the same passing rules as `call` (see
+  [Argument Types](#argument-types)).
+- The namespace `croq` (and prefixes beginning with `croq::`) are reserved for
+  built-in functions and cannot be used for intrinsic registration.
 
 ## Restrictions
 
