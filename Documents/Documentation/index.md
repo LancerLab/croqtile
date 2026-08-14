@@ -55,15 +55,16 @@ This reference (level-2) is for readers who want to understand the language in d
 ### Part G -- C++ Interop
 
 23. [Calling Device Code](call-and-device.md) -- `call`, `__co_device__`, template calls, intrinsic passthrough
-24. [I/O and Linking](io-and-linking.md) -- Parameters, `make_spanned`, return values, streams, linking
-25. [Macros](macros.md) -- `#define`, conditional compilation, preprocessing order
+24. [Inline Assembly](inline-asm.md) -- `__asm__`/`asm`, `volatile`, template string, operands, clobbers
+25. [I/O and Linking](io-and-linking.md) -- Parameters, `make_spanned`, return values, streams, linking
+26. [Macros](macros.md) -- `#define`, conditional compilation, preprocessing order
 
 ### Part H -- Advanced Topics
 
-26. [Assertions](assertions.md) -- `assert`, compile-time vs runtime evaluation, hoisting, `--runtime-check`
+27. [Assertions](assertions.md) -- `assert`, compile-time vs runtime evaluation, hoisting, `--runtime-check`
 
 ### Appendix
 
-27. [Syntax Quick Reference](syntax-quick-ref.md) -- Lookup tables for all constructs
-28. [Operator Gallery](operator-gallery.md) -- Curated index of example `.co` files
-29. [Tileflow Optimization Patterns](tileflow-opt.md) -- Matmul and optimization case studies
+28. [Syntax Quick Reference](syntax-quick-ref.md) -- Lookup tables for all constructs
+29. [Operator Gallery](operator-gallery.md) -- Curated index of example `.co` files
+30. [Tileflow Optimization Patterns](tileflow-opt.md) -- Matmul and optimization case studies

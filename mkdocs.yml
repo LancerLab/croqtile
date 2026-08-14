@@ -57,6 +57,7 @@ nav:
     - Futures and Async: futures-and-async.md
   - "Part G -- C++ Interop":
     - Calling Device Code: call-and-device.md
+    - Inline Assembly: inline-asm.md
     - I/O and Linking: io-and-linking.md
     - Macros: macros.md
   - "Part H -- Advanced Topics":
