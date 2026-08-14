@@ -1,0 +1,9 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+// __asm__ goto is not supported and should be rejected at parse time.
+
+__co__ void test_asm_goto() {
+  __asm__ goto("jmp %l[err]" :::: err);
+// CHECK: __asm__ goto is not supported
+  err:
+  return;
+}

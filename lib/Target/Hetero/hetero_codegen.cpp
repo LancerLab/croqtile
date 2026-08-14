@@ -281,6 +281,11 @@ bool HeteroCodeGen::Visit(AST::Break& n) {
   return CCCodeGen::Visit(n);
 }
 
+bool HeteroCodeGen::Visit(AST::AsmStmt& n) {
+  if (in_offload_device_block_) return true;
+  return CCCodeGen::Visit(n);
+}
+
 bool HeteroCodeGen::Visit(AST::Continue& n) {
   if (in_offload_device_block_) return true;
   return CCCodeGen::Visit(n);

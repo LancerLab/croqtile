@@ -1,0 +1,42 @@
+// REQUIRES: TARGET-CPU
+// RUN: choreo -gs %target %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// End-to-end test for GCC extended asm on CPU target.
+
+// Test volatile asm with memory clobber.
+__co__ void test_volatile_asm() {
+  parallel p by 1 {
+    __asm__ volatile("nop" : : : "memory");
+  }
+}
+
+// Test non-volatile asm with no operands.
+__co__ void test_basic_asm() {
+  parallel p by 1 {
+    __asm__("nop");
+  }
+}
+
+// Test asm with output and input operands.
+__co__ auto test_operand_copy(s32 val) {
+  s32 result;
+  parallel p by 1 {
+    __asm__ volatile(
+      "mov %0, %1"
+      : "=r"(result)
+      : "r"(val)
+    );
+  }
+  return result;
+}
+
+int main() {
+  test_volatile_asm();
+  test_basic_asm();
+
+  auto r = test_operand_copy(42);
+  choreo::choreo_assert(r == 42, "operand copy should return 42");
+
+  std::cout << "All CPU asm tests passed." << std::endl;
+}
+
+// CHECK: All CPU asm tests passed.

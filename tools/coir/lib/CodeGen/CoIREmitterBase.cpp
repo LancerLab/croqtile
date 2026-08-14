@@ -435,6 +435,8 @@ void CoIREmitterBase::emitOp(Operation *op) {
     emitSelect(selectOp);
   else if (isa<DMACheckOp>(op))
     (void)op;
+  else if (auto asmOp = dyn_cast<AsmOp>(op))
+    emitAsm(asmOp);
   else
     emitOpFallback(op);
 }
@@ -867,6 +869,69 @@ void CoIREmitterBase::emitTensorBindDims(TensorBindDimsOp op) {
 void CoIREmitterBase::emitOpFallback(Operation *op) {
   os() << getIndent() << "// [unhandled] " << op->getName().getStringRef()
        << "\n";
+}
+
+void CoIREmitterBase::emitAsm(AsmOp op) {
+  std::string asmStr = op.getTemplateStr().str();
+  bool isVolatile = op.getIsVolatile() && *op.getIsVolatile();
+
+  os() << getIndent();
+  if (isVolatile) os() << "__asm__ __volatile__";
+  else os() << "__asm__";
+  os() << " (\"" << asmStr << "\"";
+
+  auto outConstraints = op.getOutConstraints();
+  auto outOperands = op.getOutOperands();
+  auto inConstraints = op.getInConstraints();
+  auto inOperands = op.getInOperands();
+  auto clobbers = op.getClobbers();
+
+  bool hasOuts = !outConstraints.empty();
+  bool hasIns = !inConstraints.empty();
+  bool hasClobbers = !clobbers.empty();
+  bool hasAny = hasOuts || hasIns || hasClobbers;
+
+  if (hasAny) os() << " :";
+
+  // Output operands
+  if (hasOuts) {
+    for (unsigned i = 0; i < outConstraints.size(); ++i) {
+      if (i > 0) os() << ",";
+      os() << " \""
+           << outConstraints[i].cast<mlir::StringAttr>().getValue()
+           << "\"(" << getName(outOperands[i]) << ")";
+    }
+  }
+
+  if (hasIns || hasClobbers) os() << " :";
+
+  // Input operands
+  if (hasIns) {
+    for (unsigned i = 0; i < inConstraints.size(); ++i) {
+      if (i > 0) os() << ",";
+      os() << " \""
+           << inConstraints[i].cast<mlir::StringAttr>().getValue()
+           << "\"(" << getName(inOperands[i]) << ")";
+    }
+  }
+
+  if (hasClobbers) os() << " :";
+
+  // Clobbers
+  if (hasClobbers) {
+    for (unsigned i = 0; i < clobbers.size(); ++i) {
+      if (i > 0) os() << ",";
+      os() << " \""
+           << clobbers[i].cast<mlir::StringAttr>().getValue() << "\"";
+    }
+  }
+
+  os() << ");\n";
+
+  // Map asm result values to output operand names so that subsequent
+  // uses (e.g. return) refer to the correct variable names.
+  for (unsigned i = 0; i < outOperands.size() && i < op->getNumResults(); ++i)
+    valueNames[op->getResult(i)] = getName(outOperands[i]);
 }
 
 // ===== Alloc qualifier hooks =====

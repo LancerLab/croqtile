@@ -17,6 +17,8 @@ public:
   const std::string DeviceName() const override { return "cpu"; }
   static TargetID Id() { return reinterpret_cast<TargetID>(&id); }
 
+  bool IsAsmSupported(const ArchId&) const override { return true; }
+
   int DefaultOptLevel(const ArchId&) const override { return 2; }
 
   const std::vector<ArchInfo> SupportedArchs() const override {

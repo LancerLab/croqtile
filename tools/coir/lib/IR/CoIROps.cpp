@@ -980,6 +980,45 @@ void TensorBindDimsOp::print(OpAsmPrinter &printer) {
 }
 
 //===----------------------------------------------------------------------===//
+// AsmOp
+//===----------------------------------------------------------------------===//
+
+mlir::LogicalResult AsmOp::verify() {
+  // outConstraints and outOperands must match in length
+  if (getOutConstraints().size() != getOutOperands().size())
+    return emitOpError()
+           << "number of output constraints (" << getOutConstraints().size()
+           << ") must match number of output operands ("
+           << getOutOperands().size() << ")";
+
+  // inConstraints and inOperands must match in length
+  if (getInConstraints().size() != getInOperands().size())
+    return emitOpError()
+           << "number of input constraints (" << getInConstraints().size()
+           << ") must match number of input operands ("
+           << getInOperands().size() << ")";
+
+  // results count must match output operands count
+  if (getResults().size() != getOutOperands().size())
+    return emitOpError()
+           << "number of results (" << getResults().size()
+           << ") must match number of output operands ("
+           << getOutOperands().size() << ")";
+
+  // Each output operand's type must match the corresponding result type
+  for (unsigned i = 0; i < getOutOperands().size(); ++i) {
+    if (getOutOperands()[i].getType() != getResults()[i].getType())
+      return emitOpError()
+             << "output operand " << i << " type ("
+             << getOutOperands()[i].getType()
+             << ") must match result type ("
+             << getResults()[i].getType() << ")";
+  }
+
+  return mlir::success();
+}
+
+//===----------------------------------------------------------------------===//
 // ElementCopyOp (uses declarative format, no custom parse/print needed)
 //===----------------------------------------------------------------------===//
 

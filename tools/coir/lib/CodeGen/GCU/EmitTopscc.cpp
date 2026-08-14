@@ -1878,6 +1878,17 @@ private:
       // functions without parallel-by).
       auto &body = kernel.getBody();
       if (!body.empty()) {
+        // Map kernel block arguments to host parameter names (p0, p1, ...)
+        // so that ops in the body (like asm) can reference them by name.
+        auto args = body.getArguments();
+        for (unsigned i = 0; i < numOrigInputs && i < args.size(); ++i)
+          valueNames[args[i]] = "p" + std::to_string(i);
+        // Map dimension arguments to local variable names (N, M, ...).
+        for (unsigned i = 0; i < dimArgMeta.size(); ++i) {
+          unsigned argIdx = numOrigInputs + i;
+          if (argIdx < args.size())
+            valueNames[args[argIdx]] = dimArgMeta[i].name;
+        }
         for (auto &op : body.front().getOperations())
           emitOp(&op);
       }

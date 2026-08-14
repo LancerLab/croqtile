@@ -10,6 +10,9 @@ namespace Choreo {
 class GCUTarget : public Target {
 public:
   const std::string DeviceName() const override { return "gcu"; }
+  bool IsAsmSupported(const ArchId& arch) const override {
+    return IsArchSupported(arch);
+  }
   size_t GetMemCapacity(const Storage& sto, const ArchId& arch) const override {
     if (!IsArchSupported(arch))
       choreo_unreachable("unsupported architecture '" + arch + "'.");

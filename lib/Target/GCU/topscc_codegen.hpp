@@ -104,6 +104,7 @@ public:
   bool Visit(AST::Wait&) override;
   bool Visit(AST::Trigger&) override;
   bool Visit(AST::Break&) override;
+  bool Visit(AST::AsmStmt&) override;
   bool Visit(AST::Continue&) override;
   bool Visit(AST::Rotate&) override;
   bool Visit(AST::Synchronize&) override;

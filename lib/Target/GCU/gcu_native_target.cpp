@@ -44,6 +44,10 @@ public:
     };
   }
 
+  bool IsAsmSupported(const ArchId& arch) const override {
+    return IsArchSupported(arch);
+  }
+
   bool PlanPreCodegenStages(ASTPipeline& p) const override {
     p.AddStage<CodegenPrepare>();
     p.AddStage<GCUAdaptor>();

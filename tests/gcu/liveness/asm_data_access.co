@@ -1,0 +1,67 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -es -dv=liveness %s | FileCheck --match-full-lines %s
+// Live-range analysis for asm with a data-access expression (lz.at(i))
+// as a read-write operand.  Verifies that the liveness analyzer treats
+// the buffer element write as a USE (never a DEF), and that the
+// "memory" clobber marks reachable buffers as USE only.
+
+#include "choreo.h"
+
+#define N 64
+
+__co__ auto asm_data_access_test(s32 [N] x) {
+  s32 [N] z;
+  parallel p by 1 {
+    lx = dma.copy x.chunkat(p) => local;
+    local s32 [lx.span] lz;
+    foreach {i} in [lx.span(0)] {
+      // Read-write operand through lz.at(i):
+      // asm reads lz[i], xors with itself, writes back.
+      __asm__ volatile("l.xora %0, %0, %0"
+        : "+r"(lz.at(i))
+        : : "memory");
+    }
+    dma.copy lz => z.chunkat(p);
+  }
+  return z;
+}
+
+int main() { return 0; }
+
+// CHECK: (  0) asm_data_access_test(s32 mdspan<1> [64] x) {
+// CHECK: DEF: ::asm_data_access_test::x
+// CHECK: (  1)   global s32 [ 64 ] z
+// CHECK: DEF: ::asm_data_access_test::z
+// CHECK: (  2)   parallel anon_pb_0 = {anon_pb_0__elem__x} by [1] : block {
+// CHECK: DEF: ::asm_data_access_test::paraby_0::anon_pb_0
+// CHECK: DEF: ::asm_data_access_test::paraby_0::anon_pb_0__elem__x
+// CHECK: (  3)     parallel p = {p__elem__x} by [1] : thread {
+// CHECK: DEF: ::asm_data_access_test::paraby_0::paraby_1::p
+// CHECK: DEF: ::asm_data_access_test::paraby_0::paraby_1::p__elem__x
+// CHECK: (  4)       local s32 mdspan<1> [64] lx__buf__
+// CHECK: DEF: ::asm_data_access_test::paraby_0::paraby_1::lx__buf__
+// CHECK: (  5)       lx = dma.copy x.Chunk( (ubound p) ).At(p) => lx__buf__
+// CHECK: USE: ::asm_data_access_test::x
+// CHECK: USE: ::asm_data_access_test::paraby_0::paraby_1::p
+// CHECK: USE: ::asm_data_access_test::paraby_0::paraby_1::p__elem__x
+// CHECK: USE: ::asm_data_access_test::paraby_0::paraby_1::p
+// CHECK: USE: ::asm_data_access_test::paraby_0::paraby_1::lx__buf__
+// CHECK: DEF: ::asm_data_access_test::paraby_0::paraby_1::lx
+// CHECK: (  6)       local s32 [ lx.span ] lz
+// CHECK: DEF: ::asm_data_access_test::paraby_0::paraby_1::lz
+// CHECK: (  7)       with {i} in [ lx.span(0) ] {
+// CHECK: DEF: ::asm_data_access_test::paraby_0::paraby_1::within_0::i
+// CHECK: USE: ::asm_data_access_test::paraby_0::paraby_1::lx.span
+// CHECK: (  8)         foreach i(::) {
+// CHECK: USE: ::asm_data_access_test::paraby_0::paraby_1::within_0::i
+// CHECK: (  9)           __asm__ volatile ("l.xora %0, %0, %0" : "+r"(lz[i]) : "memory")
+// CHECK: USE: ::asm_data_access_test::paraby_0::paraby_1::lz
+// CHECK: RECORD extra use ::asm_data_access_test::paraby_0::paraby_1::lz
+// CHECK: USE: ::asm_data_access_test::paraby_0::paraby_1::lx__buf__
+// CHECK: RECORD extra use ::asm_data_access_test::paraby_0::paraby_1::lx__buf__
+// CHECK: USE: ::asm_data_access_test::paraby_0::paraby_1::lz
+// CHECK: USE: ::asm_data_access_test::x
+// CHECK: RECORD extra use ::asm_data_access_test::x
+// CHECK: USE: ::asm_data_access_test::z
+// CHECK: RECORD extra use ::asm_data_access_test::z
+// CHECK: ( 10)         }

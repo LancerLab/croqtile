@@ -43,7 +43,7 @@ using namespace Choreo;
 //   4. Update kNumStmtTypes below
 // The runtime assert in HasStmt() will fire if the count is wrong.
 // ==========================================================================
-static constexpr size_t kNumStmtTypes = 20;
+static constexpr size_t kNumStmtTypes = 21;
 static_assert(kNumStmtTypes == LivenessAnalyzer::NumVisitOverrides(),
               "HasStmt type count and Visit override count are out of sync. "
               "When adding a new statement node type, update both HasStmt() "
@@ -148,7 +148,8 @@ bool LivenessAnalyzer::HasStmt(const AST::Node& n) const {
                  isa<AST::WhileBlock>(&n) ||        // 17
                  isa<AST::InThreadsBlock>(&n) ||    // 18
                  isa<AST::IfElseBlock>(&n) ||       // 19
-                 isa<AST::ChoreoFunction>(&n);      // 20
+                 isa<AST::ChoreoFunction>(&n) ||    // 20
+                 isa<AST::AsmStmt>(&n);             // 21
   return is_stmt;
 }
 
@@ -1314,6 +1315,34 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
     os << ")";
   } else if (const auto dummy = dyn_cast<ScopeEnd>(&n)) {
     os << "}";
+  } else if (const auto asm_stmt = dyn_cast<AST::AsmStmt>(&n)) {
+    os << "__asm__";
+    if (asm_stmt->isVolatile) os << " volatile";
+    os << " (\"" << asm_stmt->templateStr << "\"";
+    if (!asm_stmt->outputOperands.empty()) {
+      os << " : ";
+      for (size_t i = 0; i < asm_stmt->outputOperands.size(); ++i) {
+        if (i > 0) os << ", ";
+        os << "\"" << asm_stmt->outputOperands[i]->constraint << "\"("
+           << PSTR(asm_stmt->outputOperands[i]->expression) << ")";
+      }
+    }
+    if (!asm_stmt->inputOperands.empty()) {
+      os << " : ";
+      for (size_t i = 0; i < asm_stmt->inputOperands.size(); ++i) {
+        if (i > 0) os << ", ";
+        os << "\"" << asm_stmt->inputOperands[i]->constraint << "\"("
+           << PSTR(asm_stmt->inputOperands[i]->expression) << ")";
+      }
+    }
+    if (!asm_stmt->clobbers.empty()) {
+      os << " : ";
+      for (size_t i = 0; i < asm_stmt->clobbers.size(); ++i) {
+        if (i > 0) os << ", ";
+        os << "\"" << asm_stmt->clobbers[i] << "\"";
+      }
+    }
+    os << ")";
   } else {
     choreo_unreachable(
         "unhandled stmt type in DumpStmtBriefly: " + n.TypeNameString() +
@@ -2299,5 +2328,48 @@ bool LivenessAnalyzer::Visit(AST::ChoreoFunction& n) {
   TraceEachVisit(n);
   // deal with ChoreoFunction in BeforeVisitImpl due to the orders in
   // accept().
+  return true;
+}
+
+bool LivenessAnalyzer::Visit(AST::AsmStmt& n) {
+  TraceEachVisit(n);
+  stmt_linfo[current_stmt].buffer_related = true;
+
+  // Buffer liveness only tracks the spanned objects (buffers) an asm
+  // operand touches; scalar register operands are not buffers and are
+  // ignored here.  An asm statement never DEFines a buffer (a buffer's
+  // DEF is its allocation), so any read or write of a buffer -- including
+  // an element write such as `lz[i]` -- is recorded as a USE.
+  auto AddBufferUses = [&](const AST::Node* expr) {
+    for (const auto& var : GetAllSymbolicOperands(expr)) {
+      std::string resolved = InScopeNameForRef(var);
+      if (resolved.empty()) continue;
+      auto ty = GetScopedSymbolType(resolved);
+      if (!isa<SpannedType>(ty)) continue;
+      AddUse(current_stmt, resolved);
+    }
+  };
+
+  for (const auto& op : n.outputOperands)
+    AddBufferUses(op->expression.get());
+  for (const auto& op : n.inputOperands)
+    AddBufferUses(op->expression.get());
+
+  // "memory" clobber: asm may read or write any reachable memory.
+  // Conservatively mark all known buffers as used (not defined).
+  bool has_memory_clobber = false;
+  for (const auto& c : n.clobbers) {
+    if (c == "memory") {
+      has_memory_clobber = true;
+      break;
+    }
+  }
+
+  if (has_memory_clobber || n.isVolatile) {
+    for (const auto& buf : buffers) {
+      AddUse(current_stmt, buf);
+    }
+  }
+
   return true;
 }

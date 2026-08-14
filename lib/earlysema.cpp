@@ -3005,6 +3005,39 @@ bool EarlySemantics::Visit(AST::Call& n) {
   return true;
 }
 
+bool EarlySemantics::Visit(AST::AsmStmt& n) {
+  TraceEachVisit(n);
+
+  size_t ec = error_count;
+
+  auto& tgt = CCtx().GetTarget();
+  auto arch = CCtx().GetArch();
+
+  if (!tgt.IsAsmSupported(arch)) {
+    Error1(n.LOC(), "inline assembly is not supported on the current target '" +
+                        tgt.Name() + "'.");
+    return false;
+  }
+
+  if (n.templateStr.empty()) {
+    Warning(n.LOC(), "empty inline assembly template string.");
+  }
+
+  // Resolve variables in output operands
+  for (auto& op : n.outputOperands) {
+    if (!op->expression)
+      Warning(op->LOC(), "empty expression in output asm operand.");
+  }
+
+  // Resolve variables in input operands
+  for (auto& op : n.inputOperands) {
+    if (!op->expression)
+      Warning(op->LOC(), "empty expression in input asm operand.");
+  }
+
+  return ec == error_count;
+}
+
 bool EarlySemantics::Visit(AST::Synchronize& n) {
   TraceEachVisit(n);
 

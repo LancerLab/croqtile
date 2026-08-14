@@ -1,0 +1,74 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -es -dv=liveness %s | FileCheck --match-full-lines %s
+// Live-range analysis check for GCC extended asm statements.
+// Verifies that the liveness analyzer correctly tracks:
+//   - spanned (buffer) operands create USE points; scalar operands do not
+//   - buffer writes and the "memory" clobber create USE points, never DEF
+
+#include "choreo.h"
+
+#define N 64
+
+__co__ auto asm_liveness_test(s32 [N] x) {
+  s32 [N] z;
+  parallel p by 1 {
+    lx = dma.copy x.chunkat(p) => local;
+    local s32 [lx.span] lz;
+    foreach {i} in [lx.span(0)] {
+      s32 a = lx.data.at(i);
+      s32 b;
+      __asm__ volatile("v.add %0, %1"
+        : "=r"(b)
+        : "r"(a)
+        : "memory");
+      lz.at(i) = b;
+    }
+    dma.copy lz => z.chunkat(p);
+  }
+  return z;
+}
+
+int main() { return 0; }
+
+// CHECK: (  0) asm_liveness_test(s32 mdspan<1> [64] x) {
+// CHECK: DEF: ::asm_liveness_test::x
+// CHECK: (  1)   global s32 [ 64 ] z
+// CHECK: DEF: ::asm_liveness_test::z
+// CHECK: (  2)   parallel anon_pb_0 = {anon_pb_0__elem__x} by [1] : block {
+// CHECK: DEF: ::asm_liveness_test::paraby_0::anon_pb_0
+// CHECK: DEF: ::asm_liveness_test::paraby_0::anon_pb_0__elem__x
+// CHECK: (  3)     parallel p = {p__elem__x} by [1] : thread {
+// CHECK: DEF: ::asm_liveness_test::paraby_0::paraby_1::p
+// CHECK: DEF: ::asm_liveness_test::paraby_0::paraby_1::p__elem__x
+// CHECK: (  4)       local s32 mdspan<1> [64] lx__buf__
+// CHECK: DEF: ::asm_liveness_test::paraby_0::paraby_1::lx__buf__
+// CHECK: (  5)       lx = dma.copy x.Chunk( (ubound p) ).At(p) => lx__buf__
+// CHECK: USE: ::asm_liveness_test::x
+// CHECK: USE: ::asm_liveness_test::paraby_0::paraby_1::p
+// CHECK: USE: ::asm_liveness_test::paraby_0::paraby_1::p__elem__x
+// CHECK: USE: ::asm_liveness_test::paraby_0::paraby_1::p
+// CHECK: USE: ::asm_liveness_test::paraby_0::paraby_1::lx__buf__
+// CHECK: DEF: ::asm_liveness_test::paraby_0::paraby_1::lx
+// CHECK: (  6)       local s32 [ lx.span ] lz
+// CHECK: DEF: ::asm_liveness_test::paraby_0::paraby_1::lz
+// CHECK: (  7)       with {i} in [ lx.span(0) ] {
+// CHECK: DEF: ::asm_liveness_test::paraby_0::paraby_1::within_0::i
+// CHECK: USE: ::asm_liveness_test::paraby_0::paraby_1::lx.span
+// CHECK: (  8)         foreach i(::) {
+// CHECK: USE: ::asm_liveness_test::paraby_0::paraby_1::within_0::i
+// CHECK: (  9)           mutable s32 a = lx.data[i]
+// CHECK: USE: ::asm_liveness_test::paraby_0::paraby_1::lx
+// CHECK: USE: ::asm_liveness_test::paraby_0::paraby_1::lx__buf__
+// CHECK: USE: ::asm_liveness_test::paraby_0::paraby_1::lx__buf__
+// CHECK: DEF: ::asm_liveness_test::paraby_0::paraby_1::within_0::foreach_0::a
+// CHECK: ( 10)           mutable s32 b
+// CHECK: DEF: ::asm_liveness_test::paraby_0::paraby_1::within_0::foreach_0::b
+// The asm statement appears as its own numbered line with USE points:
+// CHECK: ( 11)           __asm__ volatile ("v.add %0, %1" : "=r"(b) : "r"(a) : "memory")
+// CHECK: USE: ::asm_liveness_test::paraby_0::paraby_1::lx__buf__
+// CHECK: USE: ::asm_liveness_test::paraby_0::paraby_1::lz
+// CHECK: USE: ::asm_liveness_test::x
+// CHECK: USE: ::asm_liveness_test::z
+// CHECK: ( 12)           lz[i] = b
+// CHECK: USE: ::asm_liveness_test::paraby_0::paraby_1::lz
+// CHECK: USE: ::asm_liveness_test::paraby_0::paraby_1::within_0::foreach_0::b

@@ -426,6 +426,12 @@ void ForeachBlock::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+void AsmStmt::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  v.Visit(*this);
+  v.AfterVisit(*this);
+}
+
 void InThreadsBlock::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   PredBlock::accept(v);

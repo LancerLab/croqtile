@@ -1,0 +1,183 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// End-to-end test for GCC extended asm operand wiring inside device code.
+//
+// Asm statements run inside parallel blocks with DMA, using real DTU
+// (GCU device) instructions to prove correct operand routing through
+// the GCC extended asm constraint system.
+
+// Test 1: matching constraint "0" — write-only output tied to input.
+// "=r"(c) : "0"(lx.data.at(i)) ties output c to input lx.data.at(i)
+// (shared register). c is uninitialized; its value comes solely from
+// the constraint. l.xora c, c, ly => c = lx ^ ly.
+__co__ auto asm_matching_xor(s32 [1] x, s32 [1] y) {
+  s32 [x.span] z;
+  parallel p by 1 {
+    lx = dma.copy x.chunkat(p) => local;
+    ly = dma.copy y.chunkat(p) => local;
+    local s32 [lx.span] lz;
+    foreach {i} in [lx.span(0)] {
+      s32 c;
+      __asm__ volatile("l.xora %0, %0, %2"
+        : "=r"(c) : "0"(lx.data.at(i)), "r"(ly.data.at(i)) : "memory");
+      lz.at(i) = c;
+    }
+    dma.copy lz => z.chunkat(p);
+  }
+  return z;
+}
+
+// Test 2: read-write "+r" operand — register both read and written.
+// lz.at(i) starts as the input value, then lz.at(i) ^= lz.at(i) = 0.
+__co__ auto asm_rw_xor_self(s32 [1] x) {
+  s32 [x.span] z;
+  parallel p by 1 {
+    lx = dma.copy x.chunkat(p) => local;
+    local s32 [lx.span] lz;
+    foreach {i} in [lx.span(0)] {
+      lz.at(i) = lx.data.at(i);
+      __asm__ volatile("l.xora %0, %0, %0"
+        : "+r"(lz.at(i)) : : "memory");
+    }
+    dma.copy lz => z.chunkat(p);
+  }
+  return z;
+}
+
+// Test 3: read-write operand with separate input.
+// lz.at(i) = lz.at(i) + ly.data.at(i) via l.adda.u.
+__co__ auto asm_rw_add(s32 [1] x, s32 [1] y) {
+  s32 [x.span] z;
+  parallel p by 1 {
+    lx = dma.copy x.chunkat(p) => local;
+    ly = dma.copy y.chunkat(p) => local;
+    local s32 [lx.span] lz;
+    foreach {i} in [lx.span(0)] {
+      lz.at(i) = lx.data.at(i);
+      __asm__ volatile("l.adda.u %0, %0, %1"
+        : "+r"(lz.at(i)) : "r"(ly.data.at(i)) : "memory");
+    }
+    dma.copy lz => z.chunkat(p);
+  }
+  return z;
+}
+
+// Test 4: asm with input-only operands (no output constraint).
+// Proves the compiler passes operands into asm correctly.
+__co__ void asm_inputs(s32 [1] x, s32 [1] y) {
+  parallel p by 1 {
+    lx = dma.copy x.chunkat(p) => local;
+    ly = dma.copy y.chunkat(p) => local;
+    foreach {i} in [lx.span(0)] {
+      __asm__ volatile("v.nop" : : "r"(lx.data.at(i)), "r"(ly.data.at(i)) : "memory");
+    }
+  }
+}
+
+// Test 5: asm keyword alias and clobber-only forms.
+__co__ void asm_keyword_test() {
+  parallel p by 1 {
+    __asm__ volatile("v.nop" : : : "memory");
+    asm("v.nop");
+  }
+}
+
+// Test 6: write-only output directly to array element lz.at(i).
+// The compiler must lower lz.at(i) through a temp, then write back.
+__co__ auto asm_output_to_lz(s32 [1] x, s32 [1] y) {
+  s32 [x.span] z;
+  parallel p by 1 {
+    lx = dma.copy x.chunkat(p) => local;
+    ly = dma.copy y.chunkat(p) => local;
+    local s32 [lx.span] lz;
+    foreach {i} in [lx.span(0)] {
+      __asm__ volatile("l.xora %0, %0, %2"
+        : "=r"(lz.at(i)) : "0"(lx.data.at(i)), "r"(ly.data.at(i)) : "memory");
+    }
+    dma.copy lz => z.chunkat(p);
+  }
+  return z;
+}
+
+// Test 7: read-write operand directly on array element lz.at(i).
+// The compiler must lower lz.at(i) through a temp (read before, write after).
+__co__ auto asm_rw_lz_at(s32 [1] x) {
+  s32 [x.span] z;
+  parallel p by 1 {
+    lx = dma.copy x.chunkat(p) => local;
+    local s32 [lx.span] lz;
+    foreach {i} in [lx.span(0)] {
+      lz.at(i) = lx.data.at(i);
+      __asm__ volatile("l.xora %0, %0, %0"
+        : "+r"(lz.at(i)) : : "memory");
+    }
+    dma.copy lz => z.chunkat(p);
+  }
+  return z;
+}
+
+int main() {
+  // Test 1: matching constraint xor: 0x0F ^ 0xF0 = 0xFF
+  {
+    auto ax = choreo::make_spandata<choreo::s32>(1);
+    auto ay = choreo::make_spandata<choreo::s32>(1);
+    ax[0] = 0x0F; ay[0] = 0xF0;
+    auto az = asm_matching_xor(ax.view(), ay.view());
+    choreo::choreo_assert(az[0] == 0xFF,
+        "matching constraint xor: 0x0F^0xF0 should be 0xFF");
+  }
+
+  // Test 2: rw xor self: 99 ^ 99 = 0
+  {
+    auto ax = choreo::make_spandata<choreo::s32>(1);
+    ax[0] = 99;
+    auto az = asm_rw_xor_self(ax.view());
+    choreo::choreo_assert(az[0] == 0,
+        "rw operand xor self: value^value should be 0");
+  }
+
+  // Test 3: rw add: 40 + 2 = 42
+  {
+    auto ax = choreo::make_spandata<choreo::s32>(1);
+    auto ay = choreo::make_spandata<choreo::s32>(1);
+    ax[0] = 40; ay[0] = 2;
+    auto az = asm_rw_add(ax.view(), ay.view());
+    choreo::choreo_assert(az[0] == 42,
+        "rw operand add: 40+2 should be 42");
+  }
+
+  // Test 4: input operands
+  {
+    auto ax = choreo::make_spandata<choreo::s32>(1);
+    auto ay = choreo::make_spandata<choreo::s32>(1);
+    ax[0] = 1; ay[0] = 2;
+    asm_inputs(ax.view(), ay.view());
+  }
+
+  // Test 5: keyword and clobber
+  asm_keyword_test();
+
+  // Test 6: write-only output to lz.at(i): 0x0F ^ 0xF0 = 0xFF
+  {
+    auto ax = choreo::make_spandata<choreo::s32>(1);
+    auto ay = choreo::make_spandata<choreo::s32>(1);
+    ax[0] = 0x0F; ay[0] = 0xF0;
+    auto az = asm_output_to_lz(ax.view(), ay.view());
+    choreo::choreo_assert(az[0] == 0xFF,
+        "output to lz.at(i): 0x0F^0xF0 should be 0xFF");
+  }
+
+  // Test 7: rw operand on lz.at(i): 99 ^ 99 = 0
+  {
+    auto ax = choreo::make_spandata<choreo::s32>(1);
+    ax[0] = 99;
+    auto az = asm_rw_lz_at(ax.view());
+    choreo::choreo_assert(az[0] == 0,
+        "rw lz.at(i) xor self: 99^99 should be 0");
+  }
+
+  std::cout << "Test asm_basic Passed" << std::endl;
+  return 0;
+}
+// CHECK: Test asm_basic Passed

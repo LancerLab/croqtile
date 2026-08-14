@@ -1,0 +1,19 @@
+// RUN: choreo %s -es | FileCheck %s
+// RUN: cocc %s -es | FileCheck %s
+// Compile-time edge case tests for GCC extended asm syntax.
+
+// Test asm with multiple colons (full syntax with clobbers) in device code.
+__co__ void test_full_syntax() {
+  parallel p by 1 {
+    __asm__ volatile("nop" : : : "memory");
+  }
+}
+
+// Test asm keyword alias (non-volatile, no operands) in device code.
+__co__ void test_asm_keyword() {
+  parallel p by 1 {
+    __asm__("nop");
+  }
+}
+// CHECK: nop
+// CHECK: nop

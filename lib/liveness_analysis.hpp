@@ -60,7 +60,8 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   using VarSet = std::set<std::string>;
   using DMABufInfo = std::pair<std::string, std::string>;
 
-  struct ScopeEnd : public Stmt {
+  struct ScopeEnd : public Stmt, public TypeIDProvider<ScopeEnd> {
+    __UDT_TYPE_INFO__(Stmt, ScopeEnd)
     ScopeEnd(const location& loc, AST::Node* s = nullptr)
         : Stmt(loc), scope_start(s) {}
     const AST::Node* scope_start = nullptr;
@@ -170,7 +171,7 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 
   // When adding a new statement node type to HasStmt(), also add a Visit()
   // override and DumpStmtBriefly() case, then update this count.
-  static constexpr size_t NumVisitOverrides() { return 20; }
+  static constexpr size_t NumVisitOverrides() { return 21; }
 
   static VarSet& SetUnionInPlace(VarSet& a, const VarSet& b);
   static VarSet& SetDiffInPlace(VarSet& a, const VarSet& b);
@@ -222,6 +223,7 @@ public:
   bool Visit(AST::IfElseBlock&) override;
   bool Visit(AST::FunctionDecl&) override;
   bool Visit(AST::ChoreoFunction&) override;
+  bool Visit(AST::AsmStmt&) override;
 
   // ---- Private implementation ----
 

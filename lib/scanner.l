@@ -639,6 +639,10 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
   "unroll"   return Choreo::Parser::make_UNROLL(yytext, loc);
   "continue" return Choreo::Parser::make_CONTINUE(yytext, loc);
   "yield"    return Choreo::Parser::make_YIELD(yytext, loc);
+  "__asm__"   return Choreo::Parser::make_ASM(yytext, loc);
+  "asm"       return Choreo::Parser::make_ASM(yytext, loc);
+  "volatile"  return Choreo::Parser::make_ASM_VOLATILE(yytext, loc);
+  "goto"      return Choreo::Parser::make_ASM_GOTO(yytext, loc);
   "<->"      return Choreo::Parser::make_BIND   (loc);
   "-"        return Choreo::Parser::make_MINUS  (loc);
   "--"       return Choreo::Parser::make_MMINUS (loc);

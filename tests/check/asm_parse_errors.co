@@ -1,0 +1,8 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+// Parsing-level error checks for GCC extended asm syntax.
+// Verifies the parser rejects malformed asm with "invalid __asm__ syntax".
+
+__co__ void test_extra_colon() {
+  __asm__ volatile("nop" : : : : "memory");
+}
+// CHECK: invalid __asm__ syntax

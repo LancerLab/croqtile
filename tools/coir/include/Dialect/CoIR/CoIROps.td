@@ -842,4 +842,33 @@ def BufferUnmapOp : CoIR_Op<"buffer.unmap",
   let hasCustomAssemblyFormat = 1;
 }
 
+//===----------------------------------------------------------------------===//
+// GCC extended inline assembly
+//===----------------------------------------------------------------------===//
+
+def AsmOp : CoIR_Op<"asm", [AttrSizedOperandSegments]> {
+  let summary = "GCC-style extended inline assembly statement";
+  let description = [{
+    Represents a GCC extended inline assembly statement with outputs,
+    inputs, and clobbers. The output operands are passed as both inputs
+    (initial values) and results (potentially modified values).
+
+    Example:
+      %r = coir.asm {templateStr = "mov %0, %1", outConstraints = ["=r"],
+                     inConstraints = ["r"], clobbers = []}
+                     %in_val : !coir.scalar_type<i32> -> !coir.scalar_type<i32>
+  }];
+  let arguments = (ins
+    StrAttr:$templateStr,
+    OptionalAttr<BoolAttr>:$isVolatile,
+    StrArrayAttr:$outConstraints,
+    Variadic<AnyType>:$outOperands,
+    StrArrayAttr:$inConstraints,
+    Variadic<AnyType>:$inOperands,
+    StrArrayAttr:$clobbers
+  );
+  let results = (outs Variadic<AnyType>:$results);
+  let hasVerifier = 1;
+}
+
 #endif // COIR_OPS_TD
