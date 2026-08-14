@@ -208,6 +208,12 @@ private:
     return tty.getMemorySpace() == 1 && hasTMA;
   }
 
+  void emitTensorAlloc(TensorAllocOp op) override {
+    if (globalBufferNames.count(op.getResult()))
+      return; // hoisted to a kernel pointer parameter
+    CoIREmitterBase::emitTensorAlloc(op);
+  }
+
   void emitOpFallback(mlir::Operation *op) override {
     if (auto tmaCopy = dyn_cast<TmaCopyOp>(op))
       emitTmaCopy(tmaCopy);
@@ -331,6 +337,11 @@ private:
   bool useWGMMA = false;
   DenseSet<Value> wgmmaOperandFrags; // register-resident A operands for RS
 
+  // Cooperative launch + device-global buffer hoisting state.
+  bool cooperativeLaunch = false;
+  llvm::SmallVector<Value, 4> globalBufferVals;
+  DenseMap<Value, std::string> globalBufferNames;
+
   void prescanMMAFragRoles(mlir::Operation *root) {
     // Detect WGMMA: any GROUPx4 parallel level signals SM90+ warp-group MMA
     useWGMMA = false;
@@ -426,6 +437,7 @@ private:
       os() << "#define __CHOREO_ENABLE_CUDA_RUNTIME_ENV_CHECK__\n";
     }
     os() << "#include \"choreo.h\"\n";
+    os() << "#include <cooperative_groups.h>\n";
     if (withTMA) {
       os() << "namespace cde = cuda::device::experimental;\n";
     }
@@ -495,6 +507,8 @@ private:
     dynSpmEmitted = false;
     prescanMMAFragRoles(kernel);
     prescanDescriptors(kernel);
+    cooperativeLaunch = isCooperativeLaunch(kernel);
+    collectGlobalBuffers(kernel);
 
     auto fnType = kernel.getFunctionType();
     auto symName = kernel.getSymName();
@@ -542,6 +556,13 @@ private:
       std::string name = "out" + std::to_string(i);
       os() << emitType(fnType.getResult(i)) << " " << name;
       returnParamNames[i] = name;
+      paramIdx++;
+    }
+    // Hoisted device-global buffers as kernel pointer parameters.
+    for (auto val : globalBufferVals) {
+      if (paramIdx > 0)
+        os() << ", ";
+      os() << emitType(val.getType()) << " " << globalBufferNames[val];
       paramIdx++;
     }
     // TMA descriptors as kernel parameters
@@ -717,6 +738,47 @@ private:
         async = true;
     });
     return async;
+  }
+
+  bool isCooperativeLaunch(KernelOp kernel) {
+    bool coop = false;
+    kernel.getBody().walk([&](ParallelOp par) {
+      if (par.getLevel() == coir::ParallelLevel::BLOCK &&
+          par.getCooperativeAttr() && par.getCooperativeAttr().getValue())
+        coop = true;
+    });
+    return coop;
+  }
+
+  // Collect global (memorySpace == 0) tensor allocs that need device-global
+  // backing. Return values are excluded (they get dedicated out params).
+  void collectGlobalBuffers(KernelOp kernel) {
+    globalBufferVals.clear();
+    globalBufferNames.clear();
+
+    llvm::DenseSet<Value> returns;
+    auto &body = kernel.getBody();
+    if (!body.empty()) {
+      for (auto &op : body.front().getOperations()) {
+        if (auto ret = dyn_cast<KernelReturnOp>(op)) {
+          for (auto operand : ret.getOperands())
+            returns.insert(operand);
+        }
+      }
+    }
+
+    unsigned idx = 0;
+    kernel.getBody().walk([&](TensorAllocOp alloc) {
+      auto tty = cast<coir::TensorType>(alloc.getResult().getType());
+      if (tty.getMemorySpace() != 0)
+        return;
+      if (returns.count(alloc.getResult()))
+        return;
+      std::string name = "__gbuf" + std::to_string(idx++);
+      globalBufferNames[alloc.getResult()] = name;
+      globalBufferVals.push_back(alloc.getResult());
+      valueNames[alloc.getResult()] = name;
+    });
   }
 
   struct DimArgMeta {
@@ -1213,8 +1275,60 @@ private:
     return expr;
   }
 
+  // Byte-size expression for a hoisted device-global buffer.
+  std::string globalBufferByteExpr(coir::TensorType tty,
+                                   llvm::ArrayRef<DimArgMeta> dimArgMeta) {
+    int64_t bytes = getTensorBytes(tty);
+    if (bytes >= 0)
+      return std::to_string(bytes) + "ULL";
+
+    unsigned elemBits = tty.getElementType().getIntOrFloatBitWidth();
+    unsigned elemBytes = elemBits > 8 ? (elemBits / 8) : 1;
+    std::string expr;
+    llvm::raw_string_ostream ss(expr);
+    ss << "(";
+    for (unsigned d = 0; d < tty.getShape().size(); ++d) {
+      if (d > 0) ss << " * ";
+      auto dim = tty.getShape()[d];
+      if (mlir::ShapedType::isDynamic(dim)) {
+        bool found = false;
+        for (auto &da : dimArgMeta) {
+          if (da.dimIdx == (int64_t)d) {
+            ss << "(size_t)p" << da.paramIdx << ".shape()[" << da.dimIdx
+               << "]";
+            found = true;
+            break;
+          }
+        }
+        if (!found) ss << "1";
+      } else {
+        ss << dim;
+      }
+    }
+    ss << ") * " << elemBytes << "ULL";
+    return expr;
+  }
+
+  void emitGlobalBufferAllocs(llvm::ArrayRef<DimArgMeta> dimArgMeta) {
+    for (auto val : globalBufferVals) {
+      auto tty = cast<coir::TensorType>(val.getType());
+      std::string eType = emitElementType(tty.getElementType());
+      std::string name = globalBufferNames[val];
+      os() << "  " << eType << "* " << name << "_dev = nullptr;\n";
+      os() << "  cudaMalloc(&" << name << "_dev, "
+           << globalBufferByteExpr(tty, dimArgMeta) << ");\n";
+    }
+  }
+
+  void emitGlobalBufferFrees() {
+    for (auto val : globalBufferVals)
+      os() << "  cudaFree(" << globalBufferNames[val] << "_dev);\n";
+  }
+
   void emitHostEntry(KernelOp kernel) override {
     prescanDescriptors(kernel);
+    collectGlobalBuffers(kernel);
+    bool coopLaunch = isCooperativeLaunch(kernel);
     auto fnType = kernel.getFunctionType();
     auto symName = kernel.getSymName();
     std::string devName = kernelDeviceName(symName);
@@ -1255,6 +1369,8 @@ private:
         os() << "  " << eType << "* p" << i << "__device = (" << eType
              << "*)p" << i << ".data();\n";
       }
+
+      emitGlobalBufferAllocs(dimArgMeta);
 
       // TMA descriptor setup
       unsigned tmaIdx = 0;
@@ -1359,35 +1475,94 @@ private:
              << mrSpmSizeName << ");\n";
       }
 
-      os() << "  " << devName << "<<<" << dims.gridStr() << ", "
-         << dims.blockStr();
-      if (!dynShmem.empty() || !streamName.empty())
-        os() << ", " << (dynShmem.empty() ? "0" : dynShmem);
-      if (!streamName.empty())
-        os() << ", " << streamName;
-      // Launch order must match kernel signature:
-      //   [input ptrs/scalars] [dim args] [TMA maps] [mr_offsets] [spm_size]
-      os() << ">>>(";
-      for (unsigned i = 0; i < numOrigInputs; ++i) {
-        if (i > 0) os() << ", ";
-        if (isa<coir::TensorType>(fnType.getInput(i)))
-          os() << "p" << i << "__device";
-        else
-          os() << "p" << i;
+      if (coopLaunch) {
+        for (auto &da : dimArgMeta)
+          os() << "  int __dim_" << da.paramIdx << "_" << da.dimIdx
+               << " = (int)p" << da.paramIdx << ".shape()[" << da.dimIdx
+               << "];\n";
+        os() << "  void* __coop_args[] = {";
+        bool firstArg = true;
+        auto comma = [&]() {
+          if (!firstArg) os() << ", ";
+          firstArg = false;
+        };
+        for (unsigned i = 0; i < numOrigInputs; ++i) {
+          comma();
+          if (isa<coir::TensorType>(fnType.getInput(i)))
+            os() << "(void*)&p" << i << "__device";
+          else
+            os() << "(void*)&p" << i;
+        }
+        for (auto &da : dimArgMeta) {
+          comma();
+          os() << "(void*)&__dim_" << da.paramIdx << "_" << da.dimIdx;
+        }
+        for (auto val : globalBufferVals) {
+          comma();
+          os() << "(void*)&" << globalBufferNames[val] << "_dev";
+        }
+        for (unsigned i = 0; i < numTMA; ++i) {
+          comma();
+          os() << "(void*)&__choreo_tma_" << i << "_tensor_map";
+        }
+        for (unsigned i = 0; i < mrArgCount; ++i) {
+          comma();
+          os() << "(void*)&" << mrOffsetsName << "[" << i << "]";
+        }
+        if (mrChunksAttr) {
+          comma();
+          os() << "(void*)&" << mrSpmSizeName;
+        }
+        os() << "};\n";
+        os() << "  cudaLaunchCooperativeKernel((const void*)" << devName
+             << ", " << dims.gridStr() << ", " << dims.blockStr()
+             << ", __coop_args, "
+             << (dynShmem.empty() ? "0" : dynShmem) << ", "
+             << (streamName.empty() ? "0" : streamName) << ");\n";
+      } else {
+        os() << "  " << devName << "<<<" << dims.gridStr() << ", "
+           << dims.blockStr();
+        if (!dynShmem.empty() || !streamName.empty())
+          os() << ", " << (dynShmem.empty() ? "0" : dynShmem);
+        if (!streamName.empty())
+          os() << ", " << streamName;
+        // Launch order must match kernel signature:
+        //   [inputs] [dim args] [gbufs] [TMA maps] [mr_offsets] [spm_size]
+        os() << ">>>(";
+        bool firstArg = true;
+        auto comma = [&]() {
+          if (!firstArg) os() << ", ";
+          firstArg = false;
+        };
+        for (unsigned i = 0; i < numOrigInputs; ++i) {
+          comma();
+          if (isa<coir::TensorType>(fnType.getInput(i)))
+            os() << "p" << i << "__device";
+          else
+            os() << "p" << i;
+        }
+        for (auto &da : dimArgMeta) {
+          comma();
+          os() << "(int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+        }
+        for (auto val : globalBufferVals) {
+          comma();
+          os() << globalBufferNames[val] << "_dev";
+        }
+        for (unsigned i = 0; i < numTMA; ++i) {
+          comma();
+          os() << "__choreo_tma_" << i << "_tensor_map";
+        }
+        for (unsigned i = 0; i < mrArgCount; ++i) {
+          comma();
+          os() << mrOffsetsName << "[" << i << "]";
+        }
+        if (mrChunksAttr) {
+          comma();
+          os() << mrSpmSizeName;
+        }
+        os() << ");\n";
       }
-      for (auto &da : dimArgMeta) {
-        os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
-      }
-      for (unsigned i = 0; i < numTMA; ++i) {
-        os() << ", __choreo_tma_" << i << "_tensor_map";
-      }
-      for (unsigned i = 0; i < mrArgCount; ++i) {
-        os() << ", " << mrOffsetsName << "[" << i << "]";
-      }
-      if (mrChunksAttr) {
-        os() << ", " << mrSpmSizeName;
-      }
-      os() << ");\n";
       if (!asyncLaunch) {
         if (!streamName.empty())
           os() << "  choreo::abend_true(cudaStreamSynchronize("
@@ -1396,6 +1571,7 @@ private:
           os() << "  cudaDeviceSynchronize();\n";
       }
 
+      emitGlobalBufferFrees();
       os() << "}\n\n";
       return;
     }
@@ -1502,6 +1678,8 @@ private:
       os() << "  cudaMalloc(&__result__device, " << resBytes << "ULL);\n";
     }
 
+    emitGlobalBufferAllocs(dimArgMeta);
+
     // TMA descriptor setup
     unsigned tmaIdx = 0;
     for (unsigned i = 0; i < descInfos.size(); ++i) {
@@ -1578,36 +1756,98 @@ private:
            << mrSpmSizeName2 << ");\n";
     }
 
-    os() << "  " << devName << "<<<" << dims.gridStr() << ", "
-       << dims.blockStr();
-    if (!dynShmem.empty() || !streamName.empty())
-      os() << ", " << (dynShmem.empty() ? "0" : dynShmem);
-    if (!streamName.empty())
-      os() << ", " << streamName;
-    // Launch order must match kernel signature:
-    //   [input ptrs/scalars] [dim args] [output ptrs] [TMA maps] [mr] [spm_size]
-    os() << ">>>(";
-    for (unsigned i = 0; i < numOrigInputs; ++i) {
-      if (i > 0) os() << ", ";
-      if (isa<coir::TensorType>(fnType.getInput(i)))
-        os() << "p" << i << "__device";
-      else
-        os() << "p" << i;
+    if (coopLaunch) {
+      for (auto &da : dimArgMeta)
+        os() << "  int __dim_" << da.paramIdx << "_" << da.dimIdx
+             << " = (int)p" << da.paramIdx << ".shape()[" << da.dimIdx
+             << "];\n";
+      os() << "  void* __coop_args[] = {";
+      bool firstArg = true;
+      auto comma = [&]() {
+        if (!firstArg) os() << ", ";
+        firstArg = false;
+      };
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
+        comma();
+        if (isa<coir::TensorType>(fnType.getInput(i)))
+          os() << "(void*)&p" << i << "__device";
+        else
+          os() << "(void*)&p" << i;
+      }
+      for (auto &da : dimArgMeta) {
+        comma();
+        os() << "(void*)&__dim_" << da.paramIdx << "_" << da.dimIdx;
+      }
+      comma();
+      os() << "(void*)&__result__device";
+      for (auto val : globalBufferVals) {
+        comma();
+        os() << "(void*)&" << globalBufferNames[val] << "_dev";
+      }
+      for (unsigned i = 0; i < numTMA; ++i) {
+        comma();
+        os() << "(void*)&__choreo_tma_" << i << "_tensor_map";
+      }
+      for (unsigned i = 0; i < mrArgCount2; ++i) {
+        comma();
+        os() << "(void*)&" << mrOffsetsName2 << "[" << i << "]";
+      }
+      if (mrChunksAttr2) {
+        comma();
+        os() << "(void*)&" << mrSpmSizeName2;
+      }
+      os() << "};\n";
+      os() << "  cudaLaunchCooperativeKernel((const void*)" << devName
+           << ", " << dims.gridStr() << ", " << dims.blockStr()
+           << ", __coop_args, "
+           << (dynShmem.empty() ? "0" : dynShmem) << ", "
+           << (streamName.empty() ? "0" : streamName) << ");\n";
+    } else {
+      os() << "  " << devName << "<<<" << dims.gridStr() << ", "
+         << dims.blockStr();
+      if (!dynShmem.empty() || !streamName.empty())
+        os() << ", " << (dynShmem.empty() ? "0" : dynShmem);
+      if (!streamName.empty())
+        os() << ", " << streamName;
+      // Launch order must match kernel signature:
+      //   [inputs] [dim args] [output] [gbufs] [TMA maps] [mr] [spm_size]
+      os() << ">>>(";
+      bool firstArg = true;
+      auto comma = [&]() {
+        if (!firstArg) os() << ", ";
+        firstArg = false;
+      };
+      for (unsigned i = 0; i < numOrigInputs; ++i) {
+        comma();
+        if (isa<coir::TensorType>(fnType.getInput(i)))
+          os() << "p" << i << "__device";
+        else
+          os() << "p" << i;
+      }
+      for (auto &da : dimArgMeta) {
+        comma();
+        os() << "(int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
+      }
+      comma();
+      os() << "__result__device";
+      for (auto val : globalBufferVals) {
+        comma();
+        os() << globalBufferNames[val] << "_dev";
+      }
+      for (unsigned i = 0; i < numTMA; ++i) {
+        comma();
+        os() << "__choreo_tma_" << i << "_tensor_map";
+      }
+      for (unsigned i = 0; i < mrArgCount2; ++i) {
+        comma();
+        os() << mrOffsetsName2 << "[" << i << "]";
+      }
+      if (mrChunksAttr2) {
+        comma();
+        os() << mrSpmSizeName2;
+      }
+      os() << ");\n";
     }
-    for (auto &da : dimArgMeta) {
-      os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
-    }
-    os() << ", __result__device";
-    for (unsigned i = 0; i < numTMA; ++i) {
-      os() << ", __choreo_tma_" << i << "_tensor_map";
-    }
-    for (unsigned i = 0; i < mrArgCount2; ++i) {
-      os() << ", " << mrOffsetsName2 << "[" << i << "]";
-    }
-    if (mrChunksAttr2) {
-      os() << ", " << mrSpmSizeName2;
-    }
-    os() << ");\n";
     if (!asyncLaunch) {
       if (!streamName.empty())
         os() << "  choreo::abend_true(cudaStreamSynchronize("
@@ -1629,6 +1869,7 @@ private:
         os() << "  cudaFree(p" << i << "__device);\n";
     }
     os() << "  cudaFree(__result__device);\n";
+    emitGlobalBufferFrees();
     os() << "  return __result;\n";
     os() << "}\n\n";
   }
@@ -3307,7 +3548,10 @@ private:
     auto scope = op.getScope();
     switch (scope) {
     case ParallelLevel::BLOCK:
-      os() << getIndent() << "__syncthreads();\n";
+      if (cooperativeLaunch)
+        os() << getIndent() << "cooperative_groups::this_grid().sync();\n";
+      else
+        os() << getIndent() << "__syncthreads();\n";
       break;
     case ParallelLevel::GROUP:
     case ParallelLevel::GROUPx4:
