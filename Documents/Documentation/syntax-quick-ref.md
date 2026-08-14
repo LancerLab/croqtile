@@ -156,6 +156,8 @@
 |--------|-------------|
 | `call func(args)` | Call device function |
 | `call func<T>(args)` | Template call |
+| `#pragma croq intrinsic prefix p` | Register intrinsic call prefix |
+| `#pragma croq intrinsic namespace n` | Register intrinsic call namespace |
 | `nullptr` | Null pointer argument |
 | `__to<type>(expr)` | Explicit type conversion (validated) |
 | `__to<"type">(expr)` | Foreign type cast (verbatim) |

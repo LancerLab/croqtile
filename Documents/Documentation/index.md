@@ -54,7 +54,7 @@ This reference (level-2) is for readers who want to understand the language in d
 
 ### Part G -- C++ Interop
 
-23. [Calling Device Code](call-and-device.md) -- `call`, `__co_device__`, template calls
+23. [Calling Device Code](call-and-device.md) -- `call`, `__co_device__`, template calls, intrinsic passthrough
 24. [I/O and Linking](io-and-linking.md) -- Parameters, `make_spanned`, return values, streams, linking
 25. [Macros](macros.md) -- `#define`, conditional compilation, preprocessing order
 
