@@ -26,6 +26,8 @@ intrinsics pass through verbatim without the `call` keyword.)
 - `call` can only appear inside a `parallel-by` block (device code region).
 - The Croqtile compiler does **not** verify the callee's signature at transpile time. Errors are caught during target compilation.
 - Arguments are passed by value. Spanned data arguments are implicitly decayed to pointers.
+- `call` returns the callee's value, which can be captured by assignment
+  (`mutable int a = call bar(a, b);`) or tested in an `if` condition.
 
 ## `__co_device__` Functions
 
@@ -168,6 +170,7 @@ effect after an inner scope ends.
 
 - Croqtile functions **cannot call other Croqtile functions**. Only device/host C++ functions are callable.
 - `call` must be inside a `parallel-by` block.
-- No return value capture -- `call` is a statement, not an expression.
+- `call` is not a general expression: its result can be captured by
+  assignment, but it cannot be nested inside arithmetic or other expressions.
 
 *(Reference: `tests/parse/call_stmt.co`, `tests/check/illegal_calls.co`)*
