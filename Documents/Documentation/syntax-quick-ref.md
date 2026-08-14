@@ -164,6 +164,16 @@
 | `#define NAME value` | Object-like macro |
 | `#ifdef NAME ... #endif` | Conditional compilation |
 
+## Inline Assembly
+
+| Syntax | Description |
+|--------|-------------|
+| `__asm__("nop")` | Basic statement, no operands |
+| `__asm__ volatile("nop" : : : "memory")` | Volatile with memory clobber |
+| `__asm__("mov %0, %1" : "=r"(r) : "r"(v))` | Positional output + input operands |
+| `__asm__("mov %0, %0" : "+r"(x))` | Read-write operand |
+| `__asm__("mov %[d], %[s]" : [d] "=r"(r) : [s] "r"(v))` | Named (symbolic) operands |
+
 ## Assertions
 
 | Syntax | Description |
