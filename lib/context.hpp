@@ -518,6 +518,7 @@ private:
   bool diag_dma = false;          // diagnose DMA at runtime
   bool loop_norm = false;         // enable loop normalization
   bool no_vectorize = false;      // do not vectorize any foreach loop
+  bool no_map_hoist = false;      // do not hoist loop-invariant buffer.map
   bool vectorize = false;         // enable loop vectorization
   size_t max_local_mem_capacity =
       0; // max local memory capacity per thread (0: use default)
@@ -734,6 +735,10 @@ public:
     return GetTarget().GetMaxParallelByCount(pl, GetArch());
   }
 
+  size_t GetMaxBufferMapBytes() const {
+    return GetTarget().GetMaxBufferMapBytes(GetArch());
+  }
+
   size_t GetMaxThreadsPerBlock() const {
     return GetTarget().GetMaxThreadsPerBlock(GetArch());
   }
@@ -774,6 +779,7 @@ public:
   bool DMADiagnosis() const { return diag_dma; }
   bool LoopNorm() const { return loop_norm; }
   bool NoVectorize() const { return no_vectorize; }
+  bool NoMapHoist() const { return no_map_hoist; }
   bool Vectorize() const { return vectorize; }
   size_t MaxLocalMemCapacity() const { return max_local_mem_capacity; }
   size_t SharedMemAlignment() const { return shared_mem_alignment; }
@@ -832,6 +838,7 @@ public:
   void SetDMADiagnosis(bool value) { diag_dma = value; }
   void SetLoopNorm(bool value) { loop_norm = value; }
   void SetNoVectorize(bool value) { no_vectorize = value; }
+  void SetNoMapHoist(bool value) { no_map_hoist = value; }
   void SetVectorize(bool value) { vectorize = value; }
   void SetMaxLocalMemCapacityPerThread(size_t sz) {
     max_local_mem_capacity = sz;

@@ -8,6 +8,7 @@
 #include "latenorm.hpp"
 #include "liveness_analysis.hpp"
 #include "loop_vectorize.hpp"
+#include "map_hoist.hpp"
 #include "mem_reuse.hpp"
 #include "memcheck.hpp"
 #include "normalize.hpp"
@@ -285,6 +286,13 @@ ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
   // to visualize the dma
   if (std::getenv("VISUALIZE") || CCtx().Visualize())
     AddStageWithPost<Visualizer>([](ASTPipeline& p) { p.SetAbend(); });
+
+  // hoist loop-invariant buffer.map out of foreach loops (optimization).
+  AddStageIf<MapHoist>([] {
+    const auto arch = CCtx().GetArch();
+    return !CCtx().NoMapHoist() && !arch.empty() &&
+           CCtx().HasFeature(ChoreoFeature::BUFFER_MAP, arch);
+  });
 
   // early loop vectorizer for the certain target
   if (!CCtx().NoVectorize() && CCtx().TargetSupportVectorize()) {

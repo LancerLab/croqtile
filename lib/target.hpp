@@ -374,6 +374,13 @@ public:
   virtual bool IsBufferMappingValid(const ArchId& arch, Storage src,
                                     Storage dst) const;
 
+  // Maximum number of bytes a single buffer.map/remap may cover on the given
+  // architecture. Returns 0 when the mapped size is unbounded (no check).
+  virtual size_t GetMaxBufferMapBytes(const ArchId& arch) const {
+    (void)arch;
+    return 0;
+  }
+
   // Whether the target's code generation only produces binaries (no text
   // source or script emission).  Targets that return true default to
   // compile_binary mode and reject -es/-gs.
