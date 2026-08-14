@@ -38,31 +38,32 @@ This reference (level-2) is for readers who want to understand the language in d
 13. [DMA Tiling](dma-tiling.md) -- View operations in DMA, ubound operator, multi-variable tiling
 14. [DMA Advanced](dma-advanced.md) -- `dma.any`, `swap`/`select`, multi-buffering, swizzle
 15. [TMA](tma.md) -- Tensor Memory Accelerator, bulk copy, SM90+
+16. [Buffer Mapping](buffer-map.md) -- Explicit `buffer.map`/`buffer.remap` global-to-local zero-copy aliasing (target-specific)
 
 ### Part E -- Compute Primitives
 
-16. [MMA](mma.md) -- Matrix multiply-accumulate: `fill`, `load`, `row.col`, `op`, `store`
-17. [Numerics](numerics.md) -- Builtin functions, transcendentals, type promotion, float variants
-18. [Atomic Operations](atomic-operations.md) -- `__atomic_add`, `__atomic_cas`, etc., per-arch type support
+17. [MMA](mma.md) -- Matrix multiply-accumulate: `fill`, `load`, `row.col`, `op`, `store`
+18. [Numerics](numerics.md) -- Builtin functions, transcendentals, type promotion, float variants
+19. [Atomic Operations](atomic-operations.md) -- `__atomic_add`, `__atomic_cas`, etc., per-arch type support
 
 ### Part F -- Synchronization and Async
 
-19. [Events](events.md) -- Generations, `ready`, staged access, and completion publication
-20. [Futures and Async](futures-and-async.md) -- Data/operation futures, event generations, and native completion bindings
-21. [Cooperative Kernel Launch](cooperative-launch.md) -- Grid-level synchronization, `block<cooperative>`, `sync.barrier : block` (target-specific)
+20. [Events](events.md) -- Generations, `ready`, staged access, and completion publication
+21. [Futures and Async](futures-and-async.md) -- Data/operation futures, event generations, and native completion bindings
+22. [Cooperative Kernel Launch](cooperative-launch.md) -- Grid-level synchronization, `block<cooperative>`, `sync.barrier : block` (target-specific)
 
 ### Part G -- C++ Interop
 
-22. [Calling Device Code](call-and-device.md) -- `call`, `__co_device__`, template calls
-23. [I/O and Linking](io-and-linking.md) -- Parameters, `make_spanned`, return values, streams, linking
-24. [Macros](macros.md) -- `#define`, conditional compilation, preprocessing order
+23. [Calling Device Code](call-and-device.md) -- `call`, `__co_device__`, template calls
+24. [I/O and Linking](io-and-linking.md) -- Parameters, `make_spanned`, return values, streams, linking
+25. [Macros](macros.md) -- `#define`, conditional compilation, preprocessing order
 
 ### Part H -- Advanced Topics
 
-25. [Assertions](assertions.md) -- `assert`, compile-time vs runtime evaluation, hoisting, `--runtime-check`
+26. [Assertions](assertions.md) -- `assert`, compile-time vs runtime evaluation, hoisting, `--runtime-check`
 
 ### Appendix
 
-26. [Syntax Quick Reference](syntax-quick-ref.md) -- Lookup tables for all constructs
-27. [Operator Gallery](operator-gallery.md) -- Curated index of example `.co` files
-28. [Tileflow Optimization Patterns](tileflow-opt.md) -- Matmul and optimization case studies
+27. [Syntax Quick Reference](syntax-quick-ref.md) -- Lookup tables for all constructs
+28. [Operator Gallery](operator-gallery.md) -- Curated index of example `.co` files
+29. [Tileflow Optimization Patterns](tileflow-opt.md) -- Matmul and optimization case studies

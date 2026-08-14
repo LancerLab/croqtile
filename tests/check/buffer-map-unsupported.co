@@ -1,0 +1,19 @@
+// RUN: not choreo -t cc -es %s 2>&1 | FileCheck %s
+// RUN: not choreo -t cute -es %s 2>&1 | FileCheck %s
+// RUN: not choreo -t hip -es %s 2>&1 | FileCheck %s
+// RUN: not choreo -t hetero -es %s 2>&1 | FileCheck %s
+// RUN: not co2ir -t gpu %s 2>&1 | FileCheck %s
+
+// Explicit buffer mapping (`buffer.map` / `buffer.remap`) is only available on
+// targets that expose hardware global-memory mapping support. Every other
+// target must reject the construct during early semantic analysis, before any
+// code generation. The `gpu` target is exercised through `co2ir` because its
+// code generation path is CoIR-only.
+
+__co__ void test_buffer_map(global f32 [128] a) {
+  parallel p by 1 {
+    mapped = a.map<local>(0, 64);
+  }
+}
+
+// CHECK: error: explicit memory mapping is not supported by this target.
