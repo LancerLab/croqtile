@@ -48,6 +48,7 @@ nav:
     - DMA Tiling: dma-tiling.md
     - DMA Advanced: dma-advanced.md
     - TMA: tma.md
+    - Buffer Mapping: buffer-map.md
   - "Part E -- Compute Primitives":
     - MMA: mma.md
     - Numerics: numerics.md
