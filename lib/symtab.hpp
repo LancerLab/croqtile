@@ -37,6 +37,9 @@ public:
     table.emplace(name, Symbol{name, ty});
   }
 
+  // Remove a symbol from the symbol table (no-op if it does not exist).
+  void RemoveSymbol(const std::string& name) { table.erase(name); }
+
   // Retrieve a symbol from the symbol table
   Symbol* GetSymbol(const std::string& name) {
     if (table.find(name) != table.end()) return &table.at(name);

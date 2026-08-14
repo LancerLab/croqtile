@@ -1,0 +1,31 @@
+// RUN: not choreo -t topscc -es -arch=gcu300 %s 2>&1 | FileCheck %s
+// REQUIRES: TARGET-GCUALL
+
+// GCU target adaptation checks for buffer.map/remap:
+//   1. map/remap may only appear inside a kernel parallel-by (never at host
+//      or device scope).
+//   2. the mapped byte size must not exceed the MMU block limit (256MB).
+
+// --- host (SEQ) scope: not inside any parallel-by ---
+__co__ void map_in_host(s32 [128] input) {
+  m = input.map<local>(0, 64);
+}
+
+// --- device scope: inside `: device`, not a kernel parallel-by ---
+__co__ void map_in_device(s32 [128] input) {
+  parallel d by 1 : device {
+    m = input.map<local>(0, 64);
+  }
+}
+
+// --- mapped size exceeds 256MB (268435456 bytes) ---
+// 67108865 * sizeof(s32) = 268435460 bytes > 268435456 bytes.
+__co__ void map_too_large(s32 [67108865] input) {
+  parallel p by 1 {
+    m = input.map<local>(0, 67108865);
+  }
+}
+
+// CHECK: error: buffer.map/remap must be called inside parallel-by.
+// CHECK: error: buffer.map/remap must be called inside a kernel parallel-by (': block' or inner), not at device scope.
+// CHECK: error: On GCU300, the size of data mapped by buffer.map/remap cannot exceed 268435456 bytes.

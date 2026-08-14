@@ -83,6 +83,13 @@ public:
            dst == Storage::LOCAL;
   }
 
+  size_t GetMaxBufferMapBytes(const ArchId& arch) const override {
+    (void)arch;
+    // GCU MMU maps a 2MB-aligned window of global memory into the L3 address
+    // space; a single mapping spans 2MB..256MB (see kernel_rt krt/mmu.h).
+    return 256ull * 1024 * 1024;
+  }
+
   // Per-architecture limits for parallel-by levels.
   size_t GetMaxParallelByCount(ParallelLevel pl,
                                const ArchId& arch) const override {

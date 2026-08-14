@@ -667,6 +667,29 @@ public:
     Assess(pred, msg, pb, &pb);
   }
 
+  // Check that a buffer.map/remap's mapped byte size is within the
+  // architecture's supported range (GetMaxBufferMapBytes). A compile-time
+  // constant size is checked statically; a symbolic size emits a runtime
+  // assertion instead.
+  void CheckBufferMap(AST::BufferMap& n) {
+    const auto max_bytes = CCtx().GetMaxBufferMapBytes();
+    if (max_bytes == 0) return; // size unconstrained on this architecture
+
+    auto sty = GetSpannedType(NodeType(n));
+    if (!sty) return; // earlier pass (earlysema/typeinfer) already reported
+
+    auto bytes = sty->ByteSizeValue();
+    if (!IsValidValueItem(bytes)) return; // size not yet inferred
+
+    auto pred = sbe::cmp("<=", bytes, sbe::nu((int64_t)max_bytes));
+    if (auto bv = VIBool(pred); bv && bv.value()) return; // trivially safe
+    Assess(pred,
+           "On " + cur_arch + ", the size of data mapped by "
+           "buffer.map/remap cannot exceed " +
+               std::to_string(max_bytes) + " bytes.",
+           n, &n);
+  }
+
 public:
   GCUAdaptor()
       : VisitorWithSymTab("gcu"), cur_arch(ToUpper(CCtx().GetArch())) {}
@@ -805,6 +828,26 @@ public:
       Error1(se->LOC(), "'" + id->name +
                             "' is not a stream type; parallel<...> requires "
                             "a stream variable.");
+  }
+
+  bool Visit(AST::BufferMap& n) override {
+    TraceEachVisit(n);
+
+    // The MMU map/remap API maps global memory into a processing element's
+    // local (L3) address space, so it is only meaningful inside a kernel
+    // parallel-by (': block' or inner), never at host or device scope.
+    if (IsHost()) {
+      Error1(n.LOC(), "buffer.map/remap must be called inside parallel-by.");
+      return true;
+    }
+    if (Level() == ParallelLevel::DEVICE) {
+      Error1(n.LOC(), "buffer.map/remap must be called inside a kernel "
+                      "parallel-by (': block' or inner), not at device scope.");
+      return true;
+    }
+
+    CheckBufferMap(n);
+    return true;
   }
 
   bool Visit(AST::DMA& n) override {

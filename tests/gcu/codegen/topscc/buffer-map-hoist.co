@@ -1,0 +1,42 @@
+// RUN: choreo -t topscc -es -arch=gcu300 %s -o - | FileCheck %s
+// RUN: cocc -t topscc -es -arch=gcu300 %s -o - | FileCheck %s --check-prefix=COIR
+// RUN: choreo -t topscc -es -arch=gcu300 --no-map-hoist %s -o - | FileCheck %s --check-prefix=NO_HOIST
+
+// A loop-invariant buffer.map inside a foreach must be hoisted out of the
+// loop, so the map is emitted exactly once BEFORE the loop and its matching
+// unmap sinks out of the loop and is emitted exactly once AFTER it. When
+// --no-map-hoist is passed, the map must stay inside the loop instead.
+
+#include "choreo.h"
+
+__co__ s32 [128] buffer_map_hoist(s32 [128] input) {
+  s32[input.span] output;
+
+  parallel p by 1 {
+    local s32[|input.span|] local_out;
+    foreach {i} in [|input.span|] {
+      mapped_input = input.map<local>(0, |input.span|);
+      local_out.at(i) = mapped_input.data.at(i) + 2;
+    }
+    dma.copy local_out => output;
+  }
+
+  return output;
+}
+
+// CHECK: tops::map_mem_m(
+// CHECK-NOT: tops::map_mem_m(
+// CHECK: for (__iv_i = 0; __iv_i < 128; ++__iv_i) {
+// CHECK-NOT: tops::unmap_mem_m(
+// CHECK: } // i
+// CHECK: tops::unmap_mem_m(
+
+// COIR: tops::map_mem_m(
+// COIR-NOT: tops::map_mem_m(
+// COIR: for (
+// COIR-NOT: tops::unmap_mem_m(
+// COIR: }
+// COIR: tops::unmap_mem_m(
+
+// NO_HOIST: for (__iv_i = 0; __iv_i < 128; ++__iv_i) {
+// NO_HOIST: tops::map_mem_m(

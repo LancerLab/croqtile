@@ -1,0 +1,14 @@
+// RUN: choreo --show-assess -t topscc -es -arch=gcu300 %s 2>&1 | FileCheck %s
+// REQUIRES: TARGET-GCUALL
+
+// GCU buffer.map/remap size check: a symbolic mapped size must produce a
+// runtime assertion rather than a compile-time error.
+
+__co__ void map_dynamic(s32 [N] input) {
+  parallel p by 1 {
+    m = input.map<local>(0, N);
+  }
+}
+
+// CHECK: runtime ({{.*}}map_dynamic{{.*}}N * 4) <= 268435456)
+// CHECK: On GCU300, the size of data mapped by buffer.map/remap cannot exceed 268435456 bytes.

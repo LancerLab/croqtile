@@ -236,6 +236,8 @@ Option<bool> debug_vectorize(OptionKind::Hidden, "--debug-vectorize", "-dvec",
                              false, "debug loop vectorization process.");
 Option<bool> no_vectorize(OptionKind::Hidden, "--no-vectorize", "-nm", false,
                           "Do not vectorize any foreach loop.");
+Option<bool> no_map_hoist(OptionKind::Hidden, "--no-map-hoist", "-nmh", false,
+                          "Do not hoist loop-invariant buffer.map statements.");
 Option<bool> vectorize(OptionKind::Hidden, "--vectorize", "-vec", false,
                        "Enable loop vectorization.");
 Option<size_t> max_local_mem_capacity(
@@ -457,6 +459,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetTraceValueNumbers(print_vn.GetValue());
   CCtx().SetTraceVectorize(debug_vectorize.GetValue());
   CCtx().SetNoVectorize(no_vectorize.GetValue());
+  CCtx().SetNoMapHoist(no_map_hoist.GetValue());
   CCtx().SetVectorize(vectorize.GetValue());
   CCtx().SetShowSourceLocation(!no_show_source.GetValue());
   CCtx().SetMemReuse(mem_reuse.GetValue());

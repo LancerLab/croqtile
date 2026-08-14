@@ -1182,38 +1182,48 @@ ReferredSymbols(AST::Node* n, const VisitorWithScope* v = nullptr) {
       res.insert(r.begin(), r.end());
     }
   } else if (auto ca = dyn_cast<AST::ChunkAt>(n)) {
-    for (auto& sop : ca->AllOperations()) {
-      if (auto t = dyn_cast<AST::SOP::Tiling>(sop)) {
-        auto r = ReferredSymbols(t->GetTilingFactors().get(), v);
+    // Base data symbol, present even for operation-less ChunkAt.
+    if (v)
+      res.insert(v->InScopeName(ca->RefSymbol()));
+    else
+      res.insert(ca->RefSymbol());
+    // Array subscript indices.
+    auto r_idx = ReferredSymbols(ca->indices.get(), v);
+    res.insert(r_idx.begin(), r_idx.end());
+    // Every span operation contributes its referred nodes (tiling factors,
+    // subspan, indices, strides, steps, offsets, and reshape shapes).
+    for (auto& sop : ca->AllOperations())
+      for (auto& rn : sop->ReferredNodes()) {
+        auto r = ReferredSymbols(rn.get(), v);
         res.insert(r.begin(), r.end());
-      } else if (auto t = dyn_cast<AST::SOP::TileAt>(sop)) {
-        auto r0 = ReferredSymbols(t->GetTilingFactors().get(), v);
-        res.insert(r0.begin(), r0.end());
-        auto r1 = ReferredSymbols(t->GetIndices().get(), v);
-        res.insert(r1.begin(), r1.end());
-      } else if (auto t = dyn_cast<AST::SOP::SubSpan>(sop)) {
-        auto r0 = ReferredSymbols(t->GetSubSpan().get(), v);
-        res.insert(r0.begin(), r0.end());
-        auto r1 = ReferredSymbols(t->GetIndices().get(), v);
-        res.insert(r1.begin(), r1.end());
-        auto r2 = ReferredSymbols(t->GetStrides().get(), v);
-        res.insert(r2.begin(), r2.end());
-      } else if (auto t = dyn_cast<AST::SOP::View>(sop)) {
-        auto r0 = ReferredSymbols(t->GetSubSpan().get(), v);
-        res.insert(r0.begin(), r0.end());
-        auto r1 = ReferredSymbols(t->GetOffsets().get(), v);
-        res.insert(r1.begin(), r1.end());
-        auto r2 = ReferredSymbols(t->GetStrides().get(), v);
-        res.insert(r2.begin(), r2.end());
-      } else if (auto t = dyn_cast<AST::SOP::Reshape>(sop)) {
-        auto r0 = ReferredSymbols(t->GetNewSpan().get(), v);
-        res.insert(r0.begin(), r0.end());
       }
+  } else if (auto c = dyn_cast<AST::Call>(n)) {
+    auto rf = ReferredSymbols(c->function.get(), v);
+    res.insert(rf.begin(), rf.end());
+    auto ra = ReferredSymbols(c->arguments.get(), v);
+    res.insert(ra.begin(), ra.end());
+    auto rt = ReferredSymbols(c->template_args.get(), v);
+    res.insert(rt.begin(), rt.end());
+  } else if (auto da = dyn_cast<AST::DataAccess>(n)) {
+    auto rd = ReferredSymbols(da->data.get(), v);
+    res.insert(rd.begin(), rd.end());
+    auto ri = ReferredSymbols(da->indices.get(), v);
+    res.insert(ri.begin(), ri.end());
+  } else if (auto ii = dyn_cast<AST::IntIndex>(n)) {
+    auto rv = ReferredSymbols(ii->Val().get(), v);
+    res.insert(rv.begin(), rv.end());
+  } else if (auto it = dyn_cast<AST::IntTuple>(n)) {
+    auto rv = ReferredSymbols(it->GetValues().get(), v);
+    res.insert(rv.begin(), rv.end());
+  } else if (auto ms = dyn_cast<AST::MultiDimSpans>(n)) {
+    if (!ms->ref_name.empty()) {
       if (v)
-        res.insert(v->InScopeName(ca->RefSymbol()));
+        res.insert(v->InScopeName(ms->ref_name));
       else
-        res.insert(ca->RefSymbol());
+        res.insert(ms->ref_name);
     }
+    auto rl = ReferredSymbols(ms->list.get(), v);
+    res.insert(rl.begin(), rl.end());
   }
 
   return res;
