@@ -22,7 +22,11 @@ Croqtile provides two scalar types:
 - **`int`** -- 32-bit signed integer, used for program control. Supports all standard arithmetic, shift, and logical operations with C++ syntax.
 - **`bool`** -- Boolean type, identical to C++ `bool`. Conversion between `int` and `bool` follows C++ rules.
 
-Croqtile does not provide unsigned scalar integers or other bit widths (8, 16, 64) as scalar types. These are not needed for program control in the tileflow domain. For data element types, see *fundamental types* below.
+The `int` and `bool` scalar types are for program control only. Croqtile does
+not provide unsigned or wider scalar control types; the other bit widths and
+unsigned types are provided by the *fundamental types* below, which are data
+element types (usable as scalar variables or spanned data) rather than control
+scalars.
 
 ### Immutability
 
@@ -64,7 +68,7 @@ Fundamental types describe the element type of spanned data. They can declare sc
 Note: `s32` and `int` are distinct. `s32` is a fundamental type for data elements; `int` is a scalar type for program control. They cannot be interconverted.
 
 ```choreo
-s32 a;          // error: fundamental type cannot declare a standalone variable
+s32 a = 5;      // OK: fundamental type declares a scalar variable
 s32 [10] buf;   // OK: fully-typed spanned data
 int x = 5;      // OK: scalar for control
 ```

@@ -21,11 +21,25 @@ Macros are expanded before Croqtile compilation, producing statically-shaped til
 
 ### Function-Like Macros
 
-Function-like macros (with parameters) are **not supported**:
+Function-like macros (with parameters) are supported and expanded during
+Croqtile preprocessing, including nested definitions where one macro's body
+references another:
 
-```cpp
-#define MAX(a, b) (((a) > (b)) ? (a) : (b))  // will not work in Croqtile
+```choreo
+#define ADD(a, b) (a + b)
+#define SUB(a, b) (a - b)
+#define NESTED_ADD(a, b) ADD(ADD(a, b), b)
+
+__co__ void foo(f32 [128] a) {
+  foreach {i} in [a.span(0)] {
+    a.at(i) = NESTED_ADD(a.at(i), 1.0f);
+  }
+}
 ```
+
+Arguments are substituted textually into the macro body before Croqtile
+compilation. As in C/C++, parenthesize parameters and bodies to avoid
+precedence surprises after expansion.
 
 ## Comments
 
@@ -57,7 +71,13 @@ __co__ void foo() {
 #endif
 ```
 
-Supported directives: `#if`, `#ifdef`, `#ifndef`, `#else`, `#endif`, `#define`.
+Supported directives: `#define`, `#undef`, `#if`, `#ifdef`, `#ifndef`,
+`#elif`, `#else`, `#endif`.
+
+`#include` is **not** expanded by Croqtile preprocessing. Quote-style
+`#include "..."` lines are passed through to the C++ preprocessor; Croqtile
+only follows them to collect `__cok__` device-kernel blocks from the included
+files. Angle-bracket `#include <...>` is not followed at all.
 
 ## Preprocessing Order
 
@@ -75,13 +95,19 @@ The Croqtile preprocessor only processes code inside tileflow functions (`__co__
 
 ## Pre-Defined Target Macros
 
-The Croqtile preprocessor defines target-specific macros to support conditional compilation:
+The Croqtile preprocessor defines target-specific macros through each target's
+`ChoreoMacros` hook. Only targets that override it provide macros:
 
 | Macro | Defined When |
 |-------|-------------|
-| `__CUDA__` | Targeting CUDA/CuTe |
-| `__CUDA_ARCH__` | Inside CUDA device code compilation |
+| `__CHOREO_TARGET_AMDGPU__` | Targeting AMDGPU/HIP |
+| `__CHOREO_AMDGPU_ARCH__` | Targeting AMDGPU (set to the arch name) |
 
-These can be used in both tileflow and host code for target-specific paths.
+These can be used in tileflow code for target-specific paths.
+
+Macros such as `__CUDA__`, `__CUDA_ARCH__`, and `__CHOREO_TARGET_CUTE__` are
+**not** defined by the Croqtile preprocessor. They are provided later by the
+target toolchain: nvcc defines `__CUDA__`/`__CUDA_ARCH__`, and the code
+generator passes `__CHOREO_TARGET_CUTE__` to nvcc as a `-D` flag.
 
 *(Reference: `tests/pp/`, `tests/pp/ifdef.co`, `tests/pp/cond_define0.co`)*
