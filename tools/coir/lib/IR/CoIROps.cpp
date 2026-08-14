@@ -991,10 +991,26 @@ mlir::LogicalResult AsmOp::verify() {
            << ") must match number of output operands ("
            << getOutOperands().size() << ")";
 
+  // outSymbolicNames and outOperands must match in length
+  if (getOutSymbolicNames().size() != getOutOperands().size())
+    return emitOpError()
+           << "number of output symbolic names ("
+           << getOutSymbolicNames().size()
+           << ") must match number of output operands ("
+           << getOutOperands().size() << ")";
+
   // inConstraints and inOperands must match in length
   if (getInConstraints().size() != getInOperands().size())
     return emitOpError()
            << "number of input constraints (" << getInConstraints().size()
+           << ") must match number of input operands ("
+           << getInOperands().size() << ")";
+
+  // inSymbolicNames and inOperands must match in length
+  if (getInSymbolicNames().size() != getInOperands().size())
+    return emitOpError()
+           << "number of input symbolic names ("
+           << getInSymbolicNames().size()
            << ") must match number of input operands ("
            << getInOperands().size() << ")";
 

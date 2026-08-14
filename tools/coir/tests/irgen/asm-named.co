@@ -1,0 +1,21 @@
+// RUN: co2ir -t cute %s | FileCheck %s
+
+// IRGen test: verify GCC extended asm named operands (symbolic names)
+// propagate to the coir.asm op as inSymbolicNames / outSymbolicNames.
+
+__co__ auto test_named(s32 val) {
+  s32 result;
+  parallel p by 1 {
+    __asm__ volatile(
+      "mov %[dst], %[src]"
+      : [dst] "=r"(result)
+      : [src] "r"(val)
+    );
+  }
+  return result;
+}
+
+// CHECK: coir.asm
+// CHECK-SAME: inSymbolicNames = ["src"]
+// CHECK-SAME: outSymbolicNames = ["dst"]
+// CHECK-SAME: templateStr = "mov %[dst], %[src]"

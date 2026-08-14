@@ -45,6 +45,33 @@ __co__ s32 [1] test_readwrite(s32 val) {
   return output;
 }
 
+// Named operands (symbolic names) referenced as %[dst] / %[src].
+__co__ s32 [1] test_named_copy(s32 val) {
+  s32[1] output;
+  parallel p by 1 {
+    __asm__ volatile(
+      "mov.u32 %[dst], %[src];"
+      : [dst] "=r"(output.at(p))
+      : [src] "r"(val)
+      : "memory"
+    );
+  }
+  return output;
+}
+
+// Named read-write operand ("+r") referenced by a single symbolic name.
+__co__ s32 [1] test_named_readwrite(s32 val) {
+  s32[1] output;
+  parallel p by 1 {
+    output.at(p) = val;
+    __asm__(
+      "mov.u32 %[x], %[x];"
+      : [x] "+r"(output.at(p))
+    );
+  }
+  return output;
+}
+
 int main() {
   auto r1 = test_volatile_copy(42);
   choreo::choreo_assert(r1[0] == 42, "volatile copy should return 42");
@@ -54,6 +81,12 @@ int main() {
 
   auto r3 = test_readwrite(99);
   choreo::choreo_assert(r3[0] == 99, "read-write move should return 99");
+
+  auto r4 = test_named_copy(42);
+  choreo::choreo_assert(r4[0] == 42, "named copy should return 42");
+
+  auto r5 = test_named_readwrite(7);
+  choreo::choreo_assert(r5[0] == 7, "named read-write should return 7");
 
   printf("All GPU asm tests passed.\n");
   return 0;

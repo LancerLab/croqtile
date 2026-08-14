@@ -1323,6 +1323,8 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
       os << " : ";
       for (size_t i = 0; i < asm_stmt->outputOperands.size(); ++i) {
         if (i > 0) os << ", ";
+        if (!asm_stmt->outputOperands[i]->symbolicName.empty())
+          os << "[" << asm_stmt->outputOperands[i]->symbolicName << "] ";
         os << "\"" << asm_stmt->outputOperands[i]->constraint << "\"("
            << PSTR(asm_stmt->outputOperands[i]->expression) << ")";
       }
@@ -1331,6 +1333,8 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
       os << " : ";
       for (size_t i = 0; i < asm_stmt->inputOperands.size(); ++i) {
         if (i > 0) os << ", ";
+        if (!asm_stmt->inputOperands[i]->symbolicName.empty())
+          os << "[" << asm_stmt->inputOperands[i]->symbolicName << "] ";
         os << "\"" << asm_stmt->inputOperands[i]->constraint << "\"("
            << PSTR(asm_stmt->inputOperands[i]->expression) << ")";
       }

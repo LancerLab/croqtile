@@ -7917,8 +7917,53 @@ bool CuteCodeGen::Visit(AST::AsmStmt& n) {
     return tgt.LowerAsmOperand(ExprSTR(op->expression, IsHost()));
   };
 
+  // nvcc (CUDA) inline asm supports only positional operand references
+  // (%0, %1, ...), not GCC symbolic names (%[name]).  When any operand
+  // carries a symbolic name, lower the template and drop the [name]
+  // prefixes so the emitted CUDA source is positional.
+  std::string asmTemplate = n.templateStr;
+  bool hasSymbolicNames = false;
+  for (auto& op : n.outputOperands)
+    if (!op->symbolicName.empty()) hasSymbolicNames = true;
+  for (auto& op : n.inputOperands)
+    if (!op->symbolicName.empty()) hasSymbolicNames = true;
+  if (hasSymbolicNames) {
+    auto SymbolicIndex = [&](const std::string& name) -> int {
+      int idx = 0;
+      for (auto& op : n.outputOperands) {
+        if (op->symbolicName == name) return idx;
+        ++idx;
+      }
+      for (auto& op : n.inputOperands) {
+        if (op->symbolicName == name) return idx;
+        ++idx;
+      }
+      return -1;
+    };
+    std::string lowered;
+    lowered.reserve(asmTemplate.size());
+    for (size_t i = 0; i < asmTemplate.size();) {
+      if (asmTemplate[i] == '%' && i + 1 < asmTemplate.size() &&
+          asmTemplate[i + 1] == '[') {
+        size_t close = asmTemplate.find(']', i + 2);
+        if (close != std::string::npos) {
+          std::string name = asmTemplate.substr(i + 2, close - (i + 2));
+          int idx = SymbolicIndex(name);
+          if (idx >= 0) {
+            lowered += "%" + std::to_string(idx);
+            i = close + 1;
+            continue;
+          }
+        }
+      }
+      lowered += asmTemplate[i];
+      ++i;
+    }
+    asmTemplate = lowered;
+  }
+
   IndStream() << (n.isVolatile ? "asm volatile(" : "asm(");
-  IndStream() << "\"" << n.templateStr << "\"";
+  IndStream() << "\"" << asmTemplate << "\"";
 
   bool hasOutputs = !n.outputOperands.empty();
   bool hasInputs = !n.inputOperands.empty();

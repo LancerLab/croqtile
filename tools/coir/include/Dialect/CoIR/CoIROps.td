@@ -864,8 +864,10 @@ def AsmOp : CoIR_Op<"asm", [AttrSizedOperandSegments]> {
     StrAttr:$templateStr,
     OptionalAttr<BoolAttr>:$isVolatile,
     StrArrayAttr:$outConstraints,
+    StrArrayAttr:$outSymbolicNames,
     Variadic<AnyType>:$outOperands,
     StrArrayAttr:$inConstraints,
+    StrArrayAttr:$inSymbolicNames,
     Variadic<AnyType>:$inOperands,
     StrArrayAttr:$clobbers
   );

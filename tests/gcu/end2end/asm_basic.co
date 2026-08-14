@@ -117,6 +117,24 @@ __co__ auto asm_rw_lz_at(s32 [1] x) {
   return z;
 }
 
+// Test 8: named operands (symbolic names) with read-write and input names.
+// lz.at(i) = lz.at(i) + ly.data.at(i) via l.adda.u, referenced by name.
+__co__ auto asm_named_add(s32 [1] x, s32 [1] y) {
+  s32 [x.span] z;
+  parallel p by 1 {
+    lx = dma.copy x.chunkat(p) => local;
+    ly = dma.copy y.chunkat(p) => local;
+    local s32 [lx.span] lz;
+    foreach {i} in [lx.span(0)] {
+      lz.at(i) = lx.data.at(i);
+      __asm__ volatile("l.adda.u %[acc], %[acc], %[val]"
+        : [acc] "+r"(lz.at(i)) : [val] "r"(ly.data.at(i)) : "memory");
+    }
+    dma.copy lz => z.chunkat(p);
+  }
+  return z;
+}
+
 int main() {
   // Test 1: matching constraint xor: 0x0F ^ 0xF0 = 0xFF
   {
@@ -175,6 +193,16 @@ int main() {
     auto az = asm_rw_lz_at(ax.view());
     choreo::choreo_assert(az[0] == 0,
         "rw lz.at(i) xor self: 99^99 should be 0");
+  }
+
+  // Test 8: named rw add: 40 + 2 = 42
+  {
+    auto ax = choreo::make_spandata<choreo::s32>(1);
+    auto ay = choreo::make_spandata<choreo::s32>(1);
+    ax[0] = 40; ay[0] = 2;
+    auto az = asm_named_add(ax.view(), ay.view());
+    choreo::choreo_assert(az[0] == 42,
+        "named rw operand add: 40+2 should be 42");
   }
 
   std::cout << "Test asm_basic Passed" << std::endl;
