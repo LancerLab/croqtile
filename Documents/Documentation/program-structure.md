@@ -54,6 +54,9 @@ Any function prefixed with `__co__` is a **Croqtile function**. The compiler tra
 __co__ auto foo(f32 [M, K] input) { ... }
 ```
 
+`__co__` functions may also be primary function templates or full
+specializations. See [Choreo Function Templates](function-templates.md).
+
 ### `__cok__` -- Separated Device Code Block
 
 For targets that use the *separate source compilation model* (e.g., OpenCL-style), device code must be wrapped in a `__cok__` block. The compiler extracts this block into a separate compilation unit.

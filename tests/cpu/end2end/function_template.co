@@ -1,0 +1,44 @@
+// REQUIRES: TARGET-CPU
+// RUN: choreo -gs %target %s | bash -s -- --execute | FileCheck --match-full-lines %s
+
+template <typename T, int N = 4, bool AddOne = true>
+__co__ void initialize(T [N] output) {
+  if constexpr (__is_same<T, s32> && AddOne && N == 4) {
+    foreach i in N
+      output.at(i) = i + 1;
+  } else {
+    // A return in a void Choreo function is a semantic error. This inactive
+    // branch must disappear before the ordinary semantic pipeline runs.
+    return;
+  }
+}
+
+template <>
+__co__ void initialize<f32, 4, false>(f32 [4] output) {
+  if constexpr (__is_same<f32, f16>) {
+    return;
+  } else {
+    output.at(0) = 0.5f;
+    output.at(1) = 1.5f;
+    output.at(2) = 2.5f;
+    output.at(3) = 3.5f;
+  }
+}
+
+template __co__ initialize<s32>;
+
+int main() {
+  auto ints = choreo::make_spandata<choreo::s32>(4);
+  auto floats = choreo::make_spandata<choreo::f32>(4);
+
+  initialize<choreo::s32>(ints.view());
+  initialize<float, 4, false>(floats.view());
+
+  for (int i = 0; i < 4; ++i)
+    std::cout << ints[i] << ":" << floats[i] << std::endl;
+}
+
+// CHECK: 1:0.5
+// CHECK: 2:1.5
+// CHECK: 3:2.5
+// CHECK: 4:3.5

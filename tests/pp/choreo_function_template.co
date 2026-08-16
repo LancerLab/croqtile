@@ -1,0 +1,54 @@
+// RUN: copp %s -o - | grep -v "\<CHECK\>" | FileCheck %s
+// RUN: test "$(copp %s -o - | sha256sum)" = "$(copp %s -o - | sha256sum)"
+// RUN: choreo -t cc --print-features | grep -qx FUNCTION_TEMPLATES
+
+template <typename T, int N = 8, bool Enabled = true>
+__co__ void transform(T [N] data) {
+  static_assert(N > 0, "N must be positive");
+  if constexpr (__is_same<T, f32> && (1 / 0)) {
+    primary_first_inactive_branch = unknown_symbol;
+  } else if constexpr (__is_same<T, f16> && (N == 8 || (1 / 0)) && Enabled) {
+    primary_selected_token
+  } else {
+    primary_inactive_branch = unknown_symbol;
+  }
+}
+
+template <>
+__co__ void transform<f32, 8, false>(f32 [8] data) {
+  if constexpr (__is_same<f32, f16> && (1 / 0)) {
+    specialized_inactive_branch = unknown_symbol;
+  } else {
+    T = specialization_identifier_preserved;
+    specialization_selected_token
+  }
+}
+
+template __co__
+transform<f16>;
+template __co__ transform<f16, 8, true>;
+
+template <typename Low>
+__co__ void low_precision_alias(Low [1] data) {}
+
+template __co__ low_precision_alias<f8_e4m3>;
+
+// CHECK-NOT: {{inactive_branch|unknown_symbol}}
+// CHECK-NOT: static_assert
+// CHECK: __co__ void __choreo_template_transform_{{[0-9a-f]+}}(f32 [8] data)
+// CHECK: if (true) {
+// CHECK: T = specialization_identifier_preserved;
+// CHECK: specialization_selected_token
+// CHECK-NOT: {{inactive_branch|unknown_symbol}}
+// CHECK: __co__ void __choreo_template_transform_{{[0-9a-f]+}}(f16 [8] data)
+// CHECK: primary_selected_token
+// CHECK-NOT: {{inactive_branch|unknown_symbol}}
+// CHECK: template <typename T, int N = 8, bool Enabled = true, typename... __ChoreoArgs>
+// CHECK: std::is_same<T, float>::value && N == 8 && Enabled == false
+// CHECK: std::is_same<T, choreo::f16>::value && N == 8 && Enabled == true
+// CHECK: std::forward<__ChoreoArgs>(__choreo_args)...
+// CHECK: Choreo template 'transform' was not explicitly instantiated
+// CHECK-NOT: {{inactive_branch|unknown_symbol}}
+// CHECK-NOT: template __co__
+// CHECK: template <typename Low, typename... __ChoreoArgs>
+// CHECK: std::is_same<Low, choreo::f8_e4m3>::value

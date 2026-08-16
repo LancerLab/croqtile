@@ -15,6 +15,7 @@
 #include <string>
 #include <memory>
 #include "ast.hpp"
+#include "choreo_template.hpp"
 #include "symtab.hpp"
 #include "scanner.hpp"
 #include "parser.tab.hh"
@@ -88,14 +89,24 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
 %%
 <INITIAL,KERNEL,CO_FUNC,DEVICE_FUNC>{
     #line[ \t]+([0-9]+)[ \t]+\"([^\"]*)\" {
+      std::string directive(yytext);
       handle_line_directive(yytext);
+      if (YY_START == INITIAL)
+        return Choreo::Parser::make_HOST_CODE(directive, loc);
     }
     #line[ \t]+([0-9]+) {
+      std::string directive(yytext);
       handle_line_directive(yytext);
+      if (YY_START == INITIAL)
+        return Choreo::Parser::make_HOST_CODE(directive, loc);
     }
 }
 
 <INITIAL>{
+  "// __choreo_template_instance "{id} {
+    constexpr size_t marker_size = sizeof("// __choreo_template_instance ") - 1;
+    Choreo::SetActiveChoreoTemplateInstance(std::string(yytext + marker_size));
+  }
   "//".*   {
     if (Choreo::Scanner::KeepComments())
       return Choreo::Parser::make_HOST_CODE(yytext, loc);

@@ -117,8 +117,8 @@ Option<bool> dump_fence_insertion(
 
 Option<bool>
     print_features(OptionKind::User, "--print-features", "", false,
-                   "Print the supported features for the selected target "
-                   "and exit. One feature per line (upper-cased).");
+                   "Print the supported language and target features and "
+                   "exit. One feature per line (upper-cased).");
 Option<bool> verbose(OptionKind::User, "--verbose", "-v", false,
                      "Display the programs invoked by the compiler.");
 Option<bool> inhibit_warning(OptionKind::User, "-w", "", false,
@@ -377,6 +377,7 @@ bool CommandLine::Parse(int argc, char** argv) {
     auto& tgt = CCtx().GetTarget();
     auto arch_id =
         arch.GetValue().empty() ? tgt.DefaultArch() : ToLower(arch.GetValue());
+    std::cout << "FUNCTION_TEMPLATES\n";
     for (auto& ft : tgt.SupportedFeatures(arch_id))
       std::cout << ToUpper(ft.name) << "\n";
     exit(0);

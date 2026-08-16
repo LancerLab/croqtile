@@ -1,0 +1,13 @@
+// RUN: not copp %s -o - 2>&1 | FileCheck %s
+
+template <int N>
+__co__ void require_message(s32 [N] data) {
+  static_assert(N > 0, N);
+}
+
+template __co__ require_message<16>;
+
+// CHECK: {{.*}}choreo_function_template_static_assert_message_error.co:5.3: error: Choreo 'static_assert' message must be a string literal
+// CHECK-NEXT: {{  }}static_assert(N > 0, N);
+// CHECK-NEXT: {{  }}^
+// CHECK: {{.*}}choreo_function_template_static_assert_message_error.co:8.1: note: in instantiation of Choreo template 'require_message<16>' requested here

@@ -1,0 +1,23 @@
+// RUN: choreo -es -t cute -arch=sm_80 %s -o - | FileCheck %s
+
+template <typename T, int N = 4>
+__co__ void template_fill(T [N] output) {
+  parallel p by N {
+    if constexpr (__is_same<T, s32>) {
+      output.at(p) = 7;
+    } else {
+      output.at(p) = 2.5f;
+    }
+  }
+}
+
+template __co__ template_fill<s32>;
+template __co__ template_fill<f32>;
+
+// CHECK-DAG: __global__ void __choreo_device___choreo_template_template_fill_{{[0-9a-f]+}}(int * output)
+// CHECK-DAG: __global__ void __choreo_device___choreo_template_template_fill_{{[0-9a-f]+}}(float * output)
+// CHECK: template <typename T, int N = 4, typename... __ChoreoArgs>
+// CHECK: std::is_same<T, int>::value && N == 4
+// CHECK: std::forward<__ChoreoArgs>(__choreo_args)...
+// CHECK: std::is_same<T, float>::value && N == 4
+// CHECK: std::forward<__ChoreoArgs>(__choreo_args)...

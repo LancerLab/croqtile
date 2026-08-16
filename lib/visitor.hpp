@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 #include "ast.hpp"
+#include "choreo_template.hpp"
 #include "colors.hpp"
 #include "infra_utils.hpp"
 #include "loc.hpp"
@@ -245,6 +246,10 @@ public:
 
   virtual const std::string& GetName() { return name; }
   const std::string& GetNameConst() const { return name; }
+  virtual const std::string& CurrentFunctionName() const {
+    static const std::string empty;
+    return empty;
+  }
 
   virtual void CollectNames(std::vector<std::string>& names) const {
     names.push_back(name);
@@ -377,6 +382,13 @@ public:
   // short-hand: emit error with the error count incremented by 1
   void Error1(const location& loc, const std::string& message) const {
     Error(loc, message);
+    if (auto* instance = FindChoreoTemplateInstance(CurrentFunctionName())) {
+      Note(location(instance->filename,
+                    static_cast<int>(instance->request_line),
+                    static_cast<int>(instance->request_column)),
+           "in instantiation of Choreo template '" + instance->display_name +
+               "' requested here");
+    }
     error_count++;
   }
 
@@ -568,7 +580,7 @@ public:
     return Visitor::AfterVisit(n);
   }
 
-  const std::string& CurrentFunctionName() const { return fname; }
+  const std::string& CurrentFunctionName() const override { return fname; }
 
 public:
   VisitorWithScope(const std::string& n,

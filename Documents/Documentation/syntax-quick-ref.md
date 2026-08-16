@@ -9,6 +9,17 @@
 | `__co_device__` | Croqtile-style device function |
 | `__device__` | Target-native device function (e.g., CUDA) |
 
+## Choreo Function Templates
+
+| Syntax | Description |
+|--------|-------------|
+| `template <typename T, int N, bool B> __co__ ...` | Primary template |
+| `template __co__ foo<f16, 64, true>;` | Explicit concrete instance |
+| `template <> __co__ ... foo<f16, 64, true>(...)` | Full specialization |
+| `if constexpr (condition) { ... } else { ... }` | Compile-time branch |
+| `__is_same<T, f16>` | Compare Choreo scalar types |
+| `static_assert(condition, "message");` | Reject an invalid instance |
+
 ## Scalar Types
 
 | Type | Description |

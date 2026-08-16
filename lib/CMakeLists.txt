@@ -100,6 +100,7 @@ set(CL_SOURCES
 )
 
 set(PP_SOURCES
+  choreo_template.cpp
   preprocess.cpp
 )
 

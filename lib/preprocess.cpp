@@ -1,5 +1,6 @@
 #include "preprocess.hpp"
 #include "aux.hpp"
+#include "choreo_template.hpp"
 #include "context.hpp"
 #include "fs_utils.hpp"
 #include "io.hpp"
@@ -31,7 +32,8 @@ static const std::string trim(const std::string& str) {
   return str.substr(first, last - first + 1);
 }
 
-Preprocess::Preprocess(std::ostream& o) : output(o), debug(debugPP) {
+Preprocess::Preprocess(std::ostream& o)
+    : final_output(o), output(template_input), debug(debugPP) {
   // Replicate the target-specific macros
   for (auto& macro : CCtx().GetTarget().ChoreoMacros(CCtx().GetArch()))
     globalDefines.emplace(macro.first, macro.second);
@@ -935,6 +937,13 @@ void Preprocess::HandleOneUserLine(const std::string& line) {
   bool changed = true;
   while (changed) { sline = SubstituteGlobalMacroFuncs(sline, changed); }
 
+  // This is a declaration, not the beginning of a __co__ function body. Keep
+  // it in the buffered source for the template expansion step below.
+  if (IsChoreoTemplateInstantiation(sline)) {
+    if (!uc_skip_line) output << sline << '\n';
+    return;
+  }
+
   // Check if entering a __co__ function
   if (sline.find("__co__ ") != std::string::npos) {
     if (kernel_brace_count) {
@@ -1505,6 +1514,8 @@ bool Preprocess::ExtractDeviceKernel(std::ostream& cok_ss) {
 }
 
 bool Preprocess::Process(std::istream& input) {
+  template_input.str("");
+  template_input.clear();
   code_partition = CP_USER;
   std::string cur_line;
   std::string line_to_handle;
@@ -1568,20 +1579,25 @@ bool Preprocess::Process(std::istream& input) {
 
   if (co_if_count || uc_if_count) {
     errs() << "copp: in line " << line_num << ": error: missing '#endif'.\n";
+    final_output << template_input.str();
     return false;
   }
 
   if (kernel_brace_count) {
     errs() << "copp: in line " << line_num
            << ": error: un-terminated '__cok__' code is detected.\n";
+    final_output << template_input.str();
     return false;
   }
 
   if (choreo_brace_count) {
     errs() << "copp: in line " << line_num
            << ": error: un-terminated '__co__' function is detected.\n";
+    final_output << template_input.str();
     return false;
   }
 
-  return true;
+  return ExpandChoreoTemplates(
+      template_input.str(), final_output,
+      OptionRegistry::GetInstance().GetInputFileName());
 }

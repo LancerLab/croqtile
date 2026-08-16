@@ -1,0 +1,11 @@
+// RUN: not copp %s -o - 2>&1 | FileCheck %s
+
+template <typename T>
+__co__ void partial(T value) {}
+
+template <typename T>
+__co__ void partial<T>(T value) {}
+
+// CHECK: {{.*}}choreo_function_template_partial_error.co:6.1: error: partial Choreo template specialization is not supported
+// CHECK-NEXT: template <typename T>
+// CHECK-NEXT: ^

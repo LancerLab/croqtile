@@ -326,8 +326,10 @@ bool EarlySemantics::Visit(AST::Expr& n) {
              (n.op == Op::Div) || (n.op == Op::Mod) || (n.op == Op::CeilDiv)) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    if (!lty || !rty)
-      choreo_unreachable("expect the both types to be not nullptr.");
+    if (!lty || !rty) {
+      SetNodeType(n, MakeUnknownType());
+      return false;
+    }
     bool is_mutable = IsMutable(*lty) || IsMutable(*rty);
     if (isa<NoValueType>(lty)) {
       Error1(n.GetL()->LOC(),

@@ -83,6 +83,7 @@ struct PBAttributes {
 #include <cstring>
 #include <memory>
 #include "ast.hpp"
+#include "choreo_template.hpp"
 #include "symtab.hpp"
 #include "scanner.hpp"
 
@@ -3174,16 +3175,26 @@ void Parser::error(const location &loc , const std::string &message) {
          << ((should_use_colors()) ? color_reset : "");
   errs() << message << "\n";
 
-  if (!CCtx().ShowSourceLocation()) return;
+  if (CCtx().ShowSourceLocation()) {
+    std::string error_line = CCtx().GetSourceLine(loc.begin.line);
+    if (!error_line.empty()) {
+      errs() << "  " << error_line << "\n";
 
-  std::string error_line = CCtx().GetSourceLine(loc.begin.line);
-  if (!error_line.empty()) {
-    errs() << "  " << error_line << "\n";
+      int col = CCtx().MapExpandedColToOriginal(loc.begin.line,
+                                                loc.begin.column);
+      errs() << "  ";
+      for (int i = 1; i < col; ++i) errs() << " ";
+      errs() << "^" << "\n";
+    }
+  }
 
-    int col = CCtx().MapExpandedColToOriginal(loc.begin.line, loc.begin.column);
-    errs() << "  ";
-    for (int i = 1; i < col; ++i) errs() << " ";
-    errs() << "^" << "\n";
+  if (auto* instance = FindActiveChoreoTemplateInstance(
+          loc.begin.filename, static_cast<size_t>(loc.begin.line))) {
+    Choreo::info(location(instance->filename,
+                          static_cast<int>(instance->request_line),
+                          static_cast<int>(instance->request_column)),
+                 "in instantiation of Choreo template '" +
+                     instance->display_name + "' requested here");
   }
 
   pctx.recordError();

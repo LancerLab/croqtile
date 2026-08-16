@@ -1,0 +1,7 @@
+// RUN: not copp %s -o - 2>&1 | FileCheck %s
+
+  template __co__ missing<f16, 64>;
+
+// CHECK: {{.*}}choreo_function_template_error.co:3.3: error: explicit instantiation of undefined Choreo template 'missing'
+// CHECK-NEXT: {{    }}template __co__ missing<f16, 64>;
+// CHECK-NEXT: {{    }}^

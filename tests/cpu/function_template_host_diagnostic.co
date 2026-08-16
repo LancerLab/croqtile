@@ -1,0 +1,16 @@
+// REQUIRES: TARGET-CPU
+// RUN: not choreo %target %s -o %t 2>&1 | FileCheck %s
+
+template <typename T>
+__co__ void initialize_one(T [1] output) {
+  output.at(0) = 1;
+}
+
+template __co__ initialize_one<s32>;
+
+int main() {
+  auto output = choreo::make_spandata<choreo::f32>(1);
+  initialize_one<float>(output.view());
+}
+
+// CHECK: {{.*}}function_template_host_diagnostic.co:13:{{[0-9]+}}: {{.*}}Choreo template 'initialize_one' was not explicitly instantiated

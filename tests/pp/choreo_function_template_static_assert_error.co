@@ -1,0 +1,16 @@
+// RUN: not copp %s -o - 2>&1 | FileCheck %s
+
+template <typename T, int N>
+__co__ void require_aligned(T [N] data) {
+  static_assert(N % 16 == 0, "N must be a multiple of 16");
+}
+
+template __co__ require_aligned<f16, 12>;
+
+// CHECK: {{.*}}choreo_function_template_static_assert_error.co:5.3: error: static assertion failed for 'require_aligned<f16, 12>': N must be a multiple of 16
+// CHECK-NEXT: {{  }}static_assert(N % 16 == 0, "N must be a multiple of 16");
+// CHECK-NEXT: {{  }}^
+// CHECK: {{.*}}choreo_function_template_static_assert_error.co:8.1: note: in instantiation of Choreo template 'require_aligned<f16, 12>' requested here
+// CHECK-NEXT: template __co__ require_aligned<f16, 12>;
+// CHECK-NEXT: ^
+// CHECK-NOT: __choreo_template_require_aligned_
