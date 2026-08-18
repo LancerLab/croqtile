@@ -82,6 +82,19 @@ TEST_F(OptionTest, DescriptionPrint) {
   ASSERT_EQ(registry.ReturnCode(), 0);
 }
 
+TEST_F(OptionTest, HelpWithFilter) {
+  OptionRegistry& registry = OptionRegistry::GetInstance();
+  Option<bool> filteredOpt(OptionKind::User, "--filter-verbose-xyz", "-fvz",
+                           false, "Verbose filtering test option.");
+
+  const char* argv[] = {"program", "--help=verbose"};
+  int argc = sizeof(argv) / sizeof(argv[0]);
+
+  ASSERT_EQ(registry.Parse(argc, const_cast<char**>(argv)), false);
+  ASSERT_EQ(registry.Message(), std::string(""));
+  ASSERT_EQ(registry.ReturnCode(), 0);
+}
+
 TEST_F(OptionTest, RejectsUnknownDashOption) {
   OptionRegistry& registry = OptionRegistry::GetInstance();
   Option<bool> knownOpt(OptionKind::User, "--known", "-k", false,

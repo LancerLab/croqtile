@@ -197,10 +197,13 @@ public:
 
     std::string arg = argv[i];
     auto option = arg;
-    if (auto pos = option.find("="); pos != std::string::npos)
+    std::string opt_value;
+    if (auto pos = option.find("="); pos != std::string::npos) {
+      opt_value = arg.substr(pos + 1);
       option = arg.substr(0, pos);
+    }
     if (option == "--help" || option == "-H") {
-      Help(OptionKind::User);
+      Help(OptionKind::User, opt_value);
       return false;
     } else if (option == "--help-target") {
       std::cout << "The supported compile targets including: ";
@@ -270,13 +273,23 @@ public:
   std::string GetInputFileName() { return input_filename; }
 
 public:
-  void Help(OptionKind ok) {
+  void Help(OptionKind ok, const std::string& filter = "") {
     std::cout << "Usage: choreo [options] file...\n";
     std::cout << "Options:\n";
-    std::cout << "  " << std::setw(26) << std::left << "--help"
-              << "Display this information.\n";
-    std::cout << "  " << std::setw(26) << std::left << "--help-hidden"
-              << "Display hidden options.\n";
+
+    // `--help=<filter>` lists only options whose name, alias, or description
+    // contains <filter> (case-insensitive), mirroring gcc/clang's `--help=...`.
+    auto matches = [&filter](const std::string& text) {
+      return filter.empty() ||
+             ToLower(text).find(ToLower(filter)) != std::string::npos;
+    };
+
+    if (matches("--help Display this information."))
+      std::cout << "  " << std::setw(26) << std::left << "--help"
+                << "Display this information.\n";
+    if (matches("--help-hidden Display hidden options."))
+      std::cout << "  " << std::setw(26) << std::left << "--help-hidden"
+                << "Display hidden options.\n";
 
     // apply
     std::vector<std::string> keys;
@@ -293,7 +306,7 @@ public:
 
       if ((int)option->kind <= (int)ok) {
         auto desc = option->Description();
-        if (!desc.empty()) std::cout << desc << "\n";
+        if (!desc.empty() && matches(desc)) std::cout << desc << "\n";
       }
     }
     std::cout << "\n";
