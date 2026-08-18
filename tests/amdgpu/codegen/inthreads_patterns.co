@@ -17,7 +17,7 @@ __co__ void inthreads_async_test(f32 [64] a) {
 // CHECK: } // end inthreads
 // CHECK: if ((__vid_tid_x >= 32)) { // inthreads.async
 // CHECK: } // end inthreads
-// CHECK: __syncwarp();
+// CHECK: __builtin_amdgcn_wave_barrier();
 
 // --- Sync inthreads with barrier ---
 __co__ void inthreads_sync_test(f32 [64] a) {

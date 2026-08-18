@@ -792,8 +792,8 @@ void CoIREmitterBase::emitTensorAlloc(TensorAllocOp op) {
         std::string qualifier = getAllocQualifier(tensorTy);
         lastSpmName = "__spm_" + std::to_string(nextId++);
         int align = needsTMAAlignment(tensorTy) ? 128 : 16;
-        os() << getIndent() << qualifier << "alignas(" << align
-             << ") unsigned char "
+        os() << getIndent() << "alignas(" << align << ") " << qualifier
+             << "unsigned char "
              << lastSpmName << "[" << spmBytes << "];\n";
       }
     }
@@ -812,8 +812,8 @@ void CoIREmitterBase::emitTensorAlloc(TensorAllocOp op) {
     totalBytes *= (elemBits / 8);
     std::string qualifier = getAllocQualifier(tensorTy);
     int align = needsTMAAlignment(tensorTy) ? 128 : 16;
-    os() << getIndent() << qualifier << "alignas(" << align
-         << ") unsigned char "
+    os() << getIndent() << "alignas(" << align << ") " << qualifier
+         << "unsigned char "
          << name << "[" << totalBytes << "];\n";
     lastSpmName = name;
     return;
@@ -836,7 +836,7 @@ void CoIREmitterBase::emitTensorAlloc(TensorAllocOp op) {
   if (needsTMAAlignment(tensorTy)) {
     int64_t totalBytes =
         totalElems * (tensorTy.getElementType().getIntOrFloatBitWidth() / 8);
-    os() << getIndent() << qualifier << "alignas(128) unsigned char "
+    os() << getIndent() << "alignas(128) " << qualifier << "unsigned char "
          << name << "_storage[" << totalBytes << "];\n";
     os() << getIndent() << emitElementType(tensorTy.getElementType())
          << "* " << name << " = ("

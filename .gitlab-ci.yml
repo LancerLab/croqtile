@@ -106,7 +106,7 @@ amdgpu_test:
   script:
     - echo "Running tests with AMDGPU..."
     - make debug
-    - ./tests/lit.sh tests/amdgpu/
+    - ./tests/lit.sh --only-target=amdgpu tests/amdgpu/
   tags:
     - AMDGPU
   allow_failure: true

@@ -17,7 +17,8 @@ __co__ void test_basic_nop() {
 }
 
 // Test asm with output and input operands (copy scalar via asm).
-__co__ void test_operand_copy(s32 val, s32 [1] result) {
+__co__ s32 [1] test_operand_copy(s32 val) {
+  s32 [1] result;
   parallel p by 1 {
     s32 r;
     __asm__ volatile(
@@ -27,10 +28,12 @@ __co__ void test_operand_copy(s32 val, s32 [1] result) {
     );
     result.at(p) = r;
   }
+  return result;
 }
 
 // Test asm with named operands (symbolic names) instead of %0/%1.
-__co__ void test_named_copy(s32 val, s32 [1] result) {
+__co__ s32 [1] test_named_copy(s32 val) {
+  s32 [1] result;
   parallel p by 1 {
     s32 r;
     __asm__ volatile(
@@ -40,18 +43,17 @@ __co__ void test_named_copy(s32 val, s32 [1] result) {
     );
     result.at(p) = r;
   }
+  return result;
 }
 
 int main() {
   test_volatile_nop();
   test_basic_nop();
 
-  auto result = choreo::make_spandata<choreo::s32>(1);
-  test_operand_copy(42, result.view());
+  auto result = test_operand_copy(42);
   choreo::choreo_assert(result[0] == 42, "operand copy should return 42");
 
-  auto named = choreo::make_spandata<choreo::s32>(1);
-  test_named_copy(42, named.view());
+  auto named = test_named_copy(42);
   choreo::choreo_assert(named[0] == 42, "named operand copy should return 42");
 
   printf("All AMDGPU asm tests passed.\n");

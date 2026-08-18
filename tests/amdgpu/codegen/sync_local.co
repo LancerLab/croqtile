@@ -12,5 +12,5 @@ __co__ void sync_levels(s32 [64] a) {
   }
 }
 
-// CHECK: __syncwarp()
+// CHECK: __builtin_amdgcn_wave_barrier()
 // CHECK: __threadfence_block()

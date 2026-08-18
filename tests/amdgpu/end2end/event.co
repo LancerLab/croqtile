@@ -1,6 +1,7 @@
-// RUN: choreo -es -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+// REQUIRES: TARGET-AMDGPU
+// RUN: choreo -gs %target %amdgpu_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
-// Event E2E: verify event declaration and codegen compiles with HIP.
+// Event E2E: verify event declaration and codegen compiles and runs on HIP.
 // 256 threads = 4 wavefronts on gfx1030.
 // Producer wavefronts (0-1, threads 0-127): write shared buf, trigger event.
 // Consumer wavefronts (2-3, threads 128-255): wait event, read buf.
@@ -24,7 +25,7 @@ __co__ auto event_cross_wf(s32 [256] a) {
   }
   return output;
 }
-// CHECK: PASSED
+// CHECK: event_cross_wf: PASSED
 
 int main() {
   auto a = choreo::make_spandata<choreo::s32>(256);

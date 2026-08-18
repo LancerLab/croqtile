@@ -9,10 +9,10 @@ __co__ auto histogram(s32 [256] input) {
     if (p < 16) {
       counts.at(p) = 0;
     }
-    sync.barrier : thread;
+    sync.barrier : block;
     mutable s32 bin = input.at(p) % 16;
     __atomic_add(counts.at(bin), 1);
-    sync.barrier : thread;
+    sync.barrier : block;
     if (p < 16) {
       output.at(p) = counts.at(p);
     }
@@ -29,10 +29,10 @@ __co__ auto reduce_minmax(s32 [128] input) {
       result.at(0) = 2147483647;
       result.at(1) = -2147483647;
     }
-    sync.barrier : thread;
+    sync.barrier : block;
     __atomic_min(result.at(0), input.at(p));
     __atomic_max(result.at(1), input.at(p));
-    sync.barrier : thread;
+    sync.barrier : block;
     if (p < 2) {
       output.at(p) = result.at(p);
     }
