@@ -3,10 +3,10 @@
 // Test: barrier at thread/group levels
 __co__ void test_barriers() {
   parallel bx by 1 : group {
-    // CHECK: __syncwarp()
+    // CHECK: __builtin_amdgcn_wave_barrier()
     sync.barrier : thread;
 
-    // CHECK: __syncwarp()
+    // CHECK: __builtin_amdgcn_wave_barrier()
     sync.barrier : group;
   }
 }

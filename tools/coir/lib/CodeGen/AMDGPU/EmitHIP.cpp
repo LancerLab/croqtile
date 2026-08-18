@@ -107,6 +107,11 @@ private:
   DenseMap<Value, unsigned> descValueToIndex;
   DenseMap<Value, SmallVector<Value, 4>> descRuntimeOffsets;
 
+  // Cooperative launch + device-global buffer hoisting state.
+  bool cooperativeLaunch = false;
+  llvm::SmallVector<Value, 4> globalBufferVals;
+  DenseMap<Value, std::string> globalBufferNames;
+
   std::string emitType(Type ty) override {
     if (auto tensorTy = dyn_cast<coir::TensorType>(ty))
       return emitElementType(tensorTy.getElementType()) + "*";
@@ -150,7 +155,8 @@ private:
   void emitHeader() {
     os() << "#define __CHOREO_TARGET_AMDGPU__ 1\n";
     os() << "#include \"choreo.h\"\n";
-    os() << "#include <hip/hip_runtime.h>\n\n";
+    os() << "#include <hip/hip_runtime.h>\n";
+    os() << "#include <hip/hip_cooperative_groups.h>\n\n";
   }
 
   std::string kernelDeviceName(StringRef name) {
@@ -196,6 +202,12 @@ private:
 
   std::string getAllocQualifier(coir::TensorType tty) override {
     return tty.getMemorySpace() == 1 ? "__shared__ " : "";
+  }
+
+  void emitTensorAlloc(TensorAllocOp op) override {
+    if (globalBufferNames.count(op.getResult()))
+      return; // hoisted to a kernel pointer parameter
+    CoIREmitterBase::emitTensorAlloc(op);
   }
 
   void emitOpFallback(mlir::Operation *op) override {
@@ -426,6 +438,87 @@ private:
     return coop;
   }
 
+  // Collect global (memorySpace == 0) tensor allocs that need device-global
+  // backing. Return values are excluded (they get dedicated out params).
+  void collectGlobalBuffers(KernelOp kernel) {
+    globalBufferVals.clear();
+    globalBufferNames.clear();
+
+    llvm::DenseSet<Value> returns;
+    auto &body = kernel.getBody();
+    if (!body.empty()) {
+      for (auto &op : body.front().getOperations()) {
+        if (auto ret = dyn_cast<KernelReturnOp>(op)) {
+          for (auto operand : ret.getOperands())
+            returns.insert(operand);
+        }
+      }
+    }
+
+    unsigned idx = 0;
+    kernel.getBody().walk([&](TensorAllocOp alloc) {
+      auto tty = cast<coir::TensorType>(alloc.getResult().getType());
+      if (tty.getMemorySpace() != 0)
+        return;
+      if (returns.count(alloc.getResult()))
+        return;
+      std::string name = "__gbuf" + std::to_string(idx++);
+      globalBufferNames[alloc.getResult()] = name;
+      globalBufferVals.push_back(alloc.getResult());
+      valueNames[alloc.getResult()] = name;
+    });
+  }
+
+  // Byte-size expression for a hoisted device-global buffer.
+  std::string globalBufferByteExpr(coir::TensorType tty,
+                                   llvm::ArrayRef<DimArgMeta> dimArgMeta) {
+    int64_t bytes = getTensorBytes(tty);
+    if (bytes >= 0)
+      return std::to_string(bytes) + "ULL";
+
+    unsigned elemBits = tty.getElementType().getIntOrFloatBitWidth();
+    unsigned elemBytes = elemBits > 8 ? (elemBits / 8) : 1;
+    std::string expr;
+    llvm::raw_string_ostream ss(expr);
+    ss << "(";
+    for (unsigned d = 0; d < tty.getShape().size(); ++d) {
+      if (d > 0) ss << " * ";
+      auto dim = tty.getShape()[d];
+      if (mlir::ShapedType::isDynamic(dim)) {
+        bool found = false;
+        for (auto &da : dimArgMeta) {
+          if (da.dimIdx == (int64_t)d) {
+            ss << "(size_t)p" << da.paramIdx << ".shape()[" << da.dimIdx
+               << "]";
+            found = true;
+            break;
+          }
+        }
+        if (!found) ss << "1";
+      } else {
+        ss << dim;
+      }
+    }
+    ss << ") * " << elemBytes << "ULL";
+    return expr;
+  }
+
+  void emitGlobalBufferAllocs(llvm::ArrayRef<DimArgMeta> dimArgMeta) {
+    for (auto val : globalBufferVals) {
+      auto tty = cast<coir::TensorType>(val.getType());
+      std::string eType = emitElementType(tty.getElementType());
+      std::string name = globalBufferNames[val];
+      os() << "  " << eType << "* " << name << "_dev = nullptr;\n";
+      os() << "  (void)hipMalloc(&" << name << "_dev, "
+           << globalBufferByteExpr(tty, dimArgMeta) << ");\n";
+    }
+  }
+
+  void emitGlobalBufferFrees() {
+    for (auto val : globalBufferVals)
+      os() << "  (void)hipFree(" << globalBufferNames[val] << "_dev);\n";
+  }
+
   LaunchDims getLaunchDims(KernelOp kernel) {
     LaunchDims dims;
     int64_t groupWarps = 0;
@@ -461,6 +554,8 @@ private:
     groupThreadScale = 0;
     dmaTokens.clear();
     prescanDescriptors(kernel);
+    cooperativeLaunch = isCooperativeLaunch(kernel);
+    collectGlobalBuffers(kernel);
 
     auto fnType = kernel.getFunctionType();
     auto symName = kernel.getSymName();
@@ -498,6 +593,12 @@ private:
       std::string name = "out" + std::to_string(i);
       os() << emitType(fnType.getResult(i)) << " " << name;
       returnParamNames[i] = name;
+      paramIdx++;
+    }
+    // Hoisted device-global buffers as kernel pointer parameters.
+    for (auto val : globalBufferVals) {
+      if (paramIdx > 0) os() << ", ";
+      os() << emitType(val.getType()) << " " << globalBufferNames[val];
       paramIdx++;
     }
     os() << ") {\n";
@@ -546,6 +647,8 @@ private:
   }
 
   void emitHostEntry(KernelOp kernel) override {
+    collectGlobalBuffers(kernel);
+
     auto fnType = kernel.getFunctionType();
     auto symName = kernel.getSymName();
     std::string devName = kernelDeviceName(symName);
@@ -594,6 +697,7 @@ private:
                << ".data(), " << bytes << "ULL, hipMemcpyHostToDevice);\n";
         }
       }
+      emitGlobalBufferAllocs(dimArgMeta);
 
       auto dims = getLaunchDims(kernel);
       auto dynShmem = getDynShmemExpr(kernel, dimArgMeta);
@@ -609,12 +713,22 @@ private:
                << " = (int)p" << da.paramIdx << ".shape()[" << da.dimIdx
                << "];\n";
         os() << "  void* __coop_args[] = {";
+        bool first = true;
         for (unsigned i = 0; i < numOrigInputs; ++i) {
-          if (i > 0) os() << ", ";
+          if (!first) os() << ", ";
           os() << "(void*)&p" << i << "__device";
+          first = false;
         }
-        for (auto &da : dimArgMeta)
-          os() << ", (void*)&__dim_" << da.paramIdx << "_" << da.dimIdx;
+        for (auto &da : dimArgMeta) {
+          if (!first) os() << ", ";
+          os() << "(void*)&__dim_" << da.paramIdx << "_" << da.dimIdx;
+          first = false;
+        }
+        for (auto val : globalBufferVals) {
+          if (!first) os() << ", ";
+          os() << "(void*)&" << globalBufferNames[val] << "_dev";
+          first = false;
+        }
         os() << "};\n";
         os() << "  hipLaunchCooperativeKernel((void*)" << devName
              << ", " << dims.gridStr() << ", " << dims.blockStr()
@@ -636,6 +750,8 @@ private:
         for (auto &da : dimArgMeta) {
           os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
         }
+        for (auto val : globalBufferVals)
+          os() << ", " << globalBufferNames[val] << "_dev";
         os() << ");\n";
       }
       if (!asyncLaunch) {
@@ -647,6 +763,7 @@ private:
 
       for (unsigned i = 0; i < numOrigInputs; ++i)
         os() << "  (void)hipFree(p" << i << "__device);\n";
+      emitGlobalBufferFrees();
       os() << "}\n\n";
       return;
     }
@@ -732,6 +849,7 @@ private:
       os() << "  (void)hipMalloc(&__result__device, " << resBytes
            << "ULL);\n";
     }
+    emitGlobalBufferAllocs(dimArgMeta);
 
     auto dims = getLaunchDims(kernel);
     auto dynShmem = getDynShmemExpr(kernel, dimArgMeta);
@@ -746,13 +864,25 @@ private:
              << " = (int)p" << da.paramIdx << ".shape()[" << da.dimIdx
              << "];\n";
       os() << "  void* __coop_args[] = {";
+      bool first = true;
       for (unsigned i = 0; i < numOrigInputs; ++i) {
-        if (i > 0) os() << ", ";
+        if (!first) os() << ", ";
         os() << "(void*)&p" << i << "__device";
+        first = false;
       }
-      for (auto &da : dimArgMeta)
-        os() << ", (void*)&__dim_" << da.paramIdx << "_" << da.dimIdx;
-      os() << ", (void*)&__result__device";
+      for (auto &da : dimArgMeta) {
+        if (!first) os() << ", ";
+        os() << "(void*)&__dim_" << da.paramIdx << "_" << da.dimIdx;
+        first = false;
+      }
+      if (!first) os() << ", ";
+      os() << "(void*)&__result__device";
+      first = false;
+      for (auto val : globalBufferVals) {
+        if (!first) os() << ", ";
+        os() << "(void*)&" << globalBufferNames[val] << "_dev";
+        first = false;
+      }
       os() << "};\n";
       os() << "  hipLaunchCooperativeKernel((void*)" << devName
            << ", " << dims.gridStr() << ", " << dims.blockStr()
@@ -774,7 +904,10 @@ private:
       for (auto &da : dimArgMeta) {
         os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
       }
-      os() << ", __result__device);\n";
+      os() << ", __result__device";
+      for (auto val : globalBufferVals)
+        os() << ", " << globalBufferNames[val] << "_dev";
+      os() << ");\n";
     }
     if (!asyncLaunch) {
       if (!streamName.empty())
@@ -793,6 +926,7 @@ private:
 
     for (unsigned i = 0; i < numOrigInputs; ++i)
       os() << "  (void)hipFree(p" << i << "__device);\n";
+    emitGlobalBufferFrees();
     os() << "  (void)hipFree(__result__device);\n";
     os() << "  return __result;\n";
     os() << "}\n\n";
@@ -1347,14 +1481,17 @@ private:
     auto scope = op.getScope();
     switch (scope) {
     case ParallelLevel::BLOCK:
-      os() << getIndent() << "__syncthreads();\n";
+      if (cooperativeLaunch)
+        os() << getIndent() << "cooperative_groups::this_grid().sync();\n";
+      else
+        os() << getIndent() << "__syncthreads();\n";
       break;
     case ParallelLevel::GROUP:
     case ParallelLevel::GROUPx4:
-      os() << getIndent() << "__syncwarp();\n";
+      os() << getIndent() << "__builtin_amdgcn_wave_barrier();\n";
       break;
     case ParallelLevel::THREAD:
-      os() << getIndent() << "__syncwarp();\n";
+      os() << getIndent() << "__builtin_amdgcn_wave_barrier();\n";
       break;
     default:
       llvm_unreachable("unexpected barrier scope");

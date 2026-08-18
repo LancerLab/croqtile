@@ -566,8 +566,12 @@ bool HIPCodeGen::Visit(AST::Barrier& n) {
   TraceEachVisit(n);
 
   switch (n.GetLevel()) {
-  case ParallelLevel::THREAD: ds << d_indent << "__syncwarp();\n"; break;
-  case ParallelLevel::GROUP: ds << d_indent << "__syncwarp();\n"; break;
+  case ParallelLevel::THREAD:
+    ds << d_indent << "__builtin_amdgcn_wave_barrier();\n";
+    break;
+  case ParallelLevel::GROUP:
+    ds << d_indent << "__builtin_amdgcn_wave_barrier();\n";
+    break;
   case ParallelLevel::BLOCK:
     if (!cooperative_stack_.empty() && cooperative_stack_.top()) {
       ds << d_indent << "cooperative_groups::this_grid().sync();\n";

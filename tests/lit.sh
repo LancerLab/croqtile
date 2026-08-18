@@ -637,6 +637,7 @@ requires_cudagdb=0
 expect_fail=
 expect_skip=
 req_features=()
+REQ_RAW_TARGETS=()
 
 choreo_target=""
 choreo_arch=""
@@ -648,6 +649,7 @@ dry_run=0
 sim_mode="off"
 run_only=""
 target_only=""
+only_target=""
 
 need_cute=0
 need_cuda=0
@@ -847,6 +849,7 @@ prepare() {
   done < "$file"
 
   set_clear REQ_TARGETS
+  REQ_RAW_TARGETS=()
 
   # If no REQUIRES line found, return early
   if [[ -z "$requires" ]]; then
@@ -861,6 +864,7 @@ prepare() {
   for token in $requires; do
     if [[ "$token" == TARGET-* ]]; then
       tgts+=("${token#TARGET-}")
+      REQ_RAW_TARGETS+=("$(toupper "${token#TARGET-}")")
     elif [[ "$token" == LIBRARY-* ]]; then
       libs+=("${token#LIBRARY-}")
     elif [[ "$token" == "DYNAMIC-SHAPE" ]]; then
@@ -1062,7 +1066,7 @@ execute_command() {
 #         Handle arguments
 # ---------------------------------------"
 if [ $# -lt 1 ]; then
-    echo "Usage: $0 [-jN] [--dry-run] [--sim=off|on|only] [--run-only=BIN] [--target-only=TGT] <file_or_directory>"
+    echo "Usage: $0 [-jN] [--dry-run] [--sim=off|on|only] [--run-only=BIN] [--target-only=TGT] [--only-target=TGT] <file_or_directory>"
     exit 1
 fi
 
@@ -1103,6 +1107,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --target-only=*)
       target_only="${1#*=}"
+      shift
+      ;;
+    --only-target=*)
+      only_target="$(echo "${1#*=}" | tr '[:lower:]' '[:upper:]' | tr ',' ' ')"
       shift
       ;;
     -*)
@@ -1246,6 +1254,21 @@ for _entry in "${files_array[@]}"; do
 
   # check requirement specified by the file
   prepare "$file" "$_cfg_override"
+
+  if [[ -n "$only_target" ]]; then
+    _only_target_matched=0
+    for _only_tgt in $only_target; do
+      if set_contains REQ_RAW_TARGETS "$_only_tgt"; then
+        _only_target_matched=1
+        break
+      fi
+    done
+    if [ "$_only_target_matched" -eq 0 ]; then
+      print_status_line "SKIP(NOT-TARGET ${only_target}):" "$file"
+      num_skiped=$(($num_skiped + 1));
+      continue;
+    fi
+  fi
 
   if [ ! -z "$expect_skip" ]; then
     _skip_reason="${expect_skip#*SKIP:}"
