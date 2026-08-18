@@ -35,6 +35,11 @@ static int device_template_bracket_scope = 0;
 extern Choreo::location loc;
 extern Choreo::Option<bool> analyze_device_functions;
 static std::string kernel_buffer; // buffering the kernel code
+static std::string top_device_buffer; // buffering a top-level device function
+static int top_device_paren = 0;
+static int top_device_brace = 0;
+static int top_device_angle = 0;
+static bool top_device_saw_brace = false;
 static std::string rawstr_delimiter;
 static std::string rawstr_buffer;
 static std::string analyze_free_buffer;
@@ -64,7 +69,7 @@ static bool accumulate_expr_buffer = false;
 
 %}
 
-%x CO_FUNC DEVICE_FUNC KERNEL REAL_KERNEL MDSPAN_SUGER RAW_STRING TEMPLATE PB_ATTR
+%x CO_FUNC DEVICE_FUNC KERNEL REAL_KERNEL MDSPAN_SUGER RAW_STRING TEMPLATE PB_ATTR TOP_DEVICE_FUNC
 
 id          [a-zA-Z_][a-zA-Z0-9_]*
 num         (0|[1-9][0-9]*)[uU]?[lL]{0,2}
@@ -115,6 +120,17 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
       Error(loc, "unexpected kernel code (mustn't be inside of existing scope).");
     Choreo::Scanner::Debug("Begin Kernel code");
   }
+  "__device__"|"__co_device__" {
+    if (scope != 0)
+      Error(loc, "unexpected device function (mustn't be inside of existing scope).");
+    top_device_buffer = yytext;
+    top_device_paren = 0;
+    top_device_brace = 0;
+    top_device_angle = 0;
+    top_device_saw_brace = false;
+    BEGIN(TOP_DEVICE_FUNC);
+    Choreo::Scanner::Debug("Begin top-level device function");
+  }
   . {
     Choreo::Scanner::Debug("token (char): " + std::string(yytext));
     return Choreo::Parser::make_HOST_CODE(yytext, loc);
@@ -149,6 +165,47 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
              return res;
            }
 } // state <KERNEL>
+
+<TOP_DEVICE_FUNC>{
+  {cstr}      { top_device_buffer += yytext; }
+  '([^'\\]|\\.)*' { top_device_buffer += yytext; }
+  "//".*      { top_device_buffer += yytext; }
+  {comments}  { top_device_buffer += yytext; }
+  "("         { top_device_paren++; top_device_buffer += yytext; }
+  ")"         { if (top_device_paren > 0) top_device_paren--;
+                top_device_buffer += yytext; }
+  "<"         { top_device_angle++; top_device_buffer += yytext; }
+  ">"         { if (top_device_angle > 0) top_device_angle--;
+                top_device_buffer += yytext; }
+  "{"         { top_device_brace++; top_device_saw_brace = true;
+                top_device_buffer += yytext; }
+  "}"         { top_device_buffer += yytext;
+                if (top_device_brace > 0) top_device_brace--;
+                if (top_device_brace == 0 && top_device_saw_brace) {
+                  BEGIN(INITIAL);
+                  auto res = Choreo::Parser::make_DEVICE_CODE(top_device_buffer, loc);
+                  top_device_buffer = "";
+                  return res;
+                }
+              }
+  ";"         { top_device_buffer += yytext;
+                if (top_device_brace == 0 && top_device_paren == 0 &&
+                    top_device_angle == 0) {
+                  BEGIN(INITIAL);
+                  auto res = Choreo::Parser::make_DEVICE_CODE(top_device_buffer, loc);
+                  top_device_buffer = "";
+                  return res;
+                }
+              }
+  \n+         { top_device_buffer += yytext; }
+  <<EOF>>     { Choreo::Scanner::Error(loc, "missing '}' for the top-level device function.");
+                BEGIN(INITIAL);
+                auto res = Choreo::Parser::make_DEVICE_CODE(top_device_buffer, loc);
+                top_device_buffer = "";
+                return res;
+              }
+  .           { top_device_buffer += yytext; }
+} // state <TOP_DEVICE_FUNC>
 
 <REAL_KERNEL>{
   "{"         { scope++; }
