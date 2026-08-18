@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GCU300+
 // RUN: choreo -gs -t topscc %s | bash -s -- --execute | FileCheck --match-full-lines %s
-// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 __device__ void relu_kernel(float* input, float* out, int m, int n) {
