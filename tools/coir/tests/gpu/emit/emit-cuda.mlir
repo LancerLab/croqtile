@@ -1,4 +1,4 @@
-// RUN: coir-opt --coir-classify-copies --coir-lower-mma --coir-lower-copy --coir-emit-cuda %s | FileCheck %s
+// RUN: coir-opt --coir-lower-mma --coir-lower-copy --coir-emit-cuda %s | FileCheck %s
 
 module attributes { "coir.has_tma" = true, "coir.mma_target" = "wgmma" } {
 

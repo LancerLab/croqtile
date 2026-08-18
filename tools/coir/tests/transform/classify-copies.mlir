@@ -1,6 +1,6 @@
-// ClassifyCopies now validates TMA usage only (DataCopyOp was removed).
-// Verify that dma.copy/element.copy pass through unchanged.
-// RUN: coir-opt --coir-classify-copies %s | FileCheck %s
+// Verify that dma.copy/element.copy parse and verify unchanged now that
+// TMA validation moved into the coir.tma.copy op verifier.
+// RUN: coir-opt %s | FileCheck %s
 
 // CHECK-LABEL: coir.kernel @test_dma_copy_passthrough
 // CHECK: coir.dma.copy

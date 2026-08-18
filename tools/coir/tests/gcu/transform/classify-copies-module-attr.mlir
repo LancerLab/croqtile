@@ -1,9 +1,7 @@
-// Test ClassifyCopies driven by module attributes (the target interface path).
-// Module attrs are set by the driver from Target::HasTMA()/HasDMA().
-//
-// GCU target: has_dma=true, has_tma=false
-// Verify dma.copy and element.copy pass through; tma.copy would be rejected.
-// RUN: coir-opt --coir-classify-copies %s | FileCheck %s
+// GCU target: has_dma=true, has_tma=false.
+// dma.copy and element.copy verify cleanly; a coir.tma.copy would be rejected
+// by the op verifier (see transform/tma-copy-verifier.mlir).
+// RUN: coir-opt %s | FileCheck %s
 
 module attributes {coir.target = "topscc", coir.arch = "gcu300",
                    coir.has_tma = false, coir.has_dma = true} {

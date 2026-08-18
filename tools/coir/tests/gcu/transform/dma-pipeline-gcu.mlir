@@ -1,7 +1,7 @@
 // End-to-end DMA pipeline test for GCU target.
-// Runs classify-copies -> lower-dma-desc -> hoist-dma-config in sequence.
+// Runs lower-dma-desc -> hoist-dma-config in sequence.
 //
-// RUN: coir-opt --coir-classify-copies --coir-lower-dma-desc --coir-hoist-dma-config %s | FileCheck %s
+// RUN: coir-opt --coir-lower-dma-desc --coir-hoist-dma-config %s | FileCheck %s
 
 module attributes {coir.target = "topscc", coir.arch = "gcu300",
                    coir.has_tma = false, coir.has_dma = true} {

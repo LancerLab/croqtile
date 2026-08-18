@@ -35,28 +35,6 @@ def Cleanup : Pass<"coir-cleanup"> {
   let dependentDialects = ["::mlir::arith::ArithDialect"];
 }
 
-def ClassifyCopies : Pass<"coir-classify-copies"> {
-  let summary = "Validate copy ops against target capabilities";
-  let description = [{
-    Validates that coir.tma.copy ops are supported by the target.
-    If the target lacks TMA (coir.has_tma = false or absent), any
-    coir.tma.copy op triggers a compile-time error.
-
-    coir.dma.copy and coir.element.copy pass through unchanged.
-
-    Target capabilities are read from module attributes set by the
-    driver via Target::HasTMA() / Target::HasDMA():
-
-    - "coir.has_tma" (bool) -- target has TMA hardware
-    - "coir.has_dma" (bool) -- target has DMA engine for cross-level
-      transfers (global<->shared, global<->local, shared<->local)
-  }];
-
-  let constructor = "::coir::createClassifyCopiesPass()";
-
-  let dependentDialects = ["::coir::CoIRDialect"];
-}
-
 def LowerMMA : Pass<"coir-lower-mma"> {
   let summary = "Lower coir.mma ops to target-specific MMA instructions";
   let description = [{

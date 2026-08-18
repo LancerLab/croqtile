@@ -1,6 +1,5 @@
-// Test ClassifyCopies with SM90 module attributes (TMA enabled).
-// Verify tma.copy is accepted when has_tma=true.
-// RUN: coir-opt --coir-classify-copies %s | FileCheck %s
+// coir.tma.copy is accepted by the op verifier when coir.has_tma = true.
+// RUN: coir-opt %s | FileCheck %s
 
 // GPU SM90 module: has_tma=true, has_dma=false
 module attributes {coir.target = "cute", coir.arch = "sm_90a",

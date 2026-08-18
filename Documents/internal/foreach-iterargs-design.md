@@ -173,7 +173,8 @@ foreach_result#2 -> mapped to "fb"      (last iteration's new-fb token)
 After IRGen, the DMA lowering decomposes `coir.dma.copy` into a descriptor
 pipeline. The passes run in order:
 
-1. **ClassifyCopies** -- validates TMA usage against target capability
+1. **TMA support validation** -- handled by the `coir.tma.copy` op verifier
+   (rejects `tma.copy` when `coir.has_tma = false`)
 2. **LowerDMADesc** -- decomposes ALL global<->shared DmaCopyOp/TmaCopyOp:
    - `dma.copy %tile to %buf` becomes:
      - `dma.const.desc %base_src, %base_dst` (geometry, loop-invariant)

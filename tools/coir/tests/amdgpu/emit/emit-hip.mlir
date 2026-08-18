@@ -1,4 +1,4 @@
-// RUN: coir-opt --coir-classify-copies --coir-lower-copy --coir-emit-hip %s | FileCheck %s
+// RUN: coir-opt --coir-lower-copy --coir-emit-hip %s | FileCheck %s
 
 module attributes { "coir.has_tma" = false, "coir.has_dma" = false, "coir.mma_target" = "" } {
 
