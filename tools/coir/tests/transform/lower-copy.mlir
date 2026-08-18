@@ -1,5 +1,5 @@
 // RUN: coir-opt --coir-lower-copy %s | FileCheck %s
-// RUN: coir-opt --coir-classify-copies --coir-lower-copy %s | FileCheck %s --check-prefix=PIPE
+// RUN: coir-opt --coir-lower-copy %s | FileCheck %s --check-prefix=PIPE
 
 module attributes { "coir.has_tma" = true } {
 

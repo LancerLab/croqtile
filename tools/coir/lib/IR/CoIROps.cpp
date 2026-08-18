@@ -564,6 +564,21 @@ void TmaCopyOp::print(OpAsmPrinter &printer) {
   printAsyncCopyOp(printer, *this, getSource(), getDest());
 }
 
+LogicalResult TmaCopyOp::verify() {
+  // Lenient when the attribute is absent: this verifier runs during ASTIRGen
+  // op construction, before StampTargetOnModule stamps "coir.has_tma".
+  // verify-each re-runs it afterward, when a `false` value correctly fails.
+  auto module = (*this)->getParentOfType<mlir::ModuleOp>();
+  if (!module)
+    return success();
+  auto attr = module->getAttrOfType<BoolAttr>("coir.has_tma");
+  if (!attr || attr.getValue())
+    return success();
+  return emitOpError(
+      "requires TMA support but target does not provide it; "
+      "use dma.copy instead or target a TMA-capable architecture");
+}
+
 //===----------------------------------------------------------------------===//
 // CoIRWhileOp
 //===----------------------------------------------------------------------===//

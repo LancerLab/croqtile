@@ -574,6 +574,7 @@ def TmaCopyOp : CoIR_Op<"tma.copy", []> {
   );
   let results = (outs CoIR_AsyncTokenTypeC:$token);
   let hasCustomAssemblyFormat = 1;
+  let hasVerifier = 1;
 }
 
 def ElementCopyOp : CoIR_Op<"element.copy", []> {

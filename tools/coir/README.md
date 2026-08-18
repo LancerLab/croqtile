@@ -51,7 +51,7 @@ To disable the automatic LLVM download, pass `-DCOIR_AUTO_DOWNLOAD_LLVM=OFF`.
 ./build/tools/coir/coir-gen test.co > test.mlir
 
 # Run optimization passes
-./build/tools/coir/coir-opt --coir-classify-copies --coir-lower-mma --coir-lower-copy test.mlir -o lowered.mlir
+./build/tools/coir/coir-opt --coir-lower-mma --coir-lower-copy test.mlir -o lowered.mlir
 
 # Emit C++ source
 ./build/tools/coir/coir-codegen lowered.mlir
@@ -61,7 +61,6 @@ To disable the automatic LLVM download, pass `-DCOIR_AUTO_DOWNLOAD_LLVM=OFF`.
 
 | Pass | Description |
 |------|-------------|
-| `--coir-classify-copies` | Validate copy ops against target capabilities (reject unsupported TMA) |
 | `--coir-lower-mma` | Lower `coir.mma.*` ops to target-specific MMA instructions |
 | `--coir-lower-copy` | Lower specialized copy ops to transfer/sync sequences |
 | `--coir-emit-cuda` | Emit CUDA/C++ source from lowered CoIR IR |

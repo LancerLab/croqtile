@@ -102,7 +102,6 @@ bool Pipeline::Lower() {
       module_->getAttrOfType<mlir::StringAttr>("coir.target");
   bool not_cc = !targetAttr || targetAttr.getValue() != "cc";
 
-  pm.addPass(coir::createClassifyCopiesPass());
   if (not_cc) {
     pm.addPass(coir::createLowerDMADescPass());
     pm.addPass(coir::createHoistDMAConfigPass());
