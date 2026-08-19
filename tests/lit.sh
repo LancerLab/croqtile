@@ -139,6 +139,25 @@ set_print() {
     printf '\n'
 }
 
+# Whether the required arch targets include a non-sim arch this machine can
+# actually run. The simulator's base arch (the arch portion of a sim-* target)
+# counts only when no real device is present.
+native_arch_matches() {
+  set_contains REQ_TARGETS "$mach" && return 0
+  if [[ "$device_type" == "none" ]]; then
+    set_contains REQ_TARGETS "${simulator#sim-}" && return 0
+  fi
+  return 1
+}
+
+# Whether the required arch targets can be satisfied by the machine or an
+# explicitly-requested simulator target.
+target_arch_matches() {
+  native_arch_matches && return 0
+  set_contains REQ_TARGETS "$simulator" && return 0
+  return 1
+}
+
 # ---- hook registry for target configure----
 
 # Hooks stored as newline-separated "PHASE FUNC" pairs
@@ -1325,8 +1344,7 @@ for _entry in "${files_array[@]}"; do
 
   # Skip whole file early when required targets cannot match current machine/simulator.
   if ! set_empty REQ_TARGETS; then
-    _sim_base="${simulator#sim-}"
-    if [[ $device_type == "none" && "$simulator" == "none" ]] || ! { set_contains REQ_TARGETS "$mach" || set_contains REQ_TARGETS "$simulator" || set_contains REQ_TARGETS "$_sim_base";  }; then
+    if [[ $device_type == "none" && "$simulator" == "none" ]] || ! target_arch_matches; then
       _all_skipped_targets=$(set_print REQ_TARGETS)
       print_status_line "SKIP($(toupper "${_all_skipped_targets}")):" "${file}"
       num_skiped=$(($num_skiped + 1));
@@ -1349,8 +1367,7 @@ for _entry in "${files_array[@]}"; do
   # are allowed through since they can run without a simulator.
   if [[ $sim_mode == "off" ]]; then
     if set_contains_prefix REQ_TARGETS "sim-"; then
-      _sim_base="${simulator#sim-}"
-      if ! set_contains REQ_TARGETS "$mach" && ! set_contains REQ_TARGETS "$_sim_base"; then
+      if ! native_arch_matches; then
         _all_skipped_targets=$(set_print REQ_TARGETS)
         print_status_line "SKIP(sim=off):" "${file}"
         num_skiped=$(($num_skiped + 1));
@@ -1436,7 +1453,7 @@ for _entry in "${files_array[@]}"; do
     # requires specific device to run
     if ! set_empty REQ_TARGETS; then
       #echo "device: $device_type, reqs: $(set_print REQ_TARGETS), mach: $mach"
-      if [[ $device_type == "none" && "$simulator" == "none" ]] || ! { set_contains REQ_TARGETS "$mach" || set_contains REQ_TARGETS "$simulator" || set_contains REQ_TARGETS "$_sim_base";  }; then
+      if [[ $device_type == "none" && "$simulator" == "none" ]] || ! target_arch_matches; then
         # Not matched, skip
         _all_skipped_targets=$(set_print REQ_TARGETS)
         print_status_line "SKIP($(toupper "${_all_skipped_targets}")):" "${file} ($run_count of $run_num)"
