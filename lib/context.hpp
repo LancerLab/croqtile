@@ -462,6 +462,19 @@ struct AssessmentStats {
   size_t elem_access_runtime = 0;
   size_t loop_bound_runtime = 0;
   size_t hw_constraint_runtime = 0;
+
+  // Automatic DMA fence-insertion statistics (gated by --collect-stats).
+  struct FenceStats {
+    size_t inserted = 0;        // auto fences emitted (producer + consumer)
+    size_t producer_fences = 0; // producer-side auto fences emitted
+    size_t consumer_fences = 0; // consumer-side auto fences emitted
+    size_t elided = 0;          // edges where no fence was required
+    size_t auto_fences = 0;     // compiler-inserted fence nodes
+    size_t explicit_fences = 0; // user-written sync.fence nodes seen
+    // Per-kind auto-inserted fence counts (keyed by FenceKind).
+    std::map<FenceKind, size_t> by_kind;
+  };
+  FenceStats fence_stats;
 };
 
 /// Print the assessment/assertion statistics section to stderr.

@@ -26,6 +26,7 @@ __*
 .local.mk
 tests/standalone/*.test
 tests/standalone/*.cutest
+tests/standalone/*/*.test
 tests/sdk/build/
 sdk-install/
 

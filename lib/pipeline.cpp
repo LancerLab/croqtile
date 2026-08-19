@@ -93,8 +93,10 @@ void ASTPipeline::PrintPassTimings(const std::vector<PassTimingEntry>& timings,
          << sep << "\n"
          << "                      ... Pass Execution Timing ...\n"
          << sep << "\n";
-  errs() << std::right << std::setw(10) << "Time (ms)" << "  " << std::setw(6)
-         << "  %" << "  " << "Pass\n";
+  errs() << std::right << std::setw(10) << "Time (ms)"
+         << "  " << std::setw(6) << "  %"
+         << "  "
+         << "Pass\n";
   errs() << std::string(40, '-') << "\n";
   for (const auto& e : timings) {
     double pct = total_ms > 0 ? (e.ms / total_ms) * 100.0 : 0.0;
@@ -107,7 +109,8 @@ void ASTPipeline::PrintPassTimings(const std::vector<PassTimingEntry>& timings,
   errs() << std::right << std::setw(10) << std::fixed << std::setprecision(2)
          << total_ms << "  " << std::setw(5) << "100.0"
          << "%"
-         << "  " << "Total\n";
+         << "  "
+         << "Total\n";
   errs() << sep << "\n";
 }
 
@@ -370,4 +373,14 @@ void Choreo::PrintAssessmentStats(const AssessmentStats& s) {
   row(s.elem_access_runtime, "Runtime assertions (element-access)");
   row(s.loop_bound_runtime, "Runtime assertions (loop-bound)");
   row(s.hw_constraint_runtime, "Runtime assertions (hw-constraint)");
+  errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
+         << "\n";
+  row(s.fence_stats.inserted, "Auto DMA fences inserted");
+  row(s.fence_stats.producer_fences, "Auto DMA fences (producer)");
+  row(s.fence_stats.consumer_fences, "Auto DMA fences (consumer)");
+  row(s.fence_stats.elided, "DMA fences elided (no fence required)");
+  row(s.fence_stats.auto_fences, "Compiler-inserted fence nodes");
+  row(s.fence_stats.explicit_fences, "Explicit sync.fence nodes");
+  for (const auto& kind_count : s.fence_stats.by_kind)
+    row(kind_count.second, kind_count.first.Name().c_str());
 }

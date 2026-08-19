@@ -2,6 +2,7 @@
 #define __CHOREO_GCU_TARGET_HPP__
 
 #include "context.hpp"
+#include "gcu_fence.hpp"
 #include "target.hpp"
 #include "target_registry.hpp"
 
@@ -88,6 +89,13 @@ public:
     // GCU MMU maps a 2MB-aligned window of global memory into the L3 address
     // space; a single mapping spans 2MB..256MB (see kernel_rt krt/mmu.h).
     return 256ull * 1024 * 1024;
+  }
+
+  // DMA fence-insertion table (plan section 4). See SelectGCUDMAFences.
+  FenceSelection SelectDMAFences(const ArchId& arch, Storage src,
+                                 Storage dst) const override {
+    (void)arch;
+    return SelectGCUDMAFences(src, dst);
   }
 
   // Per-architecture limits for parallel-by levels.

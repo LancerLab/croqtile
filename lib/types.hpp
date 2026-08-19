@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <vector>
 
 // to avoid definition error
 namespace Choreo {
@@ -479,6 +480,140 @@ inline static const std::string STR(Storage st) {
 inline static const std::string STR(ParallelLevel pl) {
   return __internal__::GetStringFrom(pl);
 }
+
+/// The agent whose memory accesses a fence orders. THREADS is the executing
+/// threads (the generic proxy); DMA and TMA are data-movement engines (a
+/// cooperative or async copy vs. the tensor bulk engine); MMA is the
+/// matrix-multiply accelerator (wgmma); ALL is entity-agnostic and orders
+/// every agent that touches the space (the full scope fences).
+enum class FenceEntity {
+  THREADS,
+  DMA,
+  TMA,
+  MMA,
+  ALL,
+};
+
+inline static const std::string STR(FenceEntity e) {
+  switch (e) {
+  case FenceEntity::THREADS: return "THREADS";
+  case FenceEntity::DMA: return "DMA";
+  case FenceEntity::TMA: return "TMA";
+  case FenceEntity::MMA: return "MMA";
+  case FenceEntity::ALL: return "ALL";
+  }
+  choreo_unreachable("unsupported fence entity.");
+  return "";
+}
+
+/// The ordering a fence establishes. RELEASE publishes the writer's stores
+/// into a space; ACQUIRE orders (and, on cached spaces, invalidates) the
+/// reader's loads out of a space; ACQ_REL is the bidirectional barrier
+/// (release + acquire, i.e. the "full" fence) emitted by a fence with no
+/// direction, e.g. the explicit sync.fence path.
+enum class FenceOrder {
+  RELEASE,
+  ACQUIRE,
+  ACQ_REL,
+};
+
+inline static const std::string STR(FenceOrder o) {
+  switch (o) {
+  case FenceOrder::RELEASE: return "RELEASE";
+  case FenceOrder::ACQUIRE: return "ACQUIRE";
+  case FenceOrder::ACQ_REL: return "ACQ_REL";
+  }
+  choreo_unreachable("unsupported fence order.");
+  return "";
+}
+
+/// A single concrete fence requirement. This is the fully general four-fold
+/// request `(space, entity, order, scope)` that a target lowers to exactly one
+/// hardware primitive:
+///
+///  - `space`  (Storage):       which memory level the fence flushes / orders.
+///  - `entity` (FenceEntity):   which agent's accesses are ordered, i.e. which
+///                              instruction family the fence belongs to.
+///  - `order`  (FenceOrder):    the direction and strength (release / acquire /
+///                              acq-rel) established across that agent's
+///                              accesses.
+///  - `scope`  (ParallelLevel): the coherence domain the ordering is made
+///                              visible to (thread / group / device / ...).
+///
+/// The four axes are orthogonal but not a free cross-product: the target table
+/// returns only the legal kinds, and the implicit insertion pass only ever
+/// produces engine/proxy kinds. Two rules bound `scope`:
+///  - A thread fence may only be *coarsened* -- `scope` at least as coarse as
+///    `space`'s natural level -- never narrowed below it.
+///  - Engine/proxy fences (DMA/TMA/MMA) pin `scope` to `space`; there is no
+///    "shared proxy fence at device scope".
+///
+/// `scope == kAutoScope` (AUTO) is the "derive the enclosing scope from space"
+/// convention: the target maps `space` to its natural level via
+/// `GetDefaultFenceMemory`. Every implicit fence the insertion pass emits today
+/// uses this default, so `Name()` renders the three-fold form and only appends
+/// `_<scope>` when the scope is set explicitly (e.g. a GPU thread fence on
+/// global memory: `GLOBAL_THREADS_ACQ_REL_CTA` vs
+/// `GLOBAL_THREADS_ACQ_REL_GPU`). `space == Storage::NONE` is the "no fence"
+/// sentinel.
+struct FenceKind {
+  /// AUTO scope: derive the coherence domain from `space` (the buffer's
+  /// enclosing scope, i.e. the section-3.2 LCA projected through
+  /// `GetDefaultFenceMemory`). Set a concrete `ParallelLevel` only to coarsen
+  /// a thread fence beyond its space's natural scope.
+  static constexpr ParallelLevel kAutoScope = ParallelLevel::NONE;
+
+  Storage space = Storage::NONE;
+  FenceEntity entity = FenceEntity::THREADS;
+  // Defaults to the full (acq-rel) barrier so a partially-specified kind
+  // (e.g. `FenceKind{Storage::GLOBAL}`) is safe rather than a weak release.
+  FenceOrder order = FenceOrder::ACQ_REL;
+  ParallelLevel scope = kAutoScope;
+
+  bool IsNone() const { return space == Storage::NONE; }
+  bool HasExplicitScope() const { return scope != kAutoScope; }
+
+  std::string Name() const {
+    if (IsNone()) return "NONE";
+    std::string n = STR(space) + "_" + STR(entity) + "_" + STR(order);
+    if (HasExplicitScope()) n += "_" + STR(scope);
+    return n;
+  }
+
+  bool operator==(const FenceKind& o) const {
+    return space == o.space && entity == o.entity && order == o.order &&
+           scope == o.scope;
+  }
+  bool operator<(const FenceKind& o) const {
+    if (space != o.space) return space < o.space;
+    if (entity != o.entity) return entity < o.entity;
+    if (order != o.order) return order < o.order;
+    return scope < o.scope;
+  }
+};
+
+inline static std::ostream& operator<<(std::ostream& os, const FenceKind& k) {
+  return os << k.Name();
+}
+
+/// The fence requirements for a DMA `src -> dst` edge. `producer` holds the
+/// fences emitted at the source site (before the DMA reads `src`): the
+/// src-writer's RELEASE and, on weak spaces, the engine's ACQUIRE. `consumer`
+/// holds the fences emitted at the destination site (before the reader reads
+/// `dst`): the engine's RELEASE and, on weak spaces, the reader's ACQUIRE.
+/// Vector order is emission order; empty means no fence at that site. A
+/// strong-space target emits only the RELEASE members, so its ACQUIRE slots
+/// stay empty.
+struct FenceSelection {
+  std::vector<FenceKind> producer;
+  std::vector<FenceKind> consumer;
+
+  bool IsNoop() const { return producer.empty() && consumer.empty(); }
+
+  bool operator==(const FenceSelection& o) const {
+    return producer == o.producer && consumer == o.consumer;
+  }
+};
 
 inline static std::ostream& operator<<(std::ostream& os, BaseType bt) {
   return os << STR(bt);

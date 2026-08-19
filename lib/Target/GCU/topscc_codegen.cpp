@@ -618,8 +618,8 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       deferred_device_pb = nullptr;
     } else if (pb->IsOuter() || was_device_deferred_block) {
       // Emit pending buffer unmaps before closing the parallel scope.
-      for (auto &[src_sym, entry] : pending_mapped_buffers_) {
-        auto &res_name = std::get<0>(entry);
+      for (auto& [src_sym, entry] : pending_mapped_buffers_) {
+        auto& res_name = std::get<0>(entry);
         ds << d_indent << "tops::unmap_mem_m(" << res_name << "_mmu, "
            << std::get<2>(entry) << ");\n";
       }
@@ -2745,35 +2745,32 @@ bool TopsccCodeGen::Visit(AST::BufferMap& n) {
   ds << d_indent << bts << "* " << res_name << " = (" << bts << "*)((char*)"
      << src_name << " + " << offset_str << " * sizeof(" << bts << "));\n";
 
-  std::string size_bytes =
-      "(int)(" + size_str + " * sizeof(" + bts + "))";
+  std::string size_bytes = "(int)(" + size_str + " * sizeof(" + bts + "))";
 
   if (n.IsMap()) {
     ds << d_indent << "mapped_ptr " << res_name << "_mmu = "
-       << "tops::map_mem_m((generic_ptr)" << res_name << ", "
-       << size_bytes << ");\n";
+       << "tops::map_mem_m((generic_ptr)" << res_name << ", " << size_bytes
+       << ");\n";
   } else {
     // Remap: look up the existing mapped handle for the same source.
     auto it = pending_mapped_buffers_.find(src_sym);
     if (it == pending_mapped_buffers_.end()) {
-      Error1(n.LOC(),
-             "buffer.remap: no existing mapping found for source `" +
-                 src_sym + "'.");
+      Error1(n.LOC(), "buffer.remap: no existing mapping found for source `" +
+                          src_sym + "'.");
       return false;
     }
-    auto &existing_name = std::get<0>(it->second);
-    auto &old_size_bytes = std::get<2>(it->second);
+    auto& existing_name = std::get<0>(it->second);
+    auto& old_size_bytes = std::get<2>(it->second);
     ds << d_indent << "mapped_ptr " << res_name << "_mmu = "
-       << "tops::remap_mem_m(" << existing_name << "_mmu, "
-       << old_size_bytes << ", (generic_ptr)" << res_name << ", "
-       << size_bytes << ");\n";
+       << "tops::remap_mem_m(" << existing_name << "_mmu, " << old_size_bytes
+       << ", (generic_ptr)" << res_name << ", " << size_bytes << ");\n";
   }
 
   // vld/st (vector load/store) on GCU can only access L3-mapped addresses, so
   // derive the typed access pointer from the returned mapped_ptr handle rather
   // than the raw global pointer.
-  ds << d_indent << bts << "* " << res_name
-     << "_l3 = reinterpret_cast<" << bts << "*>(" << res_name << "_mmu);\n";
+  ds << d_indent << bts << "* " << res_name << "_l3 = reinterpret_cast<" << bts
+     << "*>(" << res_name << "_mmu);\n";
 
   // Map .data element accesses on the mapped buffer to the L3 pointer.
   ssm.MapDeviceSymbol(InScopeName(n.result) + ".data", res_name + "_l3");
@@ -2900,6 +2897,9 @@ bool TopsccCodeGen::Visit(AST::Fence& n) {
                                                       n.GetVisibility());
   }
 
+  // The bare FenceType forms (L1_VDMEM / L2_MEM / L3_MEM) are the acq-rel
+  // (full) barrier; the directional DMA fences use the *_STORE (release) and
+  // *_LOAD (acquire) forms instead.
   switch (memory) {
   case Storage::LOCAL:
     ds << d_indent << "tcle::fence<FenceType::L1_VDMEM>();\n";
@@ -3054,8 +3054,7 @@ bool TopsccCodeGen::Visit(AST::AsmStmt& n) {
       t.op = op;
       t.tempName = symtab.GetAnonName();
       t.isOutput = isOutput;
-      t.isReadWrite =
-          !op->constraint.empty() && op->constraint[0] == '+';
+      t.isReadWrite = !op->constraint.empty() && op->constraint[0] == '+';
       tempOps.push_back(t);
     }
   };
@@ -3064,17 +3063,14 @@ bool TopsccCodeGen::Visit(AST::AsmStmt& n) {
   for (auto& op : n.inputOperands) CollectTemps(op, false);
 
   // Emit compiler barrier for volatile asm
-  if (n.isVolatile) {
-    IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
-  }
+  if (n.isVolatile) { IndStream() << "asm volatile(\"\" ::: \"memory\");\n"; }
 
   // Emit temp variable declarations with copy-in from the expression.
   // For output-only operands the initial value is unused but gives
   // the compiler a well-typed declaration.
   for (auto& t : tempOps) {
-    IndStream()
-        << "auto " << t.tempName << " = "
-        << ExprSTR(t.op->expression, false) << ";\n";
+    IndStream() << "auto " << t.tempName << " = "
+                << ExprSTR(t.op->expression, false) << ";\n";
   }
 
   // Helper: get the C variable name to use for an operand (temp or
@@ -3104,8 +3100,7 @@ bool TopsccCodeGen::Visit(AST::AsmStmt& n) {
         first = false;
         if (!op->symbolicName.empty())
           IndStream() << "[" << op->symbolicName << "] ";
-        IndStream() << "\"" << op->constraint << "\"("
-                    << OpName(op) << ")";
+        IndStream() << "\"" << op->constraint << "\"(" << OpName(op) << ")";
       }
     }
   }
@@ -3121,8 +3116,7 @@ bool TopsccCodeGen::Visit(AST::AsmStmt& n) {
         first = false;
         if (!op->symbolicName.empty())
           IndStream() << "[" << op->symbolicName << "] ";
-        IndStream() << "\"" << op->constraint << "\"("
-                    << OpName(op) << ")";
+        IndStream() << "\"" << op->constraint << "\"(" << OpName(op) << ")";
       }
     }
   }
@@ -3143,15 +3137,13 @@ bool TopsccCodeGen::Visit(AST::AsmStmt& n) {
   // Write back temps for output and read-write operands.
   for (auto& t : tempOps) {
     if (t.isOutput) {
-      IndStream() << ExprSTR(t.op->expression, false) << " = "
-                  << t.tempName << ";\n";
+      IndStream() << ExprSTR(t.op->expression, false) << " = " << t.tempName
+                  << ";\n";
     }
   }
 
   // Emit compiler barrier after volatile asm
-  if (n.isVolatile) {
-    IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
-  }
+  if (n.isVolatile) { IndStream() << "asm volatile(\"\" ::: \"memory\");\n"; }
 
   return true;
 }

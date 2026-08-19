@@ -12,7 +12,7 @@ HEADER_FILES :=  $(shell find $(ROOT)/lib -name '*.hpp') $(ROOT)/runtime/choreo.
 CHOREO_HEADERS :=  $(shell find $(ROOT)/lib -name '*.hpp')
 
 # Your application's files
-SOURCES = $(wildcard *.cpp)
+SOURCES = $(wildcard *.cpp) $(wildcard */*.cpp)
 OBJECTS = $(SOURCES:.cpp=.o)
 TARGETS = $(SOURCES:.cpp=.test)
 
