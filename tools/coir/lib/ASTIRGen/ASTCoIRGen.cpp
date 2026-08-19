@@ -1086,6 +1086,15 @@ bool ASTCoIRGen::Visit(AST::ParallelBy& pb) {
       /*stream=*/nullptr, /*is_async=*/nullptr,
       /*cooperative=*/pb.IsCooperative() ? builder.getBoolAttr(true) : nullptr);
 
+  // The AST distinguishes *enforced* parallel levels (written explicitly by
+  // the user, e.g. `parallel by N : group`) from the non-enforced levels that
+  // normalization inserts to fill the hierarchy (e.g. a placeholder GROUP
+  // above a bare `parallel by M` thread parallel).  Codegen needs this to
+  // decide the virtual thread index: an enforced group is a real warp and the
+  // thread index is a lane within it, while a non-enforced group means the
+  // thread parallel spans the whole block.  Preserve the flag on the op.
+  parallelOp->setAttr("coir.enforced", builder.getBoolAttr(pb.IsEnforced()));
+
   // Dynamic bounds are stored as the kDynamic sentinel in the dense bounds
   // attribute, which codegen must not emit as a literal.  Record the source
   // expression of each dynamic bound (aligned with `bounds`, empty for
