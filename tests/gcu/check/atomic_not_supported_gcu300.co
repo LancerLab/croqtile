@@ -1,0 +1,14 @@
+// RUN: not choreo -es -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s
+
+// Atomics are only exposed by the topscc SDK on GCU400+ (gcu400/410/500).
+// gcu300 and older must reject all atomic builtins at semantic analysis.
+__co__ void atomic_rejected(s32 [64] a) {
+  parallel p by 64 : thread {
+    shared s32 [64] s;
+    s.at(p) = a.at(p);
+    sync.barrier : thread;
+    __atomic_add(s.at(p), 1);
+  }
+}
+
+// CHECK: error: '__atomic_add' is not supported on 's32' with 'shared' storage.

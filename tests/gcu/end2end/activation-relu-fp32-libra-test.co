@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GCUSIM
 // RUN-SIM: choreo -t topscc -gs -arch=sim-gcu400 %s | bash -s | FileCheck --match-full-lines %s
-// RUN: choreo -t topscc -gs %gcu_arch %s | bash -s | FileCheck --match-full-lines %s
+// RUN-GCU400: choreo -t topscc -gs %gcu_arch %s | bash -s | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
@@ -9,12 +9,9 @@
 
 __cok__ { /// kernel program
 
-template<int m, int n>
-__co_device__ void relu_kernel(float* input, float* out) {
-  for (int i = 0; i < m; ++i) {
-    for (int j = 0; j < n; ++j) {
-      out[i*n+j] = input[i*n+j] > 0.0f ? input[i*n+j] : 0.0f;
-    }
+__co_device__ extern "C" void relu_kernel(float* input, float* out, int n) {
+  for (int i = 0; i < n; ++i) {
+    out[i] = input[i] > 0.0f ? input[i] : 0.0f;
   }
 }
 
@@ -24,31 +21,20 @@ __co_device__ void relu_kernel(float* input, float* out) {
 __co__ f32 [128, 256] relu(f32 [128, 256] input) { /// device program
   f32[input.span(0), input.span(1)] output; // use same shape as input
 
-  parallel p by 2 {  // p is sip_index
-    with index = {n_tile} in [1] {  // decl your tiled spans
-      foreach n_tile {
-        shared f32[input.span(0)/#p, input.span(1)/#n_tile] l2_out;
-        input_load = dma.copy.async input.chunkat(p, n_tile) => shared;
-        wait input_load;
-        parallel q by 2 {
-          with index = {n_tile_s} in [4] {
-            foreach n_tile_s {
-              input_load_s = dma.copy.async input_load.data.chunkat(q, n_tile_s) => local;
-              out_load_s = dma.copy.async l2_out.chunkat(q, n_tile_s) => local;
-              wait input_load_s, out_load_s;
-              parallel r by 4 {
-                call relu_kernel<input.span(0)/#p/#q/#r, input.span(1)/#n_tile_s>(input_load_s.data.chunkat(r, _), out_load_s.data.chunkat(r, _)); // |span| calculate the total size of span.
-              }
-              out_store_s = dma.copy.async out_load_s.data => l2_out.chunkat(q, n_tile_s); // can use defined vars
-              wait out_store_s;
-            }
-          }
-        }
-        out_store = dma.copy.async l2_out => output.chunkat(p, n_tile); // can use defined vars
-        wait out_store;
+  // Keep per-instance local buffers small (<= 8KB) to respect the gcu400
+  // local-memory budget. Split into enough tiles so anon_0 stays tiny.
+  parallel p by 8 {
+    parallel q by 4 {
+      input_load = dma.copy.async input.chunkat(p, q) => local;
+      local f32[input_load.span] l1_out;
+      wait input_load;
+      parallel r by 4 {
+        call relu_kernel(input_load.data.chunkat(r, _), l1_out.chunkat(r, _), |input_load.span| / #r);
       }
+      out_store = dma.copy.async l1_out => output.chunkat(p, q);
+      wait out_store;
     }
-  } // can use python styling
+  }
   return output;
 }
 

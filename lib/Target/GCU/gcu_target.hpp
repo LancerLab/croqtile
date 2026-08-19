@@ -262,6 +262,50 @@ public:
   bool IsIntrinsicPassthroughSupported(const ArchId&) const override {
     return true;
   }
+
+  std::vector<AtomicCapability>
+  SupportedAtomicOps(const ArchId& arch) const override {
+    // The topscc SDK (tcle_general.h) only exposes tcle::atomic_* builtins
+    // for GCU400/410/500.  Older arches (gcu200/210/300) expose none.
+    if (ArchNum(arch) < 400) return {};
+    std::vector<AtomicCapability> caps;
+    caps.push_back({AtomicOp::ADD,
+                    {BaseType::S16, BaseType::U16, BaseType::S32, BaseType::U32,
+                     BaseType::S64, BaseType::U64, BaseType::F16,
+                     BaseType::BF16, BaseType::F32}});
+    // The SDK has no dedicated atomic_sub; codegen emits atomic_add(addr, -x).
+    caps.push_back(
+        {AtomicOp::SUB,
+         {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
+    caps.push_back(
+        {AtomicOp::EXCH,
+         {BaseType::S16, BaseType::U16, BaseType::S32, BaseType::U32,
+          BaseType::S64, BaseType::U64, BaseType::F16, BaseType::F32}});
+    caps.push_back(
+        {AtomicOp::MIN,
+         {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
+    caps.push_back({AtomicOp::MAX,
+                    {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64,
+                     BaseType::F16, BaseType::BF16, BaseType::F32}});
+    caps.push_back(
+        {AtomicOp::AND,
+         {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
+    caps.push_back(
+        {AtomicOp::OR,
+         {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
+    caps.push_back(
+        {AtomicOp::XOR,
+         {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
+    caps.push_back({AtomicOp::CAS,
+                    {BaseType::S16, BaseType::U16, BaseType::S32, BaseType::U32,
+                     BaseType::S64, BaseType::U64}});
+    return caps;
+  }
+
+  std::set<Storage> SupportedAtomicStorages(const ArchId& arch) const override {
+    if (ArchNum(arch) < 400) return {};
+    return {Storage::SHARED, Storage::GLOBAL};
+  }
 };
 
 } // end namespace Choreo

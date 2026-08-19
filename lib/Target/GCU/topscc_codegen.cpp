@@ -7,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <system_error>
+#include <unordered_map>
 #include <vector>
 
 #include "ast.hpp"
@@ -2902,13 +2903,13 @@ bool TopsccCodeGen::Visit(AST::Fence& n) {
   // *_LOAD (acquire) forms instead.
   switch (memory) {
   case Storage::LOCAL:
-    ds << d_indent << "tcle::fence<FenceType::L1_VDMEM>();\n";
+    ds << d_indent << "tcle::fence<tcle::FenceType::L1_VDMEM>();\n";
     break;
   case Storage::SHARED:
-    ds << d_indent << "tcle::fence<FenceType::L2_MEM>();\n";
+    ds << d_indent << "tcle::fence<tcle::FenceType::L2_MEM>();\n";
     break;
   case Storage::GLOBAL:
-    ds << d_indent << "tcle::fence<FenceType::L3_MEM>();\n";
+    ds << d_indent << "tcle::fence<tcle::FenceType::L3_MEM>();\n";
     break;
   default: choreo_unreachable("unsupported fence memory: " + STR(memory) + ".");
   }
@@ -3350,6 +3351,7 @@ bool TopsccCodeGen::Visit(AST::Call& n) {
       os << ");\n";
       return true;
     } else if (n.IsArith()) {
+    } else if (n.IsAtomic()) { /* fall through to CallSTR emission below */
     } else if (n.IsLibCall()) {
       EmitLibCall(n, func_name, os, indent);
       return true;
@@ -4111,8 +4113,23 @@ if [[ -z ${TOPSCC_INSTALL} ]]; then
   fi
 )script";
 
-  if (!use_system_toolchain)
-    os << "  TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
+  if (!use_system_toolchain) {
+#ifdef __CHOREO_TOPSCC_SIM_DIR__
+    if (CCtx().IsSimArch()) {
+      // Prefer the isolated simulator toolchain, falling back to the native
+      // toolchain when the sim dir has no topscc (e.g. the gcu5 simulator
+      // reuses the native topscc).
+      os << "  if [[ -f "
+         << STRINGIZE(__CHOREO_TOPSCC_SIM_DIR__) << "/bin/topscc ]]; then\n";
+      os << "    TOPSCC_INSTALL="
+         << STRINGIZE(__CHOREO_TOPSCC_SIM_DIR__) << "\n";
+      os << "  else\n";
+      os << "    TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
+      os << "  fi\n";
+    } else
+#endif
+      os << "  TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
+  }
 
   os << "fi\n\n";
 
@@ -4945,6 +4962,37 @@ const std::string TopsccCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
 
 const std::string TopsccCodeGen::CallSTR(AST::Call& n) const {
   std::ostringstream oss;
+
+  if (n.IsAtomic()) {
+    static const std::unordered_map<std::string, std::string> atomic_map = {
+        {"__atomic_add", "tcle::atomic_add"},
+        // The SDK has no atomic_sub; negate the operand and use atomic_add.
+        {"__atomic_sub", "tcle::atomic_add"},
+        {"__atomic_exch", "tcle::atomic_exch"},
+        {"__atomic_min", "tcle::atomic_min"},
+        {"__atomic_max", "tcle::atomic_max"},
+        {"__atomic_and", "tcle::atomic_and"},
+        {"__atomic_or", "tcle::atomic_or"},
+        {"__atomic_xor", "tcle::atomic_xor"},
+        {"__atomic_cas", "tcle::atomic_cas"}};
+    auto it = atomic_map.find(n.function->name);
+    assert(it != atomic_map.end());
+    oss << it->second << "(";
+    size_t i = 0;
+    for (auto& a : n.GetArguments()) {
+      if (i > 0) oss << ", ";
+      if (i == 0)
+        oss << "&(" << OpExprSTR(a, "", true, IsHost()) << ")";
+      else if (n.function->name == "__atomic_sub")
+        oss << "-(" << OpExprSTR(a, "", true, IsHost()) << ")";
+      else
+        oss << OpExprSTR(a, "", true, IsHost());
+      ++i;
+    }
+    oss << ")";
+    return oss.str();
+  }
+
   auto func_name = [&n](const std::string& name) -> std::string {
     if (!n.IsArith()) return name;
     if (name == "__log")

@@ -1,0 +1,96 @@
+// REQUIRES: TARGET-GCUSIM
+// RUN-SIM: choreo -t topscc -gs -arch=sim-gcu400 %s | bash -s | FileCheck --match-full-lines %s
+// RUN-GCU400: choreo -t topscc -gs %gcu_arch %s | bash -s | FileCheck --match-full-lines %s
+
+#include "choreo.h"
+
+// === Test 1: histogram with atomic_add ===
+__co__ s32 [4] histogram(s32 [6] input) {
+  s32 [4] output;
+  parallel p by 6 : group {
+    if (p < 4) {
+      output.at(p) = 0;
+    }
+    sync.barrier : group;
+    mutable s32 bin = input.at(p) % 4;
+    __atomic_add(output.at(bin), 1);
+    sync.barrier : group;
+  }
+  return output;
+}
+
+// === Test 2: atomic min/max reduction ===
+__co__ s32 [2] reduce_minmax(s32 [6] input) {
+  s32 [2] output;
+  parallel p by 6 : group {
+    if (p == 0) {
+      output.at(0) = 2147483647;
+      output.at(1) = -2147483647;
+    }
+    sync.barrier : group;
+    __atomic_min(output.at(0), input.at(p));
+    __atomic_max(output.at(1), input.at(p));
+    sync.barrier : group;
+  }
+  return output;
+}
+
+// === Test 3: atomic exchange captures the old value ===
+__co__ s32 [6] atomic_swap(s32 [6] input) {
+  s32 [6] output;
+  parallel p by 6 : group {
+    output.at(p) = input.at(p);
+    sync.barrier : group;
+    mutable s32 old = __atomic_exch(output.at(p), 0);
+    output.at(p) = old;
+  }
+  return output;
+}
+
+int main() {
+  // Test 1: histogram
+  {
+    auto input = choreo::make_spandata<choreo::s32>(6);
+    for (int i = 0; i < 6; ++i) input[i] = i;
+    auto output = histogram(input.view());
+    // The first kernel launch emits a sim init line without a trailing
+    // newline; flush one so the following CHECK line stays clean.
+    std::cout << std::endl;
+    int expected[4] = {};
+    for (int i = 0; i < 6; ++i) expected[i % 4]++;
+    bool ok = true;
+    for (int i = 0; i < 4; ++i)
+      if (output[i] != expected[i]) ok = false;
+    std::cout << "Test histogram " << (ok ? "Passed" : "Failed") << std::endl;
+  }
+
+  // Test 2: min/max reduction
+  {
+    auto input = choreo::make_spandata<choreo::s32>(6);
+    for (int i = 0; i < 6; ++i) input[i] = (i * 7 - 50);
+    auto output = reduce_minmax(input.view());
+    int mn = 2147483647, mx = -2147483647;
+    for (int i = 0; i < 6; ++i) {
+      int v = i * 7 - 50;
+      if (v < mn) mn = v;
+      if (v > mx) mx = v;
+    }
+    bool ok = (output[0] == mn && output[1] == mx);
+    std::cout << "Test minmax " << (ok ? "Passed" : "Failed") << std::endl;
+  }
+
+  // Test 3: atomic exchange captures old value
+  {
+    auto input = choreo::make_spandata<choreo::s32>(6);
+    for (int i = 0; i < 6; ++i) input[i] = i + 100;
+    auto output = atomic_swap(input.view());
+    bool ok = true;
+    for (int i = 0; i < 6; ++i)
+      if (output[i] != i + 100) ok = false;
+    std::cout << "Test swap " << (ok ? "Passed" : "Failed") << std::endl;
+  }
+}
+
+// CHECK: Test histogram Passed
+// CHECK: Test minmax Passed
+// CHECK: Test swap Passed

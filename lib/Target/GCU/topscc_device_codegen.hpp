@@ -38,7 +38,25 @@ struct TopsccDeviceCodeGen : public DeviceCodeGen {
   void SetupBuildEnv(std::ostream& out) const override {
     out << "\n# Find topscc\n";
     out << "if [[ -z \"${TOPSCC_INSTALL}\" ]]; then\n";
-#ifdef __CHOREO_TOPSCC_DIR__
+#ifdef __CHOREO_TOPSCC_SIM_DIR__
+    if (CCtx().IsSimArch()) {
+      // Prefer the isolated simulator toolchain when compiling for a sim arch,
+      // falling back to the native toolchain when the sim dir has no topscc
+      // (e.g. the gcu5 simulator reuses the native topscc).
+      out << "  if [[ -f "
+          << STRINGIZE(__CHOREO_TOPSCC_SIM_DIR__) << "/bin/topscc ]]; then\n";
+      out << "    TOPSCC_INSTALL="
+          << STRINGIZE(__CHOREO_TOPSCC_SIM_DIR__) << "\n";
+      out << "  elif [[ -d "
+          << STRINGIZE(__CHOREO_TOPSCC_DIR__) << " ]]; then\n";
+      out << "    TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
+      out << "  else\n";
+    } else {
+      out << "  if [[ -d " << STRINGIZE(__CHOREO_TOPSCC_DIR__) << " ]]; then\n";
+      out << "    TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
+      out << "  else\n";
+    }
+#else
     out << "  if [[ -d " << STRINGIZE(__CHOREO_TOPSCC_DIR__) << " ]]; then\n";
     out << "    TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
     out << "  else\n";
@@ -50,9 +68,7 @@ struct TopsccDeviceCodeGen : public DeviceCodeGen {
     TOPSCC_INSTALL=/opt/tops
   fi
 )script";
-#ifdef __CHOREO_TOPSCC_DIR__
     out << "  fi\n";
-#endif
     out << R"script(fi
 
 if [[ -z "${TOPSCC_INSTALL}" ]]; then

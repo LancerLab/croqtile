@@ -15,6 +15,7 @@ CUR_PKG_MD5:=$(shell md5sum $(SUPPORT_PKG) 2>/dev/null| cut -d ' ' -f 1)
 BISON_ENV:=BISON_PKGDATADIR=$(TOOLCHAIN_DIR)/shared/bison/
 BISON:=$(BISON_ENV) $(BISON_BIN)
 CFLAGS += -D__CHOREO_TOPSCC_DIR__="$(TOOLCHAIN_DIR)"
+CFLAGS += -D__CHOREO_TOPSCC_SIM_DIR__="$(TOOLCHAIN_DIR)/gcu-sim"
 
 .PHONY: setup-gcu2 setup-gcu3 setup-gcu4sim setup-gcu5sim
 
@@ -211,6 +212,9 @@ publish-sdk: sdk-package
 	curl -T $$pkg_name ftp://$(FTP_SERVER)/\%2fdev/choreo-sdk/$$sdk_name --user ftp_era:Enflame@321
 
 test-libra: release
+	$(LIT) --sim=only tests/gcu/end2end && $(MAKE) standalone-test-with-cmake
+
+test-libra-debug: debug
 	$(LIT) --sim=only tests/gcu/end2end && $(MAKE) standalone-test-with-cmake
 
 # =============================================================================

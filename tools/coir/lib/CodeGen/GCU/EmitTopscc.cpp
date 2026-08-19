@@ -4221,13 +4221,13 @@ private:
   void emitFence(FenceOp op) override {
     switch (op.getScope()) {
     case coir::TensorMemorySpace::Global:
-      os() << getIndent() << "tcle::fence<FenceType::L3_MEM>();\n";
+      os() << getIndent() << "tcle::fence<tcle::FenceType::L3_MEM>();\n";
       break;
     case coir::TensorMemorySpace::Shared:
-      os() << getIndent() << "tcle::fence<FenceType::L2_MEM>();\n";
+      os() << getIndent() << "tcle::fence<tcle::FenceType::L2_MEM>();\n";
       break;
     case coir::TensorMemorySpace::Local:
-      os() << getIndent() << "tcle::fence<FenceType::L1_VDMEM>();\n";
+      os() << getIndent() << "tcle::fence<tcle::FenceType::L1_VDMEM>();\n";
       break;
     default:
       llvm_unreachable("unexpected fence memory scope");

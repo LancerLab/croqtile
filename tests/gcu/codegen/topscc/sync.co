@@ -31,15 +31,15 @@ __co__ void test_cooperative() {
 // Test: fence with visibility and memory scopes
 __co__ void test_fences() {
   parallel bx by 1 : block {
-    // CHECK-GCU3: tcle::fence<FenceType::L3_MEM>();
-    // CHECK-GCU4: tcle::fence<FenceType::L3_MEM>();
+    // CHECK-GCU3: tcle::fence<tcle::FenceType::L3_MEM>();
+    // CHECK-GCU4: tcle::fence<tcle::FenceType::L3_MEM>();
     sync.fence : block<global>;
 
-    // CHECK-GCU4: tcle::fence<FenceType::L2_MEM>();
+    // CHECK-GCU4: tcle::fence<tcle::FenceType::L2_MEM>();
     sync.fence : group<shared>;
 
-    // CHECK-GCU3: tcle::fence<FenceType::L1_VDMEM>();
-    // CHECK-GCU4: tcle::fence<FenceType::L1_VDMEM>();
+    // CHECK-GCU3: tcle::fence<tcle::FenceType::L1_VDMEM>();
+    // CHECK-GCU4: tcle::fence<tcle::FenceType::L1_VDMEM>();
     sync.fence : thread<local>;
   }
 }

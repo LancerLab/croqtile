@@ -41,6 +41,7 @@ target_include_directories(GCUTarget
 
 target_compile_definitions(GCUTarget PRIVATE
   __CHOREO_TOPSCC_DIR__="${TOOLCHAIN_DIR}"
+  __CHOREO_TOPSCC_SIM_DIR__="${TOOLCHAIN_DIR}/gcu-sim"
 )
 
 if(NOT EXISTS "${TOOLCHAIN_DIR}/lib/libacoreop.bc")
