@@ -45,6 +45,10 @@ gpu_test:
   rules:
     - if: $NO_GPU == "true"
       when: never
+    - changes:
+        - Documents/**
+        - mkdocs.yml
+      when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" ||
         $CI_COMMIT_BRANCH == "cute" ||
@@ -89,6 +93,10 @@ amdgpu_test:
   rules:
     - if: $NO_AMDGPU == "true"
       when: never
+    - changes:
+        - Documents/**
+        - mkdocs.yml
+      when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" ||
         $CI_COMMIT_BRANCH =~ /^release\// ||
@@ -128,6 +136,10 @@ gcu2_test:
         $CI_PIPELINE_SOURCE == "merge_request_event" &&
         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
       when: never
+    - changes:
+        - Documents/**
+        - mkdocs.yml
+      when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" ||
         $CI_COMMIT_BRANCH =~ /^release\// ||
@@ -164,6 +176,10 @@ gcu3_test:
     - if: >
         $CI_PIPELINE_SOURCE == "merge_request_event" &&
         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
+      when: never
+    - changes:
+        - Documents/**
+        - mkdocs.yml
       when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" ||
@@ -204,6 +220,10 @@ gcu4_test:
         $CI_PIPELINE_SOURCE == "merge_request_event" &&
         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
       when: never
+    - changes:
+        - Documents/**
+        - mkdocs.yml
+      when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" ||
         $CI_COMMIT_BRANCH =~ /^release\// ||
@@ -240,6 +260,10 @@ gcu3_debug_test:
     - if: >
         $CI_PIPELINE_SOURCE == "merge_request_event" &&
         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
+      when: never
+    - changes:
+        - Documents/**
+        - mkdocs.yml
       when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" ||
@@ -321,6 +345,10 @@ package_test:
         $CI_PIPELINE_SOURCE == "merge_request_event" &&
         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
       when: never
+    - changes:
+        - Documents/**
+        - mkdocs.yml
+      when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" ||
         $CI_COMMIT_BRANCH =~ /^release\// ||
@@ -367,7 +395,11 @@ generate_docs:
       when: never
     - if: $CI_COMMIT_BRANCH =~ /^oss\//
       when: never
-    - when: on_success
+    - changes:
+        - Documents/**
+        - mkdocs.yml
+      when: on_success
+    - when: never
   script:
     - echo "Setting up environment for documentation generation ..."
     - python3.8 -m pip install mkdocs mkdocs-material mkdocs-markdownextradata-plugin
