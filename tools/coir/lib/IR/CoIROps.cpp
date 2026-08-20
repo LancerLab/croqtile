@@ -813,7 +813,7 @@ static ParseResult parseBindDimsShape(
 }
 
 /// Parse a memory-space keyword.  Returns -1 (default) or -2 (invalid).
-static int32_t parseMemSpace(AsmParser &parser, llvm::StringRef kw) {
+static int32_t parseMemSpace(llvm::StringRef kw) {
   if (kw == "default")  return -1;
   if (kw == "global")   return (int32_t)TensorMemorySpace::Global;
   if (kw == "shared")   return (int32_t)TensorMemorySpace::Shared;
@@ -893,7 +893,7 @@ ParseResult TensorBindDimsOp::parse(OpAsmParser &parser,
       if (parser.parseRSquare())
         return failure();
     } else {
-      memSpace = parseMemSpace(parser, kw);
+      memSpace = parseMemSpace(kw);
       if (memSpace == -2) {
         parser.emitError(parser.getCurrentLocation(),
                          "unknown memory space: " + kw);
@@ -956,7 +956,7 @@ void TensorBindDimsOp::print(OpAsmPrinter &printer) {
   printer << " : ";
 
   // Print tensor type with SSA values inlined for dynamic dims.
-  auto resultTy = getResult().getType().cast<TensorType>();
+  auto resultTy = mlir::cast<TensorType>(getResult().getType());
   auto shape = resultTy.getShape();
   auto dynDims = getDynamicDims();
 
