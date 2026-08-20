@@ -902,11 +902,11 @@ void CoIREmitterBase::emitAsm(AsmOp op) {
       os() << " ";
       if (i < outSymbolicNames.size()) {
         auto name =
-            outSymbolicNames[i].cast<mlir::StringAttr>().getValue();
+            mlir::cast<mlir::StringAttr>(outSymbolicNames[i]).getValue();
         if (!name.empty()) os() << "[" << name << "] ";
       }
       os() << "\""
-           << outConstraints[i].cast<mlir::StringAttr>().getValue()
+           << mlir::cast<mlir::StringAttr>(outConstraints[i]).getValue()
            << "\"(" << getName(outOperands[i]) << ")";
     }
   }
@@ -920,11 +920,11 @@ void CoIREmitterBase::emitAsm(AsmOp op) {
       os() << " ";
       if (i < inSymbolicNames.size()) {
         auto name =
-            inSymbolicNames[i].cast<mlir::StringAttr>().getValue();
+            mlir::cast<mlir::StringAttr>(inSymbolicNames[i]).getValue();
         if (!name.empty()) os() << "[" << name << "] ";
       }
       os() << "\""
-           << inConstraints[i].cast<mlir::StringAttr>().getValue()
+           << mlir::cast<mlir::StringAttr>(inConstraints[i]).getValue()
            << "\"(" << getName(inOperands[i]) << ")";
     }
   }
@@ -936,7 +936,7 @@ void CoIREmitterBase::emitAsm(AsmOp op) {
     for (unsigned i = 0; i < clobbers.size(); ++i) {
       if (i > 0) os() << ",";
       os() << " \""
-           << clobbers[i].cast<mlir::StringAttr>().getValue() << "\"";
+           << mlir::cast<mlir::StringAttr>(clobbers[i]).getValue() << "\"";
     }
   }
 

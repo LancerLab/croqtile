@@ -3295,7 +3295,7 @@ bool ASTCoIRGen::Visit(AST::BufferMap &n) {
   mlir::Value result;
 
   if (n.IsMap()) {
-    auto srcTensorTy = srcVal.getType().dyn_cast<coir::TensorType>();
+    auto srcTensorTy = mlir::dyn_cast<coir::TensorType>(srcVal.getType());
     if (!srcTensorTy) {
       Error(n.LOC(), "buffer.map: source is not a tensor type.");
       return false;
@@ -3320,7 +3320,7 @@ bool ASTCoIRGen::Visit(AST::BufferMap &n) {
             "buffer.remap: could not resolve existing mapped tensor for source.");
       return false;
     }
-    auto existingTy = existingVal.getType().dyn_cast<coir::TensorType>();
+    auto existingTy = mlir::dyn_cast<coir::TensorType>(existingVal.getType());
     if (!existingTy) {
       Error(n.LOC(), "buffer.remap: existing is not a tensor type.");
       return false;

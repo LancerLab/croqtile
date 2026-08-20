@@ -41,8 +41,8 @@ private:
 
   llvm::SmallVector<llvm::StringMap<mlir::Value>> value_stack;
   void PushScope() {
-    value_stack.push_back({});
-    pendingBufferUnmaps_.push_back({});
+    value_stack.emplace_back();
+    pendingBufferUnmaps_.emplace_back();
   }
   void PopScope() {
     pendingBufferUnmaps_.pop_back();

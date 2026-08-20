@@ -833,7 +833,6 @@ private:
     unsigned numFnInputs = fnType.getNumInputs();
     unsigned mrBaseIdx = 0;
     if (!body.empty()) {
-      auto args = body.getArguments();
       mrBaseIdx = numFnInputs - numMrOffsets - (mrSpmSize ? 1 : 0);
     }
     // Track which mr_offset_* names are real kernel params (both LOCAL and
