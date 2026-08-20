@@ -186,7 +186,7 @@ gcu3_test:
   tags:
     - GCU3
   allow_failure: false
-  timeout: 25m
+  timeout: 30m
   after_script:
     - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
     - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
@@ -260,9 +260,9 @@ gcu3_debug_test:
       - tools/factor_backend
       - tools/shared
   tags:
-    - GCU3
+    - GCU3DBG
   allow_failure: false
-  timeout: 25m
+  timeout: 30m
   after_script:
     - 'echo "Cleaning up CI project directory: $CI_PROJECT_DIR ..."'
     - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
