@@ -1458,9 +1458,9 @@ private:
       if (padValue) pv = *padValue;
       emitCopyWithPad(op.getSource(), op.getDest(), pl, ph, pv);
     } else if (kind == DMAKind::Transpose) {
-      auto tp = op.getTransposePerm();
-      std::optional<ArrayRef<int64_t>> perm =
-          tp ? std::optional(tp.value()) : std::nullopt;
+      std::optional<ArrayRef<int64_t>> perm = std::nullopt;
+      if (auto tp = op.getTransposePerm())
+        perm = tp.value();
       emitCopyWithTranspose(op.getSource(), op.getDest(), perm);
     } else {
       emitCooperativeCopy(op.getSource(), op.getDest());
