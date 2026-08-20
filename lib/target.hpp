@@ -12,6 +12,8 @@ enum class Storage;
 enum class BaseType;
 enum class ParallelLevel;
 enum class SwizMode;
+struct FenceKind; // (space, entity, order) fence requirement; see types.hpp
+struct FenceSelection;
 class ASTPipeline;
 class Preprocess;
 struct DeviceCodeGen;
@@ -137,6 +139,9 @@ struct TargetInfo {
   std::string description;
 };
 
+// FenceKind / FenceSelection are defined in types.hpp (next to Storage, which
+// is only forward-declared here); see the DMA fence-insertion plan section 4.
+
 class Target {
 public:
   virtual ~Target() {};
@@ -234,6 +239,15 @@ public:
   // Returns Storage::NONE if the default is target-defined (not specifiable).
   virtual Storage GetDefaultFenceMemory(const ArchId&,
                                         ParallelLevel visibility) const;
+
+  // Fence requirements to insert at the producer/consumer sites of a DMA edge
+  // moving data from `src` storage to `dst` storage on `arch`. Targets without
+  // a fence requirement return the default no-op selection. (The entity-class
+  // and LCA-level refinements from the fence-insertion plan are resolved in
+  // later stages; this query keys the table on storage direction.)
+  virtual FenceSelection SelectDMAFences(const ArchId& arch, Storage src,
+                                         Storage dst) const;
+
   // Whether the target supports cooperative kernel launches.
   virtual bool SupportsCooperativeLaunch(const ArchId&) const {
     return IsFeatureSupported(STR(ChoreoFeature::COOPERATIVE_LAUNCH));

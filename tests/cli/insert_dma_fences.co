@@ -1,0 +1,18 @@
+// Test the --insert-dma-fences option: accepted (explicitly true/false),
+// visible in --help, and rejects invalid boolean values.
+//
+// RUN: choreo --help | FileCheck %s --check-prefix=HELP
+// RUN: choreo --insert-dma-fences=false %s -o /dev/null
+// RUN: choreo --insert-dma-fences %s -o /dev/null
+// RUN: not choreo --insert-dma-fences=maybe %s 2>&1 | FileCheck %s --check-prefix=BADVAL
+
+__co__ void foo() {
+  global s32 [1,2] g;
+  parallel by 1 : block {
+    a = dma.copy g => local;
+  }
+}
+
+// HELP: --insert-dma-fences
+// HELP: default: true
+// BADVAL: Invalid value for boolean option '--insert-dma-fences'

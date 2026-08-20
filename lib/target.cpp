@@ -34,6 +34,14 @@ Storage Target::GetDefaultFenceMemory(const ArchId&,
   }
 }
 
+FenceSelection Target::SelectDMAFences(const ArchId& arch, Storage src,
+                                       Storage dst) const {
+  (void)arch;
+  (void)src;
+  (void)dst;
+  return {};
+}
+
 bool Target::IsBufferMappingValid(const ArchId& arch, Storage src,
                                   Storage dst) const {
   (void)arch;

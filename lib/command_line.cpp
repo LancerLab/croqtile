@@ -105,6 +105,11 @@ Option<bool>
     native_bf16(OptionKind::User, "--native-bf16", "-bf16n", false,
                 "Utilize native bf16 type when target platform support.");
 
+Option<bool> insert_dma_fences(
+    OptionKind::User, "--insert-dma-fences", "", true,
+    "Insert memory fences between DMA producer and consumer sites "
+    "(default: true). Disable with --insert-dma-fences=false.");
+
 Option<bool>
     print_features(OptionKind::User, "--print-features", "", false,
                    "Print the supported features for the selected target "
