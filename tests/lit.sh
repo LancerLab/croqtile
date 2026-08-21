@@ -139,22 +139,45 @@ set_print() {
     printf '\n'
 }
 
-# Whether the required arch targets include a non-sim arch this machine can
-# actually run. The simulator's base arch (the arch portion of a sim-* target)
-# counts only when no real device is present.
+# Whether the machine's real device arch matches one of the required targets.
+# Simulator targets are NOT matched here: a simulator only runs a test when the
+# file explicitly grants it permission via ALLOW-SIM-* (see sim_allowed below).
 native_arch_matches() {
   set_contains REQ_TARGETS "$mach" && return 0
-  if [[ "$device_type" == "none" ]]; then
-    set_contains REQ_TARGETS "${simulator#sim-}" && return 0
-  fi
   return 1
 }
 
-# Whether the required arch targets can be satisfied by the machine or an
-# explicitly-requested simulator target.
+# Whether the available simulator is granted permission to run this file,
+# either explicitly via ALLOW-SIM-* or, for backward compatibility, by listing
+# a sim-* target directly in REQUIRES.
+sim_allowed() {
+  [[ -n "$simulator" && "$simulator" != "none" ]] || return 1
+  set_contains REQ_ALLOWED_SIMS "$simulator" && return 0
+  set_contains REQ_TARGETS "$simulator" && return 0
+  return 1
+}
+
+# Whether the required arch targets can be satisfied by the machine's real
+# device or by the available (and allowed) simulator.
 target_arch_matches() {
   native_arch_matches && return 0
-  set_contains REQ_TARGETS "$simulator" && return 0
+  sim_allowed && return 0
+  return 1
+}
+
+# Whether the file references any simulator permission (used by --sim gating).
+file_has_sim() {
+  ! set_empty REQ_ALLOWED_SIMS && return 0
+  set_contains_prefix REQ_TARGETS "sim-" && return 0
+  return 1
+}
+
+# Whether a RUN-<arch> line can be satisfied by the available simulator: the
+# simulator must be allowed for this file and its base arch must match <arch>.
+sim_target_matches() {
+  local candidate="$1"
+  sim_allowed || return 1
+  [[ "${simulator#sim-}" == "$candidate" ]] && return 0
   return 1
 }
 
@@ -632,7 +655,7 @@ if ! which bc &>/dev/null; then
 fi
 
 echo "---------------------------------------"
-echo "        Choreo SimpleLit - v0.34"
+echo "        Choreo SimpleLit - v0.35"
 echo "---------------------------------------"
 echo ""
 
@@ -650,6 +673,7 @@ num_skiped=0
 is_in_docker=false
 is_in_shell=false
 REQ_TARGETS=()
+REQ_ALLOWED_SIMS=()
 requires_dynamic_shape=0
 requires_gdb=0
 requires_cudagdb=0
@@ -669,6 +693,7 @@ sim_mode="off"
 run_only=""
 target_only=""
 only_target=""
+run_arch=""
 
 need_cute=0
 need_cuda=0
@@ -868,6 +893,7 @@ prepare() {
   done < "$file"
 
   set_clear REQ_TARGETS
+  set_clear REQ_ALLOWED_SIMS
   REQ_RAW_TARGETS=()
 
   # If no REQUIRES line found, return early
@@ -877,6 +903,7 @@ prepare() {
 
   # Extract components
   local tgts=()
+  local sims=()
   local libs=()
   req_features=()
   local token
@@ -884,6 +911,8 @@ prepare() {
     if [[ "$token" == TARGET-* ]]; then
       tgts+=("${token#TARGET-}")
       REQ_RAW_TARGETS+=("$(toupper "${token#TARGET-}")")
+    elif [[ "$token" == ALLOW-SIM-* ]]; then
+      sims+=("${token#ALLOW-SIM-}")
     elif [[ "$token" == LIBRARY-* ]]; then
       libs+=("${token#LIBRARY-}")
     elif [[ "$token" == "DYNAMIC-SHAPE" ]]; then
@@ -900,6 +929,11 @@ prepare() {
   # Process targets
   if [ ${#tgts[@]} -ne 0 ]; then
     run_hooks "set_archs" "${tgts[@]}"
+  fi
+
+  # Process simulator permissions (ALLOW-SIM-*)
+  if [ ${#sims[@]} -ne 0 ]; then
+    run_hooks "set_sims" "${sims[@]}"
   fi
 
   if set_empty REQ_TARGETS && [ ${#tgts[@]} -ne 0 ]; then
@@ -1232,31 +1266,47 @@ retrieve_run_config() {
   run_environ=
   run_target=
   run_sim=0
+  run_arch=
 
-  if [[ $line =~ [[:blank:]]*RUN-SIM:[[:blank:]]*(.+) ]]; then
-    # RUN-SIM: only executed when --sim=on or --sim=only
-    run_command="${BASH_REMATCH[1]}"
-    run_sim=1
-    run_environ="shell"
-  elif [[ $line =~ [[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
+  if [[ $line =~ [[:blank:]]*RUN:[[:blank:]]*(.+) ]]; then
     # Extract the command after "RUN:"
     run_command="${BASH_REMATCH[1]}"
     run_environ="shell"
+    # Resolve the executing arch: prefer real hardware when it satisfies the
+    # file's TARGET-* requirement, otherwise fall back to an allowed simulator.
+    if native_arch_matches; then
+      run_arch="$mach"
+    elif [[ "$sim_mode" != "off" ]] && sim_allowed; then
+      run_arch="$simulator"
+      run_sim=1
+    else
+      run_arch="$mach"
+    fi
   elif [[ $line =~ [[:blank:]]*RUN-([^-]+):[[:blank:]]*(.+) ]]; then
     run_target=$(echo "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
     local matched_command="${BASH_REMATCH[2]}"
+    # Resolution ladder: real hardware first, then the simulator when the file
+    # grants permission (ALLOW-SIM-*) and a matching simulator is available.
     if target_specs_match_candidate "$mach" "$run_target"; then
       run_command="${matched_command}"
       run_environ="shell"
+      run_arch="$mach"
+    elif [[ "$sim_mode" != "off" ]] && sim_target_matches "$run_target"; then
+      run_command="${matched_command}"
+      run_environ="shell"
+      run_sim=1
+      run_arch="$simulator"
     elif [[ "${run_target}" == "docker" ]]; then
       run_command="${matched_command}"
       run_environ="docker"
       run_target=
+      run_arch="$mach"
     fi
   elif [[ $line =~ [[:blank:]]*RUN-([^-]+)-([^-]+):[[:blank:]]*(.+) ]]; then
     run_target=$(echo "${BASH_REMATCH[2]}" | tr '[:upper:]' '[:lower:]')
     run_environ=$(echo "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
     run_command="${BASH_REMATCH[3]}"
+    run_arch="$mach"
   fi
 }
 
@@ -1343,32 +1393,34 @@ for _entry in "${files_array[@]}"; do
   fi
 
   # Skip whole file early when required targets cannot match current machine/simulator.
-  if ! set_empty REQ_TARGETS; then
+  if ! set_empty REQ_TARGETS || ! set_empty REQ_ALLOWED_SIMS; then
     if [[ $device_type == "none" && "$simulator" == "none" ]] || ! target_arch_matches; then
       _all_skipped_targets=$(set_print REQ_TARGETS)
+      [[ -z "$_all_skipped_targets" ]] && _all_skipped_targets=$(set_print REQ_ALLOWED_SIMS)
       print_status_line "SKIP($(toupper "${_all_skipped_targets}")):" "${file}"
       num_skiped=$(($num_skiped + 1));
       continue;
     fi
   fi
 
-  # --sim=only: only run files that require a simulator target
+  # --sim=only: only run files that grant the simulator permission to run.
   if [[ $sim_mode == "only" ]]; then
-    if ! set_contains_prefix REQ_TARGETS "sim-"; then
+    if ! file_has_sim; then
       _all_skipped_targets=$(set_print REQ_TARGETS)
+      [[ -z "$_all_skipped_targets" ]] && _all_skipped_targets=$(set_print REQ_ALLOWED_SIMS)
       print_status_line "SKIP(sim=only):" "${file}"
       num_skiped=$(($num_skiped + 1));
       continue;
     fi
   fi
 
-  # --sim=off: skip files that exclusively require a simulator target.
-  # Tests that also match a non-sim arch (e.g. TARGET-ARCH300+,TARGET-SIMARCH)
-  # are allowed through since they can run without a simulator.
+  # --sim=off: skip files that grant simulator permission but cannot run on
+  # real hardware (no simulator fallback is allowed).
   if [[ $sim_mode == "off" ]]; then
-    if set_contains_prefix REQ_TARGETS "sim-"; then
+    if file_has_sim; then
       if ! native_arch_matches; then
         _all_skipped_targets=$(set_print REQ_TARGETS)
+        [[ -z "$_all_skipped_targets" ]] && _all_skipped_targets=$(set_print REQ_ALLOWED_SIMS)
         print_status_line "SKIP(sim=off):" "${file}"
         num_skiped=$(($num_skiped + 1));
         continue;
@@ -1427,14 +1479,7 @@ for _entry in "${files_array[@]}"; do
     # Either execute or skip
     run_count=$(($run_count + 1))
 
-    # Skip RUN-SIM lines when sim mode is off
-    if [[ $run_sim -eq 1 && "$sim_mode" == "off" ]]; then
-      print_status_line "SKIP(sim=off):" "${file} ($run_count of $run_num)"
-      num_skiped=$(($num_skiped + 1));
-      continue;
-    fi
-
-    # Skip non-RUN-SIM lines when sim mode is only
+    # Skip hardware-resolved lines when sim mode is only.
     if [[ $run_sim -eq 0 && "$sim_mode" == "only" ]]; then
       print_status_line "SKIP(sim=only):" "${file} ($run_count of $run_num)"
       num_skiped=$(($num_skiped + 1));
@@ -1451,11 +1496,12 @@ for _entry in "${files_array[@]}"; do
     fi
 
     # requires specific device to run
-    if ! set_empty REQ_TARGETS; then
+    if ! set_empty REQ_TARGETS || ! set_empty REQ_ALLOWED_SIMS; then
       #echo "device: $device_type, reqs: $(set_print REQ_TARGETS), mach: $mach"
       if [[ $device_type == "none" && "$simulator" == "none" ]] || ! target_arch_matches; then
         # Not matched, skip
         _all_skipped_targets=$(set_print REQ_TARGETS)
+        [[ -z "$_all_skipped_targets" ]] && _all_skipped_targets=$(set_print REQ_ALLOWED_SIMS)
         print_status_line "SKIP($(toupper "${_all_skipped_targets}")):" "${file} ($run_count of $run_num)"
         num_skiped=$(($num_skiped + 1)); #simply skip the unmatched target
         continue;
@@ -1497,6 +1543,14 @@ for _entry in "${files_array[@]}"; do
         num_skiped=$(($num_skiped + 1));
         continue;
       fi
+    fi
+
+    # Per-line simulator environment: only lines resolved to the simulator get
+    # the sim env vars injected (prevents leaking them to real-device lines).
+    exe_env=
+    unset_env=
+    if [[ $run_sim -eq 1 ]]; then
+      run_hooks "target_sim_env"
     fi
 
     # Arch Matches: Execute the command with replacements

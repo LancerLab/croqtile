@@ -1,10 +1,4 @@
-// REQUIRES: TARGET-GCUSIM4
-// Event/trigger/inthreads/foreach producer-consumer patterns are not yet
-// functional on sim-gcu400 (LIBRA). local event buffers are private per
-// subthread so trigger/wait cannot synchronize producer and consumer, and the
-// shared-memory staging needed to fix this fails at launch when the kernel has
-// a single group (blockDims=1 -> "no resource available").
-// RUN-SIM: choreo -gs -t topscc -arch=sim-gcu400 %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// REQUIRES: TARGET-GCU400 ALLOW-SIM-GCU400
 // RUN: choreo -gs -t topscc %gcu_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s

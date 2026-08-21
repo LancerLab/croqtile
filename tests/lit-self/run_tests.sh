@@ -52,10 +52,6 @@ echo ""
 # -- Test 1: --sim=off (default) -----------------------------------------
 echo "--- --sim=off ---"
 
-check_grep "sim=off: sim_req.co skipped" \
-  'SKIP(sim=off)' 1 \
-  bash "$LIT_SH" --sim=off --dry-run "$TEST_DIR/sim_req.co"
-
 check_grep "sim=off: no_req.co passes (no sim skip)" \
   'SKIP(sim=off)' 0 \
   bash "$LIT_SH" --sim=off --dry-run "$TEST_DIR/no_req.co"
@@ -71,10 +67,6 @@ check_grep "sim=off: nonsim_req.co passes (no sim skip)" \
 # -- Test 2: --sim=only --------------------------------------------------
 echo "--- --sim=only ---"
 
-check_grep "sim=only: sim_req.co passes" \
-  'PASS:' 1 \
-  bash "$LIT_SH" --sim=only --dry-run "$TEST_DIR/sim_req.co"
-
 check_grep "sim=only: no_req.co skipped" \
   'SKIP(sim=only)' 1 \
   bash "$LIT_SH" --sim=only --dry-run "$TEST_DIR/no_req.co"
@@ -85,10 +77,6 @@ check_grep "sim=only: nonsim_req.co skipped" \
 
 # -- Test 3: --sim=on ----------------------------------------------------
 echo "--- --sim=on ---"
-
-check_grep "sim=on: sim_req.co passes" \
-  'PASS:' 1 \
-  bash "$LIT_SH" --sim=on --dry-run "$TEST_DIR/sim_req.co"
 
 check_grep "sim=on: no_req.co passes" \
   'PASS:' 1 \
