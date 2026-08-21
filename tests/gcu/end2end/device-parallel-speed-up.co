@@ -35,9 +35,9 @@ __co__ void elemwise_dual(s32[N] A, s32[N] B, s32[N] &C) {
   }
 }
 
-#define MM 512
-#define MK 512
-#define MN 512
+#define MM 128
+#define MK 128
+#define MN 128
 
 // Single-device matmul
 __co__ void matmul_single(s32[MM, MK] A, s32[MK, MN] B, s32[MM, MN] &C) {
