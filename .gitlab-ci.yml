@@ -1,4 +1,5 @@
 stages:
+  - preflight
   - check-in-tests
   - pre-release-tests
   - docgen
@@ -37,17 +38,95 @@ stages:
 #    - 'if [ -n "$CI_PROJECT_DIR" ] && [ "$CI_PROJECT_DIR" != "/" ]; then rm -rf $CI_PROJECT_DIR/{*,.[!.]*,..?*}; else echo "CI_PROJECT_DIR is not set or is root, skip cleanup!"; fi'
 #    - 'echo "Cleanup done."'
 
+# Preflight: classify changed files so downstream jobs can skip themselves when
+# a push/MR only touches non-code files (docs, .gitignore, AGENTS.md, .github/,
+# etc.). Emits a dotenv artifact consumed by jobs via `needs`.
+#
+# Flags emitted:
+#   NON_CODE     = "true" when NO changed file is code (safe to skip heavy tests)
+#   DOCS_CHANGED = "true" when at least one doc file changed (informational;
+#                  generate_docs stays gated by rules:changes for efficiency)
+detect_changes:
+  stage: preflight
+  rules:
+    - when: always
+  script:
+    - |
+      set -u
+      out="change_flags.env"
+      : > "$out"
+
+      is_non_code() {
+        case "$1" in
+          Documents/*|docs/*)           return 0 ;;
+          *.md|*.rst|*.adoc)            return 0 ;;
+          mkdocs.yml)                   return 0 ;;
+          .gitignore|.gitattributes|.gitmodules|.mailmap) return 0 ;;
+          .github/*)                    return 0 ;;
+          .gitlab/*|.gitlab-ci.yml)     return 0 ;;
+          .clang-format|.clang-tidy|.editorconfig) return 0 ;;
+          README*|LICENSE*|CONTRIBUTING*|AUTHORS*|CHANGELOG*|CODE_OF_CONDUCT*) return 0 ;;
+          images/*|syntaxes/*)          return 0 ;;
+          *)                            return 1 ;;
+        esac
+      }
+
+      is_doc() {
+        case "$1" in
+          Documents/*|docs/*) return 0 ;;
+          mkdocs.yml)          return 0 ;;
+          *.md)                return 0 ;;
+          *)                   return 1 ;;
+        esac
+      }
+
+      base="${CI_MERGE_REQUEST_DIFF_BASE_SHA:-${CI_COMMIT_BEFORE_SHA:-}}"
+
+      files=""
+      if [ -n "$base" ] && [ "$base" != "0000000000000000000000000000000000000000" ]; then
+        git cat-file -e "$base^{commit}" 2>/dev/null || \
+          git fetch --quiet --depth=1 origin "$base" 2>/dev/null || true
+        files="$(git diff --name-only "$base" HEAD 2>/dev/null || true)"
+      fi
+      if [ -z "$files" ]; then
+        files="$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)"
+      fi
+
+      if [ -z "$files" ]; then
+        # Cannot determine the change set; be conservative and run everything.
+        echo "NON_CODE=false" >> "$out"
+        echo "DOCS_CHANGED=true" >> "$out"
+        echo "Unable to determine changed files; defaulting to full run." >&2
+      else
+        non_code_only=true
+        docs_changed=false
+        echo "Changed files:" >&2
+        while IFS= read -r f; do
+          [ -z "$f" ] && continue
+          echo "  $f" >&2
+          if ! is_non_code "$f"; then
+            non_code_only=false
+          fi
+          if is_doc "$f"; then
+            docs_changed=true
+          fi
+        done <<< "$files"
+        echo "NON_CODE=$non_code_only" >> "$out"
+        echo "DOCS_CHANGED=$docs_changed" >> "$out"
+      fi
+  artifacts:
+    reports:
+      dotenv: change_flags.env
+
 # GPU Testing
 gpu_test:
   variables:
    GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
   stage: check-in-tests
+  needs:
+    - detect_changes
   rules:
     - if: $NO_GPU == "true"
-      when: never
-    - changes:
-        - Documents/**
-        - mkdocs.yml
       when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" ||
@@ -66,6 +145,11 @@ gpu_test:
         cat cmake/deps.conf
       fi
   script:
+    - |
+      if [ "${NON_CODE:-false}" == "true" ]; then
+        echo "No code changes detected; skipping heavy tests."
+        exit 0
+      fi
     - echo "Running tests with GPU..."
     - make test-all
   artifacts:
@@ -90,12 +174,10 @@ amdgpu_test:
   variables:
    GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
   stage: check-in-tests
+  needs:
+    - detect_changes
   rules:
     - if: $NO_AMDGPU == "true"
-      when: never
-    - changes:
-        - Documents/**
-        - mkdocs.yml
       when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" ||
@@ -112,6 +194,11 @@ amdgpu_test:
         git show origin/main:cmake/deps.conf > cmake/deps.conf
       fi
   script:
+    - |
+      if [ "${NON_CODE:-false}" == "true" ]; then
+        echo "No code changes detected; skipping heavy tests."
+        exit 0
+      fi
     - echo "Running tests with AMDGPU..."
     - make debug
     - ./tests/lit.sh --only-target=amdgpu tests/amdgpu/
@@ -129,6 +216,8 @@ gcu2_test:
   variables:
    GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
   stage: check-in-tests
+  needs:
+    - detect_changes
   rules:
     - if: $NO_GCU == "true"
       when: never
@@ -136,16 +225,17 @@ gcu2_test:
         $CI_PIPELINE_SOURCE == "merge_request_event" &&
         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
       when: never
-    - changes:
-        - Documents/**
-        - mkdocs.yml
-      when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" ||
         $CI_COMMIT_BRANCH =~ /^release\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
       when: on_success
   script:
+    - |
+      if [ "${NON_CODE:-false}" == "true" ]; then
+        echo "No code changes detected; skipping heavy tests."
+        exit 0
+      fi
     - echo "Running tests with GCU2..."
     - make setup-gcu2
     - make test
@@ -170,6 +260,8 @@ gcu2_test:
 # GCU3 Testing
 gcu3_test:
   stage: check-in-tests
+  needs:
+    - detect_changes
   rules:
     - if: $NO_GCU == "true"
       when: never
@@ -177,16 +269,17 @@ gcu3_test:
         $CI_PIPELINE_SOURCE == "merge_request_event" &&
         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
       when: never
-    - changes:
-        - Documents/**
-        - mkdocs.yml
-      when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" ||
         $CI_COMMIT_BRANCH =~ /^release\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
       when: on_success
   script:
+    - |
+      if [ "${NON_CODE:-false}" == "true" ]; then
+        echo "No code changes detected; skipping heavy tests."
+        exit 0
+      fi
     - echo "Running tests with GCU3 S60..."
     - make setup-gcu3
     - make test
@@ -213,6 +306,8 @@ gcu4_test:
   variables:
    GIT_SSH_COMMAND: 'ssh -F /opt/gitlab-runner/ssh/config'
   stage: check-in-tests
+  needs:
+    - detect_changes
   rules:
     - if: $NO_GCU == "true"
       when: never
@@ -220,16 +315,17 @@ gcu4_test:
         $CI_PIPELINE_SOURCE == "merge_request_event" &&
         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
       when: never
-    - changes:
-        - Documents/**
-        - mkdocs.yml
-      when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" ||
         $CI_COMMIT_BRANCH =~ /^release\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
       when: on_success
   script:
+    - |
+      if [ "${NON_CODE:-false}" == "true" ]; then
+        echo "No code changes detected; skipping heavy tests."
+        exit 0
+      fi
     - echo "Running tests with GCU4 LIBRA..."
     - make setup-gcu4sim
     - make test-libra
@@ -254,6 +350,8 @@ gcu4_test:
 # GCU3 Debug Testing
 gcu3_debug_test:
   stage: check-in-tests
+  needs:
+    - detect_changes
   rules:
     - if: $NO_GCU == "true"
       when: never
@@ -261,16 +359,17 @@ gcu3_debug_test:
         $CI_PIPELINE_SOURCE == "merge_request_event" &&
         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
       when: never
-    - changes:
-        - Documents/**
-        - mkdocs.yml
-      when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" ||
         $CI_COMMIT_BRANCH =~ /^release\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
       when: on_success
   script:
+    - |
+      if [ "${NON_CODE:-false}" == "true" ]; then
+        echo "No code changes detected; skipping heavy tests."
+        exit 0
+      fi
     - echo "Running DEBUG tests with GCU3 S60..."
     - make setup-gcu3
     - make test-debug
@@ -338,6 +437,8 @@ gcu3_debug_test:
 # Package testing
 package_test:
   stage: pre-release-tests
+  needs:
+    - detect_changes
   rules:
     - if: $NO_PACK == "true"
       when: never
@@ -345,16 +446,17 @@ package_test:
         $CI_PIPELINE_SOURCE == "merge_request_event" &&
         $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^oss\//
       when: never
-    - changes:
-        - Documents/**
-        - mkdocs.yml
-      when: never
     - if: >
         $CI_COMMIT_BRANCH == "main" ||
         $CI_COMMIT_BRANCH =~ /^release\// ||
         $CI_PIPELINE_SOURCE == "merge_request_event"
       when: on_success
   script:
+    - |
+      if [ "${NON_CODE:-false}" == "true" ]; then
+        echo "No code changes detected; skipping heavy tests."
+        exit 0
+      fi
     - echo "Running release tests..."
     - make package
     - echo "Checking for generated packages..."
@@ -396,7 +498,7 @@ generate_docs:
     - if: $CI_COMMIT_BRANCH =~ /^oss\//
       when: never
     - changes:
-        - Documents/**
+        - Documents/**/*
         - mkdocs.yml
       when: on_success
     - when: never
