@@ -51,6 +51,13 @@ struct TopsccDeviceCodeGen : public DeviceCodeGen {
           << STRINGIZE(__CHOREO_TOPSCC_DIR__) << " ]]; then\n";
       out << "    TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
       out << "  else\n";
+      out << "if [[ -z \"${GCU_SIM_LIB}\" ]]; then\n";
+      out << "  GCU_SIM_LIB="
+          << STRINGIZE(__CHOREO_TOPSCC_SIM_DIR__) << "/lib/\n";
+      out << "fi\n";
+      out << "export LD_LIBRARY_PATH=\"${GCU_SIM_LIB}${LD_LIBRARY_PATH:+:${"
+             "LD_LIBRARY_PATH}}\"\n";
+
     } else {
       out << "  if [[ -d " << STRINGIZE(__CHOREO_TOPSCC_DIR__) << " ]]; then\n";
       out << "    TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";

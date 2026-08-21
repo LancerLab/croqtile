@@ -1,5 +1,4 @@
 // REQUIRES: TARGET-GCUSIM4
-// XFAIL: *
 // Event/trigger/inthreads/foreach producer-consumer patterns are not yet
 // functional on sim-gcu400 (LIBRA). local event buffers are private per
 // subthread so trigger/wait cannot synchronize producer and consumer, and the
