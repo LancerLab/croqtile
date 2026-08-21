@@ -50,9 +50,52 @@ A `.cmt` file uses `#` as the comment marker:
 
 | Directive | Executes when |
 |-----------|---------------|
-| `// RUN: ...` | Always (shell environment) |
+| `// RUN: ...` | Resolved by the per-line ladder: real hardware first, then an allowed simulator (see below) |
 | `// RUN-DOCKER: ...` | Inside Docker only |
-| `// RUN-<mach>: ...` | Only when `mach` matches (e.g. `// RUN-mt100: ...`) |
+| `// RUN-<mach>: ...` | Resolved by the per-line ladder: real hardware first, then simulator (see below) |
+
+## Simulator support (`--sim`)
+
+`lit.sh` can execute tests on a software simulator (e.g. an accelerator
+simulator) in addition to -- or instead of -- real hardware.  Simulator behaviour is
+controlled by the `--sim` flag:
+
+| Value | Meaning |
+|-------|---------|
+| `--sim=off` (default) | Run only on real hardware. Files that require the simulator are skipped. |
+| `--sim=on` | Run on real hardware when present, and also allow simulator execution. |
+| `--sim=only` | Run only on the simulator; real-hardware lines are skipped. |
+
+### `ALLOW-SIM-*` markers
+
+Unlike `TARGET-*` (which requires a specific hardware arch), `ALLOW-SIM-*` is
+a **permission**, not a peer target: it declares that the corresponding
+*simulator* may run this file.  It never makes the file run on its own -- it
+only unlocks the simulator in the per-line resolution ladder.
+
+```co
+// REQUIRES: TARGET-MT100 ALLOW-SIM-MT100
+```
+
+Read as: "this test targets mt100 hardware, and the mt100 simulator is also
+allowed to run it."
+
+### Per-line resolution ladder
+
+For a `// RUN:` or `// RUN-<arch>:` line, `lit.sh` resolves which device
+actually executes it, in priority order:
+
+1. **Real hardware** -- if `mach` matches the line's arch (`RUN-<arch>`) or the
+   file's `TARGET-*` requirement (`RUN:`), the line runs on hardware.
+2. **Simulator** -- if no hardware matches and the simulator for that arch is
+   both available and allowed (`ALLOW-SIM-*`, or a `TARGET-*` match for
+   back-compat), the line runs on the simulator with the simulator
+   environment injected for *that line only*.
+3. **Docker** -- fallback when configured.
+
+The simulator environment (e.g. `LD_LIBRARY_PATH` and target-specific
+simulator variables) is injected **per `RUN:` line** -- it never leaks to
+real-hardware lines in the same file.
 
 ### `REQUIRES:` vs `RUN-<mach>`
 
@@ -136,9 +179,11 @@ Every `lit.cfg` **must** start with a `# co-lit` first line.  `lit.sh` uses this
 |-------|-----------|---------|
 | `hw_detect` | `my_fn()` | Detect hardware; set `device_type`, `mach`, target-specific arch vars |
 | `set_archs` `[TARGET ...]` | `my_fn TARGET-FOO` | Translate `REQUIRES: TARGET-XXX` tokens into entries in `REQ_TARGETS` |
+| `set_sims` `[SIM ...]` | `my_fn SIM-FOO` | Translate `REQUIRES: ALLOW-SIM-XXX` tokens into entries in `REQ_ALLOWED_SIMS` |
 | `all_archs` | `my_fn()` | Populate `REQ_TARGETS` with all known archs (used by `--all-archs`) |
 | `target_cmd` `name_of_cmd_var` | `my_fn cmd_ref` | Substitute `%target` and other target-specific tokens in the command string; receives the name of the nameref variable |
 | `target_noskip` | `my_fn()` | Return non-zero to skip a test for a target-specific reason (e.g. simulator not present) |
+| `target_sim_env` | `my_fn()` | Inject simulator environment (`exe_env`/`unset_env`) for a single sim-resolved `RUN:` line |
 | `target_prepare` | `my_fn()` | Run arbitrary setup before the test executes |
 
 ### Registering hooks
@@ -152,7 +197,7 @@ Multiple hooks for the same phase are called in registration order.
 
 ### Design principle: target-agnostic core
 
-`lit.sh` itself must not contain any target-specific variable names, token substitutions, or detection logic.  The only variables `lit.sh` manages are the framework-level ones: `device_type`, `mach`, and `simulator`.  Everything target-specific -- arch variables, `%`-token expansions, skip conditions -- belongs in the target's own `lit.cfg` and its hooks.  This keeps the core runner extensible without modification.
+`lit.sh` itself must not contain any target-specific variable names, token substitutions, or detection logic.  The only variables `lit.sh` manages are the framework-level ones: `device_type`, `mach`, `simulator`, and `run_arch` (the arch resolved for the current `RUN:` line).  Everything target-specific -- arch variables, `%`-token expansions, skip conditions -- belongs in the target's own `lit.cfg` and its hooks.  This keeps the core runner extensible without modification.
 
 ---
 
@@ -321,4 +366,4 @@ When a file is processed via `include_dir` (cfg override), the walk starts from 
 ## See Also
 
 - [AGENTS.md](../../AGENTS.md) -- Build commands, pass names, compiler options
-- [`tests/lit.sh`](../../tests/lit.sh) -- Runner source (v0.33+)
+- [`tests/lit.sh`](../../tests/lit.sh) -- Runner source (v0.35+)
