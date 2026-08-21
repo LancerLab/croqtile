@@ -138,7 +138,7 @@ setup-gcu4-platform-sim-kit: check-gcu4-platform-kit
 install-gcu-sim:
 	mkdir -p $(GCU_SIM_DIR)/lib
 	@if [ ! -f "$(GCU_SIM_DIR)/lib/libgcusim.so" ]; then \
-		wget http://artifact.enflame.cn/artifactory/release_center/GCUSIM/4.0.2/libgcusim.so; \
+		wget http://artifact.enflame.cn/artifactory/release_center/GCUSIM/1.0.93/libgcusim.so; \
 		mv libgcusim.so $(GCU_SIM_DIR)/lib/libgcusim.so; \
 	fi;
 
