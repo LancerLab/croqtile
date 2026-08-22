@@ -129,15 +129,15 @@ def CoIR_AsyncTokenType : TypeDef<CoIR_Dialect, "AsyncToken"> {
 //===----------------------------------------------------------------------===//
 
 def CoIR_TensorTypeC : Type<
-  CPred<"$_self.isa<coir::TensorType>()">,
+  CPred<"::llvm::isa<coir::TensorType>($_self)">,
   "CoIR tensor type">;
 
 def CoIR_MMAFragTypeC : Type<
-  CPred<"$_self.isa<coir::MMAFragType>()">,
+  CPred<"::llvm::isa<coir::MMAFragType>($_self)">,
   "CoIR MMA fragment type">;
 
 def CoIR_AsyncTokenTypeC : Type<
-  CPred<"$_self.isa<coir::AsyncTokenType>()">,
+  CPred<"::llvm::isa<coir::AsyncTokenType>($_self)">,
   "CoIR async handle type">;
 
 def CoIR_TensorOrMemRef : AnyTypeOf<[CoIR_TensorTypeC, AnyMemRef]>;

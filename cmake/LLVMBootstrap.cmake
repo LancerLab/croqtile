@@ -2,8 +2,14 @@
 # On-demand LLVM/MLIR dependency for the CoIR tooling.
 #
 # Reads LLVM_* entries from cmake/deps.conf for URL, tarball name, and MD5.
-# When LLVM/MLIR is not found in extern/llvm-project/, downloads it
-# automatically (or errors out if COIR_AUTO_DOWNLOAD_LLVM is OFF).
+# When LLVM/MLIR is not found in extern/llvm-project/, obtains it
+# automatically (or errors out if COIR_AUTO_DOWNLOAD_LLVM is OFF) using
+# this fallback chain:
+#   1. internal FTP mirror ($FTP_SERVER env var, see cmake/DepMirror.cmake)
+#   2. public release tarball (LLVM_URL in cmake/deps.conf)
+#   3. build from source (scripts/build_llvm.sh) -- slow, last resort
+# An existing installation whose version does not match LLVM_SHASH in
+# cmake/deps.conf is discarded and re-obtained through the same chain.
 #
 # Sets: MLIR_DIR, LLVM_DIR, LLVM_TABLEGEN_EXE, MLIR_TABLEGEN_EXE
 
@@ -27,6 +33,49 @@ option(COIR_AUTO_DOWNLOAD_LLVM
 
 # --- Locate or download LLVM/MLIR ---
 set(_LLVM_CMAKE_DIR "${_LLVM_ROOT}/lib/cmake")
+
+# Verify that an existing LLVM/MLIR installation matches the version
+# requested in cmake/deps.conf. A stale installation (e.g. LLVM 18 left
+# behind after a version bump) will otherwise produce confusing API
+# mismatch errors during the CoIR build.
+set(_LLVM_VERSION_MISMATCH FALSE)
+if(EXISTS "${_LLVM_CMAKE_DIR}/llvm/LLVMConfig.cmake")
+  file(STRINGS "${_LLVM_CMAKE_DIR}/llvm/LLVMConfig.cmake" _llvm_config_version_line
+    REGEX "^set\\(LLVM_PACKAGE_VERSION ")
+  if(_llvm_config_version_line)
+    string(REGEX REPLACE "^set\\(LLVM_PACKAGE_VERSION ([^)]+)\\).*" "\\1"
+      _installed_llvm_version "${_llvm_config_version_line}")
+    string(STRIP "${_installed_llvm_version}" _installed_llvm_version)
+
+    # Expected version is encoded as "llvmorg-X.Y.Z" in deps.conf.
+    set(_expected_llvm_version "")
+    if(DEFINED COIR_LLVM_SHASH)
+      string(REGEX REPLACE "^llvmorg-" "" _expected_llvm_version "${COIR_LLVM_SHASH}")
+      string(STRIP "${_expected_llvm_version}" _expected_llvm_version)
+    endif()
+
+    if(_expected_llvm_version AND
+        NOT _installed_llvm_version VERSION_EQUAL _expected_llvm_version)
+      message(STATUS
+        "CoIR: installed LLVM ${_installed_llvm_version} does not match "
+        "requested ${_expected_llvm_version}")
+      set(_LLVM_VERSION_MISMATCH TRUE)
+    endif()
+  endif()
+endif()
+
+if(_LLVM_VERSION_MISMATCH)
+  if(NOT COIR_AUTO_DOWNLOAD_LLVM)
+    message(FATAL_ERROR
+      "LLVM/MLIR at ${_LLVM_ROOT} is version ${_installed_llvm_version}, "
+      "but cmake/deps.conf requests ${_expected_llvm_version}.\n"
+      "Set -DCOIR_AUTO_DOWNLOAD_LLVM=ON to replace it automatically, "
+      "or manually extract the correct LLVM tarball into ${_LLVM_ROOT}.")
+  endif()
+  message(STATUS
+    "CoIR: removing stale LLVM/MLIR installation at ${_LLVM_ROOT}...")
+  file(REMOVE_RECURSE "${_LLVM_ROOT}")
+endif()
 
 if(NOT EXISTS "${_LLVM_CMAKE_DIR}/mlir/MLIRConfig.cmake")
   if(NOT COIR_AUTO_DOWNLOAD_LLVM)
@@ -129,42 +178,58 @@ if(NOT EXISTS "${_LLVM_CMAKE_DIR}/mlir/MLIRConfig.cmake")
     if(NOT _dl_code EQUAL 0)
       list(GET _dl_status 1 _dl_msg)
       file(REMOVE "${_TAR_PATH}")
-      message(FATAL_ERROR
-        "Failed to download LLVM/MLIR: ${_dl_msg}\n"
-        "URL: ${COIR_LLVM_URL}\n"
-        "You can download manually and place at: ${_TAR_PATH}")
+      # Deepest fallback: build LLVM/MLIR from source.  This is slow, so
+      # it runs only after the FTP mirror and public tarballs failed.
+      message(WARNING
+        "CoIR: LLVM/MLIR download failed (${_dl_msg})\n"
+        "  URL: ${COIR_LLVM_URL}\n"
+        "  Falling back to building ${COIR_LLVM_SHASH} from source; "
+        "this can take a long time.")
+      execute_process(
+        COMMAND bash "${CMAKE_SOURCE_DIR}/scripts/build_llvm.sh"
+                "${COIR_LLVM_SHASH}"
+        RESULT_VARIABLE _llvm_build_result)
+      if(NOT _llvm_build_result EQUAL 0)
+        message(FATAL_ERROR
+          "Failed to obtain LLVM/MLIR by download or source build.\n"
+          "You can download manually and place at: ${_TAR_PATH}\n"
+          "or run: bash scripts/build_llvm.sh ${COIR_LLVM_SHASH}")
+      endif()
+      set(_llvm_built_from_source TRUE)
     endif()
   endif()
 
-  message(STATUS "CoIR: Extracting LLVM/MLIR into ${_LLVM_ROOT}...")
-  file(MAKE_DIRECTORY "${_LLVM_ROOT}")
-  execute_process(
-    COMMAND ${CMAKE_COMMAND} -E tar xf "${_TAR_PATH}"
-    WORKING_DIRECTORY "${_LLVM_ROOT}"
-    RESULT_VARIABLE _extract_result)
-  if(NOT _extract_result EQUAL 0)
+  if(NOT _llvm_built_from_source)
+    message(STATUS "CoIR: Extracting LLVM/MLIR into ${_LLVM_ROOT}...")
+    file(MAKE_DIRECTORY "${_LLVM_ROOT}")
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} -E tar xf "${_TAR_PATH}"
+      WORKING_DIRECTORY "${_LLVM_ROOT}"
+      RESULT_VARIABLE _extract_result)
+    if(NOT _extract_result EQUAL 0)
+      file(REMOVE "${_TAR_PATH}")
+      message(FATAL_ERROR "Failed to extract LLVM tarball: ${_TAR_PATH}")
+    endif()
+
+    # Handle tarballs that extract with a top-level directory
+    if(NOT EXISTS "${_LLVM_CMAKE_DIR}/mlir/MLIRConfig.cmake")
+      file(GLOB _subdirs "${_LLVM_ROOT}/*/lib/cmake/mlir/MLIRConfig.cmake")
+      if(_subdirs)
+        list(GET _subdirs 0 _found_config)
+        get_filename_component(_inner_root "${_found_config}" DIRECTORY)
+        get_filename_component(_inner_root "${_inner_root}" DIRECTORY)
+        get_filename_component(_inner_root "${_inner_root}" DIRECTORY)
+        get_filename_component(_inner_root "${_inner_root}" DIRECTORY)
+        file(GLOB _inner_contents "${_inner_root}/*")
+        foreach(_item ${_inner_contents})
+          get_filename_component(_name "${_item}" NAME)
+          file(RENAME "${_item}" "${_LLVM_ROOT}/${_name}")
+        endforeach()
+      endif()
+    endif()
+
     file(REMOVE "${_TAR_PATH}")
-    message(FATAL_ERROR "Failed to extract LLVM tarball: ${_TAR_PATH}")
   endif()
-
-  # Handle tarballs that extract with a top-level directory
-  if(NOT EXISTS "${_LLVM_CMAKE_DIR}/mlir/MLIRConfig.cmake")
-    file(GLOB _subdirs "${_LLVM_ROOT}/*/lib/cmake/mlir/MLIRConfig.cmake")
-    if(_subdirs)
-      list(GET _subdirs 0 _found_config)
-      get_filename_component(_inner_root "${_found_config}" DIRECTORY)
-      get_filename_component(_inner_root "${_inner_root}" DIRECTORY)
-      get_filename_component(_inner_root "${_inner_root}" DIRECTORY)
-      get_filename_component(_inner_root "${_inner_root}" DIRECTORY)
-      file(GLOB _inner_contents "${_inner_root}/*")
-      foreach(_item ${_inner_contents})
-        get_filename_component(_name "${_item}" NAME)
-        file(RENAME "${_item}" "${_LLVM_ROOT}/${_name}")
-      endforeach()
-    endif()
-  endif()
-
-  file(REMOVE "${_TAR_PATH}")
 
   if(NOT EXISTS "${_LLVM_CMAKE_DIR}/mlir/MLIRConfig.cmake")
     message(FATAL_ERROR

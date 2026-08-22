@@ -35,6 +35,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/IRMapping.h"
+#include "mlir/IR/OperationSupport.h"
 #include "mlir/Pass/Pass.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -419,9 +420,13 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
           flatTy = MemRefType::get({totalElems}, elemTy, AffineMap{},
                                    addrSpace);
         }
+        OpFoldResult offsetAttr =
+            hasDynOffset ? OpFoldResult(offset)
+                         : OpFoldResult(builder.getIndexAttr(staticOff));
         return builder.create<memref::ReinterpretCastOp>(
-            loc, flatTy, base, offset,
-            ValueRange{total}, ValueRange{one});
+            loc, flatTy, base, offsetAttr,
+            ArrayRef<OpFoldResult>{builder.getIndexAttr(totalElems)},
+            ArrayRef<OpFoldResult>{builder.getIndexAttr(1)});
       };
 
       auto flatSrc = makeFlatView(srcBase, srcOffset,
@@ -649,10 +654,13 @@ private:
                                AffineMap{}, memTy.getMemorySpace());
     }
 
-    Value sz = builder.create<arith::ConstantIndexOp>(loc, totalElems);
-    Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
+    OpFoldResult offsetAttr =
+        hasDynOffset ? OpFoldResult(offset)
+                     : OpFoldResult(builder.getIndexAttr(staticOff));
     return builder.create<memref::ReinterpretCastOp>(
-        loc, flatTy, base, offset, ValueRange{sz}, ValueRange{one});
+        loc, flatTy, base, offsetAttr,
+        ArrayRef<OpFoldResult>{builder.getIndexAttr(totalElems)},
+        ArrayRef<OpFoldResult>{builder.getIndexAttr(1)});
   }
 
   void gpuConvertLoadElem(OpBuilder &builder, Location loc,
@@ -824,14 +832,13 @@ private:
           {warpsPerBlock_ * fragShape[0], fragShape[1]},
           fragTy.getElementType(), AffineMap{}, addrSpace);
       auto globalRef2D = builder.create<memref::ReinterpretCastOp>(
-          loc, tmpMemTy, globalRef.getResult(), zero,
-          ValueRange{
-              builder.create<arith::ConstantIndexOp>(
-                  loc, warpsPerBlock_ * fragShape[0]),
-              builder.create<arith::ConstantIndexOp>(loc, fragShape[1])},
-          ValueRange{
-              builder.create<arith::ConstantIndexOp>(loc, fragShape[1]),
-              builder.create<arith::ConstantIndexOp>(loc, 1)});
+          loc, tmpMemTy, globalRef.getResult(), builder.getIndexAttr(0),
+          ArrayRef<OpFoldResult>{
+              builder.getIndexAttr(warpsPerBlock_ * fragShape[0]),
+              builder.getIndexAttr(fragShape[1])},
+          ArrayRef<OpFoldResult>{
+              builder.getIndexAttr(fragShape[1]),
+              builder.getIndexAttr(1)});
 
       builder.create<mgpu::SubgroupMmaStoreMatrixOp>(
           loc, frag, globalRef2D, ValueRange{rowOffset, zero},
@@ -996,13 +1003,11 @@ private:
                                 AffineMap{}, srcMemTy.getMemorySpace());
     }
 
-    SmallVector<Value> sizes;
-    SmallVector<Value> strides;
+    SmallVector<OpFoldResult> sizes;
+    SmallVector<OpFoldResult> strides;
     for (unsigned i = 0; i < tileShape.size(); ++i) {
-      sizes.push_back(
-          builder.create<arith::ConstantIndexOp>(loc, tileShape[i]));
-      strides.push_back(
-          builder.create<arith::ConstantIndexOp>(loc, tileStrides[i]));
+      sizes.push_back(builder.getIndexAttr(tileShape[i]));
+      strides.push_back(builder.getIndexAttr(tileStrides[i]));
     }
 
     Value base = getBaseMemRef(src);
@@ -1014,8 +1019,11 @@ private:
       offset = builder.create<arith::AddIOp>(loc, offset, parentOffset);
     }
 
+    OpFoldResult offsetAttr =
+        hasDynOffset ? OpFoldResult(offset)
+                     : OpFoldResult(builder.getIndexAttr(staticOffset));
     auto cast = builder.create<memref::ReinterpretCastOp>(
-        loc, tileMem, base, offset, sizes, strides);
+        loc, tileMem, base, offsetAttr, sizes, strides);
     mapping.map(tileOp.getResult(), cast.getResult());
   }
 
@@ -1127,12 +1135,10 @@ private:
     MemRefType tileMem = MemRefType::get(tileShape, baseTy.getElementType(),
                                          layout, baseTy.getMemorySpace());
 
-    SmallVector<Value> sizes, strides;
+    SmallVector<OpFoldResult> sizes, strides;
     for (unsigned i = 0; i < tileShape.size(); ++i) {
-      sizes.push_back(
-          builder.create<arith::ConstantIndexOp>(loc, tileShape[i]));
-      strides.push_back(
-          builder.create<arith::ConstantIndexOp>(loc, tileStrides[i]));
+      sizes.push_back(builder.getIndexAttr(tileShape[i]));
+      strides.push_back(builder.getIndexAttr(tileStrides[i]));
     }
 
     Value basePtr = getBaseMemRef(base);
@@ -1144,8 +1150,11 @@ private:
       offset = builder.create<arith::AddIOp>(loc, offset, parentOffset);
     }
 
+    OpFoldResult offsetAttr =
+        hasDynOffset ? OpFoldResult(offset)
+                     : OpFoldResult(builder.getIndexAttr(staticOffset));
     return builder.create<memref::ReinterpretCastOp>(
-        loc, tileMem, basePtr, offset, sizes, strides);
+        loc, tileMem, basePtr, offsetAttr, sizes, strides);
   }
 
   void convertAtomic(OpBuilder &builder, Location loc, AtomicOp atomicOp,

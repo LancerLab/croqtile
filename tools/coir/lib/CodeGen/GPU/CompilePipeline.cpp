@@ -64,7 +64,7 @@ bool emitHostObjectFile(llvm::Module &hostMod, llvm::StringRef outputPath) {
   LLVMInitializeX86AsmParser();
 
   auto triple = llvm::sys::getDefaultTargetTriple();
-  hostMod.setTargetTriple(triple);
+  hostMod.setTargetTriple(llvm::Triple(triple));
 
   std::string errStr;
   auto *target = llvm::TargetRegistry::lookupTarget(triple, errStr);
@@ -76,7 +76,8 @@ bool emitHostObjectFile(llvm::Module &hostMod, llvm::StringRef outputPath) {
   auto cpu = llvm::sys::getHostCPUName();
   llvm::TargetOptions tOpts;
   auto tm = std::unique_ptr<llvm::TargetMachine>(
-      target->createTargetMachine(triple, cpu, "", tOpts, llvm::Reloc::PIC_));
+      target->createTargetMachine(llvm::Triple(triple), cpu, "", tOpts,
+                                llvm::Reloc::PIC_));
   if (!tm) {
     llvm::errs() << "coir: failed to create x86 TargetMachine\n";
     return false;
