@@ -6,6 +6,7 @@
 
 #include "CodeGen/CoIRKernelLowering.h"
 #include "Dialect/CoIR/CoIRAttrs.h"
+#include "mlir/IR/OperationSupport.h"
 
 using namespace mlir;
 using namespace coir;
@@ -465,11 +466,13 @@ Value CoIRKernelLoweringBase::flattenIfNeeded(OpBuilder &builder, Location loc,
                              AffineMap{}, memTy.getMemorySpace());
   }
 
-  Value sz = builder.create<arith::ConstantIndexOp>(loc, totalElems);
-  Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
-  return builder.create<memref::ReinterpretCastOp>(loc, flatTy, base, offset,
-                                                   ValueRange{sz},
-                                                   ValueRange{one});
+  OpFoldResult offsetAttr =
+      hasDynOffset ? OpFoldResult(offset)
+                   : OpFoldResult(builder.getIndexAttr(staticOff));
+  return builder.create<memref::ReinterpretCastOp>(
+      loc, flatTy, base, offsetAttr,
+      ArrayRef<OpFoldResult>{builder.getIndexAttr(totalElems)},
+      ArrayRef<OpFoldResult>{builder.getIndexAttr(1)});
 }
 
 Value CoIRKernelLoweringBase::getBaseMemRef(Value memref) {
@@ -540,9 +543,13 @@ void CoIRKernelLoweringBase::emitFlatCopyLoop(OpBuilder &builder, Location loc,
                                    dstTy.getMemorySpace());
 
   auto flatSrc = builder.create<memref::ReinterpretCastOp>(
-      loc, flatSrcTy, src, zero, ValueRange{total}, ValueRange{one});
+      loc, flatSrcTy, src, builder.getIndexAttr(0),
+      ArrayRef<OpFoldResult>{builder.getIndexAttr(totalElems)},
+      ArrayRef<OpFoldResult>{builder.getIndexAttr(1)});
   auto flatDst = builder.create<memref::ReinterpretCastOp>(
-      loc, flatDstTy, dst, zero, ValueRange{total}, ValueRange{one});
+      loc, flatDstTy, dst, builder.getIndexAttr(0),
+      ArrayRef<OpFoldResult>{builder.getIndexAttr(totalElems)},
+      ArrayRef<OpFoldResult>{builder.getIndexAttr(1)});
 
   auto loop = builder.create<scf::ForOp>(loc, zero, total, one);
   {
