@@ -521,6 +521,7 @@ private:
   bool visualize = false;           // visualize the DMAs
   bool cross_compile = false;       // TODO: figure out
   bool trace_vn = false;            // trace the value numbering
+  bool disable_vn_share = false;    // disable value-number sharing (ablation)
   bool trace_vectorize = false;     // trace the masking
   bool show_source_loc = true;    // show source code location when error, etc.
   bool mem_reuse = false;         // reuse the memory of the program
@@ -780,6 +781,7 @@ public:
   bool Visualize() const { return visualize; }
   bool CrossCompile() const { return cross_compile; }
   bool TraceValueNumbers() const { return trace_vn; }
+  bool DisableVNShare() const { return disable_vn_share; }
   bool TraceVectorize() const { return trace_vectorize; }
   bool MemReuse() const { return mem_reuse; }
   bool SALA() const { return sala; }
@@ -839,6 +841,7 @@ public:
   void SetVisualize(bool value) { visualize = value; }
   void SetCrossCompile(bool value) { cross_compile = value; }
   void SetTraceValueNumbers(bool value) { trace_vn = value; }
+  void SetDisableVNShare(bool value) { disable_vn_share = value; }
   void SetTraceVectorize(bool value) { trace_vectorize = value; }
   void SetMemReuse(bool value) { mem_reuse = value; }
   void SetSALA(bool value) { sala = value; }
