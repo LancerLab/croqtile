@@ -1,4 +1,5 @@
 #include "shapeinfer.hpp"
+#include "context.hpp"
 
 using namespace Choreo;
 using namespace Choreo::valno;
@@ -479,6 +480,15 @@ ValueNumbering::GetOrGenValueNumberFromSignature(const SignTy& signature) {
   if (!IsValid(signature)) choreo_unreachable("signature is invalid.");
   if (IsUnknown(signature)) return NumTy::Unknown();
   if (IsNone(signature)) return NumTy::None();
+
+  // Ablation (--disable-vn-share): generate a fresh, unshared valno for
+  // every operation-expression occurrence. Constants, symbols and shape
+  // tuples keep their shared identity so that signature re-derivation stays
+  // consistent. GenerateFresh keeps a first-occurrence record in sign_pool
+  // so that NumSign() lookups remain total; bypassing FindValueNum here is
+  // what disables cross-occurrence sharing.
+  if (CCtx().DisableVNShare() && isa<OperationSign>(signature))
+    return vntbl.GenerateFresh(signature);
 
   if (auto found = vntbl.FindValueNum(signature)) return *found;
   return GenerateValueNumberFromSignature(signature);
