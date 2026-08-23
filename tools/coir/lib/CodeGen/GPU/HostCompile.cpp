@@ -70,11 +70,11 @@ coir::gpu::compileHostToLLVM(StringRef source, LLVMContext &ctx,
     args.push_back(s.c_str());
 
   // Diagnostics.
-  auto diagOpts = makeIntrusiveRefCnt<DiagnosticOptions>();
+  auto diagOpts = std::make_unique<DiagnosticOptions>();
   auto diagPrinter =
-      std::make_unique<TextDiagnosticPrinter>(errs(), diagOpts.get());
+      std::make_unique<TextDiagnosticPrinter>(errs(), *diagOpts);
   auto diagIDs = makeIntrusiveRefCnt<DiagnosticIDs>();
-  DiagnosticsEngine diags(diagIDs, diagOpts.get(), diagPrinter.release());
+  DiagnosticsEngine diags(diagIDs, *diagOpts, diagPrinter.release());
 
   // Create invocation.
   auto invocation = std::make_shared<CompilerInvocation>();
@@ -84,8 +84,7 @@ coir::gpu::compileHostToLLVM(StringRef source, LLVMContext &ctx,
   }
 
   // Set up CompilerInstance.
-  CompilerInstance ci;
-  ci.setInvocation(std::move(invocation));
+  CompilerInstance ci(std::move(invocation));
   ci.setDiagnostics(&diags);
   ci.createFileManager(overlayFS);
 
