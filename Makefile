@@ -1,6 +1,6 @@
 SHELL:=/bin/bash
 
-WORK_DIR:=$(PWD)
+WORK_DIR:=$(CURDIR)
 TOOLCHAIN_DIR=$(WORK_DIR)/extern
 TOOLS_DIR=$(WORK_DIR)/tools
 SCRIPT_DIR=$(WORK_DIR)/scripts
