@@ -806,6 +806,22 @@ public:
     return valno;
   }
 
+  // Generate a fresh valno without interning for sharing.
+  // Used by --disable-vn-share ablation mode. The first fresh valno is
+  // recorded in sign_pool (emplace is a no-op if an earlier occurrence
+  // already recorded one) so that NumSign()/GetValueNumberOfSignature stay
+  // total and stable; sharing is still disabled because the ablation hook
+  // in GetOrGenValueNumberFromSignature bypasses the pools entirely for
+  // operation signatures. The signature is also kept in value_nums so that
+  // NumSign()/SignNum() can still retrieve it.
+  NumTy GenerateFresh(const SignTy& s) {
+    auto valno = next_valno++;
+    assert(value_nums.count(valno) == 0);
+    value_nums.emplace(valno, std::vector<SignTy>{s});
+    sign_pool.emplace(s, valno);
+    return valno;
+  }
+
   // Bind a valno to the existing (dummy) signature
   void BindDummy(const SignTy& s, NumTy v) {
     // note: only dummy sign can be re-generated
