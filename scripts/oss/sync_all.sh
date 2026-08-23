@@ -231,7 +231,7 @@ stage_oss_tools() {
   for f in oss-push.sh oss-pull.sh oss-scan.sh oss-pull-scan.sh; do
     [[ -f "$SCRIPT_DIR/$f" ]] && cp "$SCRIPT_DIR/$f" "$TOOL_TMPDIR/" && chmod +x "$TOOL_TMPDIR/$f"
   done
-  for f in os_kw.txt oss_exclude_paths.txt oss-pull-baseline.txt; do
+  for f in oss-config.sh os_kw.txt oss_exclude_paths.txt oss_conflict_paths.txt oss-pull-baseline.txt; do
     [[ -f "$SCRIPT_DIR/$f" ]] && cp "$SCRIPT_DIR/$f" "$TOOL_TMPDIR/"
   done
 }
@@ -499,9 +499,6 @@ phase2_pull_to_main() {
     return 1
   fi
 
-  local pre_sha
-  pre_sha="$(lgit rev-parse HEAD)"
-
   # Auto-init baseline on first sync (skips all pre-existing oss/main history)
   local baseline_file="$SCRIPT_DIR/oss-pull-baseline.txt"
   if [[ ! -f "$baseline_file" ]]; then
@@ -529,12 +526,22 @@ phase2_pull_to_main() {
   fi
 
   if [[ $DRY_RUN -eq 0 ]]; then
-    local post_sha
+    local post_sha origin_sha
     post_sha="$(lgit rev-parse HEAD)"
-    if [[ "$pre_sha" != "$post_sha" ]]; then
-      local n; n="$(lgit rev-list --count "$pre_sha..$post_sha")"
-      log "Pushing main to origin ($n commit(s) pulled)..."
-      safe_push origin "$MAIN_BRANCH" "Push main to origin" || return 1
+    origin_sha="$(lgit rev-parse "origin/$MAIN_BRANCH" 2>/dev/null || echo "")"
+    # Push whenever local main is a fast-forward of origin/main. Compare
+    # against origin/main (not pre_sha) so commits pulled by a previous
+    # cycle -- or a prior partial run that never pushed -- still reach
+    # origin instead of being stranded on the local worktree.
+    if [[ -n "$origin_sha" && "$post_sha" != "$origin_sha" ]]; then
+      if lgit merge-base --is-ancestor "$origin_sha" "$post_sha"; then
+        local n; n="$(lgit rev-list --count "$origin_sha..$post_sha")"
+        log "Pushing main to origin ($n commit(s) ahead)..."
+        safe_push origin "$MAIN_BRANCH" "Push main to origin" || return 1
+      else
+        warn_highlighted "main diverged from origin/main" \
+          "$(printf 'Local main is not a fast-forward of origin/main; skipping auto-push.\n  local:  %s\n  origin: %s' "$post_sha" "$origin_sha")"
+      fi
     fi
   fi
   log "Phase 2 complete."

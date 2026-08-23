@@ -120,6 +120,27 @@ while IFS= read -r pat; do
   fi
 done < "$EXCLUDE_FILE"
 
+# -------- load conflict-path patterns --------
+# These are files that exist on BOTH branches with intentionally
+# different content per branch (e.g. cmake/deps.conf). The pull apply
+# phase strips them, so they must never flag PRIVATE-PATH or DIVERGED.
+
+CONFLICT_PREFIXES=()
+CONFLICT_EXACT=()
+
+if [[ -f "$CONFLICT_FILE" ]]; then
+  while IFS= read -r pat; do
+  [[ -z "$pat" || "$pat" =~ ^[[:space:]]*# ]] && continue
+  if [[ "$pat" == */ || "$pat" == *'/*' ]]; then
+    local_prefix="${pat%\*}"
+    local_prefix="${local_prefix%/}/"
+    CONFLICT_PREFIXES+=("$local_prefix")
+  elif [[ "$pat" != *'*'* && "$pat" != *'?'* ]]; then
+    CONFLICT_EXACT+=("$pat")
+  fi
+  done < "$CONFLICT_FILE"
+fi
+
 # Files that are typically repo-specific config and should never collide
 CONFLICT_ZONE_FILES=(
   ".github/workflows/"
@@ -142,6 +163,17 @@ is_private_path() {
   [[ "$fpath" == "$pfx"* ]] && return 0
   done
   for ex in "${PRIVATE_EXACT[@]}"; do
+  [[ "$fpath" == "$ex" ]] && return 0
+  done
+  return 1
+}
+
+is_conflict_file() {
+  local fpath="$1"
+  for pfx in "${CONFLICT_PREFIXES[@]}"; do
+  [[ "$fpath" == "$pfx"* ]] && return 0
+  done
+  for ex in "${CONFLICT_EXACT[@]}"; do
   [[ "$fpath" == "$ex" ]] && return 0
   done
   return 1
@@ -179,6 +211,13 @@ for commit in "${COMMITS[@]}"; do
 
   for f in "${files[@]}"; do
   [[ -z "$f" ]] && continue
+
+  # Branch-specific conflict paths (e.g. cmake/deps.conf) exist on both
+  # branches with intentionally different content. The pull apply phase
+  # strips them, so touching one is never a reason to halt the sync.
+  if is_conflict_file "$f"; then
+    continue
+  fi
 
   if is_private_path "$f"; then
     private_hits+=("$f")
