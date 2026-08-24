@@ -169,6 +169,31 @@ mlir::Value ASTCoIRGen::MaterializeSBE(mlir::Location loc,
 }
 
 bool ASTCoIRGen::Visit(AST::WithIn &wi) {
+  auto loc = Loc(wi);
+
+  // Map each with-index matcher (e.g. `i` in `with {i} in [12]`, or `x`/`y`
+  // in `with index = {x, y}`) to its base value 0.  chunkat indices that
+  // reference a matcher by name resolve against this before any foreach
+  // rebinds the name to the loop IV (mirrors the reference codegen, which
+  // initialises each matcher to `int __iv_<name> = 0`).
+  if (wi.with_matchers) {
+    auto zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
+    for (auto &m : wi.with_matchers->AllValues()) {
+      if (auto *id = dyn_cast<AST::Identifier>(m.get())) {
+        // Auto-generated per-dim matchers (`<iv>__elem__<d>`) are synthesised
+        // by the normaliser for plain `foreach x in [...]` loops and are never
+        // referenced by chunkat indices.  Mapping them to 0 here would shadow
+        // the loop-bound lookup in resolveRangeUBValue (which falls back to
+        // `<iv>__elem__0`), turning a bound of 1 into 0.  Only map user-written
+        // matchers (e.g. `i` in `with {i} in [12]`, `x`/`y` in
+        // `with index = {x, y}`).
+        if (id->name.find("__elem__") != std::string::npos)
+          continue;
+        MapValue(id->name, zero);
+      }
+    }
+  }
+
   // Materialise and map the per-dim extent values so that foreach loops
   // can look them up as loop bounds.  Without this, single-dim with-in
   // foreachs (e.g. foreach y in X where y = {...} in [X] and X is a
@@ -434,7 +459,7 @@ bool ASTCoIRGen::BeforeVisitImpl(AST::Node &n) {
     CreateKernelOp(*cf);
     BuildAssertionMap();
   } else if (isa<AST::ParallelBy>(&n) || isa<AST::ForeachBlock>(&n) ||
-             isa<AST::WithBlock>(&n)) {
+             isa<AST::WithBlock>(&n) || isa<AST::InThreadsBlock>(&n)) {
     PushScope();
   } else if (auto *asgn = dyn_cast<AST::Assignment>(&n)) {
     if (!asgn->AssignToDataElement())
@@ -636,12 +661,14 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
     emitPendingBufferUnmaps();
     PopScope();
   } else if (isa<AST::InThreadsBlock>(&n)) {
+    emitPendingBufferUnmaps();
     auto *block = builder.getInsertionBlock();
     auto *parentOp = block->getParentOp();
     if (parentOp && mlir::isa<coir::InThreadsOp>(parentOp)) {
       if (parentOp->getBlock())
         builder.setInsertionPointAfter(parentOp);
     }
+    PopScope();
   }
   return true;
 }
@@ -1412,10 +1439,13 @@ mlir::Value ASTCoIRGen::resolveRangeUBValue(AST::LoopRange *lr, int64_t bound) {
     }
   }
   if (!ubValue) {
-    // The bound could not be resolved through the bounded-type path.
-    // Try the range variable name. Visit(AST::WithIn) maps the extent
-    // value there for with-in foreachs.
-    if (bound <= 1 || bound == mlir::ShapedType::kDynamic) {
+    // resolveRangeBound already yields the correct concrete extent for
+    // numeric bounds (including extent 1 for `with index = {n} in [1]`).
+    // The with-matcher base value (mapped to 0 in Visit(AST::WithIn)) lives
+    // under the same name as the loop IV, so looking it up here would
+    // corrupt a concrete bound (1 -> 0). Only consult the name-based
+    // fallback when the extent is genuinely unresolved (kDynamic).
+    if (bound == mlir::ShapedType::kDynamic) {
       auto rvVal = LookupValue(UnScopedName(lr->GetRVName()));
       if (!rvVal)
         rvVal = LookupValue(lr->GetRVName());
@@ -1989,6 +2019,41 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
             return (mlir::Value)builder.create<mlir::arith::AddIOp>(loc, mul,
                                                                      rhs);
           }
+        }
+        return nullptr;
+      }
+      if (op == Op::GetIth) {
+        // `y(idx)` / `y[idx]` where y is a bounded "with index" dimension
+        // (e.g. `with index = {x, y} in [17, 4]`).  A negative index counts
+        // back from the end: y(-1) == ubound(y) + (-1).
+        auto lty = dyn_cast<BoundedType>(NodeType(*expr->GetL()));
+        if (lty && lty->HasValidBound()) {
+          auto *ii = dyn_cast<AST::IntIndex>(expr->GetR().get());
+          if (ii && ii->IsNegative()) {
+            auto &ubItem = lty->GetUpperBound();
+            mlir::Value ubVal;
+            if (ubItem && ubItem->IsNumeric()) {
+              ubVal = builder.create<mlir::arith::ConstantIndexOp>(
+                  loc, EvalToInt(ubItem));
+            } else if (ubItem) {
+              ubVal = MaterializeSBE(loc, ubItem);
+              if (ubVal && !mlir::isa<mlir::IndexType>(ubVal.getType()))
+                ubVal = builder.create<mlir::arith::IndexCastOp>(
+                    loc, mlir::IndexType::get(&IRContext()), ubVal);
+            }
+            if (!ubVal) return nullptr;
+            auto idxVal = EmitExpr(*ii->value);
+            if (!idxVal) return nullptr;
+            if (!mlir::isa<mlir::IndexType>(ubVal.getType()))
+              ubVal = builder.create<mlir::arith::IndexCastOp>(
+                  loc, mlir::IndexType::get(&IRContext()), ubVal);
+            if (!mlir::isa<mlir::IndexType>(idxVal.getType()))
+              idxVal = builder.create<mlir::arith::IndexCastOp>(
+                  loc, mlir::IndexType::get(&IRContext()), idxVal);
+            return (mlir::Value)builder.create<mlir::arith::AddIOp>(loc, ubVal,
+                                                                    idxVal);
+          }
+          if (ii) return EmitExpr(*ii->value);
         }
         return nullptr;
       }
@@ -3064,7 +3129,16 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
 }
 
 bool ASTCoIRGen::Visit(AST::DMA &dma) {
-  if (dma.IsDummy()) return true;
+  if (dma.IsDummy()) {
+    // dma.any is an A-B buffering placeholder. The frontend DummyBufferGen
+    // pass allocates its backing buffer as "<future>__buf__". Bind it to the
+    // future's .data so swap()/rotate() carries the buffer as a loop-carried
+    // value and the pointer alternates in lockstep with the DMA token.
+    auto bufVal = LookupValue(dma.future + "__buf__");
+    if (bufVal && mlir::isa<coir::TensorType>(bufVal.getType()))
+      MapValue(dma.future + ".data", bufVal);
+    return true;
+  }
 
   auto loc = Loc(dma);
 
@@ -3129,6 +3203,22 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
   // materialized via EmitNodeAssertions; no ad-hoc IR-level check needed.
 
   bool isAsync = dma.IsAsync();
+
+  // Determine the future name up front so the destination can be redirected
+  // through the future's current data buffer (see below).
+  auto futureName = dma.future;
+  if (futureName.empty() && !pendingDmaAssignName.empty())
+    futureName = pendingDmaAssignName;
+
+  // For an async DMA assigned to a named future, the destination is the
+  // future's CURRENT data buffer (re-bound by swap()/rotate() each iteration),
+  // not the statically-named buffer. This mirrors the reference codegen's
+  // RemapDeviceSymbol(buf, future.data()).
+  if (!futureName.empty() && isAsync) {
+    auto dataVal = LookupValue(futureName + ".data");
+    if (dataVal && mlir::isa<coir::TensorType>(dataVal.getType()))
+      dstVal = dataVal;
+  }
 
   // Map DMA kind from AST operation string.
   auto kind = coir::DMAKind::Copy;
@@ -3222,9 +3312,6 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
   if (!isAsync && token)
     builder.create<coir::WaitOp>(loc, token);
 
-  auto futureName = dma.future;
-  if (futureName.empty() && !pendingDmaAssignName.empty())
-    futureName = pendingDmaAssignName;
   if (!futureName.empty()) {
     if (isAsync && token) {
       MapValue(futureName, token);

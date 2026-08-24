@@ -785,6 +785,78 @@ private:
       dynSpmEmitted_ = true;
     });
 
+    // Identify double-buffered (loop-carried) DMA futures first: a DMA token
+    // (or a rotate result of it) that reaches a foreach's yield. Only these
+    // sites need a persistent (function-scoped) SDTE context; pooling every
+    // async SDTE site unconditionally changes the DTE lifecycle for ordinary
+    // kernels and causes wrong results or device faults in kernels that do
+    // not double-buffer.
+    llvm::DenseSet<mlir::Operation *> loopCarriedOps;
+    loopCarriedDmas_.clear();
+    kernel.walk([&](ForeachOp foreachOp) {
+      auto &fbody = foreachOp.getBody();
+      if (fbody.empty()) return;
+      auto yieldOp = dyn_cast<YieldOp>(fbody.front().getTerminator());
+      if (!yieldOp) return;
+      auto fargs = fbody.front().getArguments();
+      for (unsigned i = 0; i < yieldOp.getOperands().size(); ++i) {
+        if (i + 1 >= fargs.size()) break;
+        Value v = yieldOp.getOperands()[i];
+        if (!mlir::isa<coir::AsyncTokenType>(v.getType())) continue;
+        auto dma = traceToDma(v);
+        if (!dma) continue;
+        // Only SDTE sites are pooled below; a loop-carried CDTE future is
+        // re-created by the ordinary iter-arg path. Keep loopCarriedOps and
+        // loopCarriedDmas_ consistent with dmaEmitInfo_ so emitForeach never
+        // indexes a default-constructed (empty) DmaEmitInfo entry.
+        if (!hasAsyncUses(dma.getToken())) continue;
+        bool isSdte =
+            getDTEType(dma.getSource().getType(), dma.getDest().getType()) ==
+            "choreo::choreo_sdte";
+        if (!isSdte) continue;
+        loopCarriedOps.insert(dma.getOperation());
+        loopCarriedDmas_[foreachOp.getOperation()][i] = dma;
+      }
+    });
+
+    // Pool Private-level (SDTE) contexts for the loop-carried (double-
+    // buffered) DMA sites in a persistent, function-scoped array. This
+    // mirrors the reference topscc codegen's --use-dte-pool: a stack-local
+    // choreo_sdte created per loop iteration would call destroy_comm() at
+    // scope exit, invalidating the in-flight event of a rotated future and
+    // causing the kernel to hang or fault. Futures themselves are declared
+    // fresh at the enclosing foreach scope (DmaEmitInfo::hoistedToForeach).
+    dmaEmitInfo_.clear();
+    dmaEmitOrder_.clear();
+    dmaPoolSize_ = 0;
+    kernel.walk([&](DmaCopyOp dmaOp) {
+      if (dmaEmitInfo_.count(dmaOp)) return;
+      if (!loopCarriedOps.count(dmaOp.getOperation())) return;
+      if (!hasAsyncUses(dmaOp.getToken())) return;
+      bool isSdte =
+          getDTEType(dmaOp.getSource().getType(), dmaOp.getDest().getType()) ==
+          "choreo::choreo_sdte";
+      if (!isSdte) return;
+      unsigned id = nextDmaId++;
+      DmaEmitInfo info;
+      info.futName = "__fut_" + std::to_string(id);
+      info.ctxName =
+          "__choreo_dte_pool__[" + std::to_string(dmaPoolSize_) + "]";
+      info.pooled = true;
+      info.id = id;
+      info.hoistedToForeach = true;
+      dmaPoolSize_++;
+      dmaEmitInfo_[dmaOp] = info;
+      dmaEmitOrder_.push_back(info);
+    });
+
+    if (dmaPoolSize_ > 0) {
+      os() << getIndent() << "choreo::choreo_sdte __choreo_dte_pool__["
+           << dmaPoolSize_ << "];\n";
+      os() << getIndent() << "for (int __i = 0; __i < " << dmaPoolSize_
+           << "; ++__i) __choreo_dte_pool__[__i].init();\n";
+    }
+
     // Bind returned values to the output parameters. The return may be
     // nested inside a parallel block or control flow, so walk the kernel.
     kernel.walk([&](KernelReturnOp ret) {
@@ -1041,17 +1113,8 @@ private:
 
     // Kernel block argument: resolve via dim_args / dim_checks metadata.
     if (auto blockArg = dyn_cast<BlockArgument>(defVal)) {
-      // Compute the dynamic-dim index within the base tensor.
       auto baseTy = cast<coir::TensorType>(defVal.getType());
-      unsigned dynIdx = 0;
-      bool found = false;
-      for (unsigned i = 0; i < baseTy.getShape().size(); ++i) {
-        if (baseTy.isDynamicDim(i)) {
-          if (i == dimIdx) { found = true; break; }
-          dynIdx++;
-        }
-      }
-      if (!found)
+      if (!baseTy.isDynamicDim(dimIdx))
         return "1"; // static dim that was somehow misidentified
 
       auto kOp =
@@ -1062,9 +1125,14 @@ private:
       auto dimArgMeta = getDimArgs(kOp);
       int64_t paramIdx = blockArg.getArgNumber();
 
+      // dim_args and dim_checks record the ABSOLUTE dim index within the
+      // tensor shape (including static dims, e.g. `?x3x?x?` maps N,H,W to
+      // dims 0,2,3), which matches dimIdx here.  Comparing against a
+      // dynamic-dim index would misalign any tensor whose dynamic dims are
+      // not contiguous from dim 0.
       // Direct match.
       for (auto &da : dimArgMeta) {
-        if (da.paramIdx == paramIdx && da.dimIdx == (int64_t)dynIdx)
+        if (da.paramIdx == paramIdx && da.dimIdx == (int64_t)dimIdx)
           return da.name;
       }
 
@@ -1074,7 +1142,7 @@ private:
         llvm::SmallSetVector<int64_t, 8> visited;
         llvm::SmallVector<std::pair<int64_t, int64_t>, 8> worklist;
         visited.insert(paramIdx);
-        worklist.push_back({paramIdx, (int64_t)dynIdx});
+        worklist.push_back({paramIdx, (int64_t)dimIdx});
         while (!worklist.empty()) {
           auto [curParam, curDim] = worklist.pop_back_val();
           for (auto &dc : dimChecks) {
@@ -1252,6 +1320,57 @@ private:
           .getValue()
           .str();
     return "p" + std::to_string(idx);
+  }
+
+  /// Resolve a dynamic dim of the kernel's returned tensor to a host-side
+  /// shape expression (e.g. "input.shape()[2]").  The returned tensor's
+  /// dynamic dims are bound to the kernel's dim args via coir.tensor.alloc;
+  /// tracing the alloc operand back to coir.dim_args yields the correct
+  /// ABSOLUTE dim index on the host, even when the result shape reorders or
+  /// subsets the input's dynamic dims (e.g. f32[N,3,H,W] -> f32[N,H,W] maps
+  /// result dims N,H,W to input dims 0,2,3 rather than 0,1,2).
+  /// Returns "" when the dim cannot be resolved (caller emits "0").
+  std::string
+  resolveResultDim(KernelOp kernel, unsigned dimIdx,
+                   const llvm::SmallVectorImpl<DimArgMeta> &dimArgMeta,
+                   unsigned numOrigInputs) {
+    Value resultVal;
+    kernel.walk([&](KernelReturnOp ret) {
+      if (resultVal) return;
+      for (auto v : ret.getOperands())
+        if (isa<coir::TensorType>(v.getType())) {
+          resultVal = v;
+          return;
+        }
+    });
+    if (!resultVal) return "";
+
+    auto tty = cast<coir::TensorType>(resultVal.getType());
+    if (!mlir::ShapedType::isDynamic(tty.getShape()[dimIdx])) return "";
+
+    auto defVal = getTensorDefOp(resultVal);
+    auto alloc = defVal.getDefiningOp<TensorAllocOp>();
+    if (!alloc) return "";
+    auto dynDims = alloc.getDynamicDims();
+    unsigned dynIdx = 0;
+    for (unsigned i = 0; i < tty.getShape().size(); ++i) {
+      if (!tty.isDynamicDim(i)) continue;
+      if (i == dimIdx) {
+        if (dynIdx >= dynDims.size()) return "";
+        auto opVal = dynDims[dynIdx];
+        if (auto ba = dyn_cast<BlockArgument>(opVal)) {
+          int64_t metaIdx = (int64_t)ba.getArgNumber() - (int64_t)numOrigInputs;
+          if (metaIdx >= 0 && metaIdx < (int64_t)dimArgMeta.size()) {
+            auto &da = dimArgMeta[metaIdx];
+            return hostParamName(da.paramIdx) + ".shape()[" +
+                   std::to_string(da.dimIdx) + "]";
+          }
+        }
+        return "";
+      }
+      ++dynIdx;
+    }
+    return "";
   }
 
   void emitDimChecks(KernelOp kernel) {
@@ -1701,21 +1820,10 @@ private:
             resDynBytes += " * ";
           }
           if (mlir::ShapedType::isDynamic(resTy.getShape()[d])) {
-            bool found = false;
-            for (auto &da : dimArgMeta) {
-              if (da.dimIdx == (int64_t)d) {
-                shapeStr += hostParamName(da.paramIdx) + ".shape()[" +
-                            std::to_string(d) + "]";
-                resDynBytes += hostParamName(da.paramIdx) + ".shape()[" +
-                               std::to_string(d) + "]";
-                found = true;
-                break;
-              }
-            }
-            if (!found) {
-              shapeStr += "0";
-              resDynBytes += "0";
-            }
+            std::string expr =
+                resolveResultDim(kernel, d, dimArgMeta, numOrigInputs);
+            shapeStr += expr.empty() ? "0" : expr;
+            resDynBytes += expr.empty() ? "0" : expr;
           } else {
             shapeStr += std::to_string(resTy.getShape()[d]);
             resDynBytes += std::to_string(resTy.getShape()[d]);
@@ -2087,8 +2195,10 @@ private:
     if (!globalTensorParams_.empty())
       emitGlobalTensorAllocs();
 
-    // Build shape string for result tensor; use dynamic expressions for
-    // dynamic dims via dimArgMeta.
+    // Build shape string for result tensor.  Dynamic dims are resolved by
+    // tracing the returned tensor's alloc operands back to coir.dim_args so
+    // the host uses the correct ABSOLUTE dim index (the result shape may
+    // reorder or subset the input's dynamic dims).
     std::string shapeStr;
     std::string resDynBytes;
     {
@@ -2097,15 +2207,9 @@ private:
       for (unsigned d = 0; d < resTy.getShape().size(); ++d) {
         if (d > 0) ss << ", ";
         if (mlir::ShapedType::isDynamic(resTy.getShape()[d])) {
-          bool found = false;
-          for (auto &da : dimArgMeta) {
-            if (da.dimIdx == (int64_t)d) {
-              ss << hostParamName(da.paramIdx) << ".shape()[" << da.dimIdx << "]";
-              found = true;
-              break;
-            }
-          }
-          if (!found) ss << "0";
+          std::string expr =
+              resolveResultDim(kernel, d, dimArgMeta, numOrigInputs);
+          ss << (expr.empty() ? "0" : expr);
         } else {
           ss << resTy.getShape()[d];
         }
@@ -2117,16 +2221,9 @@ private:
         for (unsigned d = 0; d < resTy.getShape().size(); ++d) {
           if (!resDynBytes.empty()) resDynBytes += " * ";
           if (mlir::ShapedType::isDynamic(resTy.getShape()[d])) {
-            bool found = false;
-            for (auto &da : dimArgMeta) {
-              if (da.dimIdx == (int64_t)d) {
-                resDynBytes += hostParamName(da.paramIdx) +
-                               ".shape()[" + std::to_string(da.dimIdx) + "]";
-                found = true;
-                break;
-              }
-            }
-            if (!found) resDynBytes += "0";
+            std::string expr =
+                resolveResultDim(kernel, d, dimArgMeta, numOrigInputs);
+            resDynBytes += (expr.empty() ? "0" : expr);
           } else {
             resDynBytes += std::to_string(resTy.getShape()[d]);
           }
@@ -2550,8 +2647,57 @@ private:
   DenseMap<Value, std::string> dmaCtxNames;
   DenseMap<Value, std::string> asyncFutures;
 
+  // Persistent SDTE pool for Private-level async DMA. Mirrors the reference
+  // topscc codegen's --use-dte-pool: the SDTE context for each DMA site is
+  // allocated once at device-function scope and survives loop iterations so
+  // that choreo::rotate can swap its slots without invalidating an in-flight
+  // event (a per-iteration stack-local choreo_sdte would call destroy_comm()
+  // at scope exit and strand the rotated future).
+  //
+  // The future objects themselves are NOT pooled: a double-buffered future
+  // must be re-created each outer iteration at its enclosing foreach scope
+  // (see hoistedToForeach), otherwise choreo::rotate permutes a function-scope
+  // future's ctx/event state across outer iterations and the kernel faults.
+  struct DmaEmitInfo {
+    std::string futName; // choreo::future variable name
+    std::string ctxName; // DTE reference (pool slot or local name)
+    bool pooled = false; // true => ctxName indexes __choreo_dte_pool__
+    bool hoistedToForeach = false; // true => future declared at foreach scope
+    unsigned id = 0; // numeric suffix used for the future's dma label
+  };
+  DenseMap<Operation *, DmaEmitInfo> dmaEmitInfo_;
+  llvm::SmallVector<DmaEmitInfo, 32> dmaEmitOrder_; // deterministic emission
+  unsigned dmaPoolSize_ = 0;
+  // foreach op -> (iter-arg index -> DmaCopyOp whose token is loop-carried).
+  DenseMap<Operation *, DenseMap<unsigned, DmaCopyOp>> loopCarriedDmas_;
+
   bool hasAsyncUses(Value asyncHandle) {
     return asyncHandle && !asyncHandle.use_empty();
+  }
+
+  // Trace an async token back to the DmaCopyOp that produces it, unwrapping
+  // FutureRotateOp result -> input. Returns nullptr for block arguments
+  // (already loop-carried iter args) and non-DMA producers.
+  DmaCopyOp traceToDma(Value v) {
+    for (unsigned depth = 0; depth < 8; ++depth) {
+      if (auto dma = v.getDefiningOp<DmaCopyOp>()) return dma;
+      if (auto rotate = v.getDefiningOp<FutureRotateOp>()) {
+        auto results = rotate.getResults();
+        auto inputs = rotate.getFutures();
+        bool found = false;
+        for (unsigned i = 0; i < results.size() && i < inputs.size(); ++i) {
+          if (results[i] == v) {
+            v = inputs[i];
+            found = true;
+            break;
+          }
+        }
+        if (!found) return nullptr;
+        continue;
+      }
+      return nullptr;
+    }
+    return nullptr;
   }
 
   void emitOpFallback(Operation *op) override {
@@ -2791,14 +2937,37 @@ private:
       std::string iterName = getName(args[i + 1]);
       auto initVal = iterArgs[i];
       if (mlir::isa<coir::AsyncTokenType>(initVal.getType())) {
-        auto futIt = asyncFutures.find(initVal);
-        if (futIt != asyncFutures.end()) {
-          std::string futName = futIt->second;
-          asyncFutures[args[i + 1]] = futName;
-          valueNames[args[i + 1]] = futName;
-        } else {
-          asyncFutures[args[i + 1]] = iterName;
-          os() << getIndent() << "choreo::future " << iterName << ";\n";
+        // Double-buffered future: if this iter arg is loop-carried from a
+        // DMA inside the loop (its token reaches this foreach's yield), the
+        // future must be re-created each outer iteration, bound to the
+        // persistent pooled DTE slot of that DMA. This resets its state each
+        // iteration so choreo::rotate swaps the right ctx/event pairs.
+        bool lcHandled = false;
+        auto lcIt = loopCarriedDmas_.find(op.getOperation());
+        if (lcIt != loopCarriedDmas_.end()) {
+          auto idxIt = lcIt->second.find(i);
+          if (idxIt != lcIt->second.end()) {
+            auto infoIt = dmaEmitInfo_.find(idxIt->second);
+            if (infoIt != dmaEmitInfo_.end()) {
+              auto &info = infoIt->second;
+              os() << getIndent() << "choreo::future " << info.futName << "("
+                   << info.ctxName << ", \"dma_" << info.id << "\", 0, 0);\n";
+              asyncFutures[args[i + 1]] = info.futName;
+              valueNames[args[i + 1]] = info.futName;
+              lcHandled = true;
+            }
+          }
+        }
+        if (!lcHandled) {
+          auto futIt = asyncFutures.find(initVal);
+          if (futIt != asyncFutures.end()) {
+            std::string futName = futIt->second;
+            asyncFutures[args[i + 1]] = futName;
+            valueNames[args[i + 1]] = futName;
+          } else {
+            asyncFutures[args[i + 1]] = iterName;
+            os() << getIndent() << "choreo::future " << iterName << ";\n";
+          }
         }
       } else {
         os() << getIndent() << "auto " << iterName << " = "
@@ -3246,11 +3415,18 @@ private:
   }
 
   void emitYield(YieldOp op) override {
+    auto parentForeach = op->getParentOfType<ForeachOp>();
+    if (!parentForeach) return;
+    auto iterArgs = parentForeach.getBody().front().getArguments();
+
+    // First pass: propagate acore/future state and capture buffer-tensor
+    // reassignments. Buffer tensors can be permuted among the iter args by
+    // swap()/rotate() double buffering, so their yield values must be captured
+    // into temporaries before assignment -- otherwise a source that is itself
+    // an iter arg would already be clobbered by an earlier assignment.
+    SmallVector<std::string> bufTmp(op.getOperands().size());
     for (unsigned i = 0; i < op.getOperands().size(); ++i) {
       auto yieldVal = op.getOperands()[i];
-      auto parentForeach = op->getParentOfType<ForeachOp>();
-      if (!parentForeach) continue;
-      auto iterArgs = parentForeach.getBody().front().getArguments();
       if (i + 1 >= iterArgs.size()) continue;
       auto it = acoreStates.find(yieldVal);
       if (it != acoreStates.end()) {
@@ -3258,8 +3434,27 @@ private:
         acoreStates[iterArgs[i + 1]] = st;
       }
       auto futIt = asyncFutures.find(yieldVal);
-      if (futIt != asyncFutures.end())
+      if (futIt != asyncFutures.end()) {
         asyncFutures[iterArgs[i + 1]] = futIt->second;
+        continue;
+      }
+      // Loop-carried buffer tensor: reassign the iter arg to the yield value.
+      if (mlir::isa<coir::TensorType>(yieldVal.getType())) {
+        auto iterArgName = getName(iterArgs[i + 1]);
+        auto yieldValName = getName(yieldVal);
+        if (iterArgName != yieldValName) {
+          bufTmp[i] = "__yield_tmp_" + std::to_string(nextId++);
+          os() << getIndent() << "auto " << bufTmp[i] << " = " << yieldValName
+               << ";\n";
+        }
+      }
+    }
+
+    // Second pass: assign the captured temporaries to the iter args.
+    for (unsigned i = 0; i < op.getOperands().size(); ++i) {
+      if (bufTmp[i].empty()) continue;
+      os() << getIndent() << getName(iterArgs[i + 1]) << " = " << bufTmp[i]
+           << ";\n";
     }
   }
 
@@ -3504,15 +3699,33 @@ private:
     int64_t copyElems = std::max(srcElems, dstElems);
 
     bool isAsync = hasAsyncUses(op.getToken());
-    unsigned id = nextDmaId++;
-    std::string ctxName = "__dte_" + std::to_string(id);
-    std::string futName = "__fut_" + std::to_string(id);
-
-    os() << getIndent() << getDTEType(op.getSource().getType(),
-                                      op.getDest().getType())
-       << " " << ctxName << ";\n";
-    os() << getIndent() << "choreo::future " << futName << "("
-       << ctxName << ", \"dma_" << id << "\", 0, 0);\n";
+    unsigned id;
+    std::string ctxName;
+    std::string futName;
+    auto hoisted = dmaEmitInfo_.find(op);
+    if (hoisted != dmaEmitInfo_.end()) {
+      // Persistent SDTE pool slot (see emitDeviceFunction). The DTE object is
+      // pooled at device-function scope; the future is either declared at the
+      // enclosing foreach scope (double-buffered, re-created each iteration)
+      // or here at the DMA site.
+      auto &info = hoisted->second;
+      id = info.id;
+      ctxName = info.ctxName;
+      futName = info.futName;
+      if (!info.hoistedToForeach) {
+        os() << getIndent() << "choreo::future " << futName << "(" << ctxName
+             << ", \"dma_" << id << "\", 0, 0);\n";
+      }
+    } else {
+      id = nextDmaId++;
+      ctxName = "__dte_" + std::to_string(id);
+      futName = "__fut_" + std::to_string(id);
+      os() << getIndent()
+           << getDTEType(op.getSource().getType(), op.getDest().getType())
+           << " " << ctxName << ";\n";
+      os() << getIndent() << "choreo::future " << futName << "(" << ctxName
+           << ", \"dma_" << id << "\", 0, 0);\n";
+    }
 
     std::string evName = futName + "__event__";
     std::string apiCall;
@@ -3713,9 +3926,12 @@ private:
       os() << names[i];
     }
     os() << ");\n";
-    // Left-rotate the map: output[i] gets the future name of input[(i+1) % n]
+    // choreo::rotate swaps the CONTENTS of the future objects, so each C++
+    // variable name stays bound to its own storage.  After the swap, variable
+    // names[i] holds the value that `outputs[i]` denotes (the left-rotated
+    // handle), so keep the identity mapping instead of rotating the names.
     for (unsigned i = 0; i < names.size(); ++i)
-      asyncFutures[outputs[i]] = names[(i + 1) % names.size()];
+      asyncFutures[outputs[i]] = names[i];
   }
 
   // Find the kernel argument name for a dynamic dimension of a tensor.
