@@ -57,6 +57,7 @@ struct GPUAdaptor : public CodeGenerator {
 private:
   std::unordered_map<std::string, AST::Parameter*> cur_params;
   std::stack<ParallelLevel> levels;
+  std::stack<ParallelLevel> inthreads_levels;
   AST::Node* cur_fnode;
   std::string cur_arch;
   bool has_stream_param;
@@ -102,6 +103,8 @@ private:
       CheckPBSettings(pb);
       CheckLaunchBounds(pb);
       CheckStreamBinding(pb);
+    } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
+      inthreads_levels.push(it->inthreads_level);
     }
     return true;
   }
@@ -113,6 +116,8 @@ private:
       else if (pb->GetLevel() == ParallelLevel::GROUPx4)
         enforced_4x_group = false;
       levels.pop();
+    } else if (isa<AST::InThreadsBlock>(&n)) {
+      inthreads_levels.pop();
     }
 
     // mask stmts that are possible to be shared
@@ -643,7 +648,18 @@ public:
       return intersection;
     };
 
-    auto& pvs = ps.GetInnerPVs(ParallelLevel::BLOCK);
+    // A shared->global TMA store issued inside a group/group-4 inthreads
+    // scope is elected once per unit (warp/warpgroup), so parallel variables
+    // at that level are legal indices.  Loads are always block-wise.
+    ParallelLevel tma_level = ParallelLevel::BLOCK;
+    if (t_sty->GetStorage() == Storage::GLOBAL &&
+        f_sty->GetStorage() == Storage::SHARED && !inthreads_levels.empty()) {
+      auto il = inthreads_levels.top();
+      if (il == ParallelLevel::GROUP || il == ParallelLevel::GROUPx4)
+        tma_level = il;
+    }
+
+    auto& pvs = ps.GetInnerPVs(tma_level);
     auto& f_syms = ReferredSymbols(f_ca.get(), this);
     auto& t_syms = ReferredSymbols(t_ca.get(), this);
 
@@ -658,12 +674,12 @@ public:
       return oss.str();
     };
     if (auto f_int = intersection(f_syms, pvs); !f_int.empty())
-      Error1(f_ca->LOC(), "TMA is " + STR(ParallelLevel::BLOCK) +
+      Error1(f_ca->LOC(), "TMA is " + STR(tma_level) +
                               "-wise that parallel variable " +
                               format_string(f_int) +
                               " can not be used as indices/tiling-factors.");
     if (auto t_int = intersection(t_syms, pvs); !t_int.empty())
-      Error1(t_ca->LOC(), "TMA is " + STR(ParallelLevel::BLOCK) +
+      Error1(t_ca->LOC(), "TMA is " + STR(tma_level) +
                               "-wise that parallel variable " +
                               format_string(t_int) +
                               " can not be used as indices/tiling-factors.");
