@@ -31,11 +31,21 @@ SRC_DIR="$SRC_REPO/llvm"
 BUILD_DIR="$(pwd)/llvm-project-build-${TAG}"
 INSTALL_DIR="$(pwd)/llvm-project"
 
-# Clone the requested tag if there is no checkout yet.
+# Clone the requested tag/commit if there is no checkout yet.
 if [ ! -d "$SRC_DIR" ]; then
   echo "Cloning LLVM monorepo ($TAG)..."
-  git clone --depth 1 --branch "$TAG" \
-    https://github.com/llvm/llvm-project.git "$SRC_REPO"
+  if git ls-remote --heads --tags \
+      https://github.com/llvm/llvm-project.git "$TAG" | grep -q .; then
+    # TAG is a branch or tag name; a shallow clone is enough.
+    git clone --depth 1 --branch "$TAG" \
+      https://github.com/llvm/llvm-project.git "$SRC_REPO"
+  else
+    # TAG is a commit hash; fetch that exact commit.
+    git clone --filter=blob:none \
+      https://github.com/llvm/llvm-project.git "$SRC_REPO"
+    git -C "$SRC_REPO" fetch --depth 1 origin "$TAG"
+    git -C "$SRC_REPO" checkout --detach FETCH_HEAD
+  fi
 fi
 
 echo "Source: $SRC_REPO ($(git -C "$SRC_REPO" rev-parse HEAD))"

@@ -47,11 +47,18 @@ if(EXISTS "${_LLVM_CMAKE_DIR}/llvm/LLVMConfig.cmake")
       _installed_llvm_version "${_llvm_config_version_line}")
     string(STRIP "${_installed_llvm_version}" _installed_llvm_version)
 
-    # Expected version is encoded as "llvmorg-X.Y.Z" in deps.conf.
+    # Expected version is only comparable when LLVM_SHASH is a release tag
+    # (e.g. "llvmorg-21.1.0" or a bare "X.Y.Z"). When LLVM_SHASH is a git
+    # commit hash (e.g. "d752c5b"), LLVM_PACKAGE_VERSION (e.g. "21.0.0git")
+    # cannot be compared against it, so skip the mismatch check entirely.
     set(_expected_llvm_version "")
     if(DEFINED COIR_LLVM_SHASH)
       string(REGEX REPLACE "^llvmorg-" "" _expected_llvm_version "${COIR_LLVM_SHASH}")
       string(STRIP "${_expected_llvm_version}" _expected_llvm_version)
+      if(NOT _expected_llvm_version MATCHES "^[0-9]+([.][0-9]+)+")
+        # Not a semantic version (e.g. a commit hash); nothing to compare.
+        set(_expected_llvm_version "")
+      endif()
     endif()
 
     if(_expected_llvm_version AND
