@@ -6,6 +6,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGen/GPU/HostCompile.h"
+#include "CoIRVersionCompat.h"
 
 #ifdef COIR_HAS_CLANG
 
@@ -70,11 +71,10 @@ coir::gpu::compileHostToLLVM(StringRef source, LLVMContext &ctx,
     args.push_back(s.c_str());
 
   // Diagnostics.
-  auto diagOpts = std::make_unique<DiagnosticOptions>();
-  auto diagPrinter =
-      std::make_unique<TextDiagnosticPrinter>(errs(), *diagOpts);
+  auto diagOpts = COIR_DIAG_OPTS_TYPE();
+  auto diagPrinter = COIR_TEXT_DIAG_PRINTER(errs(), diagOpts);
   auto diagIDs = makeIntrusiveRefCnt<DiagnosticIDs>();
-  DiagnosticsEngine diags(diagIDs, *diagOpts, diagPrinter.release());
+  DiagnosticsEngine diags = COIR_DIAGS_ENGINE(diagIDs, diagOpts, diagPrinter);
 
   // Create invocation.
   auto invocation = std::make_shared<CompilerInvocation>();
@@ -84,7 +84,12 @@ coir::gpu::compileHostToLLVM(StringRef source, LLVMContext &ctx,
   }
 
   // Set up CompilerInstance.
+#ifdef COIR_LLVM_PRE_21_1
+  CompilerInstance ci;
+  ci.setInvocation(std::move(invocation));
+#else
   CompilerInstance ci(std::move(invocation));
+#endif
   ci.setDiagnostics(&diags);
   ci.createFileManager(overlayFS);
 

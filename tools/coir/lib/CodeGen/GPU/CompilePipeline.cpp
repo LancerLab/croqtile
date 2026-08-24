@@ -14,6 +14,7 @@
 #include "CodeGen/GPU/EmitHostStubs.h"
 #include "CodeGen/GPU/HostCompile.h"
 #include "CodeGen/GPU/NativePipeline.h"
+#include "CoIRVersionCompat.h"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -64,7 +65,7 @@ bool emitHostObjectFile(llvm::Module &hostMod, llvm::StringRef outputPath) {
   LLVMInitializeX86AsmParser();
 
   auto triple = llvm::sys::getDefaultTargetTriple();
-  hostMod.setTargetTriple(llvm::Triple(triple));
+  COIR_SET_TARGET_TRIPLE(hostMod, triple);
 
   std::string errStr;
   auto *target = llvm::TargetRegistry::lookupTarget(triple, errStr);
@@ -76,8 +77,8 @@ bool emitHostObjectFile(llvm::Module &hostMod, llvm::StringRef outputPath) {
   auto cpu = llvm::sys::getHostCPUName();
   llvm::TargetOptions tOpts;
   auto tm = std::unique_ptr<llvm::TargetMachine>(
-      target->createTargetMachine(llvm::Triple(triple), cpu, "", tOpts,
-                                llvm::Reloc::PIC_));
+      COIR_CREATE_TARGET_MACHINE(target, triple, cpu, "", tOpts,
+                                 llvm::Reloc::PIC_));
   if (!tm) {
     llvm::errs() << "coir: failed to create x86 TargetMachine\n";
     return false;
