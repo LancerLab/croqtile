@@ -60,10 +60,13 @@ set(PARSER_SOURCES
 )
 
 set(CORE_SOURCES
+  access_tracking.cpp
   assess.cpp
   assert_site.cpp
   ast.cpp
+  buffer_access_analysis.cpp
   earlysema.cpp
+  fence_insertion.cpp
   semacheck.cpp
   shapeinfer.cpp
   symtab.cpp

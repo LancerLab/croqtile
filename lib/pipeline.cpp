@@ -1,9 +1,11 @@
 #include "pipeline.hpp"
 #include "active_threads.hpp"
+#include "buffer_access_analysis.hpp"
 #include "codegen.hpp"
 #include "codegen_prepare.hpp"
 #include "colors.hpp"
 #include "earlysema.hpp"
+#include "fence_insertion.hpp"
 #include "interval.hpp"
 #include "latenorm.hpp"
 #include "liveness_analysis.hpp"
@@ -313,6 +315,10 @@ ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
   // so the checker can validate events with thread count info)
   AddStage<ActiveThreadsAnalysis>();
 
+  // record the ordered (READ | WRITE) buffer access log consumed by
+  // FenceInsertion during codegen.
+  AddStage<BufferAccessAnalyzer>();
+
   // apply the semantic check
   AddStage<SemaChecker>();
   return *this;
@@ -323,6 +329,10 @@ ASTPipeline& ASTPipeline::PlanCodeGenRoutine() {
   if (CCtx().NoCodegen()) AddAction([](ASTPipeline& p) { p.SetAbend(); });
 
   AddStage<CodegenPrepare>();
+
+  // compute and annotate DMA producer/consumer fences from the buffer access
+  // log recorded during the semantic routine.
+  AddStage<FenceInsertion>();
 
   // delegate to target for codegen plan
   if (!CCtx().GetTarget().PlanCodeGenStages(*this)) {
