@@ -6,6 +6,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGen/GPU/NativePipeline.h"
+#include "CoIRVersionCompat.h"
 
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/IR/IRMapping.h"
@@ -53,9 +54,9 @@ createNVPTXTargetMachine(llvm::StringRef arch) {
   }
 
   llvm::TargetOptions opts;
-  return std::unique_ptr<llvm::TargetMachine>(target->createTargetMachine(
-      llvm::Triple("nvptx64-nvidia-cuda"), arch, "+ptx78", opts,
-      llvm::Reloc::PIC_));
+  return std::unique_ptr<llvm::TargetMachine>(
+      COIR_CREATE_TARGET_MACHINE(target, "nvptx64-nvidia-cuda", arch,
+                                 "+ptx78", opts, llvm::Reloc::PIC_));
 }
 
 std::string emitPTX(mlir::ModuleOp gpuModule, llvm::StringRef arch) {
@@ -76,7 +77,7 @@ std::string emitPTX(mlir::ModuleOp gpuModule, llvm::StringRef arch) {
   auto tm = createNVPTXTargetMachine(arch);
   if (!tm) return "";
 
-  llvmMod->setTargetTriple(llvm::Triple("nvptx64-nvidia-cuda"));
+  COIR_SET_TARGET_TRIPLE(*llvmMod, "nvptx64-nvidia-cuda");
   llvmMod->setDataLayout(tm->createDataLayout());
 
   llvm::SmallVector<char> ptxBytes;

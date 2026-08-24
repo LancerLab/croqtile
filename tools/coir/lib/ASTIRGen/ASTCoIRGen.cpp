@@ -1,5 +1,6 @@
 // ast_coir_gen.cpp -- AST-to-CoIR MLIR translation
 #include "ASTCoIRGen.hpp"
+#include "CoIRVersionCompat.h"
 #include "codegen_utils.hpp"
 #include "context.hpp"
 #include "dmaconf.hpp"
@@ -1695,18 +1696,18 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
     auto ty = mlir::IntegerType::get(&IRContext(), 32,
                                      mlir::IntegerType::Signless);
     int64_t val = std::visit([](auto v) -> int64_t { return v; }, il->value);
-    return builder.create<mlir::arith::ConstantIntOp>(loc, ty, val);
+    return COIR_CONSTANT_INT(builder, loc, val, ty);
   }
 
   if (auto *fl = dyn_cast<AST::FloatLiteral>(&n)) {
     if (fl->IsFloat64()) {
       auto ty = mlir::Float64Type::get(&IRContext());
       double val = fl->Val_f64();
-      return builder.create<mlir::arith::ConstantFloatOp>(loc, ty, llvm::APFloat(val));
+      return COIR_CONSTANT_FLOAT(builder, loc, llvm::APFloat(val), ty);
     }
     auto ty = mlir::Float32Type::get(&IRContext());
     float val = fl->Val_f32();
-    return builder.create<mlir::arith::ConstantFloatOp>(loc, ty, llvm::APFloat(val));
+    return COIR_CONSTANT_FLOAT(builder, loc, llvm::APFloat(val), ty);
   }
 
   if (auto *sa = dyn_cast<AST::SpanAs>(&n)) {
@@ -1961,7 +1962,7 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
             if (mlir::isa<mlir::IndexType>(lhs.getType()))
               ubVal = builder.create<mlir::arith::ConstantIndexOp>(loc, ub);
             else
-              ubVal = builder.create<mlir::arith::ConstantIntOp>(loc, lhs.getType(), ub);
+              ubVal = COIR_CONSTANT_INT(builder, loc, ub, lhs.getType());
           } else if (ubItem) {
             // Symbolic/runtime extent (e.g. the with-in bound N/#p):
             // materialize it into arithmetic ops instead of collapsing to a
@@ -2001,7 +2002,7 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
           if (mlir::isa<mlir::IndexType>(v.getType()))
             zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
           else
-            zero = builder.create<mlir::arith::ConstantIntOp>(loc, v.getType(), 0);
+            zero = COIR_CONSTANT_INT(builder, loc, 0, v.getType());
           return builder.create<mlir::arith::CmpIOp>(
               loc, mlir::arith::CmpIPredicate::ne, v, zero);
         };
@@ -2083,7 +2084,7 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
         if (mlir::isa<mlir::IndexType>(resTy))
           one = builder.create<mlir::arith::ConstantIndexOp>(loc, 1);
         else
-          one = builder.create<mlir::arith::ConstantIntOp>(loc, resTy, 1);
+          one = COIR_CONSTANT_INT(builder, loc, 1, resTy);
         auto sum = isFloat
                        ? (mlir::Value)builder.create<mlir::arith::AddFOp>(
                              loc, lhs, rhs)
@@ -2198,7 +2199,7 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
       auto falseVal = EmitExpr(*expr->GetR());
       if (!cond || !trueVal || !falseVal) return nullptr;
       if (!cond.getType().isInteger(1)) {
-        auto zero = builder.create<mlir::arith::ConstantIntOp>(loc, cond.getType(), 0);
+        auto zero = COIR_CONSTANT_INT(builder, loc, 0, cond.getType());
         cond = builder.create<mlir::arith::CmpIOp>(
             loc, mlir::arith::CmpIPredicate::ne, cond, zero);
       }
@@ -2238,7 +2239,7 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
           int64_t val = EvalToInt(expr->Opts().GetVal());
           auto ty = mlir::IntegerType::get(&IRContext(), 32,
                                            mlir::IntegerType::Signless);
-          return builder.create<mlir::arith::ConstantIntOp>(loc, ty, val);
+          return COIR_CONSTANT_INT(builder, loc, val, ty);
         }
         auto *rNode = expr->GetR().get();
         std::string rName;
@@ -2254,7 +2255,7 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
               int64_t ub = EvalToInt(rty->GetUpperBound());
               auto ty = mlir::IntegerType::get(&IRContext(), 32,
                                                mlir::IntegerType::Signless);
-              return builder.create<mlir::arith::ConstantIntOp>(loc, ty, ub);
+              return COIR_CONSTANT_INT(builder, loc, ub, ty);
             }
           }
         }
@@ -2268,11 +2269,11 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
           if (mlir::isa<mlir::IndexType>(operand.getType()))
             zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
           else
-            zero = builder.create<mlir::arith::ConstantIntOp>(loc, operand.getType(), 0);
+            zero = COIR_CONSTANT_INT(builder, loc, 0, operand.getType());
           operand = builder.create<mlir::arith::CmpIOp>(
               loc, mlir::arith::CmpIPredicate::ne, operand, zero);
         }
-        auto one = builder.create<mlir::arith::ConstantIntOp>(loc, operand.getType(), 1);
+        auto one = COIR_CONSTANT_INT(builder, loc, 1, operand.getType());
         return (mlir::Value)builder.create<mlir::arith::XOrIOp>(loc, operand,
                                                                  one);
       }
@@ -2299,10 +2300,10 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
       if (op == Op::Sub) {
         bool isFloat = mlir::isa<mlir::FloatType>(operand.getType());
         if (isFloat) {
-          auto zero = builder.create<mlir::arith::ConstantFloatOp>(loc, mlir::cast<mlir::FloatType>(operand.getType()), llvm::APFloat(0.0f));
+          auto zero = COIR_CONSTANT_FLOAT(builder, loc, llvm::APFloat(0.0f), mlir::cast<mlir::FloatType>(operand.getType()));
           return builder.create<mlir::arith::SubFOp>(loc, zero, operand);
         } else {
-          auto zero = builder.create<mlir::arith::ConstantIntOp>(loc, operand.getType(), 0);
+          auto zero = COIR_CONSTANT_INT(builder, loc, 0, operand.getType());
           return builder.create<mlir::arith::SubIOp>(loc, zero, operand);
         }
       }
@@ -2313,12 +2314,12 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
                                                mlir::IntegerType::Signless);
           auto castOp = builder.create<mlir::arith::IndexCastOp>(loc, i32Ty,
                                                                    operand);
-          auto mask = builder.create<mlir::arith::ConstantIntOp>(loc, i32Ty, -1);
+          auto mask = COIR_CONSTANT_INT(builder, loc, -1, i32Ty);
           auto result = builder.create<mlir::arith::XOrIOp>(loc, castOp, mask);
           return (mlir::Value)builder.create<mlir::arith::IndexCastOp>(
               loc, opTy, result);
         }
-        auto mask = builder.create<mlir::arith::ConstantIntOp>(loc, opTy, -1);
+        auto mask = COIR_CONSTANT_INT(builder, loc, -1, opTy);
         return (mlir::Value)builder.create<mlir::arith::XOrIOp>(loc, operand,
                                                                  mask);
       }
@@ -2331,7 +2332,7 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
       int64_t val = EvalToInt(expr->Opts().GetVal());
       auto ty = mlir::IntegerType::get(&IRContext(), 32,
                                        mlir::IntegerType::Signless);
-      return builder.create<mlir::arith::ConstantIntOp>(loc, ty, val);
+      return COIR_CONSTANT_INT(builder, loc, val, ty);
     }
   }
 
@@ -3790,10 +3791,10 @@ bool ASTCoIRGen::Visit(AST::AsmStmt &asmStmt) {
       // would be an invalid lvalue for the asm output constraint.
       auto ty = inVals[0].getType();
       if (mlir::isa<mlir::IntegerType>(ty)) {
-        auto zero = builder.create<mlir::arith::ConstantIntOp>(loc, ty, 0);
+        auto zero = COIR_CONSTANT_INT(builder, loc, 0, ty);
         val = builder.create<mlir::arith::AddIOp>(loc, inVals[0], zero);
       } else if (mlir::isa<mlir::FloatType>(ty)) {
-        auto zero = builder.create<mlir::arith::ConstantFloatOp>(loc, mlir::cast<mlir::FloatType>(ty), llvm::APFloat(0.0f));
+        auto zero = COIR_CONSTANT_FLOAT(builder, loc, llvm::APFloat(0.0f), mlir::cast<mlir::FloatType>(ty));
         val = builder.create<mlir::arith::AddFOp>(loc, inVals[0], zero);
       }
     }
@@ -4042,7 +4043,7 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
           int64_t val = EvalToInt(expr->Opts().GetVal());
           auto ty = mlir::IntegerType::get(&IRContext(), 32,
                                            mlir::IntegerType::Signless);
-          v = builder.create<mlir::arith::ConstantIntOp>(loc, ty, val);
+          v = COIR_CONSTANT_INT(builder, loc, val, ty);
         }
       }
     }
@@ -4173,8 +4174,7 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
           if (auto nv = dyn_cast<sbe::NumericValue>(vl[i])) {
             auto i32Ty = mlir::IntegerType::get(&IRContext(), 32,
                                                  mlir::IntegerType::Signless);
-            v = builder.create<mlir::arith::ConstantIntOp>(
-                loc, i32Ty, nv->Value());
+            v = COIR_CONSTANT_INT(builder, loc, nv->Value(), i32Ty);
           }
         }
         vals.push_back(v);
@@ -4285,7 +4285,7 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
         // Fallback: emit constant false for unresolved booleans.
         if (!v) {
           auto i1Ty = mlir::IntegerType::get(&IRContext(), 1);
-          v = builder.create<mlir::arith::ConstantIntOp>(loc, i1Ty, 0);
+          v = COIR_CONSTANT_INT(builder, loc, 0, i1Ty);
         }
       }
       if (!v) {
@@ -4293,7 +4293,7 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
           int64_t val = EvalToInt(expr->Opts().GetVal());
           auto ty = mlir::IntegerType::get(&IRContext(), 32,
                                            mlir::IntegerType::Signless);
-          v = builder.create<mlir::arith::ConstantIntOp>(loc, ty, val);
+          v = COIR_CONSTANT_INT(builder, loc, val, ty);
         }
       }
       if (v) operands.push_back(v);
@@ -4371,7 +4371,7 @@ bool ASTCoIRGen::Visit(AST::WhileBlock &wb) {
 
     auto condVal = EmitExpr(*pred);
     if (condVal && !condVal.getType().isInteger(1)) {
-      auto zero = builder.create<mlir::arith::ConstantIntOp>(loc, condVal.getType(), 0);
+      auto zero = COIR_CONSTANT_INT(builder, loc, 0, condVal.getType());
       condVal = builder.create<mlir::arith::CmpIOp>(
           loc, mlir::arith::CmpIPredicate::ne, condVal, zero);
     }
@@ -4457,7 +4457,7 @@ bool ASTCoIRGen::Visit(AST::WhileBlock &wb) {
 
   auto condVal = EmitExpr(*pred);
   if (condVal && !condVal.getType().isInteger(1)) {
-    auto zero = builder.create<mlir::arith::ConstantIntOp>(loc, condVal.getType(), 0);
+    auto zero = COIR_CONSTANT_INT(builder, loc, 0, condVal.getType());
     condVal = builder.create<mlir::arith::CmpIOp>(
         loc, mlir::arith::CmpIPredicate::ne, condVal, zero);
   }
@@ -4533,7 +4533,7 @@ bool ASTCoIRGen::Visit(AST::IfElseBlock &ifelse) {
   if (!condVal) return true;
 
   if (!condVal.getType().isInteger(1)) {
-    auto zero = builder.create<mlir::arith::ConstantIntOp>(loc, condVal.getType(), 0);
+    auto zero = COIR_CONSTANT_INT(builder, loc, 0, condVal.getType());
     condVal = builder.create<mlir::arith::CmpIOp>(
         loc, mlir::arith::CmpIPredicate::ne, condVal, zero);
   }
@@ -4601,7 +4601,7 @@ bool ASTCoIRGen::Visit(AST::InThreadsBlock &n) {
     if (mlir::isa<mlir::IndexType>(predVal.getType()))
       zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
     else
-      zero = builder.create<mlir::arith::ConstantIntOp>(loc, predVal.getType(), 0);
+      zero = COIR_CONSTANT_INT(builder, loc, 0, predVal.getType());
     predVal = builder.create<mlir::arith::CmpIOp>(
         loc, mlir::arith::CmpIPredicate::ne, predVal, zero);
   }
