@@ -17,7 +17,8 @@ __co__ f32 [2] func() {
 // CHECK:   choreo::choreo_sdte __choreo_dte_pool__[1];
 // CHECK:   for (int __i = 0; __i < 1; ++__i) __choreo_dte_pool__[__i].init();
 // CHECK:   __local__ __valigned__ float buf[2];
-// CHECK:   choreo::choreo_sdte buf__init;
+// CHECK:   tops_dte_ctx_t buf__init;
+// CHECK:   tops::dte_scope s_buf__init(buf__init);
 // CHECK:   tops::memset(buf__init, tops::mdspan(tops::Private, (float*)buf, 2), -11.000000f);
 // CHECK:   choreo::future __choreo_anon_fut__0(__choreo_dte_pool__[0], "", {{[0-9]+}}, {{[0-9]+}}, out);
 // CHECK:   tops::mdspan __mds0_buf(tops::Private, (float*)buf, 2);

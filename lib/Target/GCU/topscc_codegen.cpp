@@ -1237,13 +1237,31 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
             "error: unexpected storage type in spm initialization.");
       ds << d_indent << BufferInitPred(sto) << "{\n";
       IncrDeviceIndent();
-      EmitDTEDecl(ds, d_indent, sto, sym__init, true, false);
-      ds << d_indent << "tops::memset(" << sym__init << ", tops::mdspan("
-         << TopsMdsStorage(sto) << ", (" << NameBaseType(sty->ElementType())
-         << "*)" << sym << ", " << ShapeSTR(sty->GetShape()) << "), "
-         << ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
-                        GetBaseType(*n.init_value->GetType()), false)
-         << ");\n";
+      if (sto == Storage::LOCAL) {
+        // Use the generic tops_dte_ctx_t so the engine (CDTE/SDTE/EDTE) is
+        // auto-selected from the context's own address at construction, the
+        // same mechanism topsop uses to memset L1 buffers. Named engines must
+        // not be used here: on gcu300 tops::private_dte is a half-initialized
+        // SDTE whose source-less memset scatters out of bounds, and on gcu400
+        // tops::local_dte is a CDTE that cannot address Private.
+        ds << d_indent << "tops_dte_ctx_t " << sym__init << ";\n";
+        ds << d_indent << "tops::dte_scope s_" << sym__init << "(" << sym__init
+           << ");\n";
+        ds << d_indent << "tops::memset(" << sym__init << ", tops::mdspan("
+           << TopsMdsStorage(sto) << ", (" << NameBaseType(sty->ElementType())
+           << "*)" << sym << ", " << ShapeSTR(sty->GetShape()) << "), "
+           << ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
+                          GetBaseType(*n.init_value->GetType()), false)
+           << ");\n";
+      } else {
+        EmitDTEDecl(ds, d_indent, sto, sym__init, true, false);
+        ds << d_indent << "tops::memset(" << sym__init << ", tops::mdspan("
+           << TopsMdsStorage(sto) << ", (" << NameBaseType(sty->ElementType())
+           << "*)" << sym << ", " << ShapeSTR(sty->GetShape()) << "), "
+           << ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
+                          GetBaseType(*n.init_value->GetType()), false)
+           << ");\n";
+      }
       DecrDeviceIndent();
       ds << d_indent << "} // single instance\n";
     }

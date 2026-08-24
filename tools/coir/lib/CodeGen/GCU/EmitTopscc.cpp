@@ -4253,9 +4253,19 @@ private:
     std::string ctxName = "__dte_init_" + std::to_string(id);
     os() << getIndent() << "{\n";
     incIndent();
-    os() << getIndent() << "choreo::choreo_sdte " << ctxName << ";\n";
-    if (needsExplicitInit())
-      os() << getIndent() << ctxName << ".init();\n";
+    if (isLocal) {
+      // Generic tops_dte_ctx_t auto-selects the engine (CDTE/EDTE) from the
+      // context's address, matching topsop's L1 memset. Avoid named engines:
+      // gcu300 tops::private_dte (SDTE) scatters a source-less memset out of
+      // bounds; gcu400 tops::local_dte cannot address Private.
+      os() << getIndent() << "tops_dte_ctx_t " << ctxName << ";\n";
+      os() << getIndent() << "tops::dte_scope s_" << ctxName << "(" << ctxName
+           << ");\n";
+    } else {
+      os() << getIndent() << "choreo::choreo_sdte " << ctxName << ";\n";
+      if (needsExplicitInit())
+        os() << getIndent() << ctxName << ".init();\n";
+    }
     os() << getIndent() << "tops::memset(" << ctxName << ", " << mds
          << ", " << initVal << ");\n";
     decIndent();
@@ -4393,9 +4403,15 @@ private:
 
       os() << getIndent() << "{\n";
       incIndent();
-      os() << getIndent() << "choreo::choreo_sdte " << name << "__init;\n";
-      if (needsExplicitInit())
-        os() << getIndent() << name << "__init.init();\n";
+      if (isLocal) {
+        os() << getIndent() << "tops_dte_ctx_t " << name << "__init;\n";
+        os() << getIndent() << "tops::dte_scope s_" << name << "__init("
+             << name << "__init);\n";
+      } else {
+        os() << getIndent() << "choreo::choreo_sdte " << name << "__init;\n";
+        if (needsExplicitInit())
+          os() << getIndent() << name << "__init.init();\n";
+      }
       os() << getIndent() << "tops::memset(" << name << "__init, "
            << mds << ", " << initVal << ");\n";
       decIndent();

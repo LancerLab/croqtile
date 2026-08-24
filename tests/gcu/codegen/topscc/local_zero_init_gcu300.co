@@ -1,0 +1,24 @@
+// Regression test for local `{0}` init on gcu300.
+//
+// A `local` (Private) buffer initializer must lower to a generic
+// `tops_dte_ctx_t` memset, not a source-less SDTE `tops::memset` on a
+// `choreo_sdte`/`tops::private_dte`. The source-less SDTE memset drives the
+// scatter DTE out of bounds and corrupts device memory on gcu300.
+//
+// RUN: choreo -t topscc -arch=gcu300 -es %s -o - 2>&1 | FileCheck %s
+
+__co__ s32 [16] identity_copy(s32 [16] input) {
+  s32[input.span] output;
+  parallel by 1 {
+    local s32 [16] l_buf {0};
+    dma.copy input => l_buf;
+    dma.copy l_buf => output;
+  }
+  return output;
+}
+
+// CHECK: tops_dte_ctx_t l_buf__init;
+// CHECK: tops::dte_scope s_l_buf__init(l_buf__init);
+// CHECK: tops::memset(l_buf__init, tops::mdspan(tops::Private, (int*)l_buf, 16), 0);
+// CHECK: tops::memcpy
+// CHECK-NOT: choreo_sdte

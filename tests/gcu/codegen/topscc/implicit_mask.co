@@ -39,7 +39,8 @@ __co__ auto foo1(f16 [36, 15, 14, 64] a) {
 // CHECK:   } // single instance
 // CHECK:   __local__ __valigned__ float l_C[30];
 // CHECK:   if (__CHOREO_GROUP_SINGLE__(32)) {
-// CHECK:     tops::local_dte l_C__init;
+// CHECK:     tops_dte_ctx_t l_C__init;
+// CHECK:     tops::dte_scope s_l_C__init(l_C__init);
 // CHECK:     tops::memset(l_C__init, tops::mdspan(tops::Private, (float*)l_C, 5, 6), static_cast<float>(0));
 // CHECK:   } // single instance
 // CHECK: }
