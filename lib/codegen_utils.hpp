@@ -25,6 +25,7 @@ extern Choreo::Option<bool> verbose;
 extern Choreo::Option<std::string> target_options;
 extern Choreo::Option<bool> use_hetero_tileflow;
 extern Choreo::Option<bool> insert_dma_fences;
+extern Choreo::Option<bool> dump_fence_insertion;
 
 namespace Choreo {
 

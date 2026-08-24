@@ -9,29 +9,10 @@
 #include <optional>
 #include <vector>
 
+#include "parallel_level.hpp"
+
 // to avoid definition error
 namespace Choreo {
-enum class Storage {
-  REG, /* register, normally not explicit */
-  LOCAL,
-  SHARED,
-  GLOBAL /*device global*/,
-  NODE /*cluster node*/,
-  DEFAULT,
-  NONE
-};
-enum class ParallelLevel {
-  THREAD,
-  GROUP,
-  GROUPx4,
-  BLOCK,
-  CLUSTER, /* thread block cluster (TBC), above block */
-  DEVICE,
-  TERM /* terminal machine in cluster*/,
-  SEQ,
-  NONE /*bottom*/,
-  UNKNOWN /*top*/
-};
 enum class CompileTarget;
 } // namespace Choreo
 

@@ -1,6 +1,7 @@
 #ifndef __CHOREO_LIVENESS_ANALYSIS_HPP__
 #define __CHOREO_LIVENESS_ANALYSIS_HPP__
 
+#include "access_tracking.hpp"
 #include "ast.hpp"
 #include "context.hpp"
 #include "loc.hpp"
@@ -161,9 +162,13 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 
   // ---- Construction ----
 
-  LivenessAnalyzer() : VisitorWithSymTab("liveness") {
+  LivenessAnalyzer()
+      : VisitorWithSymTab("liveness"),
+        tracker_([this](const std::string& n) { return InScopeNameForRef(n); },
+                 [this](const std::string& n) { return InScopeName(n); }) {
     auto_declare_symbols = true;
     if (trace_visit) debug_visit = true; // force debug when tracing
+    tracker_.debug = debug_visit;
   }
   ~LivenessAnalyzer() {}
 
@@ -267,14 +272,10 @@ private:
   }
 
   // -- Alias and binding tracking --
-  // one to one. Alias of buffer. Could happen in spanas, etc.
-  std::unordered_map<std::string, std::string> alias_;
-  // one to one. Alias that owns no storage of its own (e.g. buffer.map/remap
-  // result). Uses of such an alias are attributed directly to the source
-  // buffer, so the alias itself never gets a live range or local allocation.
-  std::unordered_map<std::string, std::string> no_storage_alias_;
-  // one to many. Bind var to other vars. Could happen in select, dma, etc.
-  std::unordered_map<std::string, VarSet> bindings_;
+  // Alias / binding / no-storage-alias / future-buffer maps and their
+  // resolution helpers live in the shared AccessTracker so that liveness and
+  // buffer-access analyses agree on what "an alias" is.
+  AccessTracker tracker_;
   // record the binding info to do restoration in ComputeLiveInOut().
   std::unordered_map<const Stmt*, std::vector<std::string>>
       stmt2binding_restore;
@@ -288,7 +289,6 @@ private:
 
   // -- Liveness info per statement --
   std::unordered_map<const Stmt*, LivenessInfo> stmt_linfo;
-  std::unordered_map<std::string, std::set<DMABufInfo>> future_buffers;
   using StrUintMap = std::unordered_map<std::string, size_t>;
   VarSet dma_any_futures;
   std::unordered_map<std::string, Ranges> var_ranges;
@@ -407,7 +407,9 @@ private:
   static bool IsSyncPoint(const AST::Node& n);
   static bool ShouldIndent(const AST::Node& n);
 
-  VarSet GetAllSymbolicOperands(const AST::Node* n) const;
+  VarSet GetAllSymbolicOperands(const AST::Node* n) const {
+    return tracker_.GetAllSymbolicOperands(n);
+  }
   void DumpStmtBriefly(const Stmt& n, std::ostream& os, bool indent,
                        bool only_else = false);
   void DumpNVD(const AST::NamedVariableDecl& nvd, std::ostream& os);
@@ -420,13 +422,7 @@ private:
   void AddDef(const Stmt* s, const std::string& var,
               bool is_buffer_or_future = false);
   void AddIsAlias(const Stmt* s, const std::string& alias_var);
-  void AddAlias(const std::string& alias_var, const std::string& original_var);
-  void AddNoStorageAlias(const std::string& alias_var,
-                         const std::string& original_var);
   void AddIsBinding(const Stmt* s, const std::string& bind_res);
-  void AddBinding(const std::string& bind_res, const std::string& bind_src);
-  void RemoveBinding(const std::string& bind_res, const std::string& bind_src);
-  void AddFut2Buffers(const std::string& fut, const DMABufInfo& buf_info);
   void AddAsyncInthreadsVar(const std::string& scope_name,
                             const std::string& var);
 
@@ -450,9 +446,6 @@ private:
   ptr<BB> StartChildBB();
   static std::string GetEventName(const AST::Node& node);
   std::string StmtStr(const Stmt* stmt) const;
-
-  template <typename... MapTypes>
-  VarSet TransitiveClosure(const VarSet& vars, const MapTypes&... maps);
 };
 
 } // end namespace Choreo

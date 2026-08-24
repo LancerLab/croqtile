@@ -1,0 +1,29 @@
+// RUN: choreo -t topscc --dump-fence-insertion -es %s -o - | FileCheck %s
+// RUN: choreo -t topscc --dump-fence-insertion --insert-dma-fences=false -es %s -o - | FileCheck --check-prefix=DISABLED %s
+
+// Automatic DMA fence insertion: global -> shared async copy is followed by a
+// thread read, so the destination needs a release fence at the wait (consumer
+// site). The local -> global async copy needs a release fence at the DMA
+// (producer site) so the write is visible to the engine that reads it back.
+__co__ auto foo(global s32 [6, 4] lhs) {
+  s32[lhs.span] output;
+
+  parallel p by 6 {
+    sf = dma.copy.async lhs.chunkat(p, _) => shared;
+    wait sf;
+
+    local s32[sf.span] l1_out;
+    foreach i in [l1_out.span]
+      l1_out.at(i) = sf.data.at(i);
+
+    out_store = dma.copy.async l1_out => output.chunkat(p, _);
+    wait out_store;
+  }
+
+  return output;
+}
+
+// CHECK: [dma-fence] consumer wait : shared_DMA_RELEASE
+// CHECK: [dma-fence] producer local->global : local_THREADS_RELEASE
+
+// DISABLED-NOT: {{^\[dma-fence\]}}

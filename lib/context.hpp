@@ -4,6 +4,7 @@
 // shared global context for a compilation process
 
 #include "assess.hpp"
+#include "buffer_access.hpp"
 #include "fragment_layout.hpp"
 #include "io.hpp"
 #include "loc.hpp"
@@ -486,9 +487,10 @@ class SymbolTable;
 class CompilationContext {
 private:
   std::map<std::string, FunctionContext> function_contexts;
-  AssessmentStats assessment_stats; // accumulated across all functions
-  VectorizerStats vectorizer_stats; // accumulated across all functions
-  MemReuseStats mem_reuse_stats;    // accumulated across all functions
+  AssessmentStats assessment_stats;  // accumulated across all functions
+  VectorizerStats vectorizer_stats;  // accumulated across all functions
+  MemReuseStats mem_reuse_stats;     // accumulated across all functions
+  BufferAccessLog buffer_access_log; // buffer access log from analysis
   std::unique_ptr<Target> compile_target = nullptr;
   std::map<std::string, std::unique_ptr<Target>> device_targets;
   std::vector<ArchId> archs;
@@ -807,6 +809,10 @@ public:
   VectorizerStats& GetVectorizerStats() { return vectorizer_stats; }
   const MemReuseStats& GetMemReuseStats() const { return mem_reuse_stats; }
   MemReuseStats& GetMemReuseStats() { return mem_reuse_stats; }
+  const BufferAccessLog& GetBufferAccessLog() const {
+    return buffer_access_log;
+  }
+  BufferAccessLog& GetBufferAccessLog() { return buffer_access_log; }
   AssertionCost RuntimeCheckCostThreshold() const { return rtc_cost_threshold; }
   bool DisableRuntimeCheck() const {
     return rtc_cost_threshold == AssertionCost::NONE;

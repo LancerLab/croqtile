@@ -110,6 +110,10 @@ Option<bool> insert_dma_fences(
     "Insert memory fences between DMA producer and consumer sites "
     "(default: true). Disable with --insert-dma-fences=false.");
 
+Option<bool> dump_fence_insertion(
+    OptionKind::User, "--dump-fence-insertion", "", false,
+    "Print the DMA fence annotations computed by FenceInsertion.");
+
 Option<bool>
     print_features(OptionKind::User, "--print-features", "", false,
                    "Print the supported features for the selected target "
