@@ -1,0 +1,22 @@
+// RUN: choreo --target topscc -dv=muchk -sa=muchk -arch=gcu300 %s 2>&1 | FileCheck %s
+
+// gcu300 has a dedicated L2 SRAM: LOCAL (L1 VDMEM) and SHARED (L2) are budgeted
+// independently. The same buffers that exceed the gcu400+ DSM joint pool (7 MiB)
+// are legal here because each is within its own per-storage limit (LOCAL 1.5 MB,
+// SHARED 64 MB). This pins the ArchNum() >= 400 boundary of the joint-pool check.
+__co__ auto mem_usage_check_separate(s32 [128, 128] i0) {
+  s32 [i0.span] output;
+
+  parallel p by 1 {
+    local f32[229376] l; // 917504 B = 896 KiB (under the 1.5 MB LOCAL limit)
+    shared f32[1024] s;  // 4096 B = 4 KiB (under the 64 MB SHARED limit)
+  }
+
+  return output;
+}
+
+// CHECK: [MemUsage] Memory usage limit of architecture GCU300 is:
+// CHECK: 0x00017fe00 bytes(1.49951 MB)
+// CHECK: 0x004000000 bytes(64 MB)
+// CHECK: 0xa30000000 bytes(40.75 GB)
+// CHECK-NOT: LOCAL+SHARED memory OUT OF BOUND!

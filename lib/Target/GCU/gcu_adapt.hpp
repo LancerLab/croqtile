@@ -170,8 +170,7 @@ public:
       return true;
     };
 
-    if (CCtx().GetArch() == "gcu300" ||
-        CCtx().GetArch() == "gcu400") { // TODO: check this for GCU400
+    if (CCtx().ArchNum() >= 300) { // gcu300 and gcu400+ (gcu400/gcu450/gcu500)
       // linear copy
       // omitted
 
@@ -372,7 +371,7 @@ public:
       return;
     }
 
-    if (CCtx().GetArch() == "gcu200" || CCtx().GetArch() == "gcu210") {
+    if (CCtx().ArchNum() < 300) { // gcu200 / gcu210
       // linear copy
       // omitted
 
@@ -779,9 +778,13 @@ public:
 
   bool Visit(AST::DataAccess& n) override {
     TraceEachVisit(n);
-    if ((CCtx().GetArch() == "gcu200" || CCtx().GetArch() == "gcu210" ||
-         (CCtx().GetArch() == "gcu300" && !IsInCooperativeBlock())) &&
-        n.indices != nullptr) {
+    // Direct (indexed) access to GLOBAL (L3) memory requires the target to
+    // support SIP load/store to L3. GCU200/210/300 must stage global data
+    // through LOCAL/SHARED via DMA; GCU300 additionally permits direct access
+    // inside cooperative blocks. GCU400+ has a unified DSM and SIP load/store
+    // to L3, so direct GLOBAL access is always allowed there.
+    if (n.indices != nullptr && CCtx().ArchNum() < 400 &&
+        !(CCtx().ArchNum() == 300 && IsInCooperativeBlock())) {
       if (auto sty = GetSpannedType(GetSymbolType(n.data->name)))
         if (sty->GetStorage() == Storage::GLOBAL ||
             cur_params.count(InScopeName(n.data->name)))

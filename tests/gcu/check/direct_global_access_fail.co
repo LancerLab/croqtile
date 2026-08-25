@@ -1,0 +1,27 @@
+// RUN: not choreo -t topscc -arch=gcu200 %s 2>&1 | FileCheck %s --check-prefix=CHECK200
+// RUN: not choreo -t topscc -arch=gcu210 %s 2>&1 | FileCheck %s --check-prefix=CHECK210
+// RUN: not choreo -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s --check-prefix=CHECK300
+
+#include "choreo.h"
+
+// GCU200/210/300 must stage GLOBAL (L3) data through LOCAL/SHARED via DMA, so
+// direct (indexed) access to GLOBAL memory is rejected. GCU400+ has a unified
+// DSM and SIP load/store to L3, so direct access is allowed there (see
+// direct_global_access_gcu400.co). The cooperative-block exception on GCU300
+// is intentionally not exercised here.
+
+__co__ auto direct_access(f32 [36] input) {
+  global f32 [3] l3_ptr;
+  parallel p by 3 {
+    l3_ptr.at(p) = 1.0f;
+    input.at(p) = 2.0f;
+  }
+  return input;
+}
+
+// CHECK200: error: global data access 'l3_ptr[p]` is not allowed.
+// CHECK200: error: global data access 'input[p]` is not allowed.
+// CHECK210: error: global data access 'l3_ptr[p]` is not allowed.
+// CHECK210: error: global data access 'input[p]` is not allowed.
+// CHECK300: error: global data access 'l3_ptr[p]` is not allowed.
+// CHECK300: error: global data access 'input[p]` is not allowed.

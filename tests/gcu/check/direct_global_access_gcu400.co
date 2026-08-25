@@ -1,0 +1,23 @@
+// RUN: choreo -t topscc -es -arch=gcu400 %s 2>&1 | FileCheck %s
+
+#include "choreo.h"
+
+// GCU400+ (unified DSM + SIP load/store to L3) allows direct indexed access to
+// GLOBAL and SHARED memory; GCU200/210/300 require DMA staging and reject it
+// (see illegal_storage_use.co).
+
+__co__ auto direct_access(f32 [36] input) {
+  global f32 [3] l3_ptr;
+  parallel p by 3 {
+    shared f32 [3] smem;
+    l3_ptr.at(p) = 1.0f; // direct global access
+    input.at(p) = 2.0f;  // direct global parameter access
+    smem.at(p) = 3.0f;   // direct shared access
+  }
+  return input;
+}
+
+// CHECK-NOT: not allowed
+// CHECK: *((float*)l3_ptr
+// CHECK: *((float*)input
+// CHECK: *((float*)smem

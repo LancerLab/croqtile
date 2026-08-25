@@ -18,43 +18,57 @@ public:
     if (!IsArchSupported(arch))
       choreo_unreachable("unsupported architecture '" + arch + "'.");
 
-    if (arch == "gcu200" || arch == "gcu210") {
+    const int arch_num = ArchNum(arch);
+    if (arch_num < 300) { // gcu200 / gcu210
       switch (sto) {
       case Storage::LOCAL: return 1008ull * 1024;             // 1008KB
       case Storage::SHARED: return 24ull * 1024 * 1024;       // 24MB
       case Storage::GLOBAL: return 4ull * 1024 * 1024 * 1024; // 4GB
       default: choreo_unreachable("Unsupported mem level.");
       }
-    } else if (arch == "gcu300") {
+    } else if (arch_num < 400) { // gcu300
       switch (sto) {
-      case Storage::LOCAL: {
-        return 1.5 * 1024 * 1024 - 512; // 1.5MB minus reserved
-      } break;
-      case Storage::SHARED: {
-        return 64ull * 1024 * 1024; // 64MB
-      } break;
-      case Storage::GLOBAL: return 40.75 * 1024 * 1024 * 1024; // 40.75GB
+      case Storage::LOCAL:
+        return 1.5 * 1024 * 1024 - 512; // 1.5MB L1 VDMEM minus reserved
+      case Storage::SHARED:
+        return 64ull * 1024 * 1024; // 64MB L2 SRAM
+      case Storage::GLOBAL:
+        return 40.75 * 1024 * 1024 * 1024; // 40.75GB
       default: choreo_unreachable("unsupported storage level.");
       }
-    } else if (arch == "gcu400") {
+    } else if (arch_num < 500) { // gcu400 / gcu450 (DSM, no L2 SRAM)
       switch (sto) {
-      case Storage::LOCAL: return 1.5 * 1024 * 1024 - 512; // todo: check this
-      case Storage::SHARED: return 64ull * 1024 * 1024;    // todo: check this
+      case Storage::LOCAL:
+        return 0xE0000ull; // 896KB L1 VDMEM per SIP (GCU_VDMEM_SIZE)
+      case Storage::SHARED:
+        return 0x600000ull; // 6MB DSM (GCU_CSB_SIZE)
       case Storage::GLOBAL:
-        return 40.75 * 1024 * 1024 * 1024; // TODO: check this
+        return 144ull * 1024 * 1024 * 1024; // 144GB HBM3
       default: choreo_unreachable("unsupported storage level.");
       }
-    } else if (arch == "gcu500") {
+    } else { // gcu500 (DSM); per-storage capacities still to be verified
       switch (sto) {
-      case Storage::LOCAL: return 4 * 1024 * 1024 - 512; // todo: check this
-      case Storage::SHARED: return 256ull * 1024 * 1024; // todo: check this
+      case Storage::LOCAL:
+        return 0xE0000ull; // 896KB L1 VDMEM per SIP (todo: verify for gcu500)
+      case Storage::SHARED:
+        return 0x600000ull; // 6MB DSM (todo: verify for gcu500)
       case Storage::GLOBAL:
-        return 128ull * 1024 * 1024 * 1024; // todo: check this
+        return 128ull * 1024 * 1024 * 1024; // 128GB (todo: verify for gcu500)
       default: choreo_unreachable("unsupported storage level.");
       }
     }
-    choreo_unreachable("unsupported target.");
     return 0;
+  }
+  Target::LocalSharedPool GetLocalSharedPool(const ArchId& arch) const override {
+    // gcu400+ (gcu400/gcu450/gcu500 and sim variants) have no dedicated L2
+    // SRAM: DSM (SHARED) is a cross-SIP view of the same L1 VDMEM (LOCAL).
+    // Per topsop tiered_memory_alloc, "L1 + L2 share a fixed pool =
+    // vdmem_size * sip_num", i.e. 8 SIPs x 896 KiB = 7 MiB per block. The
+    // joint budget is: local_per_sip * replicas_per_pool + shared <= pool_bytes.
+    if (ArchNum(arch) >= 400)
+      return {true, /*replicas_per_pool=*/8,
+              /*pool_bytes=*/7ull * 1024 * 1024};
+    return {};
   }
   const ArchId DefaultArch() const override { return "gcu300"; }
   size_t GetMemAlignmentByte(const Storage& sto, const ArchId&) const override {
