@@ -1,7 +1,7 @@
 // REQUIRES: TARGET-GCU300
 // RUN: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-DOCKER: choreo -t topscc -gs -st %s | bash -s | FileCheck --match-full-lines %s
-// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // topsop/topsop/lib/kernel/factor_kernel/rgb2gray/rgb2gray_nchw_impl.cc

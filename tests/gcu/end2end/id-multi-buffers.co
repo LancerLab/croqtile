@@ -2,7 +2,7 @@
 // RUN: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-DOCKER: choreo -t topscc -gs -st %s | bash -s | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
-// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 __co__ auto identity_three_buffers(f32 [768] input) {
   f32 [input.span(0)] output;
