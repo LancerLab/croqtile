@@ -17,6 +17,7 @@
 #include "io.hpp"
 #include "lower_libcall.hpp"
 #include "operator_info.hpp"
+#include "resource_allocator.hpp"
 #include "target.hpp"
 #include "target_utils.hpp"
 #include "topscc_header.inc"
@@ -70,11 +71,6 @@ Option<bool> named_dte_mode(
     OptionKind::User, "-fnamed-dte", "", false,
     "Generate named tops::private_dte variables instead of an array pool. "
     "Enables better register allocation by eliminating indirect addressing.");
-Option<bool> dte_merge_mode(
-    OptionKind::User, "-fdte-merge", "", false,
-    "Merge DTE slots based on liveness: reuse a waited future's DTE for "
-    "new allocations. Implies -fnamed-dte. Reduces DTE instance count "
-    "(e.g. 8 -> 4 for conv1d). Off by default.");
 
 namespace {
 
@@ -290,13 +286,11 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
       use_dte_pool = false;
       no_future_mode = false;
       named_dte_mode = false;
-      dte_merge_mode = false;
     }
-    if ((no_future_mode || named_dte_mode || dte_merge_mode) && !use_dte_pool) {
+    if ((no_future_mode || named_dte_mode) && !use_dte_pool) {
       std::string flags;
       if (no_future_mode) flags += " -fno-future";
       if (named_dte_mode) flags += " -fnamed-dte";
-      if (dte_merge_mode) flags += " -fdte-merge";
       choreo_unreachable("flags" + flags +
                          " require --use-dte-pool to be enabled.");
     }
@@ -334,6 +328,15 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
       current_pb_is_cooperative =
           pb->GetLevel() == ParallelLevel::BLOCK && pb->IsCooperative();
       EmitDeviceFuncDecl(ds);
+      if (use_dte_pool && dma_alloc_mode) {
+        // Populate the DTE pool slot map from the precomputed liveness-driven
+        // plan (DmaResourcePlan) instead of a greedy first-seen assignment.
+        if (const auto* plan = DmaResourcePlan::Lookup(SSTab().ScopeName())) {
+          dte_pool_size = std::max(dte_pool_size, (int)plan->future_slot_count);
+          for (const auto& [scoped, slot] : plan->future_slots)
+            dte_pool_slots[UnScopedName(scoped)] = (int)slot;
+        }
+      }
       ds << " {\n";
       IncrDeviceIndent();
       extern_smem = false;
@@ -505,8 +508,7 @@ bool TopsccCodeGen::AfterVisitImpl(AST::Node& n) {
       if (dte_pool_size > 0) {
         // Disable named-dte when no-future rotate is used: rotation requires
         // runtime slot indexing that named variable replacement would break.
-        bool use_named =
-            (named_dte_mode || dte_merge_mode) && !has_nofuture_rotate;
+        bool use_named = named_dte_mode && !has_nofuture_rotate;
         std::string pool_decl;
         if (use_named) {
           for (int i = 0; i < dte_pool_size; ++i) {
@@ -1806,144 +1808,28 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     bool use_pool = (use_dte_pool && sto != Storage::SHARED);
 
     if (use_pool) {
-      // GCU300 SDTE pool: all Private-level DMA (anonymous and named)
-      // reuse persistent DTE pool slots to avoid resource exhaustion from
-      // repeated init/destroy in loops. Each unique named future gets its
-      // own stable slot; anonymous DMA shares slot 0.
+      // GCU300 SDTE pool: slot assignment comes from the precomputed
+      // liveness-driven plan (DmaResourcePlan) when -fdma-alloc is on,
+      // not a greedy first-seen assignment. Each named future maps to its
+      // colored slot; an anonymous sync DMA (no future name, not in the
+      // plan) takes a dedicated trailing slot. With -fdma-alloc=false the
+      // plan is empty and this falls back to monotonic slot assignment.
       int slot = 0;
       if (!n.future.empty()) {
-        // Use unscoped name as pool key so that same-named futures in
-        // different scopes (e.g., `fd` in tile-0 vs foreach vs tail)
-        // share one DTE slot — they are never active simultaneously.
-        auto key = n.future;
+        auto key = n.future; // unscoped pool key (matches dte_pool_slots)
         auto it = dte_pool_slots.find(key);
         if (it != dte_pool_slots.end()) {
           slot = it->second;
-          waited_futures.erase(key);
         } else {
-          // DTE merge (-fdte-merge): reuse a waited future's DTE slot,
-          // but only if the slot is truly free (no un-waited future uses it).
-          int reuse_slot = -1;
-          if (dte_merge_mode) {
-            // Collect slots that are currently in-flight (have un-waited
-            // users). A slot is in-flight only if ALL its users are non-waited;
-            // if any user is waited, the non-waited entries are stale.
-            std::set<int> in_flight_slots;
-            for (const auto& kv : dte_pool_slots) {
-              if (!waited_futures.count(kv.first)) {
-                bool has_waited_user = false;
-                for (const auto& kv2 : dte_pool_slots) {
-                  if (kv2.second == kv.second &&
-                      waited_futures.count(kv2.first)) {
-                    has_waited_user = true;
-                    break;
-                  }
-                }
-                if (!has_waited_user) in_flight_slots.insert(kv.second);
-              }
-            }
-            for (const auto& kv : dte_pool_slots) {
-              if (waited_futures.count(kv.first) &&
-                  !in_flight_slots.count(kv.second)) {
-                reuse_slot = kv.second;
-                waited_futures.erase(kv.first);
-                break;
-              }
-            }
-          }
-          if (reuse_slot >= 0) {
-            slot = reuse_slot;
-          } else {
-            slot = dte_pool_size++;
-          }
+          // Fallback for a future missing from the plan (should be rare);
+          // keep a monotonic slot so the emitted code stays well-formed.
+          slot = dte_pool_size++;
           dte_pool_slots[key] = slot;
-          waited_futures.erase(key);
         }
       } else {
-        // Anonymous DMA: in merge mode, dynamically find a free slot
-        // and track it so named futures can reuse it. Sync DMA completes
-        // immediately, so its slot is always available for reuse.
-        if (dte_merge_mode) {
-          static const std::string anon_key = "__anon__";
-          auto it = dte_pool_slots.find(anon_key);
-          if (it != dte_pool_slots.end()) {
-            // Check if the current anonymous slot is in-flight (used by an
-            // un-waited named future). If so, find a new free slot.
-            int cur_slot = it->second;
-            bool slot_in_flight = false;
-            for (const auto& kv : dte_pool_slots) {
-              if (kv.first != anon_key && kv.second == cur_slot &&
-                  !waited_futures.count(kv.first)) {
-                slot_in_flight = true;
-                break;
-              }
-            }
-            if (slot_in_flight) {
-              // Find a waited future's free slot, or allocate new
-              std::set<int> in_flight_slots;
-              for (const auto& kv : dte_pool_slots) {
-                if (!waited_futures.count(kv.first)) {
-                  bool has_waited_user = false;
-                  for (const auto& kv2 : dte_pool_slots) {
-                    if (kv2.second == kv.second &&
-                        waited_futures.count(kv2.first)) {
-                      has_waited_user = true;
-                      break;
-                    }
-                  }
-                  if (!has_waited_user) in_flight_slots.insert(kv.second);
-                }
-              }
-              int reuse_slot = -1;
-              for (const auto& kv : dte_pool_slots) {
-                if (waited_futures.count(kv.first) &&
-                    !in_flight_slots.count(kv.second)) {
-                  reuse_slot = kv.second;
-                  break;
-                }
-              }
-              if (reuse_slot >= 0)
-                it->second = reuse_slot;
-              else
-                it->second = dte_pool_size++;
-            }
-            slot = it->second;
-          } else {
-            // First anonymous DMA: try to reuse a waited future's slot
-            std::set<int> in_flight_slots;
-            for (const auto& kv : dte_pool_slots) {
-              if (!waited_futures.count(kv.first)) {
-                bool has_waited_user = false;
-                for (const auto& kv2 : dte_pool_slots) {
-                  if (kv2.second == kv.second &&
-                      waited_futures.count(kv2.first)) {
-                    has_waited_user = true;
-                    break;
-                  }
-                }
-                if (!has_waited_user) in_flight_slots.insert(kv.second);
-              }
-            }
-            int reuse_slot = -1;
-            for (const auto& kv : dte_pool_slots) {
-              if (waited_futures.count(kv.first) &&
-                  !in_flight_slots.count(kv.second)) {
-                reuse_slot = kv.second;
-                break;
-              }
-            }
-            if (reuse_slot >= 0)
-              slot = reuse_slot;
-            else
-              slot = dte_pool_size++;
-            dte_pool_slots[anon_key] = slot;
-          }
-          // Sync DMA completes immediately; mark slot as available
-          waited_futures.insert(anon_key);
-        } else {
-          if (anon_dte_slot < 0) anon_dte_slot = dte_pool_size++;
-          slot = anon_dte_slot;
-        }
+        // Anonymous sync DMA: dedicated slot beyond the named futures.
+        if (anon_dte_slot < 0) anon_dte_slot = dte_pool_size++;
+        slot = anon_dte_slot;
       }
       dte_ctx = "__choreo_dte_pool__[" + std::to_string(slot) + "]";
     } else {
@@ -2745,11 +2631,6 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   if (n.HasNote("dma_fence_consumer"))
     EmitAutoFences(ds, d_indent, n.GetNote("dma_fence_consumer"));
 
-  // Mark sync named futures as immediately available for DTE merge reuse.
-  // Sync DMA completes immediately, so its DTE slot is free for reuse.
-  if (dte_merge_mode && !n.future.empty() && !fty->IsAsync())
-    waited_futures.insert(n.future);
-
   return true;
 }
 
@@ -2993,9 +2874,6 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
       } else {
         ds << d_indent << ExprSTR(f, false) << ".wait();\n";
       }
-      // Track that this future has been waited (DTE is now free for reuse)
-      if (fut_sym && !fut_sym->name.empty())
-        waited_futures.insert(fut_sym->name);
     } else if (auto ety = dyn_cast<EventArrayType>(fty)) {
       if (IsHost())
         choreo_unreachable("yet to support: wait global event in host.");
@@ -4166,10 +4044,8 @@ if [[ -z ${TOPSCC_INSTALL} ]]; then
       // Prefer the isolated simulator toolchain, falling back to the native
       // toolchain when the sim dir has no topscc (e.g. the gcu5 simulator
       // reuses the native topscc).
-      os << "  if [[ -f "
-         << STRINGIZE(__CHOREO_TOPSCC_SIM_DIR__) << "/bin/topscc ]]; then\n";
-      os << "    TOPSCC_INSTALL="
-         << STRINGIZE(__CHOREO_TOPSCC_SIM_DIR__) << "\n";
+      os << "  if [[ -f " << STRINGIZE(__CHOREO_TOPSCC_SIM_DIR__) << "/bin/topscc ]]; then\n";
+      os << "    TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_SIM_DIR__) << "\n";
       os << "  else\n";
       os << "    TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
       os << "  fi\n";

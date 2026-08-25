@@ -189,6 +189,31 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
     return var_ranges;
   }
 
+  // Resource classes used by the DMA resource allocator.  BUFFER is handled by
+  // MemReuse; FUTURE and EVENT are the finite completion slots this allocator
+  // colors.
+  enum class ResourceClass { BUFFER, FUTURE, EVENT };
+
+  // Scoped names of DMA futures and event variables, in declaration order of
+  // their first appearance.
+  const std::set<std::string>& FutureVars() const { return future_vars; }
+  const std::set<std::string>& EventVars() const { return event_vars; }
+
+  // Live ranges filtered to a single resource class.  Keys are scoped names,
+  // matching VarRanges().  FUTURE returns DMA-future handles; EVENT returns
+  // event variables; BUFFER returns scratch buffers.
+  std::unordered_map<std::string, Ranges>
+  ResourceRanges(ResourceClass rc) const;
+
+  // True if `fut` (a scoped DMA-future name) is routed through the DTE pool
+  // rather than a named completion context.  Codegen uses the pool iff the DMA
+  // storage is non-SHARED (EmitFutureClaim: use_pool = use_dte_pool &&
+  // sto != Storage::SHARED, with sto = min(from, to)).  The pool decision is
+  // recorded during Visit(DMA) by resolving each side's storage exactly like
+  // the codegen (future `.data` sources resolve through FutureType), so future
+  // names and inferred `local` destinations are handled correctly.
+  bool IsPoolFuture(const std::string& fut) const;
+
   // ---- Visitor overrides ----
 
 public:
@@ -293,6 +318,15 @@ private:
   VarSet dma_any_futures;
   std::unordered_map<std::string, Ranges> var_ranges;
 
+  // Scoped names of DMA futures and event variables (resource-class handles).
+  std::set<std::string> future_vars;
+  std::set<std::string> event_vars;
+
+  // Scoped names of DMA futures routed through the DTE pool (non-SHARED
+  // storage). Populated in Visit(DMA) by mirroring the codegen use_pool
+  // condition (sto = min(from,to) != Storage::SHARED).
+  std::set<std::string> pool_futures;
+
   // -- CFG / basic block state --
   inline void ConnectBB(ptr<BB> x, ptr<BB> y) {
     x->succs.push_back(y);
@@ -392,6 +426,11 @@ private:
   void StartNewHBPhase(const std::string& signal_in);
   void RecordHBBufferAccess(const std::string& sname,
                             const char* caller = nullptr);
+  // Record a non-buffer resource (e.g. a DMA future) into the current HB
+  // phase membership so the DMA resource allocator can relax interference for
+  // futures that provably cannot overlap. Unlike RecordHBBufferAccess, this
+  // does not filter on the shared-buffer set.
+  void RecordHBResourceAccess(const std::string& sname);
 
   // -- Private helper methods --
   std::string GetFuncNameFromScopedName(const std::string& name) const {

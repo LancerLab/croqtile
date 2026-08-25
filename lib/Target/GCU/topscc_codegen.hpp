@@ -167,7 +167,6 @@ private:
   bool has_nofuture_rotate = false;
   std::map<std::string, int> dte_pool_slots;
   std::map<int, std::string> dte_named_vars;
-  std::set<std::string> waited_futures; // futures that have been waited
 
   struct NoFutureInfo {
     std::string data_ptr;
@@ -282,7 +281,6 @@ private:
     has_nofuture_rotate = false;
     dte_pool_slots.clear();
     dte_named_vars.clear();
-    waited_futures.clear();
     nofuture_vars.clear();
     fty = nullptr;
     void_return = false;

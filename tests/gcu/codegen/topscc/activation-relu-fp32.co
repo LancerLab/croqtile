@@ -83,8 +83,8 @@ int main() { /// host program
   std::cout << "Function execution time: " << duration.count() << " microseconds" << std::endl;
 }
 // CHECK-TOPSCC: __global__ void __choreo_device_relu(float * input, float * output) {
-// CHECK-TOPSCC:   choreo::choreo_sdte __choreo_dte_pool__[3];
-// CHECK-TOPSCC:   for (int __i = 0; __i < 3; ++__i) __choreo_dte_pool__[__i].init();
+// CHECK-TOPSCC:   choreo::choreo_sdte __choreo_dte_pool__[2];
+// CHECK-TOPSCC:   for (int __i = 0; __i < 2; ++__i) __choreo_dte_pool__[__i].init();
 // CHECK-TOPSCC:   {
 // CHECK-TOPSCC:     int __iv_n_tile = 0;
 // CHECK-TOPSCC:     for (__iv_n_tile = 0; __iv_n_tile < 1; ++__iv_n_tile) {

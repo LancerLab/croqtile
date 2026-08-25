@@ -1,9 +1,10 @@
-// RUN: choreo -t topscc --use-dte-pool -fno-future -fdte-merge -es %s -o - | grep -v '^//' | FileCheck %s --check-prefix=MERGE
-// RUN: choreo -t topscc --use-dte-pool -fno-future -fnamed-dte -es %s -o - | grep -v '^//' | FileCheck %s --check-prefix=NOMERGE
+// RUN: choreo -t topscc --use-dte-pool -fno-future -fnamed-dte -es %s -o - | grep -v '^//' | FileCheck %s --check-prefix=MERGE
+// RUN: choreo -t topscc --use-dte-pool -fno-future -fnamed-dte -fdma-alloc=false -es %s -o - | grep -v '^//' | FileCheck %s --check-prefix=NOMERGE
 
 // Test DTE liveness merge: fA is waited before fC is allocated.
-// With -fdte-merge, fC reuses fA's DTE (only 2 DTEs total).
-// Without merge, 3 separate DTEs.
+// MERGE (default, -fdma-alloc on): fC reuses fA's colored slot, so only
+// two named DTEs are emitted. NOMERGE (-fdma-alloc=false): monotonic slot
+// assignment, so fC gets its own DTE (three named DTEs).
 __co__ void test_mergedte(f32 [128] input, f32 [128] output) {
   parallel p by 1 {
     local f32 [128] buf_a;
@@ -22,11 +23,11 @@ __co__ void test_mergedte(f32 [128] input, f32 [128] output) {
 // MERGE: tops::private_dte __dte_fA__;
 // MERGE: tops::private_dte __dte_fB__;
 // MERGE-NOT: __dte_fC__;
-
-// Without merge: 3 separate DTE instances
+// Without merge: fC gets its own slot, 3 DTE instances
 // NOMERGE: tops::private_dte __dte_fA__;
 // NOMERGE: tops::private_dte __dte_fB__;
 // NOMERGE: tops::private_dte __dte_fC__;
+
 
 
 __co__ void test_mergedte2(f32 [128] input, f32 [128] output) {

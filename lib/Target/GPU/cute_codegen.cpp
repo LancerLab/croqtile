@@ -19,6 +19,7 @@
 #include "codegen.hpp"
 #include "dma_plan.hpp"
 #include "operator_info.hpp"
+#include "resource_allocator.hpp"
 
 // __CHOREO_CUDA_DIR__ and __CHOREO_CUTE_DIR__ are set by CMake when
 // ENABLE_CUDA / ENABLE_CUTE are ON.  Code below uses #ifdef guards
@@ -1943,9 +1944,23 @@ bool CuteCodeGen::TryConfigureNamedEvent(const std::string& name, bool is_array,
       !is_warp_aligned(*triggers) || !is_warp_aligned(*waiters))
     return false;
 
+  // Liveness-driven slot assignment: the event's colored slot (precomputed by
+  // DmaResourcePlan) indexes the available named-barrier pool, replacing the
+  // greedy front/pop.  Non-interfering events share a slot (and thus a
+  // barrier); when the slot index exceeds the available pool, fall back to
+  // the scalar mbarrier lowering below.  With -fevent-alloc=off the plan
+  // is skipped and the monotonic slot (named_event_lowerings_.size()) is used.
+  size_t slot = named_event_lowerings_.size();
+  if (EventAllocEnabled()) {
+    if (const auto* plan = DmaResourcePlan::Lookup(SSTab().ScopeName())) {
+      auto it = plan->event_slots.find(InScopeName(name));
+      if (it != plan->event_slots.end()) slot = it->second;
+    }
+  }
+  if (slot >= available_named_barrier_ids_.size()) return false;
+
   NamedEventLowering lowering;
-  lowering.barrier_id = available_named_barrier_ids_.front();
-  available_named_barrier_ids_.pop_front();
+  lowering.barrier_id = available_named_barrier_ids_[slot];
   lowering.trigger_threads = trigger_threads;
   lowering.wait_threads = wait_threads;
   lowering.total_threads = trigger_threads + wait_threads;

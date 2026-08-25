@@ -19,8 +19,8 @@ three disjoint, mostly ad hoc mechanisms:
    live ranges into a shared scratch-pad memory (SPM). This is the one
    mechanism that is a real interval analysis.
 2. **DMA completion-slot allocation** -- GCU assigns fixed DTE-pool slots
-   (`--use-dte-pool` + `-fdte-merge`); GPU hands out TMA mbarriers / copy atoms
-   by monotonic counter and named-barrier IDs by popping a fixed pool.
+   (`--use-dte-pool` + `-fdma-alloc`); GPU hands out TMA mbarriers / copy
+   atoms by monotonic counter and named-barrier IDs by popping a fixed pool.
 3. **Synchronization / fence placement** -- there is no automatic placement.
    Fences and barriers are explicit source constructs (`Fence`, `Barrier`,
    `Trigger`) that each target merely *lowers* (`cute_codegen.cpp:7491`,

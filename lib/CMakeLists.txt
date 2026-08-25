@@ -77,6 +77,7 @@ set(CORE_SOURCES
   liveness_analysis.cpp
   loop_vectorize.cpp
   mem_reuse.cpp
+  resource_allocator.cpp
   diversity_analysis.cpp
   scalar_evolution.cpp
   pipeline.cpp
