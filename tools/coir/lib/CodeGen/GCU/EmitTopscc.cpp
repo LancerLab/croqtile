@@ -5073,31 +5073,37 @@ private:
   void emitAtomic(AtomicOp op) override {
     using AK = coir::AtomicKind;
     llvm::StringRef fnName;
+    bool negateVal = false;
     switch (op.getKind()) {
-    case AK::Add:  fnName = "atomicAdd"; break;
-    case AK::Sub:  fnName = "atomicSub"; break;
-    case AK::Exch: fnName = "atomicExch"; break;
-    case AK::Min:  fnName = "atomicMin"; break;
-    case AK::Max:  fnName = "atomicMax"; break;
-    case AK::And:  fnName = "atomicAnd"; break;
-    case AK::Or:   fnName = "atomicOr"; break;
-    case AK::Xor:  fnName = "atomicXor"; break;
-    case AK::CAS:  fnName = "atomicCAS"; break;
+    case AK::Add:  fnName = "tcle::atomic_add"; break;
+    // The SDK has no atomic_sub; negate the operand and use atomic_add.
+    case AK::Sub:  fnName = "tcle::atomic_add"; negateVal = true; break;
+    case AK::Exch: fnName = "tcle::atomic_exch"; break;
+    case AK::Min:  fnName = "tcle::atomic_min"; break;
+    case AK::Max:  fnName = "tcle::atomic_max"; break;
+    case AK::And:  fnName = "tcle::atomic_and"; break;
+    case AK::Or:   fnName = "tcle::atomic_or"; break;
+    case AK::Xor:  fnName = "tcle::atomic_xor"; break;
+    case AK::CAS:  fnName = "tcle::atomic_cas"; break;
     }
 
-    os() << getIndent() << fnName << "(&" << getName(op.getDest()) << "[";
+    bool hasResult = op.getResult() && !op.getResult().use_empty();
+
+    os() << getIndent();
+    if (hasResult) {
+      os() << emitType(op.getResult().getType()) << " "
+           << getName(op.getResult()) << " = ";
+    }
+    os() << fnName << "(&" << getName(op.getDest()) << "[";
     auto destTy = cast<coir::TensorType>(op.getDest().getType());
     emitLinearIndex(op.getIndices(), destTy);
-    os() << "], " << getName(op.getValue());
-    if (op.getKind() == AK::CAS && op.getCompare()) {
-      auto cmpAttr = *op.getCompare();
-      if (auto ia = mlir::dyn_cast<mlir::IntegerAttr>(cmpAttr))
-        os() << ", " << ia.getInt();
-      else if (auto fa = mlir::dyn_cast<mlir::FloatAttr>(cmpAttr))
-        os() << ", " << fa.getValueAsDouble();
-      else
-        os() << ", /* compare */";
-    }
+    os() << "], ";
+    if (negateVal)
+      os() << "-(" << getName(op.getValue()) << ")";
+    else
+      os() << getName(op.getValue());
+    if (op.getCompare())
+      os() << ", " << getName(op.getCompare());
     os() << ");\n";
   }
 

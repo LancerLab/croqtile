@@ -1193,20 +1193,16 @@ private:
     }
 
     auto dstTy = mlir::cast<coir::TensorType>(op.getDest().getType());
-    os() << getIndent() << fnName << "(&" << getName(op.getDest()) << "[";
+    os() << getIndent();
+    if (op.getResult() && !op.getResult().use_empty())
+      os() << emitType(op.getResult().getType()) << " "
+           << getName(op.getResult()) << " = ";
+    os() << fnName << "(&" << getName(op.getDest()) << "[";
     emitLinearIndex(op.getIndices(), dstTy);
-    os() << "], ";
-    if (op.getKind() == AK::CAS && op.getCompare()) {
-      if (auto intAttr = mlir::dyn_cast<IntegerAttr>(*op.getCompare()))
-        os() << intAttr.getInt() << ", ";
-      else if (auto fpAttr = mlir::dyn_cast<FloatAttr>(*op.getCompare())) {
-        llvm::SmallString<16> s;
-        fpAttr.getValue().toString(s, 6, 0);
-        os() << std::string(s) << ", ";
-      } else
-        os() << "/* compare */, ";
-    }
-    os() << getName(op.getValue()) << ");\n";
+    os() << "], " << getName(op.getValue());
+    if (op.getCompare())
+      os() << ", " << getName(op.getCompare());
+    os() << ");\n";
   }
 
   void emitParallel(ParallelOp op) override {

@@ -4180,13 +4180,6 @@ if [[ -z ${TOPSCC_INSTALL} ]]; then
 
   os << "fi\n\n";
 
-  // Pre-set gcu_arch from compile-time -arch flag so that SetupBuildEnv()
-  // skips JIT device detection (and TOPS_VISIBLE_DEVICES side effects).
-  if (CCtx().GetArch() == "gcu400" || CCtx().GetArch() == "gcu500")
-    os << "export GCU_ARCH=" << ToLower(CCtx().GetArch()) << "\n";
-  else if (CCtx().IsArchSet())
-    os << "export GCU_ARCH=" << ToLower(CCtx().GetArch()) << "\n";
-
   dcg_instance.SetupBuildEnv(os);
 
   // Standalone extras: profiler and acore

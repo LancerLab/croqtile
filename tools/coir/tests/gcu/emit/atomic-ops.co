@@ -1,0 +1,45 @@
+// RUN: cocc -t topscc -es -arch=gcu400 %s -o - | FileCheck %s
+//
+// Verify coir.atomic lowers to the correct tcle::atomic_* builtins, that
+// __atomic_sub negates its operand (the SDK has no atomic_sub), that
+// __atomic_cas forwards its third operand, and that the previous value is
+// captured when an atomic call is used as an expression.
+
+__co__ void atomic_ops(s32 [64] a) {
+  parallel p by 64 : thread {
+    shared s32 [64] s;
+    s.at(p) = a.at(p);
+    sync.barrier : thread;
+    __atomic_add(s.at(p), 1);
+    __atomic_sub(s.at(p), 1);
+    __atomic_exch(s.at(p), 0);
+    __atomic_min(s.at(p), a.at(p));
+    __atomic_max(s.at(p), a.at(p));
+    __atomic_and(s.at(p), 0xFF);
+    __atomic_or(s.at(p), 0x01);
+    __atomic_xor(s.at(p), 0x0F);
+    __atomic_cas(s.at(p), 0, 1);
+  }
+}
+
+// CHECK: tcle::atomic_add(&
+// CHECK: tcle::atomic_add(&{{.*}} -(
+// CHECK: tcle::atomic_exch(&
+// CHECK: tcle::atomic_min(&
+// CHECK: tcle::atomic_max(&
+// CHECK: tcle::atomic_and(&
+// CHECK: tcle::atomic_or(&
+// CHECK: tcle::atomic_xor(&
+// CHECK: tcle::atomic_cas(&{{.*}}, {{.*}}, {{.*}})
+
+__co__ void atomic_capture(s32 [64] a) {
+  parallel p by 64 : thread {
+    shared s32 [64] s;
+    s.at(p) = a.at(p);
+    sync.barrier : thread;
+    mutable s32 old = __atomic_exch(s.at(p), 0);
+    s.at(p) = old + 1;
+  }
+}
+
+// CHECK: = tcle::atomic_exch(&

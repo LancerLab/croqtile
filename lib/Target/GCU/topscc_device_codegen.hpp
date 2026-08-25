@@ -36,6 +36,11 @@ struct TopsccDeviceCodeGen : public DeviceCodeGen {
   }
 
   void SetupBuildEnv(std::ostream& out) const override {
+    // Pre-set the arch from an explicit -arch flag so the generated script
+    // skips JIT device detection (which otherwise falls back to gcu300 and
+    // drops arch-gated builtins such as tcle::atomic_*).
+    if (CCtx().IsArchSet())
+      out << "export GCU_ARCH=" << CCtx().GetArch() << "\n";
     out << "\n# Find topscc\n";
     out << "if [[ -z \"${TOPSCC_INSTALL}\" ]]; then\n";
 #ifdef __CHOREO_TOPSCC_SIM_DIR__

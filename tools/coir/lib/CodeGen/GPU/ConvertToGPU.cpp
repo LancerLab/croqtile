@@ -1186,8 +1186,10 @@ private:
 
     auto rmwKind = mapKind();
     if (rmwKind) {
-      builder.create<memref::AtomicRMWOp>(loc, val.getType(), *rmwKind, val,
-                                          dst, indices);
+      auto rmw = builder.create<memref::AtomicRMWOp>(
+          loc, val.getType(), *rmwKind, val, dst, indices);
+      if (atomicOp.getResult())
+        mapping.map(atomicOp.getResult(), rmw.getResult());
     } else if (kind == AK::Sub) {
       Value neg;
       if (isFloat)
@@ -1197,21 +1199,33 @@ private:
             loc, builder.getIntegerAttr(val.getType(), 0));
         neg = builder.create<arith::SubIOp>(loc, zero, val);
       }
-      builder.create<memref::AtomicRMWOp>(loc, val.getType(), RMW::addi, neg,
-                                          dst, indices);
+      auto rmw = builder.create<memref::AtomicRMWOp>(
+          loc, val.getType(), RMW::addi, neg, dst, indices);
+      if (atomicOp.getResult())
+        mapping.map(atomicOp.getResult(), rmw.getResult());
     } else {
       auto genAtomic = builder.create<memref::GenericAtomicRMWOp>(
           loc, dst, indices);
       Block *body = &genAtomic.body().front();
-      OpBuilder::InsertionGuard guard(builder);
-      builder.setInsertionPointToStart(body);
-      Value current = body->getArgument(0);
-      Value result;
-      if (kind == AK::Xor)
-        result = builder.create<arith::XOrIOp>(loc, current, val);
-      else
-        result = current;
-      builder.create<memref::AtomicYieldOp>(loc, result);
+      {
+        OpBuilder::InsertionGuard guard(builder);
+        builder.setInsertionPointToStart(body);
+        Value current = body->getArgument(0);
+        Value result;
+        if (kind == AK::Xor)
+          result = builder.create<arith::XOrIOp>(loc, current, val);
+        else if (kind == AK::CAS && atomicOp.getCompare()) {
+          // CAS: store `compare` when the current value equals `value`.
+          Value cmp = mapping.lookup(atomicOp.getCompare());
+          Value eq = builder.create<arith::CmpIOp>(
+              loc, arith::CmpIPredicate::eq, current, val);
+          result = builder.create<arith::SelectOp>(loc, eq, cmp, current);
+        } else
+          result = current;
+        builder.create<memref::AtomicYieldOp>(loc, result);
+      }
+      if (atomicOp.getResult())
+        mapping.map(atomicOp.getResult(), genAtomic.getResult());
     }
   }
 

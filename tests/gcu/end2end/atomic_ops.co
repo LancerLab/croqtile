@@ -1,5 +1,6 @@
 // REQUIRES: TARGET-GCU400 ALLOW-SIM-GCU400
 // RUN-GCU400: choreo -t topscc -gs %gcu_arch %s | bash -s | FileCheck --match-full-lines %s
+// RUN-GCU400: cocc -t topscc -gs %gcu_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 #include "choreo.h"
 
