@@ -206,6 +206,11 @@ Option<bool> disable_vn_share(
     OptionKind::Hidden, "--disable-vn-share", "", false,
     "(Experimental) Disable value-number sharing while keeping "
     "canonicalization, for ablation studies.");
+Option<bool> disable_vn_simplify(
+    OptionKind::Hidden, "--disable-vn-simplify", "", false,
+    "(Experimental) Disable value-number-based simplification rules "
+    "(keeping constant folding and structural normalization), for "
+    "ablation studies.");
 Option<bool> dump_sym(OptionKind::Hidden, "--dump-symbol", "-l", false,
                       "Dump the symbol table after LATENORM.");
 Option<bool> visualiz(OptionKind::Hidden, "--visualize", "-u", false,
@@ -467,6 +472,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetCrossCompile(cross_compile.GetValue());
   CCtx().SetTraceValueNumbers(print_vn.GetValue());
   CCtx().SetDisableVNShare(disable_vn_share.GetValue());
+  CCtx().SetDisableVNSimplify(disable_vn_simplify.GetValue());
   CCtx().SetTraceVectorize(debug_vectorize.GetValue());
   CCtx().SetNoVectorize(no_vectorize.GetValue());
   CCtx().SetNoMapHoist(no_map_hoist.GetValue());
