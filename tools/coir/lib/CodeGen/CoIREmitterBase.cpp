@@ -750,13 +750,47 @@ void CoIREmitterBase::emitYield(YieldOp op) {
   auto *parentOp = op->getParentOp();
   if (auto foreachOp = dyn_cast<ForeachOp>(parentOp)) {
     auto args = foreachOp.getBody().front().getArguments();
-    for (unsigned i = 0; i < op.getOperands().size(); ++i) {
-      auto iterArgName = getName(args[i + 1]);
-      auto yieldValName = getName(op.getOperands()[i]);
-      if (iterArgName != yieldValName)
-        os() << getIndent() << iterArgName << " = " << yieldValName
-             << ";\n";
+    unsigned n = op.getOperands().size();
+
+    llvm::SmallVector<std::string> iterArgNames;
+    llvm::SmallVector<std::string> yieldValNames;
+    iterArgNames.reserve(n);
+    yieldValNames.reserve(n);
+    for (unsigned i = 0; i < n; ++i) {
+      iterArgNames.push_back(getName(args[i + 1]));
+      yieldValNames.push_back(getName(op.getOperands()[i]));
     }
+
+    // A swap/rotate yield reuses another iter_arg as its source. A plain
+    // sequential `a = b; b = a;` would alias (b is overwritten before it is
+    // read), so in that case stage every value in a temporary first.
+    bool mayAlias = false;
+    for (unsigned i = 0; i < n && !mayAlias; ++i)
+      for (unsigned j = 0; j < n; ++j)
+        if (i != j && yieldValNames[i] == iterArgNames[j]) {
+          mayAlias = true;
+          break;
+        }
+
+    if (!mayAlias) {
+      for (unsigned i = 0; i < n; ++i)
+        if (iterArgNames[i] != yieldValNames[i])
+          os() << getIndent() << iterArgNames[i] << " = " << yieldValNames[i]
+               << ";\n";
+      return;
+    }
+
+    llvm::SmallVector<std::string> tmpNames;
+    tmpNames.reserve(n);
+    for (unsigned i = 0; i < n; ++i) {
+      std::string tmpName = "v" + std::to_string(nextId++);
+      os() << getIndent() << "auto " << tmpName << " = " << yieldValNames[i]
+           << ";\n";
+      tmpNames.push_back(tmpName);
+    }
+    for (unsigned i = 0; i < n; ++i)
+      if (iterArgNames[i] != yieldValNames[i])
+        os() << getIndent() << iterArgNames[i] << " = " << tmpNames[i] << ";\n";
   }
 }
 

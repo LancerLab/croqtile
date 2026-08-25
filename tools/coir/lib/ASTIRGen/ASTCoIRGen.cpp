@@ -194,6 +194,19 @@ bool ASTCoIRGen::Visit(AST::WithIn &wi) {
     }
   }
 
+  // Map the with-in loop variable itself to its base value 0.  A plain
+  // `with k in [8]` has no user-written matchers (the normaliser synthesises
+  // `k__elem__0`, which is skipped above), yet the prologue chunkat names the
+  // loop variable directly: `l.chunkat(_, k, p)`.  Resolve that reference to
+  // 0 here, before the nested foreach rebinds `k` to the loop IV (mirrors the
+  // reference codegen, which initialises the with matcher to 0 and remaps the
+  // loop variable onto it).  Without this the chunkat index is dropped and the
+  // prologue tile loses a dimension.
+  if (wi.with) {
+    auto zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
+    MapValue(wi.with->name, zero);
+  }
+
   // Materialise and map the per-dim extent values so that foreach loops
   // can look them up as loop bounds.  Without this, single-dim with-in
   // foreachs (e.g. foreach y in X where y = {...} in [X] and X is a
@@ -401,6 +414,9 @@ ASTCoIRGen::LowerSpannedType(const ptr<SpannedType> &sty) {
   case Storage::LOCAL:
     memSpace = static_cast<int32_t>(coir::TensorMemorySpace::Local);
     break;
+  case Storage::REG:
+    memSpace = static_cast<int32_t>(coir::TensorMemorySpace::Register);
+    break;
   default: llvm_unreachable("unsupported storage type"); break;
   }
 
@@ -555,7 +571,14 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
     auto *block = builder.getInsertionBlock();
     auto *foreachOp = block->getParentOp();
 
-    if (!pendingYields.empty()) {
+    // Only a foreach that actually carries loop-carried iter_args (numRes > 0)
+    // owns the pendingYields state. A plain nested foreach must not consume or
+    // clear an enclosing foreach's pending yields.
+    unsigned numRes = 0;
+    if (auto foreach_ = mlir::dyn_cast<coir::ForeachOp>(foreachOp))
+      numRes = foreach_.getNumResults();
+
+    if (numRes > 0 && !pendingYields.empty()) {
       auto *terminator = block->getTerminator();
       llvm::SmallVector<mlir::Value> yieldVals;
       for (auto &[name, _] : pendingYields) {
@@ -572,15 +595,13 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node &n) {
     if (parentBlock) builder.setInsertionPointAfter(foreachOp);
 
     llvm::SmallVector<std::pair<std::string, mlir::Value>> resultMappings;
-    if (auto foreach_ = mlir::dyn_cast<coir::ForeachOp>(foreachOp)) {
-      unsigned numRes = foreach_.getNumResults();
-      for (unsigned i = 0; i < pendingYields.size(); ++i) {
-        if (i < numRes)
-          resultMappings.push_back(
-              {pendingYields[i].first, foreach_.getResult(i)});
-      }
+    if (numRes > 0) {
+      for (unsigned i = 0; i < pendingYields.size() && i < numRes; ++i)
+        resultMappings.push_back(
+            {pendingYields[i].first,
+             mlir::cast<coir::ForeachOp>(foreachOp).getResult(i)});
+      pendingYields.clear();
     }
-    pendingYields.clear();
     foreachNestDepth = 0;
     PopScope();
     for (auto &[name, val] : resultMappings)
@@ -1607,7 +1628,7 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock &fb) {
 
     auto ivArg = block->addArgument(indexType, loc);
 
-    if (ri == 0) {
+    if (ri == 0 && !iterNames.empty()) {
       pendingYields.clear();
       for (unsigned i = 0; i < iterNames.size(); ++i) {
         auto iterArg = block->addArgument(iterTypes[i], loc);
@@ -2057,6 +2078,65 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
                                                                     idxVal);
           }
           if (ii) return EmitExpr(*ii->value);
+        }
+        return nullptr;
+      }
+      if (op == Op::DimOf) {
+        // `x.span(i)` yields the extent of the i-th dimension of mdspan `x`.
+        // The lexer folds `x.span` into a single Identifier token, so the
+        // source name carried in value_l ends with ".span".
+        std::string srcName;
+        auto *lhsNode = expr->GetL().get();
+        if (auto *le = dyn_cast<AST::Expr>(lhsNode))
+          if (le->GetForm() == AST::Expr::Reference)
+            lhsNode = le->GetR().get();
+        if (auto *lid = dyn_cast<AST::Identifier>(lhsNode))
+          srcName = lid->name;
+        if (srcName.empty()) return nullptr;
+
+        mlir::Value tensorVal = LookupValue(srcName);
+        if (!tensorVal) {
+          llvm::StringRef baseName = srcName;
+          if (baseName.ends_with(".span"))
+            tensorVal = LookupValue(baseName.drop_back(5));
+        }
+        if (!tensorVal) return nullptr;
+
+        auto tty = dyn_cast<coir::TensorType>(tensorVal.getType());
+        if (!tty) return nullptr;
+
+        int64_t dimIdx = -1;
+        if (auto *ii = dyn_cast<AST::IntIndex>(expr->GetR().get()))
+          if (auto *il = dyn_cast<AST::IntLiteral>(ii->value.get()))
+            dimIdx = std::visit([](auto v) -> int64_t { return v; },
+                                il->value);
+        if (dimIdx < 0 || (size_t)dimIdx >= tty.getShape().size())
+          return nullptr;
+
+        int64_t extent = tty.getShape()[dimIdx];
+        if (extent != mlir::ShapedType::kDynamic)
+          return builder.create<mlir::arith::ConstantIndexOp>(loc, extent);
+
+        // Recover the runtime length of a dynamic dimension from its defining
+        // alloc/bind_dims op (dynamic dims are ordered left-to-right).
+        mlir::Value base = tensorVal;
+        while (auto tile = base.getDefiningOp<coir::TensorTileOp>())
+          base = tile.getSource();
+        auto bty = dyn_cast<coir::TensorType>(base.getType());
+        if (!bty) return nullptr;
+        unsigned dynIdx = 0;
+        for (unsigned d = 0; d < bty.getShape().size(); ++d) {
+          if (!bty.isDynamicDim(d)) continue;
+          if (d == (unsigned)dimIdx) {
+            if (auto alloc = base.getDefiningOp<coir::TensorAllocOp>())
+              if (dynIdx < alloc.getDynamicDims().size())
+                return alloc.getDynamicDims()[dynIdx];
+            if (auto bind = base.getDefiningOp<coir::TensorBindDimsOp>())
+              if (dynIdx < bind.getDynamicDims().size())
+                return bind.getDynamicDims()[dynIdx];
+            return nullptr;
+          }
+          dynIdx++;
         }
         return nullptr;
       }
@@ -2746,6 +2826,11 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
 
   auto baseShape = baseTy.getShape();
 
+  // Tracks the shape as chained subspan ops shrink it, so a wildcard dim's
+  // stride resolves against the current extent instead of the original
+  // buffer shape (e.g. `.subspan(3,_,_).at(p).subspan(_,_,8).at(y)`).
+  llvm::SmallVector<int64_t> curShape(baseShape.begin(), baseShape.end());
+
   auto isWildcard = [](AST::Node *idx) -> bool {
     auto checkName = [](const std::string &n) {
       return n == "_" || n == "__choreo_no_tiling__" ||
@@ -2848,6 +2933,7 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
           baseVal = aliasOp.getResult();
           baseTy = reTy;
           baseShape = baseTy.getShape();
+          curShape.assign(baseShape.begin(), baseShape.end());
         }
         continue;
       }
@@ -2866,8 +2952,8 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
         unsigned dimIdx = 0;
         for (auto &dim : subspan->AllValues()) {
           if (isWildcard(dim.get())) {
-            tileShape.push_back(dimIdx < baseShape.size()
-                                    ? baseShape[dimIdx]
+            tileShape.push_back(dimIdx < curShape.size()
+                                    ? curShape[dimIdx]
                                     : 1);
           } else if (auto *lit = dyn_cast<AST::IntLiteral>(dim.get())) {
             tileShape.push_back(lit->Val());
@@ -2920,12 +3006,27 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
         }
 
         // The subspan size for each dim = the stride for that dim's offset.
+        // A wildcard dim keeps the current extent, which is a resolvable
+        // stride (otherwise chained subspans fall back to raw chunk indices
+        // and drop the trailing operations).
         llvm::SmallVector<mlir::Value> sizeVals;
         bool allStridesResolved = true;
+        unsigned strideDimIdx = 0;
         for (auto &dim : subspan->AllValues()) {
-          auto v = emitIdx(dim.get());
+          mlir::Value v;
+          if (isWildcard(dim.get())) {
+            int64_t extent =
+                strideDimIdx < curShape.size() ? curShape[strideDimIdx] : 1;
+            if (extent == mlir::ShapedType::kDynamic)
+              v = nullptr;
+            else
+              v = builder.create<mlir::arith::ConstantIndexOp>(loc, extent);
+          } else {
+            v = emitIdx(dim.get());
+          }
           sizeVals.push_back(v);
           if (!v) allStridesResolved = false;
+          strideDimIdx++;
         }
 
         if (allStridesResolved) {
@@ -2984,8 +3085,8 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
             // Fall through to the plain subspan sizing if unresolved.
           }
           if (isWildcard(dim.get())) {
-            tileShape.push_back(dimIdx < baseShape.size()
-                                    ? baseShape[dimIdx]
+            tileShape.push_back(dimIdx < curShape.size()
+                                    ? curShape[dimIdx]
                                     : 1);
           } else if (auto *lit = dyn_cast<AST::IntLiteral>(dim.get())) {
             tileShape.push_back(lit->Val());
@@ -3011,6 +3112,11 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt &chunk,
           }
           dimIdx++;
         }
+        // Update the tracked shape so a following chained subspan resolves
+        // wildcard dims against the freshly-shrunk extents.
+        curShape.clear();
+        for (auto d : tileShape)
+          curShape.push_back(d);
         // In the element-offset path, keep processing chained operations.
         if (elementOffsetTile) continue;
         break;
