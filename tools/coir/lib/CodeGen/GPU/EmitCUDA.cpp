@@ -1177,6 +1177,12 @@ private:
       if (!descInfos[i].isTMA) continue;
       if (tmaCount == tmaIdx) {
         if (descInfos[i].isLoad) {
+          // Use the actual source tensor's kernel-arg index rather than the
+          // sequential load count: a kernel may issue several loads from the
+          // same buffer (e.g. double-buffered loops), and the load order
+          // alone does not identify the source argument.
+          if (descInfos[i].srcParamIdx >= 0)
+            return "p" + std::to_string(descInfos[i].srcParamIdx) + "__device";
           unsigned fnInputs = kernel.getFunctionType().getNumInputs();
           unsigned argIdx = tmaLoadIdx < fnInputs ? tmaLoadIdx : 0;
           return "p" + std::to_string(argIdx) + "__device";
@@ -3032,24 +3038,19 @@ private:
       }
 
       std::string ptrName = getName(globalVal);
-      auto localShape = localTy.getShape();
       std::string offExpr;
-      if (offsets.size() == 1) {
-        int64_t tileElems = 1;
-        for (auto d : localShape) tileElems *= d;
-        offExpr = getName(offsets[0]);
-        if (tileElems > 1)
-          offExpr += " * " + std::to_string(tileElems);
-      } else {
-        for (unsigned i = 0; i < offsets.size(); ++i) {
-          std::string term = getName(offsets[i]);
-          int64_t stride = (i < localShape.size() ? localShape[i] : 1)
-                         * globalStrides[i];
-          if (stride != 1)
-            term += " * " + std::to_string(stride);
-          if (i == 0) offExpr = term;
-          else offExpr += " + " + term;
-        }
+      // Offsets from DMADescRuntimeOp are already element coordinates
+      // (LowerDMADesc multiplies tile indices by tile dims). Linearise them
+      // with the global row-major strides only; do NOT multiply by the tile
+      // extent again (that double-counts the tile dims and points far past
+      // the intended slice).
+      for (unsigned i = 0; i < offsets.size(); ++i) {
+        std::string term = getName(offsets[i]);
+        int64_t stride = (i < globalStrides.size() ? globalStrides[i] : 1);
+        if (stride != 1)
+          term += " * " + std::to_string(stride);
+        if (i == 0) offExpr = term;
+        else offExpr += " + " + term;
       }
 
       std::string slicedPtr = "__tc_ptr_" + std::to_string(id);
