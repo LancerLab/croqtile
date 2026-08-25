@@ -25,5 +25,9 @@ __co__ auto foo(global s32 [6, 4] lhs) {
 
 // CHECK: [dma-fence] consumer wait : shared_DMA_RELEASE
 // CHECK: [dma-fence] producer local->global : local_THREADS_RELEASE
+// CHECK: sf.wait();
+// CHECK-NEXT: tcle::fence<tcle::FenceType::L2_MEM_STORE>();
+// CHECK: tcle::fence<tcle::FenceType::L1_VDMEM_STORE>();
 
 // DISABLED-NOT: {{^\[dma-fence\]}}
+// DISABLED-NOT: {{^ *tcle::fence}}

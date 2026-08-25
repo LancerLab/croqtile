@@ -1759,6 +1759,28 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
   return true;
 }
 
+// Emit the auto-inserted DMA fences encoded in a comma-joined FenceKind note
+// (see FenceInsertion::JoinKinds). Each kind maps to a tcle::FenceType from its
+// space and order; the entity axis has no distinct GCU FenceType, so it is
+// ignored. Kinds with an unmapped space (e.g. NONE) are skipped.
+static void EmitAutoFences(std::ostream& ds, const std::string& indent,
+                           const std::string& joined) {
+  for (const auto& kind : ParseFenceKinds(joined)) {
+    std::string ft;
+    switch (kind.space) {
+    case Storage::LOCAL: ft = "L1_VDMEM"; break;
+    case Storage::SHARED: ft = "L2_MEM"; break;
+    case Storage::GLOBAL: ft = "L3_MEM"; break;
+    default: continue;
+    }
+    if (kind.order == FenceOrder::RELEASE)
+      ft += "_STORE";
+    else if (kind.order == FenceOrder::ACQUIRE)
+      ft += "_LOAD";
+    ds << indent << "tcle::fence<tcle::FenceType::" << ft << ">();\n";
+  }
+}
+
 bool TopsccCodeGen::Visit(AST::DMA& n) {
   TraceEachVisit(n);
 
@@ -2717,7 +2739,11 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     }
   };
 
+  if (n.HasNote("dma_fence_producer"))
+    EmitAutoFences(ds, d_indent, n.GetNote("dma_fence_producer"));
   DMACodeGen();
+  if (n.HasNote("dma_fence_consumer"))
+    EmitAutoFences(ds, d_indent, n.GetNote("dma_fence_consumer"));
 
   // Mark sync named futures as immediately available for DTE merge reuse.
   // Sync DMA completes immediately, so its DTE slot is free for reuse.
@@ -3033,6 +3059,9 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
       }
     }
   }
+
+  if (n.HasNote("dma_fence_consumer"))
+    EmitAutoFences(ds, d_indent, n.GetNote("dma_fence_consumer"));
 
   if (NeedLevelPred()) {
     DecrDeviceIndent();
