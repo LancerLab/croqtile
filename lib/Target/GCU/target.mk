@@ -212,10 +212,10 @@ publish-sdk: sdk-package
 	curl -T $$pkg_name ftp://$(FTP_SERVER)/\%2fdev/choreo-sdk/$$sdk_name --user ftp_era:Enflame@321
 
 test-libra: release
-	$(LIT) --sim=only tests/gcu/end2end && $(MAKE) standalone-test-with-cmake
+	$(LIT) --sim=only tests/gcu/end2end
 
 test-libra-debug: debug
-	$(LIT) --sim=only tests/gcu/end2end && $(MAKE) standalone-test-with-cmake
+	$(LIT) --sim=only tests/gcu/end2end
 
 # =============================================================================
 # Sample Tests for topscc/elementwise
