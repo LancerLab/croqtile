@@ -1005,12 +1005,8 @@ private:
       os() << "] ^= " << val << ";\n";
       break;
     case AK::CAS:
-      if (auto cmpAttr = op.getCompare()) {
-        std::string cmp;
-        if (auto intAttr = dyn_cast<IntegerAttr>(*cmpAttr))
-          cmp = std::to_string(intAttr.getInt());
-        else
-          cmp = "/* compare */";
+      if (op.getCompare()) {
+        std::string cmp = getName(op.getCompare());
         os() << getIndent() << "if (" << dst << "[";
         emitLinearIndex(op.getIndices(), dstTy);
         os() << "] == " << cmp << ") " << dst << "[";

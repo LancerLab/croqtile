@@ -353,28 +353,32 @@ def TensorReduceElemOp : CoIR_Op<"tensor.reduce_elem", []> {
 // Atomic read-modify-write
 //===----------------------------------------------------------------------===//
 
-def AtomicOp : CoIR_Op<"atomic", []> {
+def AtomicOp : CoIR_Op<"atomic", [AttrSizedOperandSegments]> {
   let summary = "Atomic read-modify-write on a tensor element";
   let description = [{
     Performs an atomic read-modify-write at dest[indices].
     The `kind` attribute selects the operation (add, sub, exch, min, max,
-    and, or, xor, cas). For CAS, `compare` provides the expected value.
+    and, or, xor, cas). For CAS, `compare` supplies the extra operand.
+    An optional result captures the previous value at dest[indices], which is
+    used by operations such as exch and cas when the old value is needed.
 
     Example:
       coir.atomic <add> %val, %tensor[%i, %j]
         : f32, !coir.tensor<128x128xf32, global>
+      %old = coir.atomic <exch> %val, %tensor[%i, %j]
+        : i32, !coir.tensor<128x128xi32, global> -> i32
+      %old = coir.atomic <cas> %val, %tensor[%i, %j] compare %cmp
+        : i32, !coir.tensor<128x128xi32, global> -> i32
   }];
   let arguments = (ins
     CoIR_AtomicKindAttr:$kind,
     AnyType:$value,
     CoIR_TensorTypeC:$dest,
     Variadic<Index>:$indices,
-    OptionalAttr<AnyAttr>:$compare
+    Optional<AnyType>:$compare
   );
-  let assemblyFormat = [{
-    $kind $value `,` $dest `[` $indices `]` attr-dict
-    `:` type($value) `,` type($dest)
-  }];
+  let results = (outs Optional<AnyType>:$result);
+  let hasCustomAssemblyFormat = 1;
 }
 
 //===----------------------------------------------------------------------===//

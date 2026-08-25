@@ -3724,11 +3724,15 @@ private:
     case AK::CAS:  fnName = "atomicCAS"; break;
     }
     auto tty = cast<coir::TensorType>(op.getDest().getType());
-    os() << getIndent() << fnName << "(&" << getName(op.getDest()) << "[";
+    os() << getIndent();
+    if (op.getResult() && !op.getResult().use_empty())
+      os() << emitType(op.getResult().getType()) << " "
+           << getName(op.getResult()) << " = ";
+    os() << fnName << "(&" << getName(op.getDest()) << "[";
     emitLinearIndex(op.getIndices(), tty);
     os() << "], " << getName(op.getValue());
-    if (op.getKind() == AK::CAS && op.getCompare())
-      os() << ", " << "/* compare */";
+    if (op.getCompare())
+      os() << ", " << getName(op.getCompare());
     os() << ");\n";
   }
 

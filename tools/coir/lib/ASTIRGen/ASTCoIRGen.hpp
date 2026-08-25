@@ -205,7 +205,7 @@ public:
   bool Visit(AST::Continue &) override;
   bool Visit(AST::Yield &) override { return true; }
   bool Visit(AST::Call &) override;
-  void emitAtomicCall(AST::Call &call);
+  mlir::Value emitAtomicCall(AST::Call &call);
   bool Visit(AST::Rotate &) override;
   bool Visit(AST::Synchronize &) override;
   bool Visit(AST::Barrier &) override;

@@ -1853,6 +1853,8 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node &n) {
   }
 
   if (auto *call = dyn_cast<AST::Call>(&n)) {
+    if (call->IsAtomic())
+      return emitAtomicCall(*call);
     if (call->IsArith() || call->IsLibCall()) {
       auto &fname = call->function->name;
       auto &callArgs = call->GetArguments();
@@ -4028,12 +4030,12 @@ static coir::AtomicKind parseAtomicKind(llvm::StringRef fname) {
       .Default(AK::Add);
 }
 
-void ASTCoIRGen::emitAtomicCall(AST::Call &call) {
+mlir::Value ASTCoIRGen::emitAtomicCall(AST::Call &call) {
   auto loc = Loc(call);
   auto &fname = call.function->name;
   auto &args = call.GetArguments();
 
-  if (args.size() < 2) return;
+  if (args.size() < 2) return nullptr;
 
   AST::Node *addrNode = args[0].get();
   auto valNode = args[1].get();
@@ -4044,9 +4046,9 @@ void ASTCoIRGen::emitAtomicCall(AST::Call &call) {
 
   if (auto *da = dyn_cast<AST::DataAccess>(addrNode)) {
     auto tensorVal = LookupValue(da->GetDataName());
-    if (!tensorVal) return;
+    if (!tensorVal) return nullptr;
     auto tty = mlir::dyn_cast<coir::TensorType>(tensorVal.getType());
-    if (!tty) return;
+    if (!tty) return nullptr;
 
     llvm::SmallVector<mlir::Value> idxVals;
     for (auto &idx : da->GetIndices()) {
@@ -4061,13 +4063,27 @@ void ASTCoIRGen::emitAtomicCall(AST::Call &call) {
       if (v) idxVals.push_back(v);
     }
     mlir::Value valVal = EmitExpr(*valNode);
-    if (!valVal || !tensorVal) return;
+    if (!valVal || !tensorVal) return nullptr;
+
+    // `__atomic_cas(addr, value, compare)` carries a third operand; all
+    // targets forward it positionally after the value.
+    mlir::Value cmpVal;
+    if (args.size() > 2) cmpVal = EmitExpr(*args[2]);
+
+    // Capture the previous value when the call's result is used (e.g.
+    // `mutable s32 old = __atomic_exch(...)`). Statement-form atomics emit no
+    // result so the backend emits a bare call.
+    mlir::Type resultTy;
+    if (call.IsExpr())
+      resultTy = tty.getElementType();
 
     auto kindAttr = coir::AtomicKindAttr::get(&IRContext(),
                                                parseAtomicKind(fname));
-    builder.create<coir::AtomicOp>(loc, kindAttr, valVal, tensorVal,
-                                   idxVals, /*compare=*/nullptr);
+    auto op = builder.create<coir::AtomicOp>(loc, resultTy, kindAttr, valVal,
+                                             tensorVal, idxVals, cmpVal);
+    return op.getResult();
   }
+  return nullptr;
 }
 
 bool ASTCoIRGen::Visit(AST::Call &call) {
@@ -4075,9 +4091,11 @@ bool ASTCoIRGen::Visit(AST::Call &call) {
   auto &fname = call.function->name;
   auto &args = call.GetArguments();
 
-  // Atomics lower to TensorReduceElemOp with atomic attribute
+  // Atomics used as expressions are emitted by EmitExpr so their result can
+  // be captured; statement-form atomics are emitted here.
   if (call.IsAtomic()) {
-    emitAtomicCall(call);
+    if (!call.IsExpr())
+      emitAtomicCall(call);
     return true;
   }
 

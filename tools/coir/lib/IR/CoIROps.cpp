@@ -1208,3 +1208,149 @@ void BufferUnmapOp::print(OpAsmPrinter &printer) {
   printer.printOptionalAttrDict((*this)->getAttrs());
   printer << " : " << getLocal().getType();
 }
+
+//===----------------------------------------------------------------------===//
+// AtomicOp
+//===----------------------------------------------------------------------===//
+
+// Format: [%old =] coir.atomic <add> %value, %dest[%i, %j] [compare %cmp]
+//           : i32, !coir.tensor<...> [-> i32]
+ParseResult AtomicOp::parse(OpAsmParser &parser, OperationState &result) {
+  coir::AtomicKindAttr kindAttr;
+  OpAsmParser::UnresolvedOperand valueRawOperand{};
+  ArrayRef<OpAsmParser::UnresolvedOperand> valueOperands(&valueRawOperand, 1);
+  SMLoc valueOperandsLoc;
+  OpAsmParser::UnresolvedOperand destRawOperand{};
+  ArrayRef<OpAsmParser::UnresolvedOperand> destOperands(&destRawOperand, 1);
+  SMLoc destOperandsLoc;
+  SmallVector<OpAsmParser::UnresolvedOperand, 4> indicesOperands;
+  SMLoc indicesOperandsLoc;
+  SmallVector<OpAsmParser::UnresolvedOperand, 1> compareOperands;
+  SMLoc compareOperandsLoc;
+  Type valueRawType{};
+  ArrayRef<Type> valueTypes(&valueRawType, 1);
+  Type destRawType{};
+  ArrayRef<Type> destTypes(&destRawType, 1);
+
+  if (parser.parseCustomAttributeWithFallback(kindAttr, Type{}))
+    return failure();
+  if (kindAttr)
+    result.getOrAddProperties<AtomicOp::Properties>().kind = kindAttr;
+
+  valueOperandsLoc = parser.getCurrentLocation();
+  if (parser.parseOperand(valueRawOperand) || parser.parseComma())
+    return failure();
+
+  destOperandsLoc = parser.getCurrentLocation();
+  if (parser.parseOperand(destRawOperand) || parser.parseLSquare())
+    return failure();
+
+  indicesOperandsLoc = parser.getCurrentLocation();
+  if (parser.parseOperandList(indicesOperands) || parser.parseRSquare())
+    return failure();
+
+  if (succeeded(parser.parseOptionalKeyword("compare"))) {
+    compareOperandsLoc = parser.getCurrentLocation();
+    OpAsmParser::UnresolvedOperand compareRawOperand{};
+    if (parser.parseOperand(compareRawOperand))
+      return failure();
+    compareOperands.push_back(compareRawOperand);
+  }
+
+  {
+    auto loc = parser.getCurrentLocation();
+    if (parser.parseOptionalAttrDict(result.attributes))
+      return failure();
+    if (failed(verifyInherentAttrs(result.name, result.attributes, [&]() {
+          return parser.emitError(loc)
+                 << "'" << result.name.getStringRef() << "' op ";
+        })))
+      return failure();
+  }
+  if (parser.parseColon())
+    return failure();
+
+  {
+    Type type;
+    if (parser.parseCustomTypeWithFallback(type))
+      return failure();
+    valueRawType = type;
+  }
+  if (parser.parseComma())
+    return failure();
+
+  {
+    Type type;
+    if (parser.parseCustomTypeWithFallback(type))
+      return failure();
+    destRawType = type;
+  }
+
+  // Optional result type.
+  if (succeeded(parser.parseOptionalArrow())) {
+    Type resultType;
+    if (parser.parseCustomTypeWithFallback(resultType))
+      return failure();
+    result.addTypes(resultType);
+  }
+
+  // Operand order must match the ODS argument order: value, dest, indices,
+  // compare. `compare` shares the value's type.
+  Type indexType = parser.getBuilder().getIndexType();
+  if (parser.resolveOperands(valueOperands, valueTypes, valueOperandsLoc,
+                             result.operands) ||
+      parser.resolveOperands(destOperands, destTypes, destOperandsLoc,
+                             result.operands) ||
+      parser.resolveOperands(indicesOperands, indexType, indicesOperandsLoc,
+                             result.operands) ||
+      parser.resolveOperands(compareOperands, valueRawType, compareOperandsLoc,
+                             result.operands))
+    return failure();
+
+  llvm::copy(ArrayRef<int32_t>({1, 1,
+                                static_cast<int32_t>(indicesOperands.size()),
+                                static_cast<int32_t>(compareOperands.size())}),
+             result.getOrAddProperties<AtomicOp::Properties>()
+                 .operandSegmentSizes.begin());
+  return success();
+}
+
+void AtomicOp::print(OpAsmPrinter &printer) {
+  printer << ' ';
+  printer.printStrippedAttrOrType(getKindAttr());
+  printer << ' ';
+  printer << getValue() << ", " << getDest() << "[";
+  printer << getIndices();
+  printer << "]";
+  if (getCompare())
+    printer << " compare " << getCompare();
+  SmallVector<StringRef, 2> elidedAttrs;
+  elidedAttrs.push_back("kind");
+  elidedAttrs.push_back("operandSegmentSizes");
+  printer.printOptionalAttrDict((*this)->getAttrs(), elidedAttrs);
+  printer << ' ' << ":";
+  printer << ' ';
+  {
+    auto type = getValue().getType();
+    if (auto validType = llvm::dyn_cast<Type>(type))
+      printer.printStrippedAttrOrType(validType);
+    else
+      printer << type;
+  }
+  printer << ", ";
+  {
+    auto type = getDest().getType();
+    if (auto validType = llvm::dyn_cast<Type>(type))
+      printer.printStrippedAttrOrType(validType);
+    else
+      printer << type;
+  }
+  if (getResult()) {
+    printer << " -> ";
+    auto type = getResult().getType();
+    if (auto validType = llvm::dyn_cast<Type>(type))
+      printer.printStrippedAttrOrType(validType);
+    else
+      printer << type;
+  }
+}
