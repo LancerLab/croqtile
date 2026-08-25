@@ -395,6 +395,22 @@ public:
     return 0;
   }
 
+  // Some targets have no dedicated shared-memory level: SHARED memory aliases
+  // the same physical per-thread local memory that backs LOCAL. For such
+  // targets LOCAL and SHARED cannot be budgeted independently; the memcheck
+  // pass enforces them jointly as
+  //     local_per_replica * replicas_per_pool + shared <= pool_bytes
+  // where replicas_per_pool is the number of LOCAL replicas sharing one pool.
+  struct LocalSharedPool {
+    bool aliased = false;        // whether LOCAL and SHARED alias one pool
+    size_t replicas_per_pool = 0; // LOCAL replicas sharing one pool
+    size_t pool_bytes = 0;       // total combined on-chip pool (LOCAL + SHARED)
+  };
+  virtual LocalSharedPool GetLocalSharedPool(const ArchId& arch) const {
+    (void)arch;
+    return {};
+  }
+
   // Whether the target's code generation only produces binaries (no text
   // source or script emission).  Targets that return true default to
   // compile_binary mode and reject -es/-gs.

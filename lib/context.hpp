@@ -754,6 +754,10 @@ public:
     return GetTarget().GetMaxBufferMapBytes(GetArch());
   }
 
+  Target::LocalSharedPool GetLocalSharedPool() const {
+    return GetTarget().GetLocalSharedPool(GetArch());
+  }
+
   size_t GetMaxThreadsPerBlock() const {
     return GetTarget().GetMaxThreadsPerBlock(GetArch());
   }
