@@ -693,6 +693,14 @@ void LivenessAnalyzer::RecordHBBufferAccess(const std::string& sname,
     cur_hb_state->globally_live_bufs.insert(sname);
 }
 
+void LivenessAnalyzer::RecordHBResourceAccess(const std::string& sname) {
+  if (!cur_hb_state || sname.empty()) return;
+  if (cur_hb_phase)
+    cur_hb_phase->buffers_accessed.insert(sname);
+  else
+    cur_hb_state->globally_live_bufs.insert(sname);
+}
+
 void LivenessAnalyzer::StartNewHBPhase(const std::string& signal_in) {
   FinalizeHBPhase();
   if (!cur_hb_state) return;
@@ -798,6 +806,29 @@ void LivenessAnalyzer::UpdateVarRange(const std::string& var, size_t id) {
     else
       range.PushBack(Range{id, id});
   }
+}
+
+std::unordered_map<std::string, LivenessAnalyzer::Ranges>
+LivenessAnalyzer::ResourceRanges(ResourceClass rc) const {
+  std::unordered_map<std::string, Ranges> result;
+  const std::set<std::string>* handles = nullptr;
+  switch (rc) {
+  case ResourceClass::FUTURE: handles = &future_vars; break;
+  case ResourceClass::EVENT: handles = &event_vars; break;
+  case ResourceClass::BUFFER: handles = &buffers; break;
+  }
+  for (const auto& [name, ranges] : var_ranges) {
+    if (handles->count(name)) result.emplace(name, ranges);
+  }
+  return result;
+}
+
+bool LivenessAnalyzer::IsPoolFuture(const std::string& fut) const {
+  // `.any` placeholder futures carry no src/dst, so their storage can only be
+  // resolved once the placeholder is matched to a real DMA. Conservatively
+  // treat them as pool futures so existing behavior is preserved.
+  if (dma_any_futures.count(fut)) return true;
+  return pool_futures.count(fut) > 0;
 }
 
 void LivenessAnalyzer::DumpLivenessResults(
@@ -1711,6 +1742,7 @@ bool LivenessAnalyzer::Visit(AST::NamedVariableDecl& n) {
   }
   if (isa<EventType>(ty)) {
     AddDef(current_stmt, n.name_str);
+    event_vars.insert(InScopeName(n.name_str));
     return true;
   }
   choreo_unreachable("unexpect type of variable decl: " + PSTR(ty) + ".");
@@ -1839,8 +1871,10 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
   } else if (n.operation == ".any") {
     AddDef(current_stmt, n.future, true);
     dma_any_futures.insert(InScopeName(n.future));
+    future_vars.insert(InScopeName(n.future));
     return true;
   } else {
+    future_vars.insert(InScopeName(n.future));
     if (dma_any_futures.count(InScopeName(n.future)))
       AddUse(current_stmt, n.future);
     else
@@ -1849,7 +1883,37 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
     if (n.IsAsync()) tracker_.AddBinding(n.future, n.FromSymbol());
     tracker_.AddBinding(n.future, n.ToSymbol());
     tracker_.AddFut2Buffers(n.future, DMABufInfo{n.FromSymbol(), n.ToSymbol()});
+
+    // Classify the future for DMA resource allocation.  A future whose DMA
+    // touches only non-SHARED storage is a candidate for a pooled completion
+    // slot; SHARED-storage futures are routed through per-DMA CDTE contexts
+    // and must not consume a pool slot.  This mirrors the storage half of the
+    // codegen `use_pool = use_dte_pool && sto != Storage::SHARED` condition;
+    // the target-specific `use_dte_pool` switch is applied at the codegen
+    // consumption site, not here, because the core liveness analysis is
+    // target-agnostic.  A side may be a plain buffer, a future `.data`
+    // expression (resolved via FutureType), or an inferred `local`
+    // destination (an AST::Memory node), so resolve each side's storage
+    // through its type exactly like the codegen.
+    auto StorageOf = [&](const ptr<AST::Node>& node) -> Storage {
+      if (auto m = dyn_cast<AST::Memory>(node)) return m->Get();
+      if (auto ca = dyn_cast<AST::ChunkAt>(node)) {
+        if (auto sty = GetSpannedType(GetSymbolType(ca->data->name)))
+          return sty->GetStorage();
+      }
+      return Storage::NONE;
+    };
+    Storage f_sto = StorageOf(n.from);
+    Storage t_sto = StorageOf(n.to);
+    Storage dma_sto = f_sto < t_sto ? f_sto : t_sto;
+    if (dma_sto != Storage::SHARED) pool_futures.insert(InScopeName(n.future));
   }
+
+  // An async DMA carrying an event (dma.copy.async<ev> ...) (re)arms the
+  // event at issue.  Record a def here so the event's live range is
+  // [issue, wait/trigger] rather than [decl, last use], which would
+  // over-serialize the EVENT resource class in the DMA resource allocator.
+  if (n.HasEvent()) AddDef(current_stmt, GetEventName(*n.Event()));
 
   if (n.chained && !n.chain_from.empty()) AddUse(current_stmt, n.chain_from);
 
@@ -1863,6 +1927,7 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
   if (!n.future.empty()) {
     RecordHBBufferAccess(InScopeName(n.ToSymbol()), "DMA-to");
     RecordHBBufferAccess(InScopeName(n.FromSymbol()), "DMA-from");
+    RecordHBResourceAccess(InScopeName(n.future));
   }
 
   return true;
