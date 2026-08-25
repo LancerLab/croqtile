@@ -289,6 +289,12 @@ private:
     os() << "#include <tops.h>\n";
     os() << "#include \"tops/tops_runtime.h\"\n";
     os() << "#include \"choreo.h\"\n";
+    // The intrinsic-prefix/namespace pragmas are consumed by the CoIR
+    // frontend before codegen and re-appear verbatim in the preprocessed
+    // host source (coir.user_cpp_code). Define them as no-op macros so
+    // topscc does not reject them as unknown identifiers.
+    os() << "#define __pragma_croq_intrinsic_prefix(x)\n";
+    os() << "#define __pragma_croq_intrinsic_namespace(x)\n";
     os() << "using namespace choreo;\n\n";
     // Force line-buffered stdout so host printf output merges correctly
     // with device stderr when piped (e.g. `2>&1 | FileCheck`).
