@@ -596,6 +596,101 @@ struct FenceSelection {
   }
 };
 
+/// Parse a single fence kind serialized by `FenceKind::Name()` back into a
+/// `FenceKind`. The wire format is `SPACE_ENTITY_ORDER[_SCOPE]`; the order
+/// token may itself contain a separator (`ACQ_REL`), so it is peeled from the
+/// right before the remaining underscore-separated fields are decoded. Returns
+/// a NONE kind for an empty or unrecognized string.
+inline static FenceKind FenceKindFromName(const std::string& name) {
+  FenceKind k;
+  if (name.empty() || name == "NONE") return k;
+
+  std::string rest = name;
+  auto ends_with = [&rest](const std::string& suffix) {
+    return rest.size() >= suffix.size() &&
+           rest.compare(rest.size() - suffix.size(), suffix.size(), suffix) ==
+               0;
+  };
+  auto peel = [&](const std::string& suffix, FenceOrder o) {
+    if (!ends_with(suffix)) return false;
+    k.order = o;
+    rest = rest.substr(0, rest.size() - suffix.size());
+    if (!rest.empty() && rest.back() == '_') rest.pop_back();
+    return true;
+  };
+  // Order first: ACQ_REL embeds an underscore, so match it before the plain
+  // RELEASE / ACQUIRE suffixes.
+  peel("ACQ_REL", FenceOrder::ACQ_REL) ||
+      peel("RELEASE", FenceOrder::RELEASE) ||
+      peel("ACQUIRE", FenceOrder::ACQUIRE);
+
+  // Remaining fields are SPACE_ENTITY[_SCOPE], underscore-separated.
+  const auto parts = SplitStringByDelimiter(rest, "_", /*trim=*/false);
+  if (parts.empty()) return k;
+
+  const std::string& space = parts[0];
+  if (space == "local")
+    k.space = Storage::LOCAL;
+  else if (space == "shared")
+    k.space = Storage::SHARED;
+  else if (space == "global")
+    k.space = Storage::GLOBAL;
+  else if (space == "register")
+    k.space = Storage::REG;
+  else if (space == "node")
+    k.space = Storage::NODE;
+  else if (space == "default")
+    k.space = Storage::DEFAULT;
+  else
+    k.space = Storage::NONE;
+
+  if (parts.size() >= 2) {
+    const std::string& entity = parts[1];
+    if (entity == "THREADS")
+      k.entity = FenceEntity::THREADS;
+    else if (entity == "DMA")
+      k.entity = FenceEntity::DMA;
+    else if (entity == "TMA")
+      k.entity = FenceEntity::TMA;
+    else if (entity == "MMA")
+      k.entity = FenceEntity::MMA;
+    else if (entity == "ALL")
+      k.entity = FenceEntity::ALL;
+  }
+
+  // Optional explicit scope (serialized only when HasExplicitScope()).
+  if (parts.size() >= 3) {
+    const std::string& scope = parts[2];
+    if (scope == "thread")
+      k.scope = ParallelLevel::THREAD;
+    else if (scope == "group")
+      k.scope = ParallelLevel::GROUP;
+    else if (scope == "group-4")
+      k.scope = ParallelLevel::GROUPx4;
+    else if (scope == "block")
+      k.scope = ParallelLevel::BLOCK;
+    else if (scope == "cluster")
+      k.scope = ParallelLevel::CLUSTER;
+    else if (scope == "device")
+      k.scope = ParallelLevel::DEVICE;
+  }
+
+  return k;
+}
+
+/// Split a comma-joined fence-kind list (as produced by
+/// `FenceInsertion::JoinKinds`) back into its constituent kinds, skipping
+/// empty entries.
+inline static std::vector<FenceKind>
+ParseFenceKinds(const std::string& joined) {
+  std::vector<FenceKind> out;
+  for (const auto& tok : SplitStringByDelimiter(joined, ",", /*trim=*/true)) {
+    if (tok.empty()) continue;
+    out.push_back(FenceKindFromName(tok));
+  }
+  return out;
+}
+
 inline static std::ostream& operator<<(std::ostream& os, BaseType bt) {
   return os << STR(bt);
 }
