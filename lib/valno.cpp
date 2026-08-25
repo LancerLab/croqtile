@@ -353,6 +353,11 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
   auto l_csn = CSign(lhs);
   auto r_csn = CSign(rhs);
 
+  // Ablation (--disable-vn-simplify): skip the simplification rules that
+  // rely on value-number equality and bind sets; constant folding and the
+  // structural sbe normalization above stay enabled.
+  const bool vn_simp = !CCtx().DisableVNSimplify();
+
   auto Report = [this, &op, &lhs, &rhs,
                  &verbose](const SignTy& s) -> const SignTy {
     if (trace && verbose)
@@ -373,7 +378,7 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
   // or else, apply optimization for the symbolic expression
   else if (op == Op::Div) {
     // a/a == 1
-    if (NumSign(lhs) == NumSign(rhs)) {
+    if (vn_simp && NumSign(lhs) == NumSign(rhs)) {
       return Report(c_sn(1));
     }
     // a/1 = a
@@ -381,7 +386,7 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
              rc && rc->Holds<int64_t>() && rc->GetInt() == 1)
       return Report(lhs);
     // useful simplification: a/(a/b) = b
-    else if (lhs->Count() == 1 /*not multiple values*/) {
+    else if (vn_simp && lhs->Count() == 1 /*not multiple values*/) {
       NumTy rvn = GetValueNumberOfSignature(rhs);
       auto bind_set = GetBindSet(rvn);
       bind_set.insert(rvn); // always add self
@@ -395,10 +400,10 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
     }
   } else if (op == Op::Sub) {
     // a-a == 0
-    if (NumSign(lhs) == NumSign(rhs)) return Report(c_sn(0));
+    if (vn_simp && NumSign(lhs) == NumSign(rhs)) return Report(c_sn(0));
   } else if (op == Op::Add) {
     // useful simplification: a-b+b = a
-    if (rhs->Count() == 1 /*not multiple values*/) {
+    if (vn_simp && rhs->Count() == 1 /*not multiple values*/) {
       NumTy lvn = NumSign(lhs);
       auto bind_set = GetBindSet(lvn);
       bind_set.insert(lvn); // always add self
@@ -416,7 +421,7 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
     // if `xx.chunkat(a#b)`, then the result shape should be 1
     // that is, N / (#a * #b) = N / N = 1
     // so, `a#b` should be simplified to a bounded var whose ubound is `N`
-    if (lhs->Count() == 1 /*not multiple values*/) {
+    if (vn_simp && lhs->Count() == 1 /*not multiple values*/) {
       NumTy rvn = NumSign(rhs);
       auto bind_set = GetBindSet(rvn);
       bind_set.insert(rvn); // always add self
@@ -427,7 +432,7 @@ const SignTy ValueNumbering::TryToSimplifyBinary(const OpTy& op,
         assert(div.size() == 2);
         if (NumSign(lhs) == NumSign(div[1])) return Report(div[0]);
       }
-    } else if (rhs->Count() == 1) {
+    } else if (vn_simp && rhs->Count() == 1) {
       // TODO: # is different with *
       // a # (b/a) will alway result in a?
       // if so, we need to emphasize this optimization to our users.
