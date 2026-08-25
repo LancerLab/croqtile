@@ -1309,7 +1309,8 @@ bool hasEarlyExit(AST::Node *node) {
 } // namespace
 
 int64_t ASTCoIRGen::resolveRangeBound(AST::LoopRange *lr) {
-  int64_t bound = 1;
+  // Keep unresolved bounds (e.g. `foreach y in X`) distinct from concrete 1.
+  int64_t bound = mlir::ShapedType::kDynamic;
   if (lr->ubound) {
     if (auto *expr = dyn_cast<AST::Expr>(lr->ubound.get()))
       if (expr->Opts().HasVal())
