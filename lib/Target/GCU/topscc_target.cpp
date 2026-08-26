@@ -208,6 +208,10 @@ public:
     return ArchNum(arch) < 400;
   }
 
+  bool WarnVectorAlignment(const ArchId& arch) const override {
+    return ArchNum(arch) >= 400;
+  }
+
   bool PlanPreCodegenStages(ASTPipeline& p) const override {
     p.AddStage<CodegenPrepare>();
     p.AddStage<GCUAdaptor>();

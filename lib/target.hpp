@@ -281,6 +281,11 @@ public:
 
   virtual bool EnforceVectorAlignment(const ArchId&) const { return false; }
 
+  // Whether misaligned vector loads/stores should produce a non-fatal warning
+  // (rather than silently proceeding) on architectures where alignment is not
+  // enforced. Default: no warning.
+  virtual bool WarnVectorAlignment(const ArchId&) const { return false; }
+
   // Atomic operation support -- targets override to declare which atomic ops
   // they support for each data type and storage level on each architecture.
   enum class AtomicOp { ADD, SUB, EXCH, MIN, MAX, AND, OR, XOR, CAS };
