@@ -1,9 +1,9 @@
 // RUN: choreo -es -t topscc -arch=gcu400 %s 2>&1 | FileCheck %s
 
-// === Test 1: all atomic ops on shared memory ===
-__co__ void atomic_shared(s32 [64] a) {
+// === Test 1: all atomic ops on global memory ===
+__co__ void atomic_global(s32 [64] a) {
+  global s32 [64] s;
   parallel p by 64 : thread {
-    shared s32 [64] s;
     s.at(p) = a.at(p);
     sync.barrier : thread;
     __atomic_add(s.at(p), 1);
@@ -29,8 +29,8 @@ __co__ void atomic_shared(s32 [64] a) {
 
 // === Test 2: return value capture ===
 __co__ void atomic_capture(s32 [64] a) {
+  global s32 [64] s;
   parallel p by 64 : thread {
-    shared s32 [64] s;
     s.at(p) = a.at(p);
     sync.barrier : thread;
     mutable s32 old = __atomic_add(s.at(p), 10);

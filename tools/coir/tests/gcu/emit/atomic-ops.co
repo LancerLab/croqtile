@@ -6,8 +6,8 @@
 // captured when an atomic call is used as an expression.
 
 __co__ void atomic_ops(s32 [64] a) {
+  global s32 [64] s;
   parallel p by 64 : thread {
-    shared s32 [64] s;
     s.at(p) = a.at(p);
     sync.barrier : thread;
     __atomic_add(s.at(p), 1);
@@ -33,8 +33,8 @@ __co__ void atomic_ops(s32 [64] a) {
 // CHECK: tcle::atomic_cas(&{{.*}}, {{.*}}, {{.*}})
 
 __co__ void atomic_capture(s32 [64] a) {
+  global s32 [64] s;
   parallel p by 64 : thread {
-    shared s32 [64] s;
     s.at(p) = a.at(p);
     sync.barrier : thread;
     mutable s32 old = __atomic_exch(s.at(p), 0);

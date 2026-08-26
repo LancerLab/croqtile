@@ -318,7 +318,11 @@ public:
 
   std::set<Storage> SupportedAtomicStorages(const ArchId& arch) const override {
     if (ArchNum(arch) < 400) return {};
-    return {Storage::SHARED, Storage::GLOBAL};
+    // GCU400+ AMO (tcle::atomic_*) only targets the L3 GLOBAL address space.
+    // L2/DSM (SHARED) and L1/VDMEM (LOCAL) have no atomic semantics; an AMO
+    // issued there traps (Libra SIP ISA4.0: AMO can only access Global Memory,
+    // not DSM).
+    return {Storage::GLOBAL};
   }
 };
 

@@ -1,0 +1,18 @@
+// RUN: not choreo -es -t topscc -arch=gcu400 %s 2>&1 | FileCheck %s
+
+#include "choreo.h"
+
+// GCU400+ exposes atomic builtins (tcle::atomic_*) but they only operate on
+// the L3 GLOBAL address space. The L2/DSM SHARED memory has no atomic
+// semantics, so an atomic on SHARED storage must be rejected even though
+// gcu400 supports atomics at all.
+__co__ void atomic_shared_rejected(s32 [64] a) {
+  parallel p by 64 : thread {
+    shared s32 [64] s;
+    s.at(p) = a.at(p);
+    sync.barrier : thread;
+    __atomic_add(s.at(p), 1);
+  }
+}
+
+// CHECK: error: '__atomic_add' is not supported on 's32' with 'shared' storage.
