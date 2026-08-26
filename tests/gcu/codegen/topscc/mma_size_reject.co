@@ -1,8 +1,9 @@
 // RUN: not choreo -t topscc -arch=gcu300 -es %s -o - 2>&1 | FileCheck %s
 
 // Test that unsupported MMA tile sizes are rejected on GCU target.
-// acore::matmul supports M in {1, 16, 32, 49, 64, 96, 128, 256, 512, 1024}
-// or 64-aligned for dynamic M. M=48 is not in either set.
+// acore::matmul supports static M in {1, 16, 32, 49, 64, 96, 128, 256}
+// (M=512/1024 are addmm-only) or 64-aligned for dynamic M.
+// M=48 is not in either set.
 
 __co__ void mma_bad_size(f16 [48, 256] A, f16 [256, 256] B) {
   parallel p by 1, q by 1 {

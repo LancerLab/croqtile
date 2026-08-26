@@ -10,7 +10,7 @@ GPU (CUTE mma.sync/WGMMA) and GCU (acore/VACC).
 ## Scope
 
 **In scope:** `mma.fill`, `mma.load`, `mma.row.col`/`mma.row.row`,
-`mma.store` on GCU via `MMAType::ACORE` lowering. K-loop accumulation state
+`mma.store` on GCU via `MMAType::UKERNEL` lowering. K-loop accumulation state
 machine. Out-of-line device stubs (ICALL workaround). Performance parity with
 hand-tuned acore patterns.
 
@@ -32,7 +32,7 @@ ShapeInference / TypeInference / SemaChecker (unchanged, target-agnostic)
 CodegenPrepare -> MMAInfo (unchanged, target-agnostic)
     |
     v
-GCUAdaptor (NEW) -> validates shapes, sets MMAType::ACORE
+GCUAdaptor (NEW) -> validates shapes, sets MMAType::UKERNEL
     |
     v
 TopsccCodeGen::Visit(MMA&) (NEW) -> emits acore::matmul via device stubs
@@ -79,12 +79,32 @@ When multiple accumulators are live, compiler assigns distinct vab_off values
 
 ## Acore Config Table
 
-Supported configurations (from lower_libcall.hpp):
-- Static M: {1, 16, 32, 64, 96, 128, 256} (512/1024 excluded for MVP due to ICALL)
+Supported configurations are transcribed from `extern/include/common/matmul.h`
+and encoded in `lib/Target/GCU/lower_libcall.hpp` (`kAcoreMatmulPatterns`,
+`GetAcoreAlignments`, `IsAcoreSupportedStaticM`). The table is arch-agnostic:
+the same constraints apply to gcu300, gcu400, and every other GCU arch, because
+MMA lowers to the single software `acore::matmul` path with no per-arch branch.
+
+- Static M: {1, 16, 32, 49, 64, 96, 128, 256}
 - Dynamic M: 64-aligned, for f16/bf16/f32
 - Formats: MK_KN (row.col), MK_NK (row.row)
-- Types: f16, bf16, f32, s8
-- K/N alignment varies by M and type (see GetAcoreAlignments)
+- Input types: f16, bf16, f32, s8 (char). The accumulator/output type is
+  modeled separately: f16/bf16 inputs may accumulate in float, and char input
+  is a quantization op producing int output.
+
+Format and shape restrictions (per matmul.h):
+
+- M=49: MK_NK only.
+- M=96: MK_KN only.
+- M=256: MK_KN only.
+- f32 M=1: MK_KN only; f32 M=128: MK_NK only.
+- f16/bf16 float-accumulator rows exist only for the sizes listed in matmul.h
+  (M=96/256 have no float-accumulator rows).
+- M=512/1024 belong to `acore::addmm`, not `acore::matmul`; such sizes are
+  served by the 64-aligned dynamic-M overload.
+
+K/N alignment varies by (M, input type, output type, format) — see
+`GetAcoreAlignments`.
 
 ## Async MMA Status
 

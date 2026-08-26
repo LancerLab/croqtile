@@ -101,18 +101,99 @@ inline std::string GetAcoreFuncName(const std::string& full_name) {
 // ============================================================================
 // Acore matmul supported-M table (from extern/include/common/matmul.h)
 // ============================================================================
+// MMA memory layout formats accepted by acore::matmul.
+enum class AcoreMMAFormat { MK_KN, MK_NK };
+
 struct AcoreMatmulPattern {
-  int M;
-  bool MK_KN;
-  bool MK_NK;
-  BaseType lhs_type;
+  int M;                    // static-M value, or 0 for the dynamic (64-aligned) overload
+  AcoreMMAFormat format;    // MK_KN (ROW_COL) or MK_NK (ROW_ROW)
+  BaseType lhs_type;        // input (and rhs) element type
+  BaseType out_type;        // accumulator/output element type
   int K_align;
   int N_align;
 };
 
+// Every (M, format, lhs, out) tuple accepted by the `acore::matmul` entry
+// points, transcribed from extern/include/common/matmul.h.  The M=512/1024
+// rows in matmul.h belong to `acore::addmm`, NOT `acore::matmul`, so they are
+// deliberately absent here; such sizes are instead served by the 64-aligned
+// dynamic-M overload.
+static const AcoreMatmulPattern kAcoreMatmulPatterns[] = {
+    // M=1
+    {1, AcoreMMAFormat::MK_NK, BaseType::F16, BaseType::F16, 32, 128},
+    {1, AcoreMMAFormat::MK_NK, BaseType::BF16, BaseType::BF16, 32, 128},
+    {1, AcoreMMAFormat::MK_KN, BaseType::F16, BaseType::F16, 32, 128},
+    {1, AcoreMMAFormat::MK_KN, BaseType::BF16, BaseType::BF16, 32, 128},
+    {1, AcoreMMAFormat::MK_KN, BaseType::F16, BaseType::F32, 32, 128},
+    {1, AcoreMMAFormat::MK_KN, BaseType::BF16, BaseType::F32, 32, 128},
+    {1, AcoreMMAFormat::MK_KN, BaseType::F32, BaseType::F32, 16, 64},
+    // M=16
+    {16, AcoreMMAFormat::MK_KN, BaseType::F32, BaseType::F32, 16, 64},
+    {16, AcoreMMAFormat::MK_NK, BaseType::F32, BaseType::F32, 16, 64},
+    // M=32
+    {32, AcoreMMAFormat::MK_KN, BaseType::F16, BaseType::F16, 32, 128},
+    {32, AcoreMMAFormat::MK_KN, BaseType::F16, BaseType::F16, 64, 64},
+    {32, AcoreMMAFormat::MK_KN, BaseType::BF16, BaseType::BF16, 32, 128},
+    {32, AcoreMMAFormat::MK_KN, BaseType::BF16, BaseType::BF16, 32, 64},
+    {32, AcoreMMAFormat::MK_KN, BaseType::F16, BaseType::F32, 64, 64},
+    {32, AcoreMMAFormat::MK_KN, BaseType::F16, BaseType::F32, 32, 128},
+    {32, AcoreMMAFormat::MK_KN, BaseType::BF16, BaseType::F32, 32, 64},
+    {32, AcoreMMAFormat::MK_KN, BaseType::BF16, BaseType::F32, 32, 128},
+    {32, AcoreMMAFormat::MK_KN, BaseType::F32, BaseType::F32, 16, 32},
+    {32, AcoreMMAFormat::MK_NK, BaseType::F16, BaseType::F16, 32, 128},
+    {32, AcoreMMAFormat::MK_NK, BaseType::F16, BaseType::F16, 64, 64},
+    {32, AcoreMMAFormat::MK_NK, BaseType::BF16, BaseType::BF16, 32, 128},
+    {32, AcoreMMAFormat::MK_NK, BaseType::BF16, BaseType::BF16, 32, 64},
+    {32, AcoreMMAFormat::MK_NK, BaseType::F16, BaseType::F32, 64, 64},
+    {32, AcoreMMAFormat::MK_NK, BaseType::BF16, BaseType::F32, 32, 64},
+    {32, AcoreMMAFormat::MK_NK, BaseType::F32, BaseType::F32, 16, 32},
+    // M=49 (MK_NK only)
+    {49, AcoreMMAFormat::MK_NK, BaseType::F16, BaseType::F16, 64, 64},
+    // M=64
+    {64, AcoreMMAFormat::MK_KN, BaseType::F16, BaseType::F16, 32, 128},
+    {64, AcoreMMAFormat::MK_KN, BaseType::BF16, BaseType::BF16, 32, 128},
+    {64, AcoreMMAFormat::MK_KN, BaseType::F16, BaseType::F32, 32, 128},
+    {64, AcoreMMAFormat::MK_KN, BaseType::BF16, BaseType::F32, 32, 128},
+    {64, AcoreMMAFormat::MK_KN, BaseType::F16, BaseType::F32, 128, 64},
+    {64, AcoreMMAFormat::MK_KN, BaseType::BF16, BaseType::F32, 128, 64},
+    {64, AcoreMMAFormat::MK_KN, BaseType::F32, BaseType::F32, 16, 64},
+    {64, AcoreMMAFormat::MK_NK, BaseType::F16, BaseType::F16, 32, 128},
+    {64, AcoreMMAFormat::MK_NK, BaseType::F16, BaseType::F16, 64, 64},
+    {64, AcoreMMAFormat::MK_NK, BaseType::BF16, BaseType::BF16, 32, 128},
+    {64, AcoreMMAFormat::MK_NK, BaseType::F16, BaseType::F32, 32, 128},
+    {64, AcoreMMAFormat::MK_NK, BaseType::BF16, BaseType::F32, 32, 128},
+    {64, AcoreMMAFormat::MK_NK, BaseType::F16, BaseType::F32, 64, 64},
+    {64, AcoreMMAFormat::MK_NK, BaseType::BF16, BaseType::F32, 128, 64},
+    {64, AcoreMMAFormat::MK_NK, BaseType::F32, BaseType::F32, 16, 64},
+    // M=96 (MK_KN only)
+    {96, AcoreMMAFormat::MK_KN, BaseType::F16, BaseType::F16, 32, 128},
+    {96, AcoreMMAFormat::MK_KN, BaseType::BF16, BaseType::BF16, 32, 128},
+    // M=128
+    {128, AcoreMMAFormat::MK_KN, BaseType::F16, BaseType::F16, 32, 64},
+    {128, AcoreMMAFormat::MK_KN, BaseType::BF16, BaseType::BF16, 32, 64},
+    {128, AcoreMMAFormat::MK_KN, BaseType::F16, BaseType::F32, 32, 64},
+    {128, AcoreMMAFormat::MK_KN, BaseType::BF16, BaseType::F32, 32, 64},
+    {128, AcoreMMAFormat::MK_NK, BaseType::F16, BaseType::F16, 32, 64},
+    {128, AcoreMMAFormat::MK_NK, BaseType::BF16, BaseType::BF16, 32, 64},
+    {128, AcoreMMAFormat::MK_NK, BaseType::F16, BaseType::F32, 32, 64},
+    {128, AcoreMMAFormat::MK_NK, BaseType::BF16, BaseType::F32, 32, 64},
+    {128, AcoreMMAFormat::MK_NK, BaseType::F32, BaseType::F32, 16, 32},
+    // M=256 (MK_KN only)
+    {256, AcoreMMAFormat::MK_KN, BaseType::F16, BaseType::F16, 32, 64},
+    {256, AcoreMMAFormat::MK_KN, BaseType::BF16, BaseType::BF16, 32, 64},
+    // Dynamic-M (64-aligned overload), M=0 sentinel
+    {0, AcoreMMAFormat::MK_KN, BaseType::F16, BaseType::F16, 32, 128},
+    {0, AcoreMMAFormat::MK_KN, BaseType::BF16, BaseType::BF16, 32, 128},
+    {0, AcoreMMAFormat::MK_KN, BaseType::F32, BaseType::F32, 16, 64},
+    {0, AcoreMMAFormat::MK_NK, BaseType::F16, BaseType::F16, 64, 64},
+    {0, AcoreMMAFormat::MK_NK, BaseType::BF16, BaseType::BF16, 32, 128},
+    {0, AcoreMMAFormat::MK_NK, BaseType::F32, BaseType::F32, 16, 64},
+};
+
 // Supported static-M values for the template overload (from matmul.h).
+// M=512/1024 are addmm-only and are instead served by the dynamic-M overload.
 inline bool IsAcoreSupportedStaticM(int M) {
-  static const int supported[] = {1, 16, 32, 49, 64, 96, 128, 256, 512, 1024};
+  static const int supported[] = {1, 16, 32, 49, 64, 96, 128, 256};
   for (int v : supported)
     if (v == M) return true;
   return false;
@@ -124,39 +205,31 @@ inline bool IsAcoreSupportedDynamicM(BaseType lhs_type) {
          lhs_type == BaseType::F32;
 }
 
-// Get K/N alignment requirements for given M, lhs type, and format.
-// Returns {K_align, N_align} or {0,0} if unsupported.
+// Normalize an output type for lookup: an unknown accumulator type defaults
+// to the input type (the codegen falls back to the input element type when
+// the accumulator fragment type is not statically known).
+inline BaseType NormalizeAcoreOutType(BaseType out_type, BaseType lhs_type) {
+  return out_type == BaseType::UNKNOWN ? lhs_type : out_type;
+}
+
+// Get K/N alignment requirements for given M, lhs type, output type, and
+// format.  Returns {K_align, N_align} or {0,0} if unsupported.
 inline std::pair<int, int> GetAcoreAlignments(int M, BaseType lhs_type,
-                                              bool is_MK_KN) {
-  if (lhs_type == BaseType::F16 || lhs_type == BaseType::BF16) {
-    if (M == 1) return {32, 128};
-    if (M == 32)
-      return is_MK_KN ? std::make_pair(32, 128) : std::make_pair(32, 128);
-    if (M == 64)
-      return is_MK_KN ? std::make_pair(32, 128) : std::make_pair(32, 128);
-    if (M == 96 && is_MK_KN) return {32, 128};
-    if (M == 128) return {32, 64};
-    if (M == 256 && is_MK_KN) return {32, 64};
-    if (M == 512 && is_MK_KN) return {32, 64};
-    if (M == 1024 && is_MK_KN) return {32, 64};
-    if (M == 0) return {32, 128}; // dynamic-M (64-aligned)
-    return {0, 0};
-  }
-  if (lhs_type == BaseType::F32) {
-    if (M == 1)
-      return is_MK_KN ? std::make_pair(16, 64) : std::make_pair(16, 64);
-    if (M == 16) return {16, 64};
-    if (M == 32) return {16, 32};
-    if (M == 64)
-      return is_MK_KN ? std::make_pair(16, 64) : std::make_pair(16, 64);
-    if (M == 128) return {16, 32};
-    if (M == 0) return {16, 64}; // dynamic-M
-    return {0, 0};
-  }
+                                              BaseType out_type,
+                                              AcoreMMAFormat format) {
+  // s8 (char) input quantization rows are keyed on the input type alone;
+  // acore::matmul always produces `int` output for char input.
   if (lhs_type == BaseType::S8) {
     if (M == 32 || M == 64) return {64, 128};
     if (M == 128) return {64, 64};
     return {0, 0};
+  }
+
+  BaseType out = NormalizeAcoreOutType(out_type, lhs_type);
+  for (const auto& p : kAcoreMatmulPatterns) {
+    if (p.M == M && p.format == format && p.lhs_type == lhs_type &&
+        p.out_type == out)
+      return {p.K_align, p.N_align};
   }
   return {0, 0};
 }
@@ -399,14 +472,20 @@ LibGemmLoweringInfo AnalyzeLibGemm(AST::Call& n, AssessFn /* assess_fn */,
   // out is arg 0, shape [M, N] -- we need the first dimension.
   auto out_arg = n.arguments->ValueAt(0);
   auto out_ty = out_arg->GetType();
+  BaseType out_bt = BaseType::UNKNOWN;
   int static_M = -1;
   if (out_ty) {
     if (auto sty = dyn_cast<SpannedType>(out_ty)) {
+      out_bt = sty->ElementType();
       auto shape = sty->GetShape();
       if (shape.Rank() >= 1) {
         auto m_vi = shape.Value()[0];
         if (auto mv = VIInt(m_vi)) static_M = (int)mv.value();
       }
+    } else if (auto dt = dyn_cast<DeviceDataType>(out_ty)) {
+      out_bt = Choreo::GetBaseType(*dt);
+    } else {
+      out_bt = out_ty->GetBaseType();
     }
   }
 
@@ -416,7 +495,8 @@ LibGemmLoweringInfo AnalyzeLibGemm(AST::Call& n, AssessFn /* assess_fn */,
     info.use_acore = true;
     info.use_static_M = true;
     info.static_M = static_M;
-    auto [ka, na] = GetAcoreAlignments(static_M, lhs_bt, true);
+    auto [ka, na] = GetAcoreAlignments(static_M, lhs_bt, out_bt,
+                                       AcoreMMAFormat::MK_KN);
     info.K_align = ka;
     info.N_align = na;
     if (ka == 0) {
@@ -430,7 +510,7 @@ LibGemmLoweringInfo AnalyzeLibGemm(AST::Call& n, AssessFn /* assess_fn */,
     info.use_acore = true;
     info.use_static_M = false;
     info.static_M = static_M;
-    auto [ka, na] = GetAcoreAlignments(0, lhs_bt, true);
+    auto [ka, na] = GetAcoreAlignments(0, lhs_bt, out_bt, AcoreMMAFormat::MK_KN);
     info.K_align = ka;
     info.N_align = na;
   } else if (static_M > 0) {
@@ -438,7 +518,7 @@ LibGemmLoweringInfo AnalyzeLibGemm(AST::Call& n, AssessFn /* assess_fn */,
     info.fallback_reason =
         "M=" + std::to_string(static_M) +
         " is not a supported acore matmul tile size (supported: "
-        "1,16,32,49,64,96,128,256,512,1024 or 64-aligned for "
+        "1,16,32,49,64,96,128,256 or 64-aligned for "
         "dynamic-M overload)";
   } else {
     info.use_acore = false;

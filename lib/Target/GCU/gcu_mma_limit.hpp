@@ -19,6 +19,9 @@ struct AcoreMMAConfig {
 
   bool IsMK_KN() const { return method == AST::MMAOperation::ROW_COL; }
   bool IsMK_NK() const { return method == AST::MMAOperation::ROW_ROW; }
+  AcoreMMAFormat Format() const {
+    return IsMK_KN() ? AcoreMMAFormat::MK_KN : AcoreMMAFormat::MK_NK;
+  }
 };
 
 inline bool IsValidAcoreMMAConfig(const AcoreMMAConfig& cfg) {
@@ -34,7 +37,7 @@ inline bool IsValidAcoreMMAConfig(const AcoreMMAConfig& cfg) {
     if (!IsAcoreSupportedStaticM(cfg.M)) {
       if (cfg.M % 64 != 0 || !IsAcoreSupportedDynamicM(bt)) return false;
     }
-    auto [ka, na] = GetAcoreAlignments(cfg.M, bt, is_mk_kn);
+    auto [ka, na] = GetAcoreAlignments(cfg.M, bt, cfg.acc_type, cfg.Format());
     if (ka == 0) return false;
   }
 
