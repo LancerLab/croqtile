@@ -462,6 +462,7 @@ ASTCoIRGen::LowerParallelLevel(ParallelLevel pl) {
   case ParallelLevel::CLUSTER: level = coir::ParallelLevel::CLUSTER; break;
   case ParallelLevel::DEVICE:  level = coir::ParallelLevel::DEVICE; break;
   case ParallelLevel::SEQ:     level = coir::ParallelLevel::SEQ; break;
+  case ParallelLevel::NONE:    level = coir::ParallelLevel::NONE; break;
   default: llvm_unreachable("unsupported parallel level"); break;
   }
   return coir::ParallelLevelAttr::get(&IRContext(), level);
@@ -3387,6 +3388,11 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
   }
 
   // DMA: user wrote `dma.copy` -> DmaCopyOp (always produces token).
+  // Producer fences (attached by FenceInsertion) are emitted as standalone
+  // coir.fence ops before the copy.
+  if (dma.HasNote("dma_fence_producer"))
+    emitFenceKinds(dma.GetNote("dma_fence_producer"), loc);
+
   mlir::Value token = nullptr;
   if (dma.IsTMA()) {
     mlir::IntegerAttr swizAttr;
@@ -3418,8 +3424,13 @@ bool ASTCoIRGen::Visit(AST::DMA &dma) {
   // For synchronous frontend DMA (no .async), insert an immediate
   // coir.wait so the MLIR explicitly synchronises before any
   // subsequent read of the destination buffer.
-  if (!isAsync && token)
+  if (!isAsync && token) {
     builder.create<coir::WaitOp>(loc, token);
+    // Consumer fences on a synchronous DMA attach to the DMA node; emit them
+    // as standalone coir.fence ops after the wait.
+    if (dma.HasNote("dma_fence_consumer"))
+      emitFenceKinds(dma.GetNote("dma_fence_consumer"), loc);
+  }
 
   if (!futureName.empty()) {
     if (isAsync && token) {
@@ -3873,6 +3884,11 @@ bool ASTCoIRGen::Visit(AST::Rotate &rot) {
 bool ASTCoIRGen::Visit(AST::Wait &w) {
   if (!w.targets) return true;
   auto loc = Loc(w);
+  // Consumer fences (attached by FenceInsertion) are emitted after the wait.
+  llvm::StringRef consumerFence =
+      w.HasNote("dma_fence_consumer") ? w.GetNote("dma_fence_consumer") : "";
+
+  bool anyWait = false;
   for (auto &t : w.targets->AllValues()) {
     std::string name;
     std::string subscript;
@@ -3895,12 +3911,15 @@ bool ASTCoIRGen::Visit(AST::Wait &w) {
     auto tokenVal = LookupValue(name);
     if (tokenVal && mlir::isa<coir::AsyncTokenType>(tokenVal.getType())) {
       builder.create<coir::WaitOp>(loc, tokenVal);
+      anyWait = true;
     } else {
       builder.create<coir::EventWaitOp>(
           loc, builder.getStringAttr(name),
           subscript.empty() ? nullptr : builder.getStringAttr(subscript));
     }
   }
+  if (anyWait)
+    emitFenceKinds(consumerFence, loc);
   return true;
 }
 
@@ -4099,26 +4118,82 @@ bool ASTCoIRGen::Visit(AST::Barrier &barrier) {
   return true;
 }
 
+static coir::TensorMemorySpace lowerFenceSpace(Choreo::Storage s) {
+  switch (s) {
+  case Choreo::Storage::LOCAL:  return coir::TensorMemorySpace::Local;
+  case Choreo::Storage::SHARED: return coir::TensorMemorySpace::Shared;
+  case Choreo::Storage::GLOBAL: return coir::TensorMemorySpace::Global;
+  default:
+    llvm_unreachable("unsupported fence memory space");
+    return coir::TensorMemorySpace::Global;
+  }
+}
+
+static coir::FenceEntity lowerFenceEntity(Choreo::FenceEntity e) {
+  switch (e) {
+  case Choreo::FenceEntity::THREADS: return coir::FenceEntity::Threads;
+  case Choreo::FenceEntity::DMA:     return coir::FenceEntity::DMA;
+  case Choreo::FenceEntity::TMA:     return coir::FenceEntity::TMA;
+  case Choreo::FenceEntity::MMA:     return coir::FenceEntity::MMA;
+  case Choreo::FenceEntity::ALL:     return coir::FenceEntity::All;
+  }
+  llvm_unreachable("unsupported fence entity");
+  return coir::FenceEntity::All;
+}
+
+static coir::FenceOrder lowerFenceOrder(Choreo::FenceOrder o) {
+  switch (o) {
+  case Choreo::FenceOrder::RELEASE: return coir::FenceOrder::Release;
+  case Choreo::FenceOrder::ACQUIRE: return coir::FenceOrder::Acquire;
+  case Choreo::FenceOrder::ACQ_REL: return coir::FenceOrder::AcqRel;
+  }
+  llvm_unreachable("unsupported fence order");
+  return coir::FenceOrder::AcqRel;
+}
+
 bool ASTCoIRGen::Visit(AST::Fence &fence) {
   auto loc = Loc(fence);
-  auto level = LowerParallelLevel(fence.GetVisibility());
-  coir::TensorMemorySpace scope;
+  auto scope = LowerParallelLevel(fence.GetVisibility());
   auto memory = fence.GetMemory();
   if (memory == Storage::NONE) {
     // Default memory scope from visibility level (target-defined).
     memory = CCtx().GetTarget().GetDefaultFenceMemory(CCtx().GetArch(),
                                                       fence.GetVisibility());
   }
-  switch (memory) {
-  case Storage::LOCAL:  scope = coir::TensorMemorySpace::Local;  break;
-  case Storage::SHARED: scope = coir::TensorMemorySpace::Shared; break;
-  case Storage::GLOBAL: scope = coir::TensorMemorySpace::Global; break;
-  default:              llvm_unreachable("unsupported fence memory scope"); break;
-  }
+  // The explicit full fence is the acq-rel barrier over every agent; its
+  // visibility level becomes the four-fold `scope` axis and its memory level
+  // the `space` axis.
   builder.create<coir::FenceOp>(
-      loc, level,
-      coir::TensorMemorySpaceAttr::get(&IRContext(), scope));
+      loc, coir::TensorMemorySpaceAttr::get(&IRContext(),
+                                            lowerFenceSpace(memory)),
+      coir::FenceEntityAttr::get(&IRContext(), coir::FenceEntity::All),
+      coir::FenceOrderAttr::get(&IRContext(), coir::FenceOrder::AcqRel),
+      scope);
   return true;
+}
+
+void ASTCoIRGen::emitFenceKinds(llvm::StringRef joined, mlir::Location loc) {
+  if (joined.empty())
+    return;
+  auto kinds = Choreo::ParseFenceKinds(joined.str());
+  if (kinds.empty())
+    return;
+
+  // Emit one coir.fence per four-fold kind, carrying every axis
+  // (space, entity, order, scope) explicitly. Engine/proxy fences keep the
+  // auto scope (NONE), which codegen derives from `space`.
+  for (const auto &kind : kinds) {
+    if (kind.IsNone())
+      continue;
+    builder.create<coir::FenceOp>(
+        loc,
+        coir::TensorMemorySpaceAttr::get(&IRContext(),
+                                         lowerFenceSpace(kind.space)),
+        coir::FenceEntityAttr::get(&IRContext(),
+                                   lowerFenceEntity(kind.entity)),
+        coir::FenceOrderAttr::get(&IRContext(), lowerFenceOrder(kind.order)),
+        LowerParallelLevel(kind.scope));
+  }
 }
 
 static coir::AtomicKind parseAtomicKind(llvm::StringRef fname) {

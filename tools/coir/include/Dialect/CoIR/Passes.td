@@ -111,6 +111,24 @@ def LowerDMADesc : Pass<"coir-lower-dma-desc"> {
   ];
 }
 
+def FenceElision : Pass<"coir-fence-elision"> {
+  let summary = "Drop redundant directional fences";
+  let description = [{
+    Drops a directional coir.fence that is immediately preceded (ignoring
+    memory-effect-free descriptor/config ops) by an equal fence. A fence
+    orders the issuing agent's prior accesses, so a second fence of the
+    same kind with no intervening memory effect publishes nothing new and
+    is redundant.
+
+    Runs unconditionally in the lowering pipeline (even at -O0), because
+    fences lower to hardware barrier instructions; they are correctness
+    annotations, not optional optimizations.
+  }];
+
+  let constructor = "::coir::createFenceElisionPass()";
+  let dependentDialects = ["::coir::CoIRDialect"];
+}
+
 def PlanDMACopy : Pass<"coir-plan-dma-copy"> {
   let summary = "Plan cooperative tiled copy strategy for DMA invoke ops";
   let description = [{

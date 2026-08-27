@@ -74,7 +74,7 @@ def DMACheckOp : CoIR_Op<"dma.check", [NoMemoryEffect]> {
   let assemblyFormat = "$in attr-dict `:` type($in)";
 }
 
-def DMADescPrefetchOp : CoIR_Op<"dma.prefetch.desc", []> {
+def DMADescPrefetchOp : CoIR_Op<"dma.prefetch.desc", [NoMemoryEffect]> {
   let summary = "Materialize descriptor for execution";
   let description = [{
     Converts a compile-time descriptor to a runtime-ready descriptor.
@@ -86,7 +86,7 @@ def DMADescPrefetchOp : CoIR_Op<"dma.prefetch.desc", []> {
   let assemblyFormat = "$in attr-dict `:` type($in) `->` type($out)";
 }
 
-def DMADescRuntimeOp : CoIR_Op<"dma.runtime.desc", []> {
+def DMADescRuntimeOp : CoIR_Op<"dma.runtime.desc", [NoMemoryEffect]> {
   let summary = "Bind per-iteration offsets to a DMA descriptor";
   let description = [{
     Binds runtime offset values to a materialized descriptor. The variadic
@@ -445,28 +445,39 @@ def BarrierOp : CoIR_Op<"barrier", []> {
   let assemblyFormat = "$scope attr-dict";
 }
 
-def FenceOp : CoIR_Op<"fence", []> {
-  let summary = "Memory fence with visibility scope and optional memory scope";
+def FenceOp : CoIR_Op<"fence",
+                   [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+  let summary = "Four-fold memory fence: space, agent, ordering, and scope";
   let description = [{
-    Ensures memory ordering at the specified visibility level:
-    - Visibility (ParallelLevel): which threads can see the ordering
-      (thread/group/block), drives GPU intrinsic selection.
-    - Memory (TensorMemorySpace): which memory level is fenced
-      (local/shared/global), drives hardware intrinsic selection.
+    The four orthogonal axes of a fence request, each lowered to exactly one
+    hardware primitive:
+    - space  (TensorMemorySpace): which memory level is fenced
+      (local/shared/global), drives the hardware intrinsic selection.
+    - entity (FenceEntity): which agent's accesses are ordered (threads /
+      dma / tma / mma / all); the full fence uses `all`.
+    - order  (FenceOrder): direction and strength (release / acquire /
+      acq_rel); the full fence uses `acq_rel`.
+    - scope  (ParallelLevel): the coherence domain the ordering is visible to
+      (thread / group / block / device); `none` marks an engine/proxy fence
+      whose scope is derived from `space`.
 
-    For GPU: visibility <= block  --> __threadfence_block()
-             visibility  > block --> __threadfence()
+    For GPU: scope <= block --> __threadfence_block()
+             scope  > block --> __threadfence()
   }];
   let arguments = (ins
-    CoIR_ParallelLevelAttr:$visibility,
-    CoIR_TensorMemorySpaceAttr:$scope
+    CoIR_TensorMemorySpaceAttr:$space,
+    CoIR_FenceEntityAttr:$entity,
+    CoIR_FenceOrderAttr:$order,
+    CoIR_ParallelLevelAttr:$scope
   );
-  let assemblyFormat = "$visibility $scope attr-dict";
+  let assemblyFormat = "$space $entity $order $scope attr-dict";
 }
 
 def WaitOp : CoIR_Op<"wait", []> {
   let summary = "Wait for an async operation to complete";
-  let arguments = (ins CoIR_AsyncTokenTypeC:$token);
+  let arguments = (ins
+    CoIR_AsyncTokenTypeC:$token
+  );
   let assemblyFormat = "$token attr-dict `:` type($token)";
 }
 
@@ -543,7 +554,8 @@ def FutureRotateOp : CoIR_Op<"async.rotate", []> {
 // Tier 3: Specialized copy ops (from AST-to-CoIR generation)
 //===----------------------------------------------------------------------===//
 
-def DmaCopyOp : CoIR_Op<"dma.copy", []> {
+def DmaCopyOp : CoIR_Op<"dma.copy",
+                   [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
   let summary = "Asynchronous DMA copy between memory hierarchies";
   let description = [{
     Copy data asynchronously using the DMA engine (e.g. global -> shared).
@@ -562,7 +574,8 @@ def DmaCopyOp : CoIR_Op<"dma.copy", []> {
   let hasCustomAssemblyFormat = 1;
 }
 
-def TmaCopyOp : CoIR_Op<"tma.copy", []> {
+def TmaCopyOp : CoIR_Op<"tma.copy",
+                   [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
   let summary = "Tensor Memory Accelerator (TMA) bulk copy";
   let description = [{
     TMA-based bulk copy for SM90+. Uses hardware tensor descriptors

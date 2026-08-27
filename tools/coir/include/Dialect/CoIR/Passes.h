@@ -20,6 +20,7 @@
 namespace coir {
 
 std::unique_ptr<mlir::Pass> createCleanupPass();
+std::unique_ptr<mlir::Pass> createFenceElisionPass();
 std::unique_ptr<mlir::Pass> createLowerDMADescPass();
 std::unique_ptr<mlir::Pass> createHoistDMAConfigPass();
 std::unique_ptr<mlir::Pass> createPlanDMACopyPass();
