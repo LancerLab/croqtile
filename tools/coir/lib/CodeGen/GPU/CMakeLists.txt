@@ -1,4 +1,4 @@
-file(GLOB _GPU_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+file(GLOB _GPU_SRCS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 
 add_library(MLIRCoIRCodeGenGPU STATIC ${_GPU_SRCS})
 add_dependencies(MLIRCoIRCodeGenGPU CoIRTableGen)

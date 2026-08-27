@@ -105,7 +105,7 @@ set(COIR_MLIR_LIBS
 # ------------------------------------------------------------------
 # lib/IR -- CoIR Dialect library
 # ------------------------------------------------------------------
-file(GLOB _COIR_IR_SRCS lib/IR/*.cpp)
+file(GLOB _COIR_IR_SRCS CONFIGURE_DEPENDS lib/IR/*.cpp)
 add_library(MLIRCoIRDialect STATIC ${_COIR_IR_SRCS})
 add_dependencies(MLIRCoIRDialect CoIRTableGen)
 target_include_directories(MLIRCoIRDialect PUBLIC
@@ -121,7 +121,7 @@ target_link_libraries(MLIRCoIRDialect PUBLIC
 # ------------------------------------------------------------------
 # lib/Transforms -- target-agnostic lowering passes
 # ------------------------------------------------------------------
-file(GLOB _COIR_TRANSFORMS_SRCS lib/Transforms/*.cpp)
+file(GLOB _COIR_TRANSFORMS_SRCS CONFIGURE_DEPENDS lib/Transforms/*.cpp)
 add_library(MLIRCoIRTransforms STATIC ${_COIR_TRANSFORMS_SRCS})
 add_dependencies(MLIRCoIRTransforms CoIRTableGen)
 target_include_directories(MLIRCoIRTransforms PUBLIC
@@ -137,7 +137,7 @@ target_link_libraries(MLIRCoIRTransforms PUBLIC
 # ------------------------------------------------------------------
 # lib/Driver -- Pipeline implementation (shared by tools)
 # ------------------------------------------------------------------
-file(GLOB _COIR_DRIVER_SRCS lib/Driver/Pipeline.cpp)
+file(GLOB _COIR_DRIVER_SRCS CONFIGURE_DEPENDS lib/Driver/Pipeline.cpp)
 add_library(MLIRCoIRDriver STATIC ${_COIR_DRIVER_SRCS})
 add_dependencies(MLIRCoIRDriver CoIRTableGen)
 target_include_directories(MLIRCoIRDriver PUBLIC
@@ -156,12 +156,13 @@ target_link_libraries(MLIRCoIRDriver PUBLIC
 # named MLIRCoIRCodeGen<DirName>.
 set(COIR_CODEGEN_LIBS "")
 
-file(GLOB _codegen_subdirs RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/lib/CodeGen
+file(GLOB _codegen_subdirs CONFIGURE_DEPENDS
+  RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/lib/CodeGen
   "${CMAKE_CURRENT_SOURCE_DIR}/lib/CodeGen/*")
 foreach(_subdir ${_codegen_subdirs})
   set(_subdir_path "${CMAKE_CURRENT_SOURCE_DIR}/lib/CodeGen/${_subdir}")
   if(IS_DIRECTORY "${_subdir_path}")
-    file(GLOB _subdir_srcs "${_subdir_path}/*.cpp")
+    file(GLOB _subdir_srcs CONFIGURE_DEPENDS "${_subdir_path}/*.cpp")
     # Skip directories with a CMakeLists.txt (they self-manage via add_subdirectory)
     if(EXISTS "${_subdir_path}/CMakeLists.txt")
       add_subdirectory("${_subdir_path}")
