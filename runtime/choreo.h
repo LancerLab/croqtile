@@ -146,9 +146,14 @@
 #endif
 
 #if __CHOREO_TGT0_ARCH__ == 400
+  // SIMT targets expose BLOCK/GROUP/THREAD levels.  Guard semantics:
+  //   BLOCK_SINGLE -> one GROUP (hardware thread; threadIdx == 0), whose
+  //                   subthreads run the guarded code in lockstep.
+  //   GROUP_SINGLE -> one THREAD (subthread; subThreadIdx == 0) in a GROUP.
+  // GSIZE is unused because a GROUP is a fixed set of subthreads rather than
+  // a CUDA-style 32-wide warp.
   #define __CHOREO_BLOCK_SINGLE__                                              \
-    threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 &&                \
-        subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0
+    threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0
   #define __CHOREO_GROUP_SINGLE__(GSIZE)                                       \
     subThreadIdx.x == 0 && subThreadIdx.y == 0 && subThreadIdx.z == 0
 #elif defined(__CHOREO_TARGET_AMDGPU__)
