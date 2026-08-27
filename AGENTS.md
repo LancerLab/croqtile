@@ -347,6 +347,34 @@ Three comprehensive test suites validate OSS script functionality. They live in
 - Never write generated files to `/tmp`; use `build/` directory
 - Build artifacts are symlinked to repo root
 
+### GCU SIMT Parallel-Level Mapping (gcu400+)
+
+The gcu400 target uses a SIMT model whose naming is the reverse of the CUDA
+mental model, and this frequently confuses agents. The canonical mapping:
+
+| Choreo level | Hardware unit          | Index builtin     | Builtin var  |
+|--------------|------------------------|-------------------|--------------|
+| `BLOCK`      | cluster / grid         | `__tops_bid_*()`  | `blockIdx`   |
+| `GROUP`      | thread / SIP           | `__tops_tid_*()`  | `threadIdx`  |
+| `THREAD`     | subthread / SIMT lane  | `__tops_stid_*()` | `subThreadIdx`|
+
+Key facts:
+
+- Choreo `GROUP` = the hardware **thread (SIP)** = `threadIdx`. A GROUP runs
+  `DEFAULT_SUBTHREAD_NUM == 4` subthreads in SIMT lockstep.
+- Choreo `THREAD` = the hardware **subthread (lane)** = `subThreadIdx`
+  (`__tops_stid_*()`). It is NOT `threadIdx`.
+- The DTE (data-transfer engine) context is **thread-shared per SIP** for
+  `LOCAL`/`SHARED` (`tops::local_dte` / `tops::shared_dte`); only
+  `private_dte` is per-subthread. See `DMATypeSTR` in
+  `lib/Target/GCU/topscc_codegen.cpp`.
+- Guard semantics (see `runtime/choreo.h`): `__CHOREO_BLOCK_SINGLE__` selects
+  a single **GROUP** (`threadIdx == 0`; its subthreads run in lockstep);
+  `__CHOREO_GROUP_SINGLE__` selects a single **THREAD** (`subThreadIdx == 0`).
+  A DMA issued at `THREAD` level (per-lane slice/deslice) is **unguarded** and
+  uses `tops::private_dte` (per-subthread) instead of the thread-shared
+  `local_dte`.
+
 ### Target Development: Supporting Explicit Type Conversions
 
 When implementing a new `Target` subclass, override `SupportedScalarTypes(arch)` to declare which scalar types your target supports for explicit `__to<type>(expr)` conversions. Return the set of `BaseType` values valid for the given architecture. The compiler validates both source and target types in early semantic analysis. Optionally override `IsCastSupported(arch, from, to)` to restrict specific conversion pairs; the default allows all conversions between supported types. See `lib/target.hpp` for the interface and existing targets for reference.
