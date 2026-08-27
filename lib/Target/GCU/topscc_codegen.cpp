@@ -1767,6 +1767,10 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
 // ignored. Kinds with an unmapped space (e.g. NONE) are skipped.
 static void EmitAutoFences(std::ostream& ds, const std::string& indent,
                            const std::string& joined) {
+  // Auto-inserted DMA fences are only attached (via the dma_fence_* notes) for
+  // arches whose SDK exposes a memory fence (see SelectDMAFences). Unsupported
+  // arches never reach this point with a non-empty note, so no fence code is
+  // emitted and no arch guard is required.
   for (const auto& kind : ParseFenceKinds(joined)) {
     std::string ft;
     switch (kind.space) {
@@ -2833,7 +2837,9 @@ bool TopsccCodeGen::Visit(AST::Fence& n) {
 
   // The bare FenceType forms (L1_VDMEM / L2_MEM / L3_MEM) are the acq-rel
   // (full) barrier; the directional fences use the *_STORE (release) and
-  // *_LOAD (acquire) forms instead.
+  // *_LOAD (acquire) forms instead. Only arches whose SDK exposes a memory
+  // fence reach codegen here: SEMA rejects sync.fence for unsupported arches
+  // (IsFenceSupported), so no arch guard is required.
   const char* suffix = "";
   switch (n.GetOrder()) {
   case FenceOrder::RELEASE: suffix = "_STORE"; break;

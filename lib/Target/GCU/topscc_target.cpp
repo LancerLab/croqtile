@@ -144,7 +144,6 @@ public:
         {STR(ChoreoFeature::HDRPARSE), Description(ChoreoFeature::HDRPARSE)},
         {STR(ChoreoFeature::MEMALLOC), Description(ChoreoFeature::MEMALLOC)},
         {STR(ChoreoFeature::BARRIER), Description(ChoreoFeature::BARRIER)},
-        {STR(ChoreoFeature::FENCE), Description(ChoreoFeature::FENCE)},
         {STR(ChoreoFeature::COOPERATIVE_LAUNCH),
          Description(ChoreoFeature::COOPERATIVE_LAUNCH)},
     };

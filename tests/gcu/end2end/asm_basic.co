@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: choreo -t topscc -gs %gcu_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // End-to-end test for GCC extended asm operand wiring inside device code.
 //

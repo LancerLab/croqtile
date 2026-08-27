@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GCUALL
 // SHELL-ONLY
-// RUN: choreo -gs -t topscc %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: choreo -gs -t topscc %gcu_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 #include "choreo.h"
 #include <algorithm>

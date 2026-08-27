@@ -1,5 +1,6 @@
 // RUN: choreo -t topscc --dump-fence-insertion -es %s -o - | FileCheck %s
 // RUN: choreo -t topscc --dump-fence-insertion --insert-dma-fences=false -es %s -o - | FileCheck --check-prefix=DISABLED %s
+// RUN: choreo -t topscc --dump-fence-insertion -arch=gcu210 -es %s -o - | FileCheck --check-prefix=NOFENCE %s
 
 // Automatic DMA fence insertion: global -> shared async copy is followed by a
 // thread read, so the destination needs a release fence at the wait (consumer
@@ -31,3 +32,6 @@ __co__ auto foo(global s32 [6, 4] lhs) {
 
 // DISABLED-NOT: {{^\[dma-fence\]}}
 // DISABLED-NOT: {{^ *tcle::fence}}
+
+// NOFENCE-NOT: {{^\[dma-fence\]}}
+// NOFENCE-NOT: {{^ *tcle::fence}}

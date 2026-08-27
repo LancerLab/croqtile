@@ -1,5 +1,5 @@
 // REQUIRES: TARGET-GCUALL
-// RUN: choreo -t topscc -gs -kt %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: choreo -t topscc -gs -kt %gcu_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-DOCKER: choreo -st -t topscc %s -o %s.result && %s.result | FileCheck --match-full-lines %s
 // RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s

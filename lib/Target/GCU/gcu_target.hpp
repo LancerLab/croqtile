@@ -108,7 +108,9 @@ public:
   // DMA fence-insertion table (plan section 4). See SelectGCUDMAFences.
   FenceSelection SelectDMAFences(const ArchId& arch, Storage src,
                                  Storage dst) const override {
-    (void)arch;
+    // gcu200/210 SDKs expose no memory-fence API (tcle::fence/FenceType), so
+    // no DMA fence can be inserted for sub-300 arches.
+    if (ArchNum(arch) < 300) return {};
     return SelectGCUDMAFences(src, dst);
   }
 
