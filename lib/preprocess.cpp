@@ -1527,7 +1527,8 @@ bool Preprocess::Process(std::istream& input) {
     bool in_comment = c_skip || (fisrt_pos != std::string::npos &&
                                  fisrt_pos == cur_line.find_first_not_of(' '));
 
-    if (line_to_handle.back() == '\\' && !in_comment) {
+    if (!line_to_handle.empty() && line_to_handle.back() == '\\' &&
+        !in_comment) {
       line_to_handle.pop_back();
       line_to_handle += " " + trim(cur_line);
     } else
