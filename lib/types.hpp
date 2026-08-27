@@ -382,10 +382,10 @@ inline static std::string GetStringFrom(BaseType dataType) {
 
 inline static std::string GetStringFrom(Storage st) {
   static const std::unordered_map<Storage, std::string> enumToString = {
-      {Storage::REG, "register"},    {Storage::LOCAL, "local"},
-      {Storage::SHARED, "shared"},   {Storage::GLOBAL, "global"},
-      {Storage::NODE, "node"},       {Storage::NONE, "none"},
-      {Storage::DEFAULT, "default"},
+      {Storage::REG, "register"},  {Storage::LOCAL, "local"},
+      {Storage::SHARED, "shared"}, {Storage::GROUP_SHARED, "groupshared"},
+      {Storage::GLOBAL, "global"}, {Storage::NODE, "node"},
+      {Storage::NONE, "none"},     {Storage::DEFAULT, "default"},
   };
 
   auto it = enumToString.find(st);
@@ -645,6 +645,8 @@ inline static FenceKind FenceKindFromName(const std::string& name) {
     k.space = Storage::LOCAL;
   else if (space == "shared")
     k.space = Storage::SHARED;
+  else if (space == "groupshared")
+    k.space = Storage::GROUP_SHARED;
   else if (space == "global")
     k.space = Storage::GLOBAL;
   else if (space == "register")

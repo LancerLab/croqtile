@@ -41,3 +41,22 @@ TEST_F(GCUFenceTableTest, UntabulatedDirectionsNeedNoFence) {
   ASSERT_TRUE(SelectGCUDMAFences(Storage::SHARED, Storage::GLOBAL).IsNoop());
   ASSERT_TRUE(SelectGCUDMAFences(Storage::GLOBAL, Storage::GLOBAL).IsNoop());
 }
+
+// The GROUP_SHARED storage is serialized as the underscore-free token
+// "groupshared" so the SPACE_ENTITY_ORDER wire format survives the
+// underscore-split in FenceKindFromName (a "group_shared" token would
+// deserialize as space="group" and fall through to Storage::NONE).
+TEST_F(GCUFenceTableTest, GroupSharedFenceWireRoundTrip) {
+  ASSERT_EQ(__internal__::GetStringFrom(Storage::GROUP_SHARED), "groupshared");
+
+  auto k = FenceKindFromName("groupshared_DMA_RELEASE");
+  ASSERT_EQ(k.space, Storage::GROUP_SHARED);
+  ASSERT_EQ(k.entity, FenceEntity::DMA);
+  ASSERT_EQ(k.order, FenceOrder::RELEASE);
+
+  // Round-trips through Name() -> FenceKindFromName().
+  auto named = FenceKindFromName(k.Name());
+  ASSERT_EQ(named.space, Storage::GROUP_SHARED);
+  ASSERT_EQ(named.entity, FenceEntity::DMA);
+  ASSERT_EQ(named.order, FenceOrder::RELEASE);
+}

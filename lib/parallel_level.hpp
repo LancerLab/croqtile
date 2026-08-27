@@ -11,6 +11,7 @@ enum class Storage {
   REG, /* register, normally not explicit */
   LOCAL,
   SHARED,
+  GROUP_SHARED, /* shared<group>: visible within a GROUP */
   GLOBAL /*device global*/,
   NODE /*cluster node*/,
   DEFAULT,
