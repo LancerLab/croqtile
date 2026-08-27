@@ -3814,21 +3814,25 @@ struct Barrier : public Node, public TypeIDProvider<Barrier> {
 struct Fence : public Node, public TypeIDProvider<Fence> {
   ParallelLevel visibility;
   Storage memory;
+  FenceOrder order;
 
-  Fence(const location& loc, ParallelLevel v, Storage m = Storage::NONE)
-      : Node(loc), visibility(v), memory(m) {}
+  Fence(const location& loc, ParallelLevel v, Storage m = Storage::NONE,
+        FenceOrder o = FenceOrder::ACQ_REL)
+      : Node(loc), visibility(v), memory(m), order(o) {}
 
   ptr<Node> CloneImpl() const override {
-    return Make<Fence>(LOC(), visibility, memory);
+    return Make<Fence>(LOC(), visibility, memory, order);
   }
 
   ParallelLevel GetVisibility() const { return visibility; }
   Storage GetMemory() const { return memory; }
+  FenceOrder GetOrder() const { return order; }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool = false) const override {
     os << "\n" << prefix << "`- " << "Fence: " << STR(visibility);
     if (memory != Storage::NONE) os << "<" << STR(memory) << ">";
+    os << " " << STR(order);
   }
   void accept(Visitor&) override;
 
@@ -3984,17 +3988,17 @@ struct ForeachBlock : public Block, public TypeIDProvider<ForeachBlock> {
 // Plain data container (not an AST Node), like SpannedOperation.
 struct AsmOperand {
   location loc;
-  std::string symbolicName;  // optional "[name]" reference (empty = unnamed)
-  std::string constraint;    // e.g., "=r", "r", "memory"
-  ptr<Expr> expression;      // Choreo expression (variable, data access, etc.)
+  std::string symbolicName; // optional "[name]" reference (empty = unnamed)
+  std::string constraint;   // e.g., "=r", "r", "memory"
+  ptr<Expr> expression;     // Choreo expression (variable, data access, etc.)
 
   explicit AsmOperand(const location& l) : loc(l) {}
 
   AsmOperand(const location& l, const std::string& c, const ptr<Expr>& e)
       : loc(l), constraint(c), expression(e) {}
 
-  AsmOperand(const location& l, const std::string& name,
-             const std::string& c, const ptr<Expr>& e)
+  AsmOperand(const location& l, const std::string& name, const std::string& c,
+             const ptr<Expr>& e)
       : loc(l), symbolicName(name), constraint(c), expression(e) {}
 
   const location& LOC() const { return loc; }
@@ -4020,10 +4024,8 @@ struct AsmStmt : public Node, public TypeIDProvider<AsmStmt> {
     auto n = Make<AsmStmt>(LOC());
     n->isVolatile = isVolatile;
     n->templateStr = templateStr;
-    for (auto& op : outputOperands)
-      n->outputOperands.push_back(op->Clone());
-    for (auto& op : inputOperands)
-      n->inputOperands.push_back(op->Clone());
+    for (auto& op : outputOperands) n->outputOperands.push_back(op->Clone());
+    for (auto& op : inputOperands) n->inputOperands.push_back(op->Clone());
     n->clobbers = clobbers;
     return n;
   }

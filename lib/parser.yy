@@ -216,6 +216,7 @@ extern int yylex();
 %token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST EVICT_FIRST EVICT_LAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC BARRIER FENCE CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG
 %token <std::string> MAP REMAP
 %token DLBRAKT
+%token ACQ REL ACQ_REL
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN SCALE MASK
 %token <std::string> UNROLL
@@ -280,6 +281,8 @@ extern int yylex();
 %nterm <AST::ptr<AST::Synchronize>> sync_stmt
 %nterm <AST::ptr<AST::Barrier>> barrier_stmt
 %nterm <AST::ptr<AST::Fence>> fence_stmt
+%nterm <Choreo::FenceOrder> fence_order_opt
+%nterm <Choreo::ParallelLevel> fence_scope fence_scope_opt
 %nterm <std::vector<ptr<AST::SpannedOperation>>> spanned_ops
 %nterm <ptr<AST::SpannedOperation>> spanned_op
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr subdata_expr
@@ -818,12 +821,30 @@ barrier_stmt
     ;
 
 fence_stmt
-    : SYNC DOT FENCE COL PBLEVEL {
-        $$ = AST::Make<AST::Fence>(@1, $5);
+    : SYNC DOT FENCE fence_order_opt LT STORAGE GT fence_scope_opt {
+        auto level = ($8 == ParallelLevel::NONE) ? DefaultLevelForStorage($6)
+                                                 : $8;
+        $$ = AST::Make<AST::Fence>(@1, level, $6, $4);
       }
-    | SYNC DOT FENCE COL PBLEVEL LT STORAGE GT {
-        $$ = AST::Make<AST::Fence>(@1, $5, $7);
+    | SYNC DOT FENCE fence_order_opt fence_scope {
+        $$ = AST::Make<AST::Fence>(@1, $5, Storage::NONE, $4);
       }
+    ;
+
+fence_order_opt
+    : ACQ     { $$ = FenceOrder::ACQUIRE; }
+    | REL     { $$ = FenceOrder::RELEASE; }
+    | ACQ_REL { $$ = FenceOrder::ACQ_REL; }
+    | %empty  { $$ = FenceOrder::ACQ_REL; }
+    ;
+
+fence_scope
+    : COL PBLEVEL { $$ = $2; }
+    ;
+
+fence_scope_opt
+    : fence_scope { $$ = $1; }
+    | %empty      { $$ = ParallelLevel::NONE; }
     ;
 
 return_stmt

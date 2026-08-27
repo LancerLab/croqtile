@@ -33,13 +33,21 @@ __co__ void test_fences() {
   parallel bx by 1 : block {
     // CHECK-GCU3: tcle::fence<tcle::FenceType::L3_MEM>();
     // CHECK-GCU4: tcle::fence<tcle::FenceType::L3_MEM>();
-    sync.fence : block<global>;
+    sync.fence<global> : block;
 
     // CHECK-GCU4: tcle::fence<tcle::FenceType::L2_MEM>();
-    sync.fence : group<shared>;
+    sync.fence<shared> : group;
 
     // CHECK-GCU3: tcle::fence<tcle::FenceType::L1_VDMEM>();
     // CHECK-GCU4: tcle::fence<tcle::FenceType::L1_VDMEM>();
-    sync.fence : thread<local>;
+    sync.fence<local> : thread;
+
+    // CHECK-GCU3: tcle::fence<tcle::FenceType::L2_MEM_STORE>();
+    // CHECK-GCU4: tcle::fence<tcle::FenceType::L2_MEM_STORE>();
+    sync.fence.rel<shared>;
+
+    // CHECK-GCU3: tcle::fence<tcle::FenceType::L3_MEM_LOAD>();
+    // CHECK-GCU4: tcle::fence<tcle::FenceType::L3_MEM_LOAD>();
+    sync.fence.acq<global> : device;
   }
 }

@@ -2823,21 +2823,28 @@ bool TopsccCodeGen::Visit(AST::Fence& n) {
                                                       n.GetVisibility());
   }
 
-  // The bare FenceType forms (L1_VDMEM / L2_MEM / L3_MEM) are the acq-rel
-  // (full) barrier; the directional DMA fences use the *_STORE (release) and
-  // *_LOAD (acquire) forms instead.
+  const char* base = nullptr;
   switch (memory) {
-  case Storage::LOCAL:
-    ds << d_indent << "tcle::fence<tcle::FenceType::L1_VDMEM>();\n";
-    break;
-  case Storage::SHARED:
-    ds << d_indent << "tcle::fence<tcle::FenceType::L2_MEM>();\n";
-    break;
-  case Storage::GLOBAL:
-    ds << d_indent << "tcle::fence<tcle::FenceType::L3_MEM>();\n";
-    break;
+  case Storage::LOCAL: base = "L1_VDMEM"; break;
+  case Storage::SHARED: base = "L2_MEM"; break;
+  case Storage::GLOBAL: base = "L3_MEM"; break;
   default: choreo_unreachable("unsupported fence memory: " + STR(memory) + ".");
   }
+
+  // The bare FenceType forms (L1_VDMEM / L2_MEM / L3_MEM) are the acq-rel
+  // (full) barrier; the directional fences use the *_STORE (release) and
+  // *_LOAD (acquire) forms instead.
+  const char* suffix = "";
+  switch (n.GetOrder()) {
+  case FenceOrder::RELEASE: suffix = "_STORE"; break;
+  case FenceOrder::ACQUIRE: suffix = "_LOAD"; break;
+  case FenceOrder::ACQ_REL: suffix = ""; break;
+  default:
+    choreo_unreachable("unsupported fence order: " + STR(n.GetOrder()) + ".");
+  }
+
+  ds << d_indent << "tcle::fence<tcle::FenceType::" << base << suffix
+     << ">();\n";
 
   return true;
 }
@@ -4044,8 +4051,10 @@ if [[ -z ${TOPSCC_INSTALL} ]]; then
       // Prefer the isolated simulator toolchain, falling back to the native
       // toolchain when the sim dir has no topscc (e.g. the gcu5 simulator
       // reuses the native topscc).
-      os << "  if [[ -f " << STRINGIZE(__CHOREO_TOPSCC_SIM_DIR__) << "/bin/topscc ]]; then\n";
-      os << "    TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_SIM_DIR__) << "\n";
+      os << "  if [[ -f "
+         << STRINGIZE(__CHOREO_TOPSCC_SIM_DIR__) << "/bin/topscc ]]; then\n";
+      os << "    TOPSCC_INSTALL="
+         << STRINGIZE(__CHOREO_TOPSCC_SIM_DIR__) << "\n";
       os << "  else\n";
       os << "    TOPSCC_INSTALL=" << STRINGIZE(__CHOREO_TOPSCC_DIR__) << "\n";
       os << "  fi\n";
