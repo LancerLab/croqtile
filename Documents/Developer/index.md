@@ -20,13 +20,14 @@ For a **hands-on tutorial**, see the [Croqtile Tutorial](https://codes1gn.github
 3. [Compilation Passes](compilation-passes.md) -- pass pipeline (SEMA -> CODEGEN), debugging with `-pa` and `-sa`
 4. [Value Numbering](value-numbering.md) -- shape inference foundation, simplification, scope rules
 5. [Memory Reuse](memory-reuse.md) -- automatic buffer lifetime analysis, static/dynamic reuse, alignment
+6. [DMA Resource Allocation](dma-resource-allocation.md) -- liveness-driven allocation of DMA futures and events, interval coloring, HeapSimulator
 
 ### Extending the Compiler
 
-6. [Developing a Target](developing-a-target.md) -- adding a new compilation backend, codegen visitor, target registration
-7. [Lit Test Runner](lit-test-runner.md) -- `lit.sh` directives, `%` substitutions, hooks, `include_dir`, per-target configs
+7. [Developing a Target](developing-a-target.md) -- adding a new compilation backend, codegen visitor, target registration
+8. [Lit Test Runner](lit-test-runner.md) -- `lit.sh` directives, `%` substitutions, hooks, `include_dir`, per-target configs
 
 ### Target-Specific References
 
-8. [Target-Specific Calls](target/calls.md) -- calling conventions for specific backends (e.g., `extern "C"` for Factor)
-9. [Target Environment Setup](target/env_setting_up.md) -- target SDK and hardware configuration
+9. [Target-Specific Calls](target/calls.md) -- calling conventions for specific backends (e.g., `extern "C"` for Factor)
+10. [Target Environment Setup](target/env_setting_up.md) -- target SDK and hardware configuration
