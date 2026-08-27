@@ -228,12 +228,12 @@ public:
   // and cooperative launch are supported for each architecture.
 
   // Whether execution barrier at the given parallel level is supported.
-  virtual bool IsBarrierSupported(const ArchId&, ParallelLevel) const {
-    return IsFeatureSupported(STR(ChoreoFeature::BARRIER));
+  virtual bool IsBarrierSupported(const ArchId& arch, ParallelLevel) const {
+    return IsFeatureSupported(arch, STR(ChoreoFeature::BARRIER));
   }
   // Whether memory fence at the given visibility level is supported.
-  virtual bool IsFenceSupported(const ArchId&, ParallelLevel) const {
-    return IsFeatureSupported(STR(ChoreoFeature::FENCE));
+  virtual bool IsFenceSupported(const ArchId& arch, ParallelLevel) const {
+    return IsFeatureSupported(arch, STR(ChoreoFeature::FENCE));
   }
   // Default memory scope for a fence at the given visibility level.
   // Returns Storage::NONE if the default is target-defined (not specifiable).
@@ -249,8 +249,8 @@ public:
                                          Storage dst) const;
 
   // Whether the target supports cooperative kernel launches.
-  virtual bool SupportsCooperativeLaunch(const ArchId&) const {
-    return IsFeatureSupported(STR(ChoreoFeature::COOPERATIVE_LAUNCH));
+  virtual bool SupportsCooperativeLaunch(const ArchId& arch) const {
+    return IsFeatureSupported(arch, STR(ChoreoFeature::COOPERATIVE_LAUNCH));
   }
 
   virtual size_t VectorizeLimit(const ArchId& arch) const {
