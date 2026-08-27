@@ -381,6 +381,55 @@ The project includes specialized skills for Claude Code:
 
 ---
 
+## Opening Issues (GitLab / GitHub)
+
+API tokens are available as environment variables (never commit or print them):
+
+- `GITLAB_TOKEN` -- internal GitLab personal access token (`glpat-...`)
+- `GITHUB_TOKEN` -- GitHub personal access token (`ghp_...`)
+
+### Internal GitLab
+
+The internal GitLab is `git.enflame.cn` (resolves to `172.16.11.21`). It
+exposes SSH (port 22) and the REST API over HTTP (port 80). HTTPS (443) is
+refused, so always use the `http://` endpoint.
+
+- Project path: `xiaofeng.guan/choreo`
+- Project id: `10205`
+
+```bash
+# Resolve the project
+curl -sS --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+  "http://git.enflame.cn/api/v4/projects/xiaofeng.guan%2Fchoreo"
+
+# Open an issue (for multiline bodies, write to a file and pass description@<file>)
+curl -sS --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+  --data-urlencode "title=Summary of the issue" \
+  --data-urlencode "description=Long form description..." \
+  "http://git.enflame.cn/api/v4/projects/10205/issues"
+```
+
+Internal issues may use internal terminology (gcu, topscc, DTE, etc.) freely.
+
+### GitHub (public)
+
+The public repo is `LancerLab/croqtile`.
+
+```bash
+curl -sS -X POST -H "Authorization: token $GITHUB_TOKEN" \
+  -d '{"title":"...","body":"..."}' \
+  "https://api.github.com/repos/LancerLab/croqtile/issues"
+```
+
+GitHub issues are public and MUST be OSS-compliant:
+
+- No forbidden keywords (see `scripts/oss/os_kw.txt`): gcu, topscc, DTE,
+  enflame, etc.
+- ASCII-only, no internal URLs or IPs.
+- When in doubt, open the issue on internal GitLab instead.
+
+---
+
 ## Additional Resources
 
 - [Language Reference](./Documents/Documentation/index.md)
