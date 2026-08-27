@@ -19,8 +19,10 @@ integration are in place:
   scalar-replacement pass). Disabling either makes the corresponding codegen
   fall back to monotonic slot assignment.
 
-Remaining work is tracked under "Known gaps to close" below (SALA binding for
-events, and explicit loop-carried reuse scoping).
+Remaining work is tracked under "Known gaps to close" below and on the public
+issue tracker: GPU TMA-mbarrier FUTURE consumption (#7), SALA binding for
+events (#8), loop-carried reuse scoping (#9), and event-array scalar
+replacement (#6).
 
 ## Motivation
 
@@ -117,12 +119,14 @@ interference matrix) generalized from buffers to DMA handles.
 
 2. **SALA binding for events.** Futures are added to the `HBGraph` via
    `AddBinding`. Events need the same so the allocator does not over-serialize
-   GPU events that provably cannot overlap. Still open.
+   GPU events that provably cannot overlap. Still open
+   (https://github.com/LancerLab/croqtile/issues/8).
 
 3. **Loop-carried reuse.** A future defined and waited inside the same loop has
    a self-overlapping interval and cannot share a slot with itself across
    iterations. The allocator must make the scoping rule explicit (key intervals
-   by scoped name, as `VarRanges()` already does).
+   by scoped name, as `VarRanges()` already does)
+   (https://github.com/LancerLab/croqtile/issues/9).
 
 4. **Event-array scalar replacement.** Event arrays (`event[N]`) are keyed by
    base symbol in liveness (`GetEventName` collapses `ElemOf` refs), so the
@@ -149,13 +153,19 @@ interference matrix) generalized from buffers to DMA handles.
      only constant indices can be split (a runtime `ev[i]` needs guards or falls
      back to the array).
 
+5. **GPU FUTURE (TMA mbarrier) consumption.** The allocator computes
+   `future_slots` / `future_slot_count`, but the GPU backend does not read them
+   yet: TMA futures are still handed out by a monotonic counter
+   (`tma_future_count`), so non-interfering TMA transfers do not share an
+   mbarrier. Tracked at https://github.com/LancerLab/croqtile/issues/7.
+
 ## Switches
 
 The two liveness-driven allocator switches are target-agnostic:
 
 | Switch | Default | Resource | Consumed by |
 |---|---|---|---|
-| `-fdma-alloc` | `true` | `FUTURE` | backends that pool DMA completion slots (GPU TMA mbarrier is not yet a consumer) |
+| `-fdma-alloc` | `true` | `FUTURE` | backends that pool DMA completion slots (GPU TMA mbarrier is not yet a consumer, #7) |
 | `-fevent-alloc=<mode>` | `simple` | `EVENT` | GPU named barriers |
 
 `off` is a real, observable fallback on both switches:
