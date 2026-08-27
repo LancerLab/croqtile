@@ -103,6 +103,7 @@ bool Pipeline::Lower() {
   bool not_cc = !targetAttr || targetAttr.getValue() != "cc";
 
   if (not_cc) {
+    pm.addPass(coir::createFenceElisionPass());
     pm.addPass(coir::createLowerDMADescPass());
     pm.addPass(coir::createHoistDMAConfigPass());
     pm.addPass(coir::createLowerMMAPass());

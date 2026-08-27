@@ -1,4 +1,5 @@
 #include "codegen_prepare.hpp"
+#include "fence_insertion.hpp"
 #include "gcu_adapt.hpp"
 #include "gcu_target.hpp"
 #include "pipeline.hpp"
@@ -51,6 +52,9 @@ public:
   bool PlanPreCodegenStages(ASTPipeline& p) const override {
     p.AddStage<CodegenPrepare>();
     p.AddStage<GCUAdaptor>();
+    // Compute DMA producer/consumer fences from the buffer access log
+    // (recorded during the semantic routine) so ASTIRGen can lower them.
+    p.AddStage<FenceInsertion>();
     return true;
   }
 

@@ -8,6 +8,8 @@
 #include "Dialect/CoIR/Passes.h"
 #include "CodeGen/CoIREmitterBase.h"
 
+#include "types.hpp"
+
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -4456,20 +4458,21 @@ private:
   }
 
   void emitFence(FenceOp op) override {
-    switch (op.getScope()) {
-    case coir::TensorMemorySpace::Global:
-      os() << getIndent() << "tcle::fence<tcle::FenceType::L3_MEM>();\n";
-      break;
-    case coir::TensorMemorySpace::Shared:
-      os() << getIndent() << "tcle::fence<tcle::FenceType::L2_MEM>();\n";
-      break;
-    case coir::TensorMemorySpace::Local:
-      os() << getIndent() << "tcle::fence<tcle::FenceType::L1_VDMEM>();\n";
-      break;
-    default:
-      llvm_unreachable("unexpected fence memory scope");
-      break;
+    // Derive the base fence level from the memory-space axis, then apply the
+    // order suffix: release -> _STORE, acquire -> _LOAD, acq-rel -> none.
+    std::string ft;
+    switch (op.getSpace()) {
+    case coir::TensorMemorySpace::Local:  ft = "L1_VDMEM"; break;
+    case coir::TensorMemorySpace::Shared: ft = "L2_MEM";   break;
+    case coir::TensorMemorySpace::Global: ft = "L3_MEM";   break;
+    default: llvm_unreachable("unexpected fence memory space"); break;
     }
+    switch (op.getOrder()) {
+    case coir::FenceOrder::Release: ft += "_STORE"; break;
+    case coir::FenceOrder::Acquire: ft += "_LOAD";  break;
+    case coir::FenceOrder::AcqRel:  break;
+    }
+    os() << getIndent() << "tcle::fence<tcle::FenceType::" << ft << ">();\n";
   }
 
   void emitBufferMap(BufferMapOp op) override {

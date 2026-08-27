@@ -140,6 +140,10 @@ private:
   /// Emit coir.buffer.unmap for all pending mappings in the current scope.
   void emitPendingBufferUnmaps();
 
+  /// Emit directional coir.fence ops for a comma-joined fence-kind list
+  /// (see Choreo::FenceInsertion::JoinKinds). Emits nothing when empty.
+  void emitFenceKinds(llvm::StringRef joined, mlir::Location loc);
+
   /// Resolve the existing mapped tensor for a buffer.remap from the
   /// bufferMapMappings_ table using the source value.
   mlir::Value resolveRemapExisting(AST::BufferMap &n, mlir::Value srcVal);

@@ -1496,8 +1496,8 @@ private:
   }
 
   void emitFence(FenceOp op) override {
-    auto visibility = op.getVisibility();
-    switch (visibility) {
+    auto scope = op.getScope();
+    switch (scope) {
     case ParallelLevel::THREAD:
     case ParallelLevel::GROUP:
     case ParallelLevel::GROUPx4:
@@ -1510,7 +1510,7 @@ private:
       os() << getIndent() << "__threadfence();\n";
       break;
     default:
-      llvm_unreachable("unexpected fence visibility");
+      llvm_unreachable("unexpected fence scope");
       break;
     }
   }

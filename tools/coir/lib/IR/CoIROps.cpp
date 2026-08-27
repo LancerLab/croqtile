@@ -105,6 +105,31 @@ void DMAInvokeOp::getEffects(
   effects.emplace_back(mlir::MemoryEffects::Write::get());
 }
 
+void FenceOp::getEffects(
+    llvm::SmallVectorImpl<
+        mlir::SideEffects::EffectInstance<mlir::MemoryEffects::Effect>>
+        &effects) {
+  // A fence orders the agent's prior accesses and is therefore a memory
+  // effect; it must never be treated as trivially dead by CSE/DCE.
+  effects.emplace_back(mlir::MemoryEffects::Write::get());
+}
+
+void DmaCopyOp::getEffects(
+    llvm::SmallVectorImpl<
+        mlir::SideEffects::EffectInstance<mlir::MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(mlir::MemoryEffects::Read::get());
+  effects.emplace_back(mlir::MemoryEffects::Write::get());
+}
+
+void TmaCopyOp::getEffects(
+    llvm::SmallVectorImpl<
+        mlir::SideEffects::EffectInstance<mlir::MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(mlir::MemoryEffects::Read::get());
+  effects.emplace_back(mlir::MemoryEffects::Write::get());
+}
+
 void DMADescPrefetchOp::getCanonicalizationPatterns(
     mlir::RewritePatternSet & /*results*/,
     mlir::MLIRContext * /*context*/) {}

@@ -35,6 +35,7 @@ def CoIR_PL_Block     : I32EnumAttrCase<"BLOCK",     3, "block">;
 def CoIR_PL_Cluster   : I32EnumAttrCase<"CLUSTER",   4, "cluster">;
 def CoIR_PL_Device    : I32EnumAttrCase<"DEVICE",    5, "device">;
 def CoIR_PL_Seq       : I32EnumAttrCase<"SEQ",       6, "seq">;
+def CoIR_PL_None      : I32EnumAttrCase<"NONE",      7, "none">;
 
 def CoIR_ParallelLevelEnum : CoIR_I32Enum<
   "ParallelLevel", "parallel execution level", [
@@ -44,7 +45,8 @@ def CoIR_ParallelLevelEnum : CoIR_I32Enum<
     CoIR_PL_Block,
     CoIR_PL_Cluster,
     CoIR_PL_Device,
-    CoIR_PL_Seq
+    CoIR_PL_Seq,
+    CoIR_PL_None
   ]>;
 
 def CoIR_ParallelLevelAttr :
@@ -69,6 +71,46 @@ def CoIR_TensorMemorySpaceEnum : CoIR_I32Enum<
 
 def CoIR_TensorMemorySpaceAttr :
   CoIR_I32EnumAttr<"tensor_memory_space", CoIR_TensorMemorySpaceEnum>;
+
+//===----------------------------------------------------------------------===//
+// FenceEntity -- which agent's memory accesses a fence orders
+//===----------------------------------------------------------------------===//
+
+def CoIR_FE_Threads : I32EnumAttrCase<"Threads", 0, "threads">;
+def CoIR_FE_DMA     : I32EnumAttrCase<"DMA",     1, "dma">;
+def CoIR_FE_TMA     : I32EnumAttrCase<"TMA",     2, "tma">;
+def CoIR_FE_MMA     : I32EnumAttrCase<"MMA",     3, "mma">;
+def CoIR_FE_All     : I32EnumAttrCase<"All",     4, "all">;
+
+def CoIR_FenceEntityEnum : CoIR_I32Enum<
+  "FenceEntity", "agent whose accesses a fence orders", [
+    CoIR_FE_Threads,
+    CoIR_FE_DMA,
+    CoIR_FE_TMA,
+    CoIR_FE_MMA,
+    CoIR_FE_All
+  ]>;
+
+def CoIR_FenceEntityAttr :
+  CoIR_I32EnumAttr<"fence_entity", CoIR_FenceEntityEnum>;
+
+//===----------------------------------------------------------------------===//
+// FenceOrder -- direction and strength a fence establishes
+//===----------------------------------------------------------------------===//
+
+def CoIR_FO_Release : I32EnumAttrCase<"Release", 0, "release">;
+def CoIR_FO_Acquire : I32EnumAttrCase<"Acquire", 1, "acquire">;
+def CoIR_FO_AcqRel  : I32EnumAttrCase<"AcqRel",  2, "acq_rel">;
+
+def CoIR_FenceOrderEnum : CoIR_I32Enum<
+  "FenceOrder", "ordering a fence establishes", [
+    CoIR_FO_Release,
+    CoIR_FO_Acquire,
+    CoIR_FO_AcqRel
+  ]>;
+
+def CoIR_FenceOrderAttr :
+  CoIR_I32EnumAttr<"fence_order", CoIR_FenceOrderEnum>;
 
 //===----------------------------------------------------------------------===//
 // MMALayout -- operand layout for matrix multiply-accumulate
