@@ -508,6 +508,18 @@ inline static const std::string STR(FenceOrder o) {
   return "";
 }
 
+/// Derive the natural parallel level for a storage space, the inverse of
+/// `Target::GetDefaultFenceMemory`: local -> thread, shared -> group,
+/// global -> device. Returns NONE for a space without a natural level.
+inline static ParallelLevel DefaultLevelForStorage(Storage s) {
+  switch (s) {
+  case Storage::LOCAL: return ParallelLevel::THREAD;
+  case Storage::SHARED: return ParallelLevel::GROUP;
+  case Storage::GLOBAL: return ParallelLevel::DEVICE;
+  default: return ParallelLevel::NONE;
+  }
+}
+
 /// A single concrete fence requirement. This is the fully general four-fold
 /// request `(space, entity, order, scope)` that a target lowers to exactly one
 /// hardware primitive:

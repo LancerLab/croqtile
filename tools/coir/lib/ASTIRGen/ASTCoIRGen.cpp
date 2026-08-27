@@ -4161,13 +4161,14 @@ bool ASTCoIRGen::Visit(AST::Fence &fence) {
                                                       fence.GetVisibility());
   }
   // The explicit full fence is the acq-rel barrier over every agent; its
-  // visibility level becomes the four-fold `scope` axis and its memory level
-  // the `space` axis.
+  // visibility level becomes the four-fold `scope` axis, its memory level the
+  // `space` axis, and its dotted order qualifier (.acq / .rel / .acq_rel)
+  // the `order` axis.
   builder.create<coir::FenceOp>(
       loc, coir::TensorMemorySpaceAttr::get(&IRContext(),
                                             lowerFenceSpace(memory)),
       coir::FenceEntityAttr::get(&IRContext(), coir::FenceEntity::All),
-      coir::FenceOrderAttr::get(&IRContext(), coir::FenceOrder::AcqRel),
+      coir::FenceOrderAttr::get(&IRContext(), lowerFenceOrder(fence.GetOrder())),
       scope);
   return true;
 }
