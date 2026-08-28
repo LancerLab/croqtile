@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GCU300
 // RUN: choreo -t topscc -gs -arch=gcu300 --mem-reuse %s | bash -s -- --execute | FileCheck --match-full-lines %s
-// RUN-COCR: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 // RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
 
 // Merged from: mem_reuse.co, mem_reuse_dynamic.co, mem_reuse_dynamic_ifelse.co,

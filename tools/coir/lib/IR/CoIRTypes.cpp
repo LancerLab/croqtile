@@ -56,15 +56,20 @@ mlir::Type coir::TensorType::parse(mlir::AsmParser& parser) {
   if (parser.parseType(elemType)) return {};
 
   int32_t memSpace = -1;
+  bool isUnsigned = false;
   llvm::SmallVector<int64_t> strides;
 
-  if (succeeded(parser.parseOptionalComma())) {
+  // Optional comma-separated suffixes: memspace keyword, "unsigned", and
+  // "strides: [...]" (in any order).
+  while (succeeded(parser.parseOptionalComma())) {
     llvm::StringRef kw;
     if (parser.parseKeyword(&kw)) return {};
 
-    if (kw == "strides") {
-      // strides without memspace: parse ": [...]"
-      if (parser.parseColon() || parser.parseLSquare()) return {};
+    if (kw == "unsigned") {
+      isUnsigned = true;
+    } else if (kw == "strides") {
+      if (parser.parseColon() || parser.parseLSquare())
+        return {};
       int64_t s;
       auto res = parser.parseOptionalInteger(s);
       if (res.has_value() && succeeded(*res)) {
@@ -79,34 +84,17 @@ mlir::Type coir::TensorType::parse(mlir::AsmParser& parser) {
       int32_t ms = parseMemorySpaceKeyword(kw);
       if (ms == -2) {
         parser.emitError(parser.getCurrentLocation(),
-                         "unknown memory space: " + kw);
+                         "unknown tensor suffix: " + kw);
         return {};
       }
       memSpace = ms;
-
-      // Check for optional strides after memspace
-      if (succeeded(parser.parseOptionalComma())) {
-        llvm::StringRef stKw;
-        if (parser.parseKeyword(&stKw) || stKw != "strides") return {};
-        if (parser.parseColon() || parser.parseLSquare()) return {};
-        int64_t s;
-        auto res2 = parser.parseOptionalInteger(s);
-        if (res2.has_value() && succeeded(*res2)) {
-          strides.push_back(s);
-          while (succeeded(parser.parseOptionalComma())) {
-            if (parser.parseInteger(s)) return {};
-            strides.push_back(s);
-          }
-        }
-        if (parser.parseRSquare()) return {};
-      }
     }
   }
 
   if (parser.parseGreater()) return {};
 
   return coir::TensorType::get(parser.getContext(), elemType, shape, memSpace,
-                               strides);
+                               isUnsigned, strides);
 }
 
 void coir::TensorType::print(mlir::AsmPrinter& printer) const {
@@ -130,6 +118,8 @@ void coir::TensorType::print(mlir::AsmPrinter& printer) const {
     case coir::TensorMemorySpace::Register: printer << "register"; break;
     }
   }
+  if (getIsUnsigned())
+    printer << ", unsigned";
   auto stridesArr = getStrides();
   if (!stridesArr.empty()) {
     printer << ", strides: [";

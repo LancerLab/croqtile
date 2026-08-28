@@ -201,9 +201,27 @@ private:
     return std::stoi(std::string(it.base(), numEnd.base()));
   }
 
+  // C++ scalar type for an integer element of a given width/signedness.
+  // Element types are signless in the IR (arith requires signless operands),
+  // so signedness is carried on the enclosing coir::TensorType isUnsigned
+  // flag and passed here explicitly.
+  std::string emitIntType(Type ty, bool isUnsigned) {
+    if (ty.isInteger(8)) return isUnsigned ? "uint8_t" : "int8_t";
+    if (ty.isInteger(16)) return isUnsigned ? "uint16_t" : "int16_t";
+    if (ty.isInteger(32)) return isUnsigned ? "uint32_t" : "int";
+    if (ty.isInteger(64)) return isUnsigned ? "uint64_t" : "int64_t";
+    return "/* unknown */";
+  }
+
+  static bool isIntegerLike(Type ty) {
+    return ty.isInteger(8) || ty.isInteger(16) || ty.isInteger(32) ||
+           ty.isInteger(64);
+  }
+
   std::string emitType(Type ty) override {
     if (auto tensorTy = dyn_cast<coir::TensorType>(ty))
-      return emitType(tensorTy.getElementType()) + "*";
+      return emitType(tensorTy.getElementType(), tensorTy.getIsUnsigned()) +
+             "*";
     if (ty.isIndex()) return "int";
     if (ty.isInteger(1)) return "bool";
     if (ty.isF16()) return "choreo::f16";
@@ -224,11 +242,14 @@ private:
                       " (f6/f4); these require the CUTE target\n";
       return "/* unsupported_narrow_float */";
     }
-    if (ty.isInteger(8)) return "int8_t";
-    if (ty.isInteger(16)) return "int16_t";
-    if (ty.isInteger(32)) return "int";
-    if (ty.isInteger(64)) return "int64_t";
+    if (isIntegerLike(ty)) return emitIntType(ty, /*isUnsigned=*/false);
     return "/* unknown */";
+  }
+
+  // Signedness-aware overload: tensor element types pass the isUnsigned flag.
+  std::string emitType(Type ty, bool isUnsigned) {
+    if (isIntegerLike(ty)) return emitIntType(ty, isUnsigned);
+    return emitType(ty);
   }
 
   std::string emitElementType(Type ty) override {
@@ -241,22 +262,25 @@ private:
       if (isa<mlir::Float8E4M3FNType>(ty)) return "tops::float_e4m3";
       return "tops::float_e5m2";
     }
-    if (ty.isInteger(8)) return "int8_t";
-    if (ty.isInteger(16)) return "int16_t";
-    if (ty.isInteger(32)) return "int";
-    if (ty.isInteger(64)) return "int64_t";
+    if (isIntegerLike(ty)) return emitIntType(ty, /*isUnsigned=*/false);
     return "/* unknown */";
   }
 
-  std::string choreoType(Type ty) {
+  // Signedness-aware overload for tensor element types.
+  std::string emitElementType(Type ty, bool isUnsigned) {
+    if (isIntegerLike(ty)) return emitIntType(ty, isUnsigned);
+    return emitElementType(ty);
+  }
+
+  std::string choreoType(Type ty, bool isUnsigned = false) {
     if (ty.isF16()) return "choreo::f16";
     if (ty.isBF16()) return "choreo::bf16";
     if (ty.isF32()) return "choreo::f32";
     if (ty.isF64()) return "choreo::f64";
-    if (ty.isInteger(8)) return "choreo::s8";
-    if (ty.isInteger(16)) return "choreo::s16";
-    if (ty.isInteger(32)) return "choreo::s32";
-    if (ty.isInteger(64)) return "choreo::s64";
+    if (ty.isInteger(8)) return isUnsigned ? "choreo::u8" : "choreo::s8";
+    if (ty.isInteger(16)) return isUnsigned ? "choreo::u16" : "choreo::s16";
+    if (ty.isInteger(32)) return isUnsigned ? "choreo::u32" : "choreo::s32";
+    if (ty.isInteger(64)) return isUnsigned ? "choreo::u64" : "choreo::s64";
     return "choreo::s32";
   }
 
@@ -591,7 +615,7 @@ private:
           info.totalElems = totalElems;
           unsigned elemBits = tty.getElementType().getIntOrFloatBitWidth();
           info.totalBytes = totalElems * (elemBits / 8);
-          info.eType = emitElementType(tty.getElementType());
+          info.eType = emitElementType(tty.getElementType(), tty.getIsUnsigned());
           globalTensorParams_.push_back(info);
           globalTensorValues_.insert(alloc.getResult());
         }
@@ -1237,7 +1261,8 @@ private:
     if (fnType.getNumResults() == 0) return "void";
     Type resTy = fnType.getResult(0);
     if (auto tty = dyn_cast<coir::TensorType>(resTy)) {
-      return "choreo::spanned_data<" + choreoType(tty.getElementType()) + ", " +
+      return "choreo::spanned_data<" +
+             choreoType(tty.getElementType(), tty.getIsUnsigned()) + ", " +
              std::to_string(tty.getShape().size()) + ">";
     }
     return emitType(resTy);
@@ -1603,7 +1628,7 @@ private:
       }
       if (resTy) {
         int retInputIdx = getReturnInputArgIdx(kernel, 0);
-        std::string eType = emitType(resTy.getElementType());
+        std::string eType = emitType(resTy.getElementType(), resTy.getIsUnsigned());
         if (retInputIdx < 0) {
           if (hasPrevParam) os() << ", ";
           os() << eType << "* g_out, int N";
@@ -1675,9 +1700,9 @@ private:
         std::string elemStr =
             (i < hostElemHints.size() && !hostElemHints[i].empty())
                 ? ("choreo::" + hostElemHints[i].str())
-                : choreoType(tensorTy.getElementType());
-        os() << "const choreo::spanned_view<" << elemStr << ", " << inDim
-             << "> & " << pName;
+                : choreoType(tensorTy.getElementType(), tensorTy.getIsUnsigned());
+        os() << "const choreo::spanned_view<"
+           << elemStr << ", " << inDim << "> & " << pName;
       } else {
         os() << emitType(inTy) << " " << pName;
       }
@@ -1748,7 +1773,7 @@ private:
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
         if (!tty) continue;
-        std::string inEType = emitType(tty.getElementType());
+        std::string inEType = emitType(tty.getElementType(), tty.getIsUnsigned());
         std::string pName;
         if (hostParamNames && i < hostParamNames.size())
           pName = cast<mlir::StringAttr>(hostParamNames[i]).getValue().str();
@@ -1800,8 +1825,8 @@ private:
       hostReturnTensors_.clear();
       hostResultBytes_.clear();
       if (resTy) {
-        std::string eType = emitType(resTy.getElementType());
-        std::string choreoElem = choreoType(resTy.getElementType());
+        std::string eType = emitType(resTy.getElementType(), resTy.getIsUnsigned());
+        std::string choreoElem = choreoType(resTy.getElementType(), resTy.getIsUnsigned());
         unsigned ndim = resTy.getShape().size();
         std::string shapeStr = "{";
         std::string resDynBytes;
@@ -2137,8 +2162,8 @@ private:
     if (auto pn = kernel->getAttrOfType<mlir::ArrayAttr>("coir.param_names"))
       numOrigInputs = std::min(numOrigInputs, static_cast<unsigned>(pn.size()));
     int retInputIdx = getReturnInputArgIdx(kernel, 0);
-    std::string eType = emitType(resTy.getElementType());
-    std::string choreoElem = choreoType(resTy.getElementType());
+    std::string eType = emitType(resTy.getElementType(), resTy.getIsUnsigned());
+    std::string choreoElem = choreoType(resTy.getElementType(), resTy.getIsUnsigned());
     unsigned ndim = resTy.getShape().size();
     int64_t resN = getTensorNumElems(resTy);
     int64_t resBytes = getTensorBytes(resTy);
@@ -2158,12 +2183,12 @@ private:
     for (unsigned i = 0; i < numOrigInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (tty && isDeviceGlobal(tty)) {
-        std::string inEType = emitType(tty.getElementType());
+        std::string inEType = emitType(tty.getElementType(), tty.getIsUnsigned());
         os() << "  " << inEType << "* " << hostParamName(i)
              << "__device = const_cast<" << inEType << "*>(" << hostParamName(i)
              << ".data());\n";
       } else if (tty) {
-        std::string inEType = emitType(tty.getElementType());
+        std::string inEType = emitType(tty.getElementType(), tty.getIsUnsigned());
         std::string dynBytes = emitDynamicBytesExpr(tty, i);
         os() << "  " << inEType << "* " << hostParamName(i)
              << "__device = nullptr;\n";
@@ -2369,7 +2394,7 @@ private:
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
         if (!tty || isDeviceGlobal(tty)) continue;
-        std::string inEType = emitType(tty.getElementType());
+        std::string inEType = emitType(tty.getElementType(), tty.getIsUnsigned());
         os() << "  std::vector<" << inEType << "*> " << hostParamName(i)
              << "__device_vec(" << dc << ", nullptr);\n";
       }
@@ -2401,8 +2426,8 @@ private:
         if (tty && !isDeviceGlobal(tty))
           os() << hostParamName(i) << "__device_vec[__d]";
         else if (tty)
-          os() << "const_cast<" << emitType(tty.getElementType()) << "*>("
-               << hostParamName(i) << ".data())";
+          os() << "const_cast<" << emitType(tty.getElementType(), tty.getIsUnsigned())
+             << "*>(" << hostParamName(i) << ".data())";
         else
           os() << hostParamName(i);
       }
@@ -2447,12 +2472,12 @@ private:
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (!tty) continue;
       if (isDeviceGlobal(tty)) {
-        std::string inEType = emitType(tty.getElementType());
+        std::string inEType = emitType(tty.getElementType(), tty.getIsUnsigned());
         os() << "  " << inEType << "* " << hostParamName(i)
              << "__device = const_cast<" << inEType << "*>(" << hostParamName(i)
              << ".data());\n";
       } else {
-        std::string inEType = emitType(tty.getElementType());
+        std::string inEType = emitType(tty.getElementType(), tty.getIsUnsigned());
         std::string dynBytes = emitDynamicBytesExpr(tty, i);
         os() << "  " << inEType << "* " << hostParamName(i)
              << "__device = nullptr;\n";
@@ -2524,8 +2549,8 @@ private:
     auto name = kernel.getSymName();
     unsigned numInputs = fnType.getNumInputs();
     int retInputIdx = getReturnInputArgIdx(kernel, 0);
-    std::string eType = emitType(resTy.getElementType());
-    std::string choreoElem = choreoType(resTy.getElementType());
+    std::string eType = emitType(resTy.getElementType(), resTy.getIsUnsigned());
+    std::string choreoElem = choreoType(resTy.getElementType(), resTy.getIsUnsigned());
     unsigned ndim = resTy.getShape().size();
     int64_t resN = getTensorNumElems(resTy);
     int64_t resBytes = getTensorBytes(resTy);
@@ -2546,7 +2571,7 @@ private:
     for (unsigned i = 0; i < numInputs; ++i) {
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (tty && isDeviceGlobal(tty)) continue;
-      std::string inEType = tty ? emitType(tty.getElementType()) : eType;
+      std::string inEType = tty ? emitType(tty.getElementType(), tty.getIsUnsigned()) : eType;
       os() << "  std::vector<" << inEType << "*> " << hostParamName(i)
            << "__device_vec(" << dc << ", nullptr);\n";
     }
@@ -2590,8 +2615,8 @@ private:
       first = false;
       auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
       if (tty && isDeviceGlobal(tty))
-        os() << "const_cast<" << emitType(tty.getElementType()) << "*>("
-             << hostParamName(i) << ".data())";
+        os() << "const_cast<" << emitType(tty.getElementType(), tty.getIsUnsigned())
+           << "*>(" << hostParamName(i) << ".data())";
       else
         os() << hostParamName(i) << "__device_vec[__d]";
     }
@@ -3484,11 +3509,11 @@ private:
             cast<mlir::BlockArgument>(base).getOwner()->getParentOp());
     std::string ptrExpr;
     if (isKernelTensorArg)
-      ptrExpr = "(" + emitType(tty.getElementType()) + "*)" + name + ".data()";
+      ptrExpr = "(" + emitType(tty.getElementType(), tty.getIsUnsigned()) + "*)" + name + ".data()";
     else
-      ptrExpr = "(" + emitType(tty.getElementType()) + "*)" + name;
-    return "tops::mdspan(" + space + ", " + ptrExpr + ", " +
-           emitTensorShape(tensor) + ")";
+      ptrExpr = "(" + emitType(tty.getElementType(), tty.getIsUnsigned()) + "*)" + name;
+    return "tops::mdspan(" + space + ", " + ptrExpr +
+           ", " + emitTensorShape(tensor) + ")";
   }
 
   std::string emitCopyMdspan(Value tensor, const std::string& sizeStr) {
@@ -3509,10 +3534,11 @@ private:
             cast<mlir::BlockArgument>(base).getOwner()->getParentOp());
     std::string ptrExpr;
     if (isKernelTensorArg)
-      ptrExpr = "(" + emitType(tty.getElementType()) + "*)" + name + ".data()";
+      ptrExpr = "(" + emitType(tty.getElementType(), tty.getIsUnsigned()) + "*)" + name + ".data()";
     else
-      ptrExpr = "(" + emitType(tty.getElementType()) + "*)" + name;
-    return "tops::mdspan(" + space + ", " + ptrExpr + ", " + sizeStr + ")";
+      ptrExpr = "(" + emitType(tty.getElementType(), tty.getIsUnsigned()) + "*)" + name;
+    return "tops::mdspan(" + space + ", " + ptrExpr + ", " +
+           sizeStr + ")";
   }
 
   int64_t tensorElems(Value v) {
@@ -3543,11 +3569,37 @@ private:
       space = "tops::Shared";
     else
       space = "tops::Global";
-    return "tops::mdspan(" + space + ", (" + emitType(mdsTy.getElementType()) +
-           "*)" + name + ", " + emitTensorShape(tile.getSource()) + ")";
+    return "tops::mdspan(" + space + ", (" +
+           emitType(mdsTy.getElementType(), mdsTy.getIsUnsigned()) + "*)" + name +
+           ", " + emitTensorShape(tile.getSource()) + ")";
   }
 
-  std::string emitSliceOffsets(TensorTileOp tile, const std::string& prefix,
+  // An array-of-spanned slot (element_offset tile whose result rank differs
+  // from its flat 1-D source): the slot is `base + offset` elements into a
+  // contiguous buffer. Emit a pointer-offset mdspan over that slot, matching
+  // the choreo reference's `(char*)l + (row*3+col)*byte_stride` pattern.
+  std::string emitElementOffsetMdspan(TensorTileOp tile) {
+    Value base = getTensorDefOp(tile.getSource());
+    auto baseTy = cast<coir::TensorType>(tile.getSource().getType());
+    auto tileTy = cast<coir::TensorType>(tile.getResult().getType());
+    std::string name = getName(base);
+    std::string space;
+    int32_t ms = baseTy.getMemorySpace();
+    if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Local))
+      space = "tops::Private";
+    else if (ms == static_cast<int32_t>(coir::TensorMemorySpace::Shared))
+      space = "tops::Shared";
+    else
+      space = "tops::Global";
+    auto indices = tile.getIndices();
+    std::string offsetExpr = indices.empty() ? "0" : getName(indices[0]);
+    std::string ptrExpr = "(" + emitType(tileTy.getElementType(), tileTy.getIsUnsigned()) + "*)(" +
+                          name + " + (" + offsetExpr + "))";
+    return "tops::mdspan(" + space + ", " + ptrExpr + ", " +
+           emitTensorShape(tile.getResult()) + ")";
+  }
+
+  std::string emitSliceOffsets(TensorTileOp tile, const std::string &prefix,
                                int64_t fallbackSize = -1,
                                Value counterpart = nullptr) {
     auto tileTy = cast<coir::TensorType>(tile.getResult().getType());
@@ -3731,21 +3783,47 @@ private:
 
     if (kind == coir::DMAKind::Copy) {
       if (srcTile && !dstTile) {
-        std::string dstMds = emitMdspanWithShape(op.getDest());
-        std::string srcMds = emitFullBaseMdspan(srcTile);
-        std::string offArr = emitSliceOffsets(
-            srcTile, futName, tensorElems(op.getDest()), op.getDest());
-        apiCall = (isAsync ? "tops::slice_async" : "tops::slice");
-        apiCall += "(*" + futName + ".get_ctx(), " + dstMds + ", " + srcMds +
-                   ", " + offArr + ")";
+        auto srcBaseTy = cast<coir::TensorType>(srcTile.getSource().getType());
+        auto srcResTy = cast<coir::TensorType>(srcTile.getResult().getType());
+        if (srcTile->hasAttr("coir.element_offset") &&
+            srcBaseTy.getRank() != srcResTy.getRank()) {
+          // Array-of-spanned slot on the source side: base + flat offset.
+          std::string dstMds = emitMdspanWithShape(op.getDest());
+          std::string srcMds = emitElementOffsetMdspan(srcTile);
+          apiCall = (isAsync ? "tops::memcpy_async" : "tops::memcpy");
+          apiCall += "(*" + futName + ".get_ctx(), " + dstMds + ", " +
+                     srcMds + ")";
+        } else {
+          std::string dstMds = emitMdspanWithShape(op.getDest());
+          std::string srcMds = emitFullBaseMdspan(srcTile);
+          std::string offArr =
+              emitSliceOffsets(srcTile, futName, tensorElems(op.getDest()),
+                               op.getDest());
+          apiCall = (isAsync ? "tops::slice_async" : "tops::slice");
+          apiCall += "(*" + futName + ".get_ctx(), " + dstMds + ", " +
+                     srcMds + ", " + offArr + ")";
+        }
       } else if (!srcTile && dstTile) {
-        std::string srcMds = emitMdspanWithShape(op.getSource());
-        std::string dstMds = emitFullBaseMdspan(dstTile);
-        std::string offArr = emitSliceOffsets(
-            dstTile, futName, tensorElems(op.getSource()), op.getSource());
-        apiCall = (isAsync ? "tops::deslice_async" : "tops::deslice");
-        apiCall += "(*" + futName + ".get_ctx(), " + dstMds + ", " + srcMds +
-                   ", " + offArr + ")";
+        auto dstBaseTy = cast<coir::TensorType>(dstTile.getSource().getType());
+        auto dstResTy = cast<coir::TensorType>(dstTile.getResult().getType());
+        if (dstTile->hasAttr("coir.element_offset") &&
+            dstBaseTy.getRank() != dstResTy.getRank()) {
+          // Array-of-spanned slot on the destination side: base + flat offset.
+          std::string srcMds = emitMdspanWithShape(op.getSource());
+          std::string dstMds = emitElementOffsetMdspan(dstTile);
+          apiCall = (isAsync ? "tops::memcpy_async" : "tops::memcpy");
+          apiCall += "(*" + futName + ".get_ctx(), " + dstMds + ", " +
+                     srcMds + ")";
+        } else {
+          std::string srcMds = emitMdspanWithShape(op.getSource());
+          std::string dstMds = emitFullBaseMdspan(dstTile);
+          std::string offArr =
+              emitSliceOffsets(dstTile, futName, tensorElems(op.getSource()),
+                               op.getSource());
+          apiCall = (isAsync ? "tops::deslice_async" : "tops::deslice");
+          apiCall += "(*" + futName + ".get_ctx(), " + dstMds + ", " +
+                     srcMds + ", " + offArr + ")";
+        }
       } else if (srcTile && dstTile) {
         std::string srcMds = emitFullBaseMdspan(srcTile);
         std::string dstMds = emitFullBaseMdspan(dstTile);
@@ -3759,17 +3837,29 @@ private:
         apiCall += "(*" + futName + ".get_ctx(), " + dstMds + ", " + srcMds +
                    ", " + srcOff + ", " + sShape + ", " + dstOff + ")";
       } else {
-        // Flat copy: resolve dynamic copyElems from the dest tensor's
-        // dynamic dim (if available) so both mdspans get the right size.
-        std::string flatSizeStr;
-        if (mlir::ShapedType::isDynamic(copyElems)) {
-          auto dstTty = cast<coir::TensorType>(op.getDest().getType());
-          if (dstTty.getShape().size() == 1 && dstTty.isDynamicDim(0))
-            flatSizeStr = emitDimExpr(op.getDest(), 0);
+        // Flat copy.  A tensor with any dynamic dim cannot be expressed as a
+        // single static element count: `tensorElems` overflows the dynamic
+        // sentinels, and a flat mdspan built from that overflow yields a
+        // 0-byte copy that the DTU rejects ("Receive Sdte error").  Emit each
+        // mdspan with its full (possibly dynamic) shape so `total_size` is
+        // derived from the runtime dims.
+        auto srcTty = cast<coir::TensorType>(op.getSource().getType());
+        auto dstTty = cast<coir::TensorType>(op.getDest().getType());
+        bool hasDynamicDims = false;
+        for (auto d : srcTty.getShape())
+          hasDynamicDims |= mlir::ShapedType::isDynamic(d);
+        for (auto d : dstTty.getShape())
+          hasDynamicDims |= mlir::ShapedType::isDynamic(d);
+        std::string srcMds;
+        std::string dstMds;
+        if (hasDynamicDims) {
+          srcMds = emitMdspanWithShape(op.getSource());
+          dstMds = emitMdspanWithShape(op.getDest());
+        } else {
+          std::string flatSizeStr = std::to_string(copyElems);
+          srcMds = emitCopyMdspan(op.getSource(), flatSizeStr);
+          dstMds = emitCopyMdspan(op.getDest(), flatSizeStr);
         }
-        if (flatSizeStr.empty()) flatSizeStr = std::to_string(copyElems);
-        std::string srcMds = emitCopyMdspan(op.getSource(), flatSizeStr);
-        std::string dstMds = emitCopyMdspan(op.getDest(), flatSizeStr);
         apiCall = (isAsync ? "tops::memcpy_async" : "tops::memcpy");
         apiCall +=
             "(*" + futName + ".get_ctx(), " + dstMds + ", " + srcMds + ")";
@@ -4236,11 +4326,12 @@ private:
           initVal.find('e') == std::string::npos)
         initVal += ".0";
       if (tty.getElementType().isF16() || tty.getElementType().isBF16())
-        initVal = "(" + emitType(tty.getElementType()) + ")" + initVal;
+        initVal = "(" + emitType(tty.getElementType(), tty.getIsUnsigned()) + ")" + initVal;
     }
     std::string mds = "tops::mdspan(" + space + ", (" +
-                      emitType(tty.getElementType()) + "*)" + name;
-    for (auto d : tty.getShape()) mds += ", " + std::to_string(d);
+                      emitType(tty.getElementType(), tty.getIsUnsigned()) + "*)" + name;
+    for (auto d : tty.getShape())
+      mds += ", " + std::to_string(d);
     mds += ")";
     unsigned id = nextId++;
     std::string ctxName = "__dte_init_" + std::to_string(id);
@@ -4278,8 +4369,8 @@ private:
       // Returned tensors are allocated as __result__device by the host entry;
       // do not re-declare them.
       if (hostReturnTensors_.count(op.getResult())) return;
-      os() << getIndent() << emitType(tensorTy.getElementType()) << "* " << name
-           << " = nullptr;\n";
+      os() << getIndent() << emitType(tensorTy.getElementType(), tensorTy.getIsUnsigned()) << "* "
+           << name << " = nullptr;\n";
       hostTensorAllocs_.insert(op.getResult());
       return;
     }
@@ -4300,9 +4391,10 @@ private:
         if (mrOffsetParamNames_.empty() ||
             mrOffsetParamNames_.count(dynArgAttr.getValue())) {
           std::string offName = dynArgAttr.getValue().str();
-          std::string eType = emitElementType(tensorTy.getElementType());
-          bool isLocal = (tensorTy.getMemorySpace() ==
-                          static_cast<int32_t>(coir::TensorMemorySpace::Local));
+          std::string eType = emitElementType(tensorTy.getElementType(), tensorTy.getIsUnsigned());
+          bool isLocal =
+              (tensorTy.getMemorySpace() ==
+               static_cast<int32_t>(coir::TensorMemorySpace::Local));
           if (isLocal) {
             // LOCAL dynamic buffer: carve from the static private-memory pool
             // declared here.  Offsets are kernel params computed by the
@@ -4351,7 +4443,7 @@ private:
              << spmBytes << "];\n";
       }
       int64_t offset = op.getReuseOffset().value_or(0);
-      std::string eType = emitElementType(tensorTy.getElementType());
+      std::string eType = emitElementType(tensorTy.getElementType(), tensorTy.getIsUnsigned());
       os() << getIndent() << eType << "* " << name << " = (" << eType
            << "*)((unsigned char*)" << spmVar << " + " << offset << ");\n";
       emitReuseInit(op, tensorTy, name);
@@ -4362,8 +4454,8 @@ private:
     for (auto d : tensorTy.getShape()) totalElems *= d;
 
     std::string qualifier = getAllocQualifier(tensorTy);
-    os() << getIndent() << qualifier << emitType(tensorTy.getElementType())
-         << " " << name << "[" << totalElems << "];\n";
+    os() << getIndent() << qualifier << emitType(tensorTy.getElementType(), tensorTy.getIsUnsigned())
+       << " " << name << "[" << totalElems << "];\n";
 
     if (auto initAttr = op.getInit()) {
       auto ms = tensorTy.getMemorySpace();
@@ -4383,11 +4475,12 @@ private:
           initVal += ".0";
         if (tensorTy.getElementType().isF16() ||
             tensorTy.getElementType().isBF16())
-          initVal = "(" + emitType(tensorTy.getElementType()) + ")" + initVal;
+          initVal = "(" + emitType(tensorTy.getElementType(), tensorTy.getIsUnsigned()) + ")" + initVal;
       }
       std::string mds = "tops::mdspan(" + space + ", (" +
-                        emitType(tensorTy.getElementType()) + "*)" + name;
-      for (auto d : tensorTy.getShape()) mds += ", " + std::to_string(d);
+                        emitType(tensorTy.getElementType(), tensorTy.getIsUnsigned()) + "*)" + name;
+      for (auto d : tensorTy.getShape())
+        mds += ", " + std::to_string(d);
       mds += ")";
 
       os() << getIndent() << "{\n";
@@ -4467,11 +4560,11 @@ private:
     // Compute the raw global pointer from the source address. This is the
     // address handed to map_mem_m and any DTE that consumes the buffer
     // directly.
-    std::string elemType = emitElementType(tty.getElementType());
-    os() << getIndent() << elemType << "* " << name << " = (" << elemType
-         << "*)("
-         << "(char*)" << src << " + " << getName(op.getOffset()) << " * sizeof("
-         << elemType << "));\n";
+    std::string elemType = emitElementType(tty.getElementType(), tty.getIsUnsigned());
+    os() << getIndent() << elemType << "* " << name << " = ("
+         << elemType << "*)("
+         << "(char*)" << src << " + " << getName(op.getOffset())
+         << " * sizeof(" << elemType << "));\n";
 
     // MMU mapping: set up the page table entry for the local->global mapping.
     // Returns a mapped_ptr handle used later for unmap/remap.
@@ -4496,11 +4589,11 @@ private:
     auto tty = cast<coir::TensorType>(op.getResult().getType());
 
     // Recompute the raw global pointer from new offset.
-    std::string elemType = emitElementType(tty.getElementType());
-    os() << getIndent() << elemType << "* " << name << " = (" << elemType
-         << "*)("
-         << "(char*)" << src << " + " << getName(op.getOffset()) << " * sizeof("
-         << elemType << "));\n";
+    std::string elemType = emitElementType(tty.getElementType(), tty.getIsUnsigned());
+    os() << getIndent() << elemType << "* " << name << " = ("
+         << elemType << "*)("
+         << "(char*)" << src << " + " << getName(op.getOffset())
+         << " * sizeof(" << elemType << "));\n";
 
     // Remap: update existing MMU entry to the new local/global mapping.
     // The second argument to remap_mem_m is the OLD mapped byte count, which
@@ -4530,7 +4623,7 @@ private:
     std::string szName = getName(op.getSize());
     os() << getIndent() << "tops::unmap_mem_m(" << local << "_mmu, "
          << "(int)(" << szName << " * sizeof("
-         << emitElementType(tty.getElementType()) << ")));\n";
+         << emitElementType(tty.getElementType(), tty.getIsUnsigned()) << ")));\n";
   }
 
   std::string
@@ -5017,8 +5110,10 @@ private:
       if (auto tty = mlir::dyn_cast<coir::TensorType>(ty)) {
         // bind_dims results are materialized by emitTensorBindDims as
         // aliases to the underlying tensor, so getName() works directly.
-        os() << "(" << emitType(tty.getElementType()) << "*)" << getName(arg);
-        if (isEmittingHost_ && !hostTensorAllocs_.count(arg)) os() << ".data()";
+        os() << "(" << emitType(tty.getElementType(), tty.getIsUnsigned()) << "*)"
+             << getName(arg);
+        if (isEmittingHost_ && !hostTensorAllocs_.count(arg))
+          os() << ".data()";
       } else {
         os() << getName(arg);
       }
