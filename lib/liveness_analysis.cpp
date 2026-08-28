@@ -1647,9 +1647,12 @@ bool LivenessAnalyzer::AfterVisitImpl(AST::Node& n) {
       stmt2binding_restore[&n].push_back(fut_name);
     }
   } else if (auto trigger = dyn_cast<AST::Trigger>(&n);
-             trigger && trigger->HasDependencies()) {
+             trigger && trigger->HasDependencies() &&
+             !trigger->HasNote("native_completion_event")) {
     // Publishing an event after a data future consumes that future just like
     // an explicit wait.  Operation futures do not own DMA buffer bindings.
+    // A trigger whose TMA futures were folded into native completion events
+    // has no runtime future objects and no bindings to unbind.
     for (const auto& dependency : trigger->GetDependencies()) {
       if (!isa<FutureType>(NodeType(*dependency))) continue;
       auto id = AST::GetIdentifier(*dependency);
@@ -2144,6 +2147,7 @@ bool LivenessAnalyzer::Visit(AST::Trigger& n) {
     }
   }
   if (n.HasDependencies()) {
+    const bool native_completion = n.HasNote("native_completion_event");
     for (const auto& dependency : n.GetDependencies()) {
       auto id = AST::GetIdentifier(*dependency);
       assert(id && "expecting a trigger-after future identifier.");
@@ -2151,6 +2155,12 @@ bool LivenessAnalyzer::Visit(AST::Trigger& n) {
       if (!isa<FutureType>(NodeType(*dependency))) continue;
 
       stmt_linfo[current_stmt].buffer_related = true;
+      // AsyncOpGraphPrepare folds a `trigger event after tma_future...` into
+      // the producing TMA's native completion event and clears the DMA's
+      // future.  Such a dependency has no runtime future object and no
+      // future_buffers entry; the producing DMA has already recorded the
+      // source/destination buffer accesses, so there is nothing to resolve.
+      if (native_completion) continue;
       auto scoped_name = InScopeName(id->name);
       assert(tracker_.future_buffers.count(scoped_name) &&
              "expecting the future to be in future_buffers.");
