@@ -2219,5 +2219,6 @@ void SemaChecker::CreateAssessment(const ValueItem& pred,
 
   FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, effective_pred,
                                         message, uty, aty, l, n.get(),
-                                        emit_node, active_guard);
+                                        emit_node, active_guard,
+                                        ClassifyDependence({&pred}));
 }
