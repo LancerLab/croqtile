@@ -490,12 +490,17 @@ inline static const std::string STR(FenceEntity e) {
 /// The ordering a fence establishes. RELEASE publishes the writer's stores
 /// into a space; ACQUIRE orders (and, on cached spaces, invalidates) the
 /// reader's loads out of a space; ACQ_REL is the bidirectional barrier
-/// (release + acquire, i.e. the "full" fence) emitted by a fence with no
-/// direction, e.g. the explicit sync.fence path.
+/// (release + acquire, i.e. the "full" fence); SEQ_CST is the
+/// sequentially-consistent fence (acq_rel plus a single total order over all
+/// such fences). DEFAULT is the parser sentinel for an unspecified order; the
+/// semantic checker resolves it to the target's preferred default (seq_cst on
+/// targets with a sequential fence, acq_rel otherwise) before codegen.
 enum class FenceOrder {
   RELEASE,
   ACQUIRE,
   ACQ_REL,
+  SEQ_CST,
+  DEFAULT,
 };
 
 inline static const std::string STR(FenceOrder o) {
@@ -503,6 +508,8 @@ inline static const std::string STR(FenceOrder o) {
   case FenceOrder::RELEASE: return "RELEASE";
   case FenceOrder::ACQUIRE: return "ACQUIRE";
   case FenceOrder::ACQ_REL: return "ACQ_REL";
+  case FenceOrder::SEQ_CST: return "SEQ_CST";
+  case FenceOrder::DEFAULT: return "DEFAULT";
   }
   choreo_unreachable("unsupported fence order.");
   return "";
@@ -631,10 +638,11 @@ inline static FenceKind FenceKindFromName(const std::string& name) {
     return true;
   };
   // Order first: ACQ_REL embeds an underscore, so match it before the plain
-  // RELEASE / ACQUIRE suffixes.
+  // RELEASE / ACQUIRE / SEQ_CST suffixes.
   peel("ACQ_REL", FenceOrder::ACQ_REL) ||
       peel("RELEASE", FenceOrder::RELEASE) ||
-      peel("ACQUIRE", FenceOrder::ACQUIRE);
+      peel("ACQUIRE", FenceOrder::ACQUIRE) ||
+      peel("SEQ_CST", FenceOrder::SEQ_CST);
 
   // Remaining fields are SPACE_ENTITY[_SCOPE], underscore-separated.
   const auto parts = SplitStringByDelimiter(rest, "_", /*trim=*/false);

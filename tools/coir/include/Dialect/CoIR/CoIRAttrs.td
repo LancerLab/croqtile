@@ -101,12 +101,14 @@ def CoIR_FenceEntityAttr :
 def CoIR_FO_Release : I32EnumAttrCase<"Release", 0, "release">;
 def CoIR_FO_Acquire : I32EnumAttrCase<"Acquire", 1, "acquire">;
 def CoIR_FO_AcqRel  : I32EnumAttrCase<"AcqRel",  2, "acq_rel">;
+def CoIR_FO_SeqCst  : I32EnumAttrCase<"SeqCst",  3, "seq_cst">;
 
 def CoIR_FenceOrderEnum : CoIR_I32Enum<
   "FenceOrder", "ordering a fence establishes", [
     CoIR_FO_Release,
     CoIR_FO_Acquire,
-    CoIR_FO_AcqRel
+    CoIR_FO_AcqRel,
+    CoIR_FO_SeqCst
   ]>;
 
 def CoIR_FenceOrderAttr :

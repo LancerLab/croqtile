@@ -456,7 +456,8 @@ def FenceOp : CoIR_Op<"fence",
     - entity (FenceEntity): which agent's accesses are ordered (threads /
       dma / tma / mma / all); the full fence uses `all`.
     - order  (FenceOrder): direction and strength (release / acquire /
-      acq_rel); the full fence uses `acq_rel`.
+      acq_rel / seq_cst); the full fence uses `acq_rel`, and `seq_cst` is
+      the sequentially-consistent barrier.
     - scope  (ParallelLevel): the coherence domain the ordering is visible to
       (thread / group / block / device); `none` marks an engine/proxy fence
       whose scope is derived from `space`.

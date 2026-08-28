@@ -1204,9 +1204,16 @@ private:
 
   void emitBarrier(BarrierOp /*op*/) override {}
 
-  void emitFence(FenceOp /*op*/) override {
-    os() << getIndent()
-         << "std::atomic_thread_fence(std::memory_order_seq_cst);\n";
+  void emitFence(FenceOp op) override {
+    const char* order = "seq_cst";
+    switch (op.getOrder()) {
+    case FenceOrder::Release: order = "release"; break;
+    case FenceOrder::Acquire: order = "acquire"; break;
+    case FenceOrder::AcqRel:  order = "acq_rel";  break;
+    case FenceOrder::SeqCst:  order = "seq_cst";  break;
+    }
+    os() << getIndent() << "std::atomic_thread_fence(std::memory_order_"
+         << order << ");\n";
   }
 
   void emitWait(WaitOp op) override {

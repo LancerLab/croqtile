@@ -11,13 +11,27 @@ __co__ void test_barriers() {
   }
 }
 
-// Test: fence at thread/block visibility
+// Test: fence at thread/block visibility (HIP: seq_cst is the default;
+// release/acquire emit directional __builtin_amdgcn_fence; acq_rel emits the
+// full __threadfence* forms)
 __co__ void test_fences() {
   parallel bx by 1 : block {
-    // CHECK: __threadfence()
+    // CHECK: __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "agent")
     sync.fence : block;
 
-    // CHECK: __threadfence_block()
+    // CHECK: __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "workgroup")
     sync.fence : thread;
+
+    // CHECK: __builtin_amdgcn_fence(__ATOMIC_RELEASE, "agent")
+    sync.fence.rel : block;
+
+    // CHECK: __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup")
+    sync.fence.acq : thread;
+
+    // CHECK: __threadfence()
+    sync.fence.acq_rel : block;
+
+    // CHECK: __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "agent")
+    sync.fence.sc : block;
   }
 }

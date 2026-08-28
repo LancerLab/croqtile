@@ -196,6 +196,15 @@ public:
     return {};
   }
 
+  // CUDA's standalone `fence` instruction has no release-only / acquire-only
+  // form (only .acq_rel and .sc), so a directional fence order collapses to
+  // the full __threadfence*() barrier.
+  bool SupportsDirectionalFence(const ArchId&) const override { return false; }
+
+  // CUDA exposes a sequentially-consistent fence via `fence.sc`, so the
+  // default fence order is seq_cst and `sync.fence.sc` is accepted.
+  bool SupportsSeqCstFence(const ArchId&) const override { return true; }
+
   ArchId ResolveNativeArch() const override;
 };
 

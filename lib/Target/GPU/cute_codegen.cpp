@@ -7509,21 +7509,38 @@ bool CuteCodeGen::Visit(AST::Fence& n) {
   TraceEachVisit(n);
 
   // GPU fences always cover shared+global; visibility distinguishes the scope.
+  //
+  // The order axis selects between the two standalone fence forms CUDA
+  // offers: .acq_rel (the full barrier, emitted as __threadfence*()) and
+  // .sc (seq_cst, emitted as fence.sc.*). There is no release-only or
+  // acquire-only standalone fence, so release/acquire collapse to the full
+  // acq_rel __threadfence*() barrier (the semantic checker notes this).
+  bool cta_scope = false;
   switch (n.GetVisibility()) {
   case ParallelLevel::THREAD:
   case ParallelLevel::GROUP:
   case ParallelLevel::GROUPx4:
     // Fence within CTA: shared + global memory.
-    ds << d_indent << "__threadfence_block();\n";
+    cta_scope = true;
     break;
   case ParallelLevel::BLOCK:
   case ParallelLevel::DEVICE:
     // Fence device-wide: global memory.
-    ds << d_indent << "__threadfence();\n";
+    cta_scope = false;
     break;
   default:
     choreo_unreachable(
         "unsupported fence visibility: " + STR(n.GetVisibility()) + ".");
+  }
+
+  if (n.GetOrder() == FenceOrder::SEQ_CST) {
+    // Sequentially-consistent fence: PTX fence.sc at the CTA or GPU scope.
+    ds << d_indent << "asm volatile(\"fence.sc."
+       << (cta_scope ? "cta" : "gpu") << ";\" ::: \"memory\");\n";
+  } else {
+    // Full (acq_rel) fence, covering release / acquire / acq_rel.
+    ds << d_indent << (cta_scope ? "__threadfence_block();\n"
+                                 : "__threadfence();\n");
   }
 
   return true;

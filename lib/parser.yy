@@ -216,7 +216,7 @@ extern int yylex();
 %token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST EVICT_FIRST EVICT_LAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC BARRIER FENCE CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG
 %token <std::string> MAP REMAP
 %token DLBRAKT
-%token ACQ REL ACQ_REL
+%token ACQ REL ACQ_REL SC
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN SCALE MASK
 %token <std::string> UNROLL
@@ -853,7 +853,8 @@ fence_order_opt
     : ACQ     { $$ = FenceOrder::ACQUIRE; }
     | REL     { $$ = FenceOrder::RELEASE; }
     | ACQ_REL { $$ = FenceOrder::ACQ_REL; }
-    | %empty  { $$ = FenceOrder::ACQ_REL; }
+    | SC      { $$ = FenceOrder::SEQ_CST; }
+    | %empty  { $$ = FenceOrder::DEFAULT; }
     ;
 
 fence_scope

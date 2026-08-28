@@ -837,6 +837,26 @@ bool SemaChecker::VisitNode(AST::Fence& n) {
     return false;
   }
 
+  // Resolve an unspecified order to the target default: seq_cst on targets
+  // with a sequentially-consistent standalone fence, acq_rel otherwise.
+  if (n.order == FenceOrder::DEFAULT) {
+    n.order = (CCtx().HasTarget() &&
+               CCtx().GetTarget().SupportsSeqCstFence(CCtx().GetArch()))
+                  ? FenceOrder::SEQ_CST
+                  : FenceOrder::ACQ_REL;
+  }
+
+  // Reject an explicit seq_cst fence on a target with no sequential fence.
+  if (n.order == FenceOrder::SEQ_CST && CCtx().HasTarget() &&
+      !CCtx().GetTarget().SupportsSeqCstFence(CCtx().GetArch())) {
+    Error1(n.LOC(), "sync.fence.sc is not supported by target '" +
+                        CCtx().GetTarget().Name() + "' on arch '" +
+                        CCtx().GetArch() +
+                        "'; the target has no sequentially-consistent "
+                        "standalone fence.");
+    return false;
+  }
+
   // Validate fence visibility is appropriate for the enclosing parallel level
   if (!parallel_level_stack.empty()) {
     auto enc_level = parallel_level_stack.back();
@@ -848,6 +868,20 @@ bool SemaChecker::VisitNode(AST::Fence& n) {
               " inside a parallel : " + STR(enc_level) +
               " scope; the fence scope exceeds the enclosing parallel level.");
     }
+  }
+
+  // Note when a directional (release/acquire) order collapses to the full
+  // acq_rel fence because the target has no release-only / acquire-only
+  // standalone fence instruction.
+  if ((n.order == FenceOrder::RELEASE || n.order == FenceOrder::ACQUIRE) &&
+      CCtx().HasTarget() &&
+      !CCtx().GetTarget().SupportsDirectionalFence(CCtx().GetArch())) {
+    Note(n.LOC(),
+         std::string("sync.fence.") +
+             (n.GetOrder() == FenceOrder::RELEASE ? "rel" : "acq") +
+             " on target '" + CCtx().GetTarget().Name() +
+             "' emits a full acq_rel fence; the target has no directional "
+             "(release-only / acquire-only) standalone fence.");
   }
 
   return true;

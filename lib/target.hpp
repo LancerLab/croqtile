@@ -235,6 +235,18 @@ public:
   virtual bool IsFenceSupported(const ArchId& arch, ParallelLevel) const {
     return IsFeatureSupported(arch, STR(ChoreoFeature::FENCE));
   }
+  // Whether the target honors the fence order axis with a directional
+  // (release-only / acquire-only) standalone fence. Targets whose fence
+  // instruction only offers a full acq_rel barrier (e.g. CUDA's standalone
+  // `fence`) return false, so the semantic checker can note when a
+  // `sync.fence.rel` / `sync.fence.acq` collapses to the full fence.
+  virtual bool SupportsDirectionalFence(const ArchId&) const { return true; }
+  // Whether the target has a sequentially-consistent standalone fence
+  // (`fence.sc` on CUDA, `memory_order_seq_cst` on CPU, `__ATOMIC_SEQ_CST`
+  // on AMDGPU). Targets without one return false, so the default fence order
+  // degrades to acq_rel and an explicit `sync.fence.sc` is rejected by the
+  // semantic checker.
+  virtual bool SupportsSeqCstFence(const ArchId&) const { return false; }
   // Default memory scope for a fence at the given visibility level.
   // Returns Storage::NONE if the default is target-defined (not specifiable).
   virtual Storage GetDefaultFenceMemory(const ArchId&,
