@@ -45,9 +45,11 @@ private:
   // allocation so the joint limit can be enforced at runtime as well.
   struct JointRtMemUsageCheck {
     std::vector<std::string> local_useds;
+    std::vector<std::string> group_shared_useds;
     std::vector<std::string> shared_useds;
     location loc;
     size_t replicas_per_pool;
+    size_t max_group_dim;
     size_t pool_bytes;
   };
   std::vector<JointRtMemUsageCheck> rt_joint_mem_usage_check_list;
@@ -141,26 +143,35 @@ private:
     // same physical on-chip pool. See Target::GetLocalSharedPool.
     const auto pool = CCtx().GetLocalSharedPool();
     if (pool.aliased) {
-      const size_t local_total =
-          ct_tot_mem_usage[Storage::LOCAL] * pool.replicas_per_pool;
+      const size_t max_group_dim = CCtx().GetMaxGroupDim();
+      const size_t local_total = ct_tot_mem_usage[Storage::LOCAL] *
+                                 pool.replicas_per_pool * max_group_dim;
+      const size_t group_shared_total =
+          ct_tot_mem_usage[Storage::GROUP_SHARED] * pool.replicas_per_pool;
       const size_t shared_total = ct_tot_mem_usage[Storage::SHARED];
-      if (local_total + shared_total > pool.pool_bytes) {
+      const size_t replicated_total = local_total + group_shared_total;
+      if (replicated_total + shared_total > pool.pool_bytes) {
         std::ostringstream oss;
         for (const auto& inst_set : ct_mem_alloc_inst_sets)
-          for (Storage sto : {Storage::LOCAL, Storage::SHARED})
+          for (Storage sto :
+               {Storage::LOCAL, Storage::GROUP_SHARED, Storage::SHARED})
             if (inst_set.count(sto))
               for (const auto& inst : inst_set.at(sto)) oss << "\n\t\t" << inst;
         std::string error_msg =
-            "LOCAL+SHARED memory OUT OF BOUND!\n\t"
+            "LOCAL+shared<group>+SHARED memory OUT OF BOUND!\n\t"
             "In the scope " +
             SSTab().ScopeName() +
-            ", LOCAL and SHARED memory share one "
+            ", LOCAL, shared<group> and SHARED memory share one "
             "on-chip pool:\n\t"
             "LOCAL (per-thread) * " +
+            std::to_string(pool.replicas_per_pool) + " groups * " +
+            std::to_string(max_group_dim) +
+            " threads + shared<group> (per-group) * " +
             std::to_string(pool.replicas_per_pool) +
-            " threads + SHARED:\n\tUsed: " + std::to_string(local_total) +
-            " + " + std::to_string(shared_total) + " = " +
-            std::to_string(local_total + shared_total) +
+            " groups + SHARED:\n\tUsed: " + std::to_string(local_total) +
+            " + " + std::to_string(group_shared_total) + " + " +
+            std::to_string(shared_total) + " = " +
+            std::to_string(replicated_total + shared_total) +
             " bytes, Limit: " + std::to_string(pool.pool_bytes) +
             " bytes. With variables:" + oss.str();
         Error1(n.LOC(), error_msg);
@@ -279,16 +290,20 @@ private:
     }
 
     // Joint LOCAL+SHARED budget for aliased-pool targets:
-    //     local_per_replica * replicas_per_pool + shared <= pool_bytes
+    //     local * max_group_dim * replicas_per_pool
+    //     + group_shared * replicas_per_pool + shared <= pool_bytes
     for (const auto& jc : rt_joint_mem_usage_check_list) {
-      std::string lhs = "(size_t)((" + BuildUsageSum(jc.local_useds) + ") * " +
+      std::string lhs = "(size_t)(((" + BuildUsageSum(jc.local_useds) + ") * " +
+                        std::to_string(jc.replicas_per_pool) + " * " +
+                        std::to_string(jc.max_group_dim) + " + (" +
+                        BuildUsageSum(jc.group_shared_useds) + ") * " +
                         std::to_string(jc.replicas_per_pool) + " + (" +
                         BuildUsageSum(jc.shared_useds) + "))";
       std::string op = "<=";
       std::string rhs = "(size_t)" + std::to_string(jc.pool_bytes);
       std::string message =
-          "total LOCAL+SHARED memory (shared pool) usage (compile time and "
-          "runtime) should not exceed " +
+          "total LOCAL+shared<group>+SHARED memory (shared pool) usage "
+          "(compile time and runtime) should not exceed " +
           std::to_string(jc.pool_bytes) + " bytes";
       FCtx(fname).AppendRtCheck({lhs, op, rhs, jc.loc, message, {}});
     }
@@ -304,6 +319,10 @@ public:
       tocheck_storage = {Storage::LOCAL, Storage::SHARED};
     else
       tocheck_storage = {Storage::LOCAL, Storage::SHARED, Storage::GLOBAL};
+    // `shared<group>` (GROUP_SHARED) is budgeted like LOCAL (same VDMEM heap)
+    // on targets that expose a GROUP storage tier.
+    if (CCtx().GetTarget().IsGroupSharedStorageSupported(CCtx().GetArch()))
+      tocheck_storage.insert(Storage::GROUP_SHARED);
     // initialize with ct_tot_mem_usage
     for (const auto& sto : tocheck_storage) {
       ct_tot_mem_usage[sto] = 0;
@@ -355,10 +374,14 @@ public:
       // Snapshot the joint LOCAL+SHARED budget for aliased-pool targets so it
       // is enforced at runtime too.
       const auto pool = CCtx().GetLocalSharedPool();
-      if ((sto == Storage::LOCAL || sto == Storage::SHARED) && pool.aliased)
+      if ((sto == Storage::LOCAL || sto == Storage::GROUP_SHARED ||
+           sto == Storage::SHARED) &&
+          pool.aliased)
         rt_joint_mem_usage_check_list.push_back(
-            {SumUpCtRtUsage(Storage::LOCAL), SumUpCtRtUsage(Storage::SHARED),
-             n.LOC(), pool.replicas_per_pool, pool.pool_bytes});
+            {SumUpCtRtUsage(Storage::LOCAL),
+             SumUpCtRtUsage(Storage::GROUP_SHARED),
+             SumUpCtRtUsage(Storage::SHARED), n.LOC(), pool.replicas_per_pool,
+             CCtx().GetMaxGroupDim(), pool.pool_bytes});
     } else {
       // compile time usage
       auto size = sty->ByteSize() * array_dim_product;

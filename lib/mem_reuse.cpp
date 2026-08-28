@@ -10,6 +10,13 @@ using namespace Choreo;
 
 namespace {
 
+// `shared<group>` (Storage::GROUP_SHARED) lives in the same per-thread VDMEM
+// heap as `local` (Storage::LOCAL). Route GROUP_SHARED buffers into the LOCAL
+// allocation pool while keeping their Storage value intact for codegen.
+Storage AllocPoolOf(Storage sto) {
+  return sto == Storage::GROUP_SHARED ? Storage::LOCAL : sto;
+}
+
 struct SharedAlignmentCollector : public VisitorWithSymTab {
   std::map<std::string, size_t>& shared_alignment_reqs;
   std::string cur_dev_fname;
@@ -168,7 +175,7 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
       buf_size.emplace(sname, total_size);
       VST_DEBUG(dbgs() << "\tstatic  size:  " << total_size << "\n");
     } else {
-      sto_have_dyn[cur_dev_fname][sto] = true;
+      sto_have_dyn[cur_dev_fname][AllocPoolOf(sto)] = true;
       auto size_expr = sty->ByteSizeValue();
       if (n.IsArray()) size_expr = size_expr * elem_count;
       buf_size.emplace(sname, size_expr);
@@ -265,6 +272,7 @@ bool MemReuse::Visit(AST::NamedVariableDecl& n) {
 
 bool MemReuse::ShouldReuseStorage(Storage sto,
                                   const std::string& dev_func_name) const {
+  sto = AllocPoolOf(sto);
   if (sto == Storage::SHARED) return true;
   if (sto != Storage::LOCAL) return false;
   if (CCtx().TargetName() != "cute") return true;
@@ -282,6 +290,7 @@ bool MemReuse::ShouldReuseStorage(Storage sto,
 
 bool MemReuse::ShouldReuseBuffer(const std::string& buffer_id, Storage sto,
                                  const std::string& dev_func_name) const {
+  sto = AllocPoolOf(sto);
   if (!ShouldReuseStorage(sto, dev_func_name)) return false;
   if (sto != Storage::LOCAL || CCtx().TargetName() != "cute") return true;
   // In CUTE local storage, keep reuse only for dynamic-shape buffers.
@@ -401,7 +410,7 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
 
       auto SetChunkInfo = [&](const auto& bs) -> void {
         for (const auto& buffer : bs) {
-          if (ma.buf_sto.at(buffer.buffer_id) != sto) continue;
+          if (AllocPoolOf(ma.buf_sto.at(buffer.buffer_id)) != sto) continue;
 
           infos[sto].offset_args.push_back("mr_offset" + buffer.buffer_id);
           auto chunks_name = "__co__" + STR(sto) + "_chunks" + idx_suffix;
@@ -429,7 +438,7 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
         size_t total_event_size = 0;
         for (const auto& event : ma.event_vars) {
           if (GetDeclDevFuncOfBuffer(event) != df_name) continue;
-          if (ma.buf_sto.at(event) != sto) continue;
+          if (AllocPoolOf(ma.buf_sto.at(event)) != sto) continue;
           auto event_size = ma.buf_size.at(event);
           assert(VIIsInt(event_size));
           total_event_size += VIInt(event_size).value();
@@ -488,7 +497,7 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
 
         auto CollectBufs = [&](const auto& bs) {
           for (const auto& buffer : bs) {
-            if (ma.buf_sto.at(buffer.buffer_id) != sto) continue;
+            if (AllocPoolOf(ma.buf_sto.at(buffer.buffer_id)) != sto) continue;
             if (sto == Storage::LOCAL && CCtx().TargetName() == "cute") {
               if constexpr (std::is_same_v<std::decay_t<decltype(buffer.size)>,
                                            size_t>) {
@@ -593,7 +602,7 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
     HeapSimulator::Chunks chunks;
 
     for (const auto& buffer : ctx.buffers) {
-      if (ma.buf_sto.at(buffer.buffer_id) != sto) continue;
+      if (AllocPoolOf(ma.buf_sto.at(buffer.buffer_id)) != sto) continue;
       if (!ShouldReuseBuffer(buffer.buffer_id, sto, df_name)) continue;
       chunks.push_back(buffer);
     }
@@ -704,6 +713,7 @@ bool MemReuse::ValidateResult(
 }
 
 void MemReuse::ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto) {
+  sto = AllocPoolOf(sto);
   assert(sto == Storage::LOCAL || sto == Storage::SHARED);
   auto sname = InScopeName(n.name_str);
   if (!ShouldReuseBuffer(sname, sto, cur_dev_fname)) {

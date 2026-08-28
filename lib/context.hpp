@@ -758,6 +758,10 @@ public:
     return GetTarget().GetLocalSharedPool(GetArch());
   }
 
+  size_t GetMaxGroupDim() const {
+    return GetTarget().GetMaxGroupDim(GetArch());
+  }
+
   size_t GetMaxThreadsPerBlock() const {
     return GetTarget().GetMaxThreadsPerBlock(GetArch());
   }

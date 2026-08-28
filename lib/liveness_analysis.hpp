@@ -288,6 +288,7 @@ private:
     buffers.insert(sname);
     switch (sto) {
     case Storage::LOCAL: lbuffers.insert(sname); break;
+    case Storage::GROUP_SHARED: lbuffers.insert(sname); break;
     case Storage::SHARED: sbuffers.insert(sname); break;
     case Storage::GLOBAL: [[fallthrough]];
     case Storage::DEFAULT: gbuffers.insert(sname); break;
