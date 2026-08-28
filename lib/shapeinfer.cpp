@@ -37,6 +37,7 @@ void ShapeInference::InvalidateVisitorValNOs() {
 bool ShapeInference::StaticFail(bool pred_fail, UsageType ut) {
   auto& stats = CCtx().GetAssessmentStats();
   ++stats.total;
+  ++stats.direct_checks;
   if (pred_fail)
     ++stats.static_false;
   else
