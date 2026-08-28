@@ -2100,13 +2100,17 @@ void SemaChecker::CreateAssessment(const ValueItem& pred,
   // Try to prove the predicate using interval analysis on variable ranges
   // narrowed by both BoundedType declarations and active scope predicates.
   auto effective_pred = pred;
+  auto mech = AssessMechanism::CANONICAL;
   if (!VIBool(pred) && IsValidValueItem(active_guard)) {
     auto proven = TryProveWithIntervals(this, pred, active_guard);
-    if (proven.has_value()) effective_pred = sbe::bl(*proven);
+    if (proven.has_value()) {
+      effective_pred = sbe::bl(*proven);
+      mech = AssessMechanism::INTERVAL;
+    }
   }
 
   FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, effective_pred,
                                         message, uty, aty, l, n.get(),
                                         emit_node, active_guard,
-                                        ClassifyDependence({&pred}));
+                                        ClassifyDependence({&pred}), mech);
 }

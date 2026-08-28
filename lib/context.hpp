@@ -452,6 +452,9 @@ struct AssessmentStats {
   size_t rt_scalar = 0;        // runtime, scalar symbols only
   size_t rt_const = 0;         // runtime, constants only
   size_t direct_checks = 0;    // assessed via direct static checks (no log)
+  // Discharge resolution mechanism (Assessor-logged path; RQ6)
+  size_t st_canonical = 0;     // static_true via canonical normalization
+  size_t st_interval = 0;      // static_true via interval/bounded-type proof
   size_t runtime_entry = 0;    // runtime assertions with entry estimated cost
   size_t runtime_low = 0;      // runtime assertions with low estimated cost
   size_t runtime_medium = 0;   // runtime assertions with medium estimated cost

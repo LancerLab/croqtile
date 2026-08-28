@@ -78,6 +78,15 @@ enum class AssessDependence {
                     ///< dissolves into flat index arithmetic.
 };
 
+/// Resolution mechanism that decided an assessment (RQ6 mechanism
+/// breakdown). CANONICAL: structural normalization/constant folding of the
+/// predicate itself. INTERVAL: interval analysis over bounded-type ranges
+/// (TryProveWithIntervals in the semantic checker).
+enum class AssessMechanism {
+  CANONICAL,
+  INTERVAL,
+};
+
 /// Record of every assessment evaluation, regardless of outcome.
 struct AssessmentEntry {
   std::string message;
@@ -85,6 +94,7 @@ struct AssessmentEntry {
   AssessOutcome outcome;
   UsageType usage_type = UsageType::UnClassified;
   AssessDependence dependence = AssessDependence::CONSTANT;
+  AssessMechanism mechanism = AssessMechanism::CANONICAL;
   /// Index into Assessor::assertions (RUNTIME only); SIZE_MAX otherwise.
   size_t assertion_idx = static_cast<size_t>(-1);
 };
@@ -152,7 +162,8 @@ private:
   void LogAssessment(const std::string& msg, const location& l,
                      AssessOutcome outcome, UsageType uty,
                      AssessDependence dep = AssessDependence::CONSTANT,
-                     size_t assertion_idx = static_cast<size_t>(-1));
+                     size_t assertion_idx = static_cast<size_t>(-1),
+                     AssessMechanism mech = AssessMechanism::CANONICAL);
 
   bool DebugOn() const;
 
@@ -198,7 +209,8 @@ public:
                       AST::Node* emit_node = nullptr,
                       const ValueItem& guard = GetInvalidValueItem(),
                       std::optional<AssessDependence> dep_override =
-                          std::nullopt);
+                          std::nullopt,
+                      AssessMechanism mech = AssessMechanism::CANONICAL);
 };
 
 } // end namespace Choreo
