@@ -414,8 +414,7 @@ bool HIPCodeGen::Visit(AST::AsmStmt& n) {
       t.op = op;
       t.tempName = SymbolTable::GetAnonName();
       t.isOutput = isOutput;
-      t.isReadWrite =
-          !op->constraint.empty() && op->constraint[0] == '+';
+      t.isReadWrite = !op->constraint.empty() && op->constraint[0] == '+';
       tempOps.push_back(t);
     }
   };
@@ -424,8 +423,7 @@ bool HIPCodeGen::Visit(AST::AsmStmt& n) {
   for (auto& op : n.inputOperands) CollectTemps(op, false);
 
   // Emit compiler barrier before volatile asm
-  if (n.isVolatile)
-    IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
+  if (n.isVolatile) IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
 
   // Emit temp variable declarations with copy-in from the expression.
   for (auto& t : tempOps) {
@@ -459,8 +457,7 @@ bool HIPCodeGen::Visit(AST::AsmStmt& n) {
         first = false;
         if (!op->symbolicName.empty())
           IndStream() << "[" << op->symbolicName << "] ";
-        IndStream() << "\"" << op->constraint << "\"("
-                    << OpName(op) << ")";
+        IndStream() << "\"" << op->constraint << "\"(" << OpName(op) << ")";
       }
     }
   }
@@ -476,8 +473,7 @@ bool HIPCodeGen::Visit(AST::AsmStmt& n) {
         first = false;
         if (!op->symbolicName.empty())
           IndStream() << "[" << op->symbolicName << "] ";
-        IndStream() << "\"" << op->constraint << "\"("
-                    << OpName(op) << ")";
+        IndStream() << "\"" << op->constraint << "\"(" << OpName(op) << ")";
       }
     }
   }
@@ -498,14 +494,13 @@ bool HIPCodeGen::Visit(AST::AsmStmt& n) {
   // Write back temps for output and read-write operands.
   for (auto& t : tempOps) {
     if (t.isOutput) {
-      IndStream() << ExprSTR(t.op->expression, false) << " = "
-                  << t.tempName << ";\n";
+      IndStream() << ExprSTR(t.op->expression, false) << " = " << t.tempName
+                  << ";\n";
     }
   }
 
   // Emit compiler barrier after volatile asm
-  if (n.isVolatile)
-    IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
+  if (n.isVolatile) IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
 
   return true;
 }
@@ -1371,9 +1366,7 @@ void HIPCodeGen::EmitDMATranspose(AST::DMA&, const HIPDMALoweringDecision& dec,
   ds << d_indent << "}\n";
 }
 
-bool HIPCodeGen::Visit(AST::BufferMap&) {
-  return true;
-}
+bool HIPCodeGen::Visit(AST::BufferMap&) { return true; }
 
 // ============================================================================
 // Assignment

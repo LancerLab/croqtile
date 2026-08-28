@@ -342,8 +342,9 @@ public:
                          std::to_string(cur_loop->GetVectorFactor()));
       vty = MakeVectorType(init_ty->GetBaseType(), cur_loop->GetVectorFactor());
       if (debug_visit)
-        dbgs() << indent << "Expr: " << "broadcast `" << PSTR(init_expr)
-               << "`, type: " << PSTR(vty) << "\n";
+        dbgs() << indent << "Expr: "
+               << "broadcast `" << PSTR(init_expr) << "`, type: " << PSTR(vty)
+               << "\n";
     } else
       vty = init_ty;
 

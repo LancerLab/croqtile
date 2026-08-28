@@ -636,8 +636,7 @@ Value MockInterpreter::ExprEval(const ptr<AST::Node>& e) {
         if (auto id = dyn_cast<AST::Identifier>(expr->GetR()))
           mem.Define(id->name, result);
         else if (auto da = dyn_cast<AST::DataAccess>(expr->GetR())) {
-          if (!da->AccessElement())
-            mem.Define(da->GetDataName(), result);
+          if (!da->AccessElement()) mem.Define(da->GetDataName(), result);
         }
         return result;
       }
@@ -850,21 +849,21 @@ Value MockInterpreter::EvalUnaryOp(Opcode op, const Value& operand) {
 }
 
 static std::string StripBIFPrefix(const std::string& name) {
-  if (name.size() > 2 && name[0] == '_' && name[1] == '_' &&
-      name != "__co__" && name != "__cpp__")
+  if (name.size() > 2 && name[0] == '_' && name[1] == '_' && name != "__co__" &&
+      name != "__cpp__")
     return name.substr(2);
   return name;
 }
 
 bool MockInterpreter::IsKnownBIF(const std::string& name) const {
   static const std::set<std::string> bifs = {
-      "print",   "println",   "assert",   "sizeof", "min",   "max",
-      "abs",     "sqrt",      "rsqrt",    "sin",    "cos",   "tan",
-      "exp",     "log",       "floor",    "ceil",   "round", "pow",
-      "alignup", "aligndown", "isfinite", "sign",   "fabs",  "fmaf",
-      "exp2f",   "expm1",     "frcp_rn",  "gelu",   "sigmoid",
-      "sinh",    "cosh",      "softplus", "log1p",  "acos",  "asin",
-      "atan",    "atan2",     "tanh",
+      "print",   "println",   "assert",   "sizeof", "min",     "max",
+      "abs",     "sqrt",      "rsqrt",    "sin",    "cos",     "tan",
+      "exp",     "log",       "floor",    "ceil",   "round",   "pow",
+      "alignup", "aligndown", "isfinite", "sign",   "fabs",    "fmaf",
+      "exp2f",   "expm1",     "frcp_rn",  "gelu",   "sigmoid", "sinh",
+      "cosh",    "softplus",  "log1p",    "acos",   "asin",    "atan",
+      "atan2",   "tanh",
   };
   return bifs.count(name) > 0 || bifs.count(StripBIFPrefix(name)) > 0;
 }
@@ -962,9 +961,9 @@ Value MockInterpreter::CallBIF(const std::string& raw_name,
     if (name == "gelu") {
       if (!args.empty()) {
         double x = args[0].AsDouble();
-        return Value::MakeDouble(
-            0.5 * x * (1.0 + std::tanh(std::sqrt(2.0 / M_PI) *
-                                        (x + 0.044715 * x * x * x))));
+        return Value::MakeDouble(0.5 * x *
+                                 (1.0 + std::tanh(std::sqrt(2.0 / M_PI) *
+                                                  (x + 0.044715 * x * x * x))));
       }
       return Value::MakeDouble(0);
     }
@@ -991,9 +990,8 @@ Value MockInterpreter::CallBIF(const std::string& raw_name,
 
   if (name == "fmaf") {
     if (args.size() >= 3)
-      return Value::MakeDouble(std::fma(args[0].AsDouble(),
-                                        args[1].AsDouble(),
-                                        args[2].AsDouble()));
+      return Value::MakeDouble(
+          std::fma(args[0].AsDouble(), args[1].AsDouble(), args[2].AsDouble()));
     return Value::MakeDouble(0);
   }
 
@@ -1043,14 +1041,12 @@ Value MockInterpreter::CallBIF(const std::string& raw_name,
       else if (op == "exch")
         new_val = operand;
       else if (op == "cas" && args.size() >= 3) {
-        if (old_val.AsInt() == operand.AsInt())
-          new_val = args[2];
+        if (old_val.AsInt() == operand.AsInt()) new_val = args[2];
       }
 
       auto target_node = arg_nodes[0];
       if (auto expr = dyn_cast<AST::Expr>(target_node))
-        if (expr->GetForm() == AST::Expr::Reference)
-          target_node = expr->GetR();
+        if (expr->GetForm() == AST::Expr::Reference) target_node = expr->GetR();
 
       if (auto chunk = dyn_cast<AST::ChunkAt>(target_node)) {
         std::string base_name = chunk->data->name;
@@ -1063,8 +1059,7 @@ Value MockInterpreter::CallBIF(const std::string& raw_name,
             std::vector<size_t> indices;
             for (auto& idx : chunk->indices->AllValues())
               indices.push_back((size_t)ExprEval(idx).AsInt());
-            size_t linear =
-                ComputeLinearIndex(indices, arr_val.alloc->shape);
+            size_t linear = ComputeLinearIndex(indices, arr_val.alloc->shape);
             size_t byte_off =
                 linear * arr_val.alloc->ElemSize() + arr_val.offset;
             arr_val.WriteToAlloc(byte_off, new_val);
@@ -1077,8 +1072,7 @@ Value MockInterpreter::CallBIF(const std::string& raw_name,
             std::vector<size_t> indices;
             for (auto& idx : da->GetIndices())
               indices.push_back((size_t)ExprEval(idx).AsInt());
-            size_t linear =
-                ComputeLinearIndex(indices, arr_val.alloc->shape);
+            size_t linear = ComputeLinearIndex(indices, arr_val.alloc->shape);
             size_t byte_off =
                 linear * arr_val.alloc->ElemSize() + arr_val.offset;
             arr_val.WriteToAlloc(byte_off, new_val);
@@ -1239,7 +1233,8 @@ void MockInterpreter::ExecMMA(AST::MMA& n) {
         double fv = fill_val.AsDouble();
         Value tmp = MakeScalarOf(existing.alloc->elem_type, fv);
         for (size_t i = 0; i < existing.alloc->TotalElements(); ++i) {
-          auto ptr_val = Value::MakePointer(existing.alloc, existing.alloc->elem_type);
+          auto ptr_val =
+              Value::MakePointer(existing.alloc, existing.alloc->elem_type);
           ptr_val.WriteToAlloc(i * existing.alloc->ElemSize(), tmp);
         }
         return;
@@ -1571,16 +1566,13 @@ void MockInterpreter::ExecFragReduce(AST::FragReduce& n) {
       sum += v;
       if (v > best) best = v;
     }
-    write_dst(out_idx,
-              n.op == AST::FragReduceOp::SUM ? sum : best);
+    write_dst(out_idx, n.op == AST::FragReduceOp::SUM ? sum : best);
   };
 
   if (n.dim == 1) {
-    for (size_t i = 0; i < rows; ++i)
-      reduce_range(i, i * cols, 1, cols);
+    for (size_t i = 0; i < rows; ++i) reduce_range(i, i * cols, 1, cols);
   } else if (n.dim == 0) {
-    for (size_t j = 0; j < cols; ++j)
-      reduce_range(j, j, cols, rows);
+    for (size_t j = 0; j < cols; ++j) reduce_range(j, j, cols, rows);
   } else {
     Warning(n.LOC(), "mock: unsupported reduce dim=" + std::to_string(n.dim));
   }
@@ -1608,7 +1600,8 @@ void MockInterpreter::ExecFragTransfer(AST::FragTransfer& n) {
     return;
   }
 
-  size_t bytes = std::min(src_val.alloc->TotalBytes(), dst_val.alloc->TotalBytes());
+  size_t bytes =
+      std::min(src_val.alloc->TotalBytes(), dst_val.alloc->TotalBytes());
   std::memcpy(dst_val.alloc->RawPtr(), src_val.alloc->RawPtr(), bytes);
 }
 

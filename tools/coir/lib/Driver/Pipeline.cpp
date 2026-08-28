@@ -20,7 +20,7 @@ namespace CoIR {
 void StampTargetOnModule(mlir::ModuleOp module, llvm::StringRef target,
                          llvm::StringRef arch, llvm::StringRef mma_target,
                          bool has_tma, bool has_dma, bool has_buffer_map) {
-  auto *ctx = module.getContext();
+  auto* ctx = module.getContext();
   if (!target.empty())
     module->setAttr("coir.target", mlir::StringAttr::get(ctx, target));
   if (!arch.empty())
@@ -52,8 +52,7 @@ bool HasDMA(mlir::ModuleOp module) {
 }
 
 bool HasBufferMap(mlir::ModuleOp module) {
-  if (auto attr =
-          module->getAttrOfType<mlir::BoolAttr>("coir.has_buffer_map"))
+  if (auto attr = module->getAttrOfType<mlir::BoolAttr>("coir.has_buffer_map"))
     return attr.getValue();
   return false;
 }
@@ -64,7 +63,7 @@ llvm::StringRef GetArch(mlir::ModuleOp module) {
   return {};
 }
 
-void Pipeline::EmitCoIR(llvm::raw_ostream &os) {
+void Pipeline::EmitCoIR(llvm::raw_ostream& os) {
   mlir::OpPrintingFlags flags;
   module_.print(os, flags);
   os << "\n";
@@ -72,22 +71,19 @@ void Pipeline::EmitCoIR(llvm::raw_ostream &os) {
 
 bool Pipeline::InstrumentSafety() {
   module_->setAttr("coir.cost_threshold",
-                   mlir::IntegerAttr::get(
-                       mlir::IntegerType::get(&ctx_, 32), cost_threshold_));
+                   mlir::IntegerAttr::get(mlir::IntegerType::get(&ctx_, 32),
+                                          cost_threshold_));
   mlir::PassManager pm(&ctx_);
   pm.addPass(coir::createHoistAssertionsPass());
   pm.addPass(coir::createEstimateAssertCostPass());
-  if (collect_stats_)
-    pm.addPass(coir::createCollectAssertStatsPass());
-  if (mlir::failed(pm.run(module_)))
-    return false;
+  if (collect_stats_) pm.addPass(coir::createCollectAssertStatsPass());
+  if (mlir::failed(pm.run(module_))) return false;
   return true;
 }
 
 bool Pipeline::Optimize() {
   mlir::PassManager pm(&ctx_);
-  if (mlir::failed(mlir::applyPassManagerCLOptions(pm)))
-    return false;
+  if (mlir::failed(mlir::applyPassManagerCLOptions(pm))) return false;
 
   pm.addPass(coir::createCleanupPass());
   return mlir::succeeded(pm.run(module_));
@@ -95,11 +91,9 @@ bool Pipeline::Optimize() {
 
 bool Pipeline::Lower() {
   mlir::PassManager pm(&ctx_);
-  if (mlir::failed(mlir::applyPassManagerCLOptions(pm)))
-    return false;
+  if (mlir::failed(mlir::applyPassManagerCLOptions(pm))) return false;
 
-  auto targetAttr =
-      module_->getAttrOfType<mlir::StringAttr>("coir.target");
+  auto targetAttr = module_->getAttrOfType<mlir::StringAttr>("coir.target");
   bool not_cc = !targetAttr || targetAttr.getValue() != "cc";
 
   if (not_cc) {
@@ -113,12 +107,11 @@ bool Pipeline::Lower() {
 }
 
 int Pipeline::EmitSource(llvm::StringRef target, bool script,
-                         llvm::StringRef output_path,
-                         llvm::StringRef arch) {
+                         llvm::StringRef output_path, llvm::StringRef arch) {
   auto codegen = CodeGenRegistry::Create(target.str());
   if (!codegen) {
-    llvm::errs() << "error: no code generator registered for target '"
-                 << target << "'\n";
+    llvm::errs() << "error: no code generator registered for target '" << target
+                 << "'\n";
     return 1;
   }
 
@@ -127,22 +120,21 @@ int Pipeline::EmitSource(llvm::StringRef target, bool script,
     return 1;
   }
 
-  llvm::raw_ostream *os = &llvm::outs();
+  llvm::raw_ostream* os = &llvm::outs();
   std::unique_ptr<llvm::raw_fd_ostream> file_os;
 
   if (!output_path.empty()) {
     std::error_code ec;
     file_os = std::make_unique<llvm::raw_fd_ostream>(output_path, ec);
     if (ec) {
-      llvm::errs() << "error: cannot open '" << output_path << "': "
-                   << ec.message() << "\n";
+      llvm::errs() << "error: cannot open '" << output_path
+                   << "': " << ec.message() << "\n";
       return 1;
     }
     os = file_os.get();
   }
 
-  if (script)
-    return codegen->EmitScript(module_, arch, *os);
+  if (script) return codegen->EmitScript(module_, arch, *os);
   return codegen->EmitSource(module_, arch, *os);
 }
 

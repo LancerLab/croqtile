@@ -153,13 +153,14 @@ private:
         std::string error_msg =
             "LOCAL+SHARED memory OUT OF BOUND!\n\t"
             "In the scope " +
-            SSTab().ScopeName() + ", LOCAL and SHARED memory share one "
-                                 "on-chip pool:\n\t"
-                                 "LOCAL (per-thread) * " +
+            SSTab().ScopeName() +
+            ", LOCAL and SHARED memory share one "
+            "on-chip pool:\n\t"
+            "LOCAL (per-thread) * " +
             std::to_string(pool.replicas_per_pool) +
-            " threads + SHARED:\n\tUsed: " +
-            std::to_string(local_total) + " + " + std::to_string(shared_total) +
-            " = " + std::to_string(local_total + shared_total) +
+            " threads + SHARED:\n\tUsed: " + std::to_string(local_total) +
+            " + " + std::to_string(shared_total) + " = " +
+            std::to_string(local_total + shared_total) +
             " bytes, Limit: " + std::to_string(pool.pool_bytes) +
             " bytes. With variables:" + oss.str();
         Error1(n.LOC(), error_msg);

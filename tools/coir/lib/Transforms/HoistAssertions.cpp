@@ -39,13 +39,13 @@ using namespace coir;
 
 namespace {
 
-static bool isDefinedOutsideRegion(Value v, Region *region) {
+static bool isDefinedOutsideRegion(Value v, Region* region) {
   if (auto arg = dyn_cast<BlockArgument>(v))
     return !region->isAncestor(arg.getOwner()->getParent());
   return !region->isAncestor(v.getDefiningOp()->getParentRegion());
 }
 
-static bool allDepsMovableOutOfRegion(Value cond, Region *region) {
+static bool allDepsMovableOutOfRegion(Value cond, Region* region) {
   SmallVector<Value> worklist;
   DenseSet<Value> visited;
   worklist.push_back(cond);
@@ -53,11 +53,10 @@ static bool allDepsMovableOutOfRegion(Value cond, Region *region) {
     Value v = worklist.pop_back_val();
     if (!visited.insert(v).second) continue;
     if (isDefinedOutsideRegion(v, region)) continue;
-    auto *defOp = v.getDefiningOp();
+    auto* defOp = v.getDefiningOp();
     if (!defOp) return false;
     if (isa<arith::ConstantOp>(defOp)) continue;
-    for (Value operand : defOp->getOperands())
-      worklist.push_back(operand);
+    for (Value operand : defOp->getOperands()) worklist.push_back(operand);
   }
   return true;
 }
@@ -73,7 +72,7 @@ static bool allInputsFromKernelArgs(Value cond, KernelOp kernel) {
       if (arg.getOwner()->getParentOp() == kernel.getOperation()) continue;
       return false;
     }
-    auto *defOp = v.getDefiningOp();
+    auto* defOp = v.getDefiningOp();
     if (!defOp) return false;
     if (isa<arith::ConstantOp>(defOp)) continue;
     for (Value operand : defOp->getOperands()) worklist.push_back(operand);
@@ -82,8 +81,8 @@ static bool allInputsFromKernelArgs(Value cond, KernelOp kernel) {
 }
 
 struct HoistTarget {
-  Operation *insertBefore = nullptr;
-  Block *destBlock = nullptr;
+  Operation* insertBefore = nullptr;
+  Block* destBlock = nullptr;
   AssertSite site = AssertSite::USE;
 };
 
@@ -91,12 +90,12 @@ static HoistTarget computeHoistTarget(AssertOp assertOp, KernelOp kernel) {
   HoistTarget target;
   Value cond = assertOp.getCondition();
 
-  Operation *bestInsertBefore = nullptr;
-  Block *bestBlock = nullptr;
+  Operation* bestInsertBefore = nullptr;
+  Block* bestBlock = nullptr;
   bool hoistedPastSomething = false;
   bool stoppedEarly = false;
 
-  auto *current = assertOp->getParentOp();
+  auto* current = assertOp->getParentOp();
   while (current && current != kernel.getOperation()) {
     if (isa<scf::IfOp>(current)) {
       bestInsertBefore = current;
@@ -106,7 +105,7 @@ static HoistTarget computeHoistTarget(AssertOp assertOp, KernelOp kernel) {
       stoppedEarly = true;
       break;
     } else if (auto foreachOp = dyn_cast<ForeachOp>(current)) {
-      Region &loopRegion = foreachOp.getBody();
+      Region& loopRegion = foreachOp.getBody();
       if (allDepsMovableOutOfRegion(cond, &loopRegion)) {
         bestInsertBefore = current;
         bestBlock = current->getBlock();
@@ -142,14 +141,14 @@ static HoistTarget computeHoistTarget(AssertOp assertOp, KernelOp kernel) {
 /// Returns false if the chain crosses a TensorAllocOp, meaning the assertion
 /// depends on DMA-loaded data and cannot be safely hoisted (the alloc cannot
 /// be cloned or moved past its external users like dma.copy).
-static bool collectDefChain(Value root, Region *boundary,
-                            SmallVectorImpl<Operation *> &opsToMove) {
+static bool collectDefChain(Value root, Region* boundary,
+                            SmallVectorImpl<Operation*>& opsToMove) {
   SmallVector<Value> worklist;
-  DenseSet<Operation *> visited;
+  DenseSet<Operation*> visited;
   worklist.push_back(root);
   while (!worklist.empty()) {
     Value v = worklist.pop_back_val();
-    auto *defOp = v.getDefiningOp();
+    auto* defOp = v.getDefiningOp();
     if (!defOp) continue;
     if (!boundary->isAncestor(defOp->getParentRegion())) continue;
     if (!visited.insert(defOp).second) continue;
@@ -166,10 +165,9 @@ static bool collectDefChain(Value root, Region *boundary,
 }
 
 /// Check that every operand of `op` dominates `op` in its new position.
-static bool operandsDominate(Operation *op, DominanceInfo &domInfo) {
+static bool operandsDominate(Operation* op, DominanceInfo& domInfo) {
   for (Value operand : op->getOperands()) {
-    if (!domInfo.dominates(operand, op))
-      return false;
+    if (!domInfo.dominates(operand, op)) return false;
   }
   return true;
 }
@@ -178,74 +176,71 @@ static bool operandsDominate(Operation *op, DominanceInfo &domInfo) {
 /// Ops that have users outside the move set are cloned instead of moved,
 /// so that existing references remain valid.
 /// Returns false and rolls back if the move would break SSA dominance.
-static bool moveOpsBeforeInTopoOrder(SmallVectorImpl<Operation *> &ops,
-                                     Block *destBlock,
+static bool moveOpsBeforeInTopoOrder(SmallVectorImpl<Operation*>& ops,
+                                     Block* destBlock,
                                      Block::iterator destPoint) {
-  DenseSet<Operation *> opSet(ops.begin(), ops.end());
-  SmallVector<Operation *> sorted;
-  DenseSet<Operation *> emitted;
+  DenseSet<Operation*> opSet(ops.begin(), ops.end());
+  SmallVector<Operation*> sorted;
+  DenseSet<Operation*> emitted;
 
-  std::function<void(Operation *)> visit = [&](Operation *op) {
+  std::function<void(Operation*)> visit = [&](Operation* op) {
     if (!opSet.count(op) || emitted.count(op)) return;
     for (Value operand : op->getOperands())
-      if (auto *defOp = operand.getDefiningOp()) visit(defOp);
+      if (auto* defOp = operand.getDefiningOp()) visit(defOp);
     sorted.push_back(op);
     emitted.insert(op);
   };
 
-  for (auto *op : ops) visit(op);
+  for (auto* op : ops) visit(op);
 
   // Save original positions for rollback.  We record the *next* operation
   // (or nullptr for end-of-block) because MLIR ilist iterators are
   // element-stable -- comparing &*it after a move always returns the same
   // operation, so we cannot detect same-block reordering with iterators.
   struct OrigPos {
-    Operation *op;
-    Block *block;
-    Operation *next;
+    Operation* op;
+    Block* block;
+    Operation* next;
   };
   SmallVector<OrigPos> origPositions;
-  SmallVector<Operation *> clonedOps;
+  SmallVector<Operation*> clonedOps;
 
-  for (auto *op : sorted) {
+  for (auto* op : sorted) {
     auto it = op->getIterator();
     auto nextIt = std::next(it);
     origPositions.push_back(
         {op, op->getBlock(),
          nextIt != op->getBlock()->end() ? &*nextIt : nullptr});
     bool hasExternalUsers = llvm::any_of(
-        op->getUsers(), [&](Operation *u) { return !opSet.count(u); });
+        op->getUsers(), [&](Operation* u) { return !opSet.count(u); });
     if (hasExternalUsers) {
       OpBuilder b(destBlock, destPoint);
-      auto *clone = b.clone(*op);
+      auto* clone = b.clone(*op);
       clonedOps.push_back(clone);
-      for (auto &use : llvm::make_early_inc_range(op->getUses()))
-        if (opSet.count(use.getOwner()))
-          use.set(clone->getResult(0));
+      for (auto& use : llvm::make_early_inc_range(op->getUses()))
+        if (opSet.count(use.getOwner())) use.set(clone->getResult(0));
     } else {
       op->moveBefore(destBlock, destPoint);
     }
   }
 
-  auto *topOp = destBlock->getParentOp();
+  auto* topOp = destBlock->getParentOp();
   if (topOp) {
     DominanceInfo domInfo(topOp);
-    for (auto *op : sorted) {
+    for (auto* op : sorted) {
       if (!operandsDominate(op, domInfo)) {
         // Roll back in reverse order to restore original positions.
         for (auto it = origPositions.rbegin(); it != origPositions.rend();
              ++it) {
           if (it->op->getBlock() != it->block) {
             // Moved to a different block -- move back.
-            it->op->moveBefore(it->block,
-                               it->next ? it->next->getIterator()
-                                        : it->block->end());
+            it->op->moveBefore(it->block, it->next ? it->next->getIterator()
+                                                   : it->block->end());
           } else if (it->next) {
             // Same block -- check if the successor is still the same op.
             auto curIt = it->op->getIterator();
             auto curNext = std::next(curIt);
-            if (curNext == it->op->getBlock()->end() ||
-                &*curNext != it->next) {
+            if (curNext == it->op->getBlock()->end() || &*curNext != it->next) {
               it->op->moveBefore(it->block, it->next->getIterator());
             }
           } else {
@@ -256,7 +251,7 @@ static bool moveOpsBeforeInTopoOrder(SmallVectorImpl<Operation *> &ops,
             }
           }
         }
-        for (auto *cl : clonedOps) cl->erase();
+        for (auto* cl : clonedOps) cl->erase();
         return false;
       }
     }
@@ -305,25 +300,25 @@ struct HoistAssertionsPass
 
       auto target = computeHoistTarget(assertOp, kernel);
 
-      LLVM_DEBUG(llvm::dbgs() << "HOIST: msg=\""
-                              << assertOp.getMessage() << "\" -> site="
-                              << (target.site == AssertSite::ENTRY ? "ENTRY"
-                                  : target.site == AssertSite::HOIST ? "HOIST"
-                                  : "USE") << "\n");
+      LLVM_DEBUG(llvm::dbgs()
+                 << "HOIST: msg=\"" << assertOp.getMessage() << "\" -> site="
+                 << (target.site == AssertSite::ENTRY   ? "ENTRY"
+                     : target.site == AssertSite::HOIST ? "HOIST"
+                                                        : "USE")
+                 << "\n");
 
       if (target.site == AssertSite::ENTRY) {
-        auto &entryBlock = kernel.getBody().front();
-        SmallVector<Operation *> chain;
-        if (!collectDefChain(assertOp.getCondition(), &kernel.getBody(),
-                             chain))
-          continue;  // def-chain crosses a tensor alloc; cannot hoist
+        auto& entryBlock = kernel.getBody().front();
+        SmallVector<Operation*> chain;
+        if (!collectDefChain(assertOp.getCondition(), &kernel.getBody(), chain))
+          continue; // def-chain crosses a tensor alloc; cannot hoist
         chain.push_back(assertOp);
 
         // If all ops in the chain are already in the entry block, there
         // is nothing to move -- just mark the assert as ENTRY.  Moving
         // ops that are already there can reorder them and break SSA
         // dominance when destPoint == begin().
-        bool allInEntry = llvm::all_of(chain, [&](Operation *op) {
+        bool allInEntry = llvm::all_of(chain, [&](Operation* op) {
           return op->getBlock() == &entryBlock;
         });
         if (allInEntry) {
@@ -335,22 +330,19 @@ struct HoistAssertionsPass
               AssertSiteAttr::get(assertOp.getContext(), AssertSite::ENTRY));
         }
       } else if (target.site == AssertSite::HOIST && target.insertBefore) {
-        SmallVector<Operation *> chain;
-        if (!collectDefChain(assertOp.getCondition(), &kernel.getBody(),
-                             chain))
-          continue;  // def-chain crosses a tensor alloc; cannot hoist
+        SmallVector<Operation*> chain;
+        if (!collectDefChain(assertOp.getCondition(), &kernel.getBody(), chain))
+          continue; // def-chain crosses a tensor alloc; cannot hoist
         chain.push_back(assertOp);
 
         // Same guard: if everything is already in the right block and
         // positioned before the insertion point, skip the move.
-        Block *destBlock = target.destBlock;
+        Block* destBlock = target.destBlock;
         auto destPoint = target.insertBefore->getIterator();
-        bool allInPlace = llvm::all_of(chain, [&](Operation *op) {
-          if (op->getBlock() != destBlock)
-            return false;
+        bool allInPlace = llvm::all_of(chain, [&](Operation* op) {
+          if (op->getBlock() != destBlock) return false;
           for (auto it = destBlock->begin(); it != destPoint; ++it)
-            if (&*it == op)
-              return true;
+            if (&*it == op) return true;
           return false;
         });
         if (allInPlace) {

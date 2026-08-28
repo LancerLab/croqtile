@@ -341,7 +341,8 @@ protected:
       int col = CCtx().MapExpandedColToOriginal(l.begin.line, l.begin.column);
       errs() << "  ";
       for (int i = 1; i < col; ++i) errs() << " ";
-      errs() << "^" << "\n";
+      errs() << "^"
+             << "\n";
     }
   }
 

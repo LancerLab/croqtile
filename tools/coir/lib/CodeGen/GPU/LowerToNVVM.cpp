@@ -14,6 +14,7 @@
 #include "mlir/Conversion/GPUToNVVM/GPUToNVVM.h"
 #include "mlir/Conversion/GPUToNVVM/GPUToNVVMPass.h"
 #include "mlir/Conversion/IndexToLLVM/IndexToLLVM.h"
+#include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Conversion/MemRefToLLVM/MemRefToLLVM.h"
 #include "mlir/Conversion/NVVMToLLVM/NVVMToLLVM.h"
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
@@ -25,7 +26,6 @@
 #include "mlir/Dialect/LLVMIR/NVVMDialect.h"
 #include "mlir/Dialect/SCF/Transforms/Patterns.h"
 #include "mlir/IR/DialectRegistry.h"
-#include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/DialectConversion.h"
 
@@ -46,13 +46,13 @@ struct GpuToNVVMWithSCFPass
   std::unique_ptr<mlir::Pass> clonePass() const override {
     return std::make_unique<GpuToNVVMWithSCFPass>();
   }
-  void getDependentDialects(mlir::DialectRegistry &registry) const override {
+  void getDependentDialects(mlir::DialectRegistry& registry) const override {
     registry.insert<mlir::LLVM::LLVMDialect, mlir::NVVM::NVVMDialect>();
   }
 
   void runOnOperation() override {
     auto gpuModule = getOperation();
-    mlir::MLIRContext &ctx = *gpuModule.getContext();
+    mlir::MLIRContext& ctx = *gpuModule.getContext();
 
     mlir::LowerToLLVMOptions llvmOpts(&ctx);
     llvmOpts.useBarePtrCallConv = false;
@@ -84,7 +84,7 @@ struct GpuToNVVMWithSCFPass
 namespace coir {
 namespace gpu {
 
-static void ensureDialectExtensions(mlir::MLIRContext &ctx) {
+static void ensureDialectExtensions(mlir::MLIRContext& ctx) {
   mlir::DialectRegistry registry;
   mlir::arith::registerConvertArithToLLVMInterface(registry);
   mlir::cf::registerConvertControlFlowToLLVMInterface(registry);
@@ -98,7 +98,7 @@ static void ensureDialectExtensions(mlir::MLIRContext &ctx) {
 }
 
 bool lowerToNVVM(mlir::ModuleOp module) {
-  mlir::MLIRContext &ctx = *module.getContext();
+  mlir::MLIRContext& ctx = *module.getContext();
   ensureDialectExtensions(ctx);
   mlir::PassManager pm(&ctx);
   pm.enableVerifier(true);

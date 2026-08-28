@@ -52,8 +52,8 @@ int CoIR::CodeGen::Compile(mlir::ModuleOp module, llvm::StringRef arch,
       return 1;
     }
     std::string quotedOutput = shellQuote(outputPath);
-    script << "\ncp -- \"$BINFILE\" " << quotedOutput
-           << " && chmod +x -- " << quotedOutput << "\n";
+    script << "\ncp -- \"$BINFILE\" " << quotedOutput << " && chmod +x -- "
+           << quotedOutput << "\n";
   }
 
   auto bash = llvm::sys::findProgramByName("bash");
@@ -78,10 +78,10 @@ int CoIR::CodeGen::Compile(mlir::ModuleOp module, llvm::StringRef arch,
   return 0;
 }
 
-void CoIR::CodeGen::emitScriptPrologue(llvm::raw_ostream &os,
+void CoIR::CodeGen::emitScriptPrologue(llvm::raw_ostream& os,
                                        llvm::StringRef comment,
                                        llvm::StringRef tmpSuffix) {
-  auto &sctx = CoIR::ScriptContext::Get();
+  auto& sctx = CoIR::ScriptContext::Get();
   bool has_embedded = sctx.types_header && sctx.runtime_header;
 
   os << "#!/usr/bin/env bash\n";
@@ -134,7 +134,7 @@ void CoIR::CodeGen::emitScriptPrologue(llvm::raw_ostream &os,
 // ===== CoIREmitterBase -- CodeGen pipeline =====
 
 int CoIREmitterBase::EmitSource(ModuleOp module, llvm::StringRef /*arch*/,
-                                llvm::raw_ostream &os) {
+                                llvm::raw_ostream& os) {
   os_ = &os;
   resetState();
   emitModule(module, os);
@@ -157,7 +157,9 @@ std::string CoIREmitterBase::getIndent() {
 }
 
 void CoIREmitterBase::incIndent() { indent++; }
-void CoIREmitterBase::decIndent() { if (indent > 0) indent--; }
+void CoIREmitterBase::decIndent() {
+  if (indent > 0) indent--;
+}
 
 // ===== Value naming =====
 
@@ -199,19 +201,19 @@ int64_t CoIREmitterBase::getTensorBytes(TensorType tty) {
   }
   Type eTy = tty.getElementType();
   int64_t elemSize = 4;
-  if (eTy.isF16() || eTy.isBF16() || eTy.isInteger(16)) elemSize = 2;
-  else if (eTy.isF64() || eTy.isInteger(64)) elemSize = 8;
+  if (eTy.isF16() || eTy.isBF16() || eTy.isInteger(16))
+    elemSize = 2;
+  else if (eTy.isF64() || eTy.isInteger(64))
+    elemSize = 8;
   else if (eTy.isInteger(8) || isa<mlir::Float8E4M3FNType>(eTy) ||
-           isa<mlir::Float8E5M2Type>(eTy) ||
-           isa<mlir::Float6E2M3FNType>(eTy) ||
-           isa<mlir::Float6E3M2FNType>(eTy) ||
-           isa<mlir::Float4E2M1FNType>(eTy))
+           isa<mlir::Float8E5M2Type>(eTy) || isa<mlir::Float6E2M3FNType>(eTy) ||
+           isa<mlir::Float6E3M2FNType>(eTy) || isa<mlir::Float4E2M1FNType>(eTy))
     elemSize = 1;
   return n * elemSize;
 }
 
 void CoIREmitterBase::emitLinearIndex(ValueRange indices, TensorType tty,
-                                     Value tensor) {
+                                      Value tensor) {
   auto strides = tty.getStrides();
   auto shape = tty.getShape();
   if (indices.empty()) {
@@ -255,9 +257,8 @@ void CoIREmitterBase::emitLinearIndex(ValueRange indices, TensorType tty,
     }
 
     if (dimNames.empty())
-      llvm_unreachable(
-          "emitLinearIndex: dynamic tensor has no tensor.alloc "
-          "or tensor.bind_dims defining op");
+      llvm_unreachable("emitLinearIndex: dynamic tensor has no tensor.alloc "
+                       "or tensor.bind_dims defining op");
 
     for (unsigned i = 0; i < indices.size(); ++i) {
       if (i > 0) os() << " + ";
@@ -269,8 +270,7 @@ void CoIREmitterBase::emitLinearIndex(ValueRange indices, TensorType tty,
           unsigned dj = 0;
           for (unsigned k = 0; k < j; ++k)
             if (mlir::ShapedType::isDynamic(shape[k])) ++dj;
-          if (dj < dimNames.size())
-            os() << " * " << dimNames[dj];
+          if (dj < dimNames.size()) os() << " * " << dimNames[dj];
         } else {
           os() << " * " << shape[j];
         }
@@ -302,8 +302,8 @@ void CoIREmitterBase::emitLinearIndex(ValueRange indices, TensorType tty,
 // ===== Return value prescan =====
 
 void CoIREmitterBase::prescanReturnValues(KernelOp kernel) {
-  auto &body = kernel.getBody();
-  for (auto &op : body.front().getOperations()) {
+  auto& body = kernel.getBody();
+  for (auto& op : body.front().getOperations()) {
     if (auto ret = dyn_cast<KernelReturnOp>(op)) {
       for (unsigned i = 0; i < ret.getOperands().size(); ++i) {
         returnValues.insert(ret.getOperands()[i]);
@@ -315,7 +315,7 @@ void CoIREmitterBase::prescanReturnValues(KernelOp kernel) {
 
 // ===== Op dispatch (visitor pattern) =====
 
-void CoIREmitterBase::emitOp(Operation *op) {
+void CoIREmitterBase::emitOp(Operation* op) {
   if (auto parallel = dyn_cast<ParallelOp>(op))
     emitParallel(parallel);
   else if (auto foreach_ = dyn_cast<ForeachOp>(op))
@@ -382,40 +382,31 @@ void CoIREmitterBase::emitOp(Operation *op) {
       valueNames[indexCast.getResult()] = getName(indexCast.getIn());
     else
       os() << getIndent() << emitType(resTy) << " "
-           << getName(indexCast.getResult()) << " = (" << emitType(resTy)
-           << ")" << getName(indexCast.getIn()) << ";\n";
-  }
-  else if (auto extSI = dyn_cast<arith::ExtSIOp>(op)) {
+           << getName(indexCast.getResult()) << " = (" << emitType(resTy) << ")"
+           << getName(indexCast.getIn()) << ";\n";
+  } else if (auto extSI = dyn_cast<arith::ExtSIOp>(op)) {
     auto resTy = extSI.getResult().getType();
-    os() << getIndent() << emitType(resTy) << " "
-         << getName(extSI.getResult()) << " = (" << emitType(resTy) << ")"
-         << getName(extSI.getIn()) << ";\n";
-  }
-  else if (auto extUI = dyn_cast<arith::ExtUIOp>(op)) {
+    os() << getIndent() << emitType(resTy) << " " << getName(extSI.getResult())
+         << " = (" << emitType(resTy) << ")" << getName(extSI.getIn()) << ";\n";
+  } else if (auto extUI = dyn_cast<arith::ExtUIOp>(op)) {
     auto resTy = extUI.getResult().getType();
-    os() << getIndent() << emitType(resTy) << " "
-         << getName(extUI.getResult()) << " = (" << emitType(resTy) << ")"
-         << getName(extUI.getIn()) << ";\n";
-  }
-  else if (auto truncI = dyn_cast<arith::TruncIOp>(op)) {
+    os() << getIndent() << emitType(resTy) << " " << getName(extUI.getResult())
+         << " = (" << emitType(resTy) << ")" << getName(extUI.getIn()) << ";\n";
+  } else if (auto truncI = dyn_cast<arith::TruncIOp>(op)) {
     auto resTy = truncI.getResult().getType();
-    os() << getIndent() << emitType(resTy) << " "
-         << getName(truncI.getResult()) << " = (" << emitType(resTy) << ")"
-         << getName(truncI.getIn()) << ";\n";
-  }
-  else if (auto extF = dyn_cast<arith::ExtFOp>(op)) {
+    os() << getIndent() << emitType(resTy) << " " << getName(truncI.getResult())
+         << " = (" << emitType(resTy) << ")" << getName(truncI.getIn())
+         << ";\n";
+  } else if (auto extF = dyn_cast<arith::ExtFOp>(op)) {
     auto resTy = extF.getResult().getType();
     os() << getIndent() << emitType(resTy) << " " << getName(extF.getResult())
-         << " = (" << emitType(resTy) << ")" << getName(extF.getIn())
-         << ";\n";
-  }
-  else if (auto truncF = dyn_cast<arith::TruncFOp>(op)) {
+         << " = (" << emitType(resTy) << ")" << getName(extF.getIn()) << ";\n";
+  } else if (auto truncF = dyn_cast<arith::TruncFOp>(op)) {
     auto resTy = truncF.getResult().getType();
-    os() << getIndent() << emitType(resTy) << " "
-         << getName(truncF.getResult()) << " = (" << emitType(resTy) << ")"
-         << getName(truncF.getIn()) << ";\n";
-  }
-  else if (auto ifOp = dyn_cast<mlir::scf::IfOp>(op))
+    os() << getIndent() << emitType(resTy) << " " << getName(truncF.getResult())
+         << " = (" << emitType(resTy) << ")" << getName(truncF.getIn())
+         << ";\n";
+  } else if (auto ifOp = dyn_cast<mlir::scf::IfOp>(op))
     emitIfOp(ifOp);
   else if (auto whileOp = dyn_cast<mlir::scf::WhileOp>(op))
     emitWhileOp(whileOp);
@@ -429,9 +420,9 @@ void CoIREmitterBase::emitOp(Operation *op) {
     emitContinue(contOp);
   else if (isa<mlir::scf::YieldOp>(op) || isa<mlir::scf::ConditionOp>(op))
     (void)op;
-  else if (emitArithBinOp(op)) {}
-  else if (emitCmpOp(op)) {}
-  else if (auto selectOp = dyn_cast<arith::SelectOp>(op))
+  else if (emitArithBinOp(op)) {
+  } else if (emitCmpOp(op)) {
+  } else if (auto selectOp = dyn_cast<arith::SelectOp>(op))
     emitSelect(selectOp);
   else if (isa<DMACheckOp>(op))
     (void)op;
@@ -450,10 +441,11 @@ void CoIREmitterBase::emitConstant(arith::ConstantOp op) {
     if (val >= INT32_MIN && val <= INT32_MAX)
       os() << getIndent() << "const int " << name << " = " << val << ";\n";
     else
-      os() << getIndent() << "const int64_t " << name << " = " << val << "LL;\n";
+      os() << getIndent() << "const int64_t " << name << " = " << val
+           << "LL;\n";
   } else if (auto floatAttr = dyn_cast<FloatAttr>(op.getValue())) {
-    os() << getIndent() << "const " << emitElementType(op.getType())
-         << " " << name << " = ";
+    os() << getIndent() << "const " << emitElementType(op.getType()) << " "
+         << name << " = ";
     llvm::SmallString<16> strVal;
     floatAttr.getValue().toString(strVal, 6, 0);
     os() << strVal << ";\n";
@@ -466,19 +458,30 @@ static bool isFP8Type(mlir::Type ty) {
   return isa<mlir::Float8E4M3FNType>(ty) || isa<mlir::Float8E5M2Type>(ty);
 }
 
-bool CoIREmitterBase::emitArithBinOp(Operation *op) {
+bool CoIREmitterBase::emitArithBinOp(Operation* op) {
   llvm::StringRef opStr;
-  if (isa<arith::AddIOp>(op) || isa<arith::AddFOp>(op)) opStr = "+";
-  else if (isa<arith::SubIOp>(op) || isa<arith::SubFOp>(op)) opStr = "-";
-  else if (isa<arith::MulIOp>(op) || isa<arith::MulFOp>(op)) opStr = "*";
-  else if (isa<arith::DivSIOp>(op) || isa<arith::DivFOp>(op)) opStr = "/";
-  else if (isa<arith::RemSIOp>(op)) opStr = "%";
-  else if (isa<arith::AndIOp>(op)) opStr = "&";
-  else if (isa<arith::OrIOp>(op)) opStr = "|";
-  else if (isa<arith::XOrIOp>(op)) opStr = "^";
-  else if (isa<arith::ShLIOp>(op)) opStr = "<<";
-  else if (isa<arith::ShRSIOp>(op) || isa<arith::ShRUIOp>(op)) opStr = ">>";
-  else return false;
+  if (isa<arith::AddIOp>(op) || isa<arith::AddFOp>(op))
+    opStr = "+";
+  else if (isa<arith::SubIOp>(op) || isa<arith::SubFOp>(op))
+    opStr = "-";
+  else if (isa<arith::MulIOp>(op) || isa<arith::MulFOp>(op))
+    opStr = "*";
+  else if (isa<arith::DivSIOp>(op) || isa<arith::DivFOp>(op))
+    opStr = "/";
+  else if (isa<arith::RemSIOp>(op))
+    opStr = "%";
+  else if (isa<arith::AndIOp>(op))
+    opStr = "&";
+  else if (isa<arith::OrIOp>(op))
+    opStr = "|";
+  else if (isa<arith::XOrIOp>(op))
+    opStr = "^";
+  else if (isa<arith::ShLIOp>(op))
+    opStr = "<<";
+  else if (isa<arith::ShRSIOp>(op) || isa<arith::ShRUIOp>(op))
+    opStr = ">>";
+  else
+    return false;
 
   std::string name = getName(op->getResult(0));
   std::string lhs = getName(op->getOperand(0));
@@ -491,21 +494,21 @@ bool CoIREmitterBase::emitArithBinOp(Operation *op) {
          << emitType(resTy) << "(" << lhs << " " << opStr << " " << rhs
          << ");\n";
   } else {
-    os() << getIndent() << emitType(resTy) << " " << name << " = " << lhs
-         << " " << opStr << " " << rhs << ";\n";
+    os() << getIndent() << emitType(resTy) << " " << name << " = " << lhs << " "
+         << opStr << " " << rhs << ";\n";
   }
   return true;
 }
 
-bool CoIREmitterBase::emitCmpOp(Operation *op) {
+bool CoIREmitterBase::emitCmpOp(Operation* op) {
   if (auto cmpI = dyn_cast<arith::CmpIOp>(op)) {
     std::string name = getName(cmpI.getResult());
     std::string lhs = getName(cmpI.getLhs());
     std::string rhs = getName(cmpI.getRhs());
     llvm::StringRef opStr;
     switch (cmpI.getPredicate()) {
-    case arith::CmpIPredicate::eq:  opStr = "=="; break;
-    case arith::CmpIPredicate::ne:  opStr = "!="; break;
+    case arith::CmpIPredicate::eq: opStr = "=="; break;
+    case arith::CmpIPredicate::ne: opStr = "!="; break;
     case arith::CmpIPredicate::slt: opStr = "<"; break;
     case arith::CmpIPredicate::sle: opStr = "<="; break;
     case arith::CmpIPredicate::sgt: opStr = ">"; break;
@@ -515,8 +518,8 @@ bool CoIREmitterBase::emitCmpOp(Operation *op) {
     case arith::CmpIPredicate::ugt: opStr = ">"; break;
     case arith::CmpIPredicate::uge: opStr = ">="; break;
     }
-    os() << getIndent() << "bool " << name << " = (" << lhs << " "
-         << opStr << " " << rhs << ");\n";
+    os() << getIndent() << "bool " << name << " = (" << lhs << " " << opStr
+         << " " << rhs << ");\n";
     return true;
   }
   if (auto cmpF = dyn_cast<arith::CmpFOp>(op)) {
@@ -532,8 +535,8 @@ bool CoIREmitterBase::emitCmpOp(Operation *op) {
     case arith::CmpFPredicate::OLE: opStr = "<="; break;
     default: opStr = "!="; break;
     }
-    os() << getIndent() << "bool " << name << " = (" << lhs << " "
-         << opStr << " " << rhs << ");\n";
+    os() << getIndent() << "bool " << name << " = (" << lhs << " " << opStr
+         << " " << rhs << ");\n";
     return true;
   }
   return false;
@@ -541,12 +544,12 @@ bool CoIREmitterBase::emitCmpOp(Operation *op) {
 
 void CoIREmitterBase::emitIfOp(mlir::scf::IfOp op) {
   for (auto res : op.getResults())
-    os() << getIndent() << emitType(res.getType()) << " "
-         << getName(res) << ";\n";
+    os() << getIndent() << emitType(res.getType()) << " " << getName(res)
+         << ";\n";
 
   os() << getIndent() << "if (" << getName(op.getCondition()) << ") {\n";
   incIndent();
-  for (auto &bodyOp : op.getThenRegion().front().getOperations()) {
+  for (auto& bodyOp : op.getThenRegion().front().getOperations()) {
     if (auto yieldOp = dyn_cast<mlir::scf::YieldOp>(&bodyOp)) {
       for (unsigned i = 0; i < yieldOp.getNumOperands(); ++i)
         os() << getIndent() << getName(op.getResult(i)) << " = "
@@ -560,7 +563,7 @@ void CoIREmitterBase::emitIfOp(mlir::scf::IfOp op) {
   if (!op.getElseRegion().empty()) {
     os() << getIndent() << "else {\n";
     incIndent();
-    for (auto &bodyOp : op.getElseRegion().front().getOperations()) {
+    for (auto& bodyOp : op.getElseRegion().front().getOperations()) {
       if (auto yieldOp = dyn_cast<mlir::scf::YieldOp>(&bodyOp)) {
         for (unsigned i = 0; i < yieldOp.getNumOperands(); ++i)
           os() << getIndent() << getName(op.getResult(i)) << " = "
@@ -584,10 +587,10 @@ void CoIREmitterBase::emitContinue(CoIRContinueOp /*op*/) {
 
 void CoIREmitterBase::emitSelect(arith::SelectOp op) {
   std::string name = getName(op.getResult());
-  os() << getIndent() << emitType(op.getResult().getType()) << " "
-       << name << " = " << getName(op.getCondition()) << " ? "
-       << getName(op.getTrueValue()) << " : "
-       << getName(op.getFalseValue()) << ";\n";
+  os() << getIndent() << emitType(op.getResult().getType()) << " " << name
+       << " = " << getName(op.getCondition()) << " ? "
+       << getName(op.getTrueValue()) << " : " << getName(op.getFalseValue())
+       << ";\n";
 }
 
 void CoIREmitterBase::emitTensorLoadElem(TensorLoadElemOp op) {
@@ -612,9 +615,8 @@ void CoIREmitterBase::emitTensorStoreElem(TensorStoreElemOp op) {
 // ===== Overridable ops with defaults =====
 
 void CoIREmitterBase::emitWhileOp(mlir::scf::WhileOp op) {
-  auto &beforeBlock = op.getBefore().front();
-  auto condOp =
-      dyn_cast<mlir::scf::ConditionOp>(beforeBlock.getTerminator());
+  auto& beforeBlock = op.getBefore().front();
+  auto condOp = dyn_cast<mlir::scf::ConditionOp>(beforeBlock.getTerminator());
 
   for (unsigned i = 0; i < op.getInits().size(); ++i)
     valueNames[beforeBlock.getArgument(i)] = getName(op.getInits()[i]);
@@ -623,28 +625,26 @@ void CoIREmitterBase::emitWhileOp(mlir::scf::WhileOp op) {
   for (unsigned i = 0; i < op.getInits().size(); ++i)
     iterVarNames.push_back(getName(op.getInits()[i]));
 
-  for (auto &bodyOp : beforeBlock.getOperations()) {
+  for (auto& bodyOp : beforeBlock.getOperations()) {
     if (isa<mlir::scf::ConditionOp>(&bodyOp)) continue;
     emitOp(&bodyOp);
   }
 
-  os() << getIndent() << "while (" << getName(condOp.getCondition())
-       << ") {\n";
+  os() << getIndent() << "while (" << getName(condOp.getCondition()) << ") {\n";
   incIndent();
 
-  auto &afterBlock = op.getAfter().front();
+  auto& afterBlock = op.getAfter().front();
   for (unsigned i = 0; i < condOp.getArgs().size(); ++i)
     valueNames[afterBlock.getArgument(i)] = getName(condOp.getArgs()[i]);
 
-  for (auto &bodyOp : afterBlock.getOperations()) {
+  for (auto& bodyOp : afterBlock.getOperations()) {
     if (auto yieldOp = dyn_cast<mlir::scf::YieldOp>(&bodyOp)) {
       for (unsigned i = 0; i < yieldOp.getNumOperands(); ++i) {
         os() << getIndent() << iterVarNames[i] << " = "
              << getName(yieldOp.getOperand(i)) << ";\n";
-        valueNames[beforeBlock.getArgument(i)] =
-            getName(yieldOp.getOperand(i));
+        valueNames[beforeBlock.getArgument(i)] = getName(yieldOp.getOperand(i));
       }
-      for (auto &bOp : beforeBlock.getOperations()) {
+      for (auto& bOp : beforeBlock.getOperations()) {
         if (isa<mlir::scf::ConditionOp>(&bOp)) continue;
         emitOp(&bOp);
       }
@@ -663,7 +663,7 @@ void CoIREmitterBase::emitWhileOp(mlir::scf::WhileOp op) {
 }
 
 void CoIREmitterBase::emitCoIRWhileOp(CoIRWhileOp op) {
-  auto &condBlock = op.getCondRegion().front();
+  auto& condBlock = op.getCondRegion().front();
   auto condOp = dyn_cast<CoIRWhileCondOp>(condBlock.getTerminator());
 
   for (unsigned i = 0; i < op.getInits().size(); ++i)
@@ -673,36 +673,33 @@ void CoIREmitterBase::emitCoIRWhileOp(CoIRWhileOp op) {
   for (unsigned i = 0; i < op.getInits().size(); ++i)
     iterVarNames.push_back(getName(op.getInits()[i]));
 
-  for (auto &bodyOp : condBlock.getOperations()) {
+  for (auto& bodyOp : condBlock.getOperations()) {
     if (isa<CoIRWhileCondOp>(&bodyOp)) continue;
     emitOp(&bodyOp);
   }
 
-  os() << getIndent() << "while (" << getName(condOp.getCondition())
-       << ") {\n";
+  os() << getIndent() << "while (" << getName(condOp.getCondition()) << ") {\n";
   incIndent();
 
-  auto &bodyBlock = op.getBodyRegion().front();
+  auto& bodyBlock = op.getBodyRegion().front();
   for (unsigned i = 0; i < condOp.getArgs().size(); ++i)
     valueNames[bodyBlock.getArgument(i)] = getName(condOp.getArgs()[i]);
 
-  for (auto &bodyOp : bodyBlock.getOperations()) {
+  for (auto& bodyOp : bodyBlock.getOperations()) {
     if (auto breakOp = dyn_cast<CoIRBreakOp>(&bodyOp)) {
       for (unsigned i = 0; i < breakOp.getOperands().size(); ++i) {
         os() << getIndent() << iterVarNames[i] << " = "
              << getName(breakOp.getOperand(i)) << ";\n";
-        valueNames[condBlock.getArgument(i)] =
-            getName(breakOp.getOperand(i));
+        valueNames[condBlock.getArgument(i)] = getName(breakOp.getOperand(i));
       }
       os() << getIndent() << "break;\n";
     } else if (auto contOp = dyn_cast<CoIRContinueOp>(&bodyOp)) {
       for (unsigned i = 0; i < contOp.getOperands().size(); ++i) {
         os() << getIndent() << iterVarNames[i] << " = "
              << getName(contOp.getOperand(i)) << ";\n";
-        valueNames[condBlock.getArgument(i)] =
-            getName(contOp.getOperand(i));
+        valueNames[condBlock.getArgument(i)] = getName(contOp.getOperand(i));
       }
-      for (auto &cOp : condBlock.getOperations()) {
+      for (auto& cOp : condBlock.getOperations()) {
         if (isa<CoIRWhileCondOp>(&cOp)) continue;
         emitOp(&cOp);
       }
@@ -722,7 +719,7 @@ void CoIREmitterBase::emitCoIRWhileOp(CoIRWhileOp op) {
 }
 
 void CoIREmitterBase::emitForeach(ForeachOp op) {
-  auto &body = op.getBody();
+  auto& body = op.getBody();
   auto args = body.front().getArguments();
   std::string iv = getName(args[0]);
   std::string ub = getName(op.getUpperBound());
@@ -730,15 +727,14 @@ void CoIREmitterBase::emitForeach(ForeachOp op) {
   auto iterArgs = op.getIterArgs();
   for (unsigned i = 0; i < iterArgs.size(); ++i) {
     std::string iterName = getName(args[i + 1]);
-    os() << getIndent() << "auto " << iterName << " = "
-         << getName(iterArgs[i]) << ";\n";
+    os() << getIndent() << "auto " << iterName << " = " << getName(iterArgs[i])
+         << ";\n";
   }
 
-  os() << getIndent() << "for (int " << iv << " = 0; " << iv << " < "
-       << ub << "; ++" << iv << ") {\n";
+  os() << getIndent() << "for (int " << iv << " = 0; " << iv << " < " << ub
+       << "; ++" << iv << ") {\n";
   incIndent();
-  for (auto &bodyOp : body.front().getOperations())
-    emitOp(&bodyOp);
+  for (auto& bodyOp : body.front().getOperations()) emitOp(&bodyOp);
   decIndent();
   os() << getIndent() << "}\n";
 
@@ -747,7 +743,7 @@ void CoIREmitterBase::emitForeach(ForeachOp op) {
 }
 
 void CoIREmitterBase::emitYield(YieldOp op) {
-  auto *parentOp = op->getParentOp();
+  auto* parentOp = op->getParentOp();
   if (auto foreachOp = dyn_cast<ForeachOp>(parentOp)) {
     auto args = foreachOp.getBody().front().getArguments();
     unsigned n = op.getOperands().size();
@@ -795,8 +791,7 @@ void CoIREmitterBase::emitYield(YieldOp op) {
 }
 
 void CoIREmitterBase::emitTensorAlloc(TensorAllocOp op) {
-  if (returnValues.count(op.getResult()))
-    return;
+  if (returnValues.count(op.getResult())) return;
 
   auto tensorTy = cast<TensorType>(op.getResult().getType());
   std::string name = getName(op.getResult());
@@ -827,8 +822,7 @@ void CoIREmitterBase::emitTensorAlloc(TensorAllocOp op) {
         lastSpmName = "__spm_" + std::to_string(nextId++);
         int align = needsTMAAlignment(tensorTy) ? 128 : 16;
         os() << getIndent() << "alignas(" << align << ") " << qualifier
-             << "unsigned char "
-             << lastSpmName << "[" << spmBytes << "];\n";
+             << "unsigned char " << lastSpmName << "[" << spmBytes << "];\n";
       }
     }
     int64_t offset = op.getReuseOffset().value_or(0);
@@ -847,19 +841,17 @@ void CoIREmitterBase::emitTensorAlloc(TensorAllocOp op) {
     std::string qualifier = getAllocQualifier(tensorTy);
     int align = needsTMAAlignment(tensorTy) ? 128 : 16;
     os() << getIndent() << "alignas(" << align << ") " << qualifier
-         << "unsigned char "
-         << name << "[" << totalBytes << "];\n";
+         << "unsigned char " << name << "[" << totalBytes << "];\n";
     lastSpmName = name;
     return;
   }
 
   // Dynamic shared memory: emit extern __shared__ with pointer arithmetic.
-  if (tensorTy.hasDynamicShape() &&
-      tensorTy.getMemorySpace() == 1 /*shared*/) {
+  if (tensorTy.hasDynamicShape() && tensorTy.getMemorySpace() == 1 /*shared*/) {
     std::string eType = emitElementType(tensorTy.getElementType());
     os() << getIndent() << "extern __shared__ unsigned char __dyn_smem[];\n";
-    os() << getIndent() << eType << "* " << name
-         << " = (" << eType << "*)__dyn_smem;\n";
+    os() << getIndent() << eType << "* " << name << " = (" << eType
+         << "*)__dyn_smem;\n";
     return;
   }
 
@@ -872,14 +864,13 @@ void CoIREmitterBase::emitTensorAlloc(TensorAllocOp op) {
         totalElems * (tensorTy.getElementType().getIntOrFloatBitWidth() / 8);
     os() << getIndent() << "alignas(128) " << qualifier << "unsigned char "
          << name << "_storage[" << totalBytes << "];\n";
-    os() << getIndent() << emitElementType(tensorTy.getElementType())
-         << "* " << name << " = ("
-         << emitElementType(tensorTy.getElementType()) << "*)("
-         << name << "_storage);\n";
+    os() << getIndent() << emitElementType(tensorTy.getElementType()) << "* "
+         << name << " = (" << emitElementType(tensorTy.getElementType())
+         << "*)(" << name << "_storage);\n";
   } else {
     os() << getIndent() << qualifier
-         << emitElementType(tensorTy.getElementType())
-         << " " << name << "[" << totalElems << "];\n";
+         << emitElementType(tensorTy.getElementType()) << " " << name << "["
+         << totalElems << "];\n";
   }
 }
 
@@ -900,7 +891,7 @@ void CoIREmitterBase::emitTensorBindDims(TensorBindDimsOp op) {
 
 // ===== Fallback =====
 
-void CoIREmitterBase::emitOpFallback(Operation *op) {
+void CoIREmitterBase::emitOpFallback(Operation* op) {
   os() << getIndent() << "// [unhandled] " << op->getName().getStringRef()
        << "\n";
 }
@@ -910,8 +901,10 @@ void CoIREmitterBase::emitAsm(AsmOp op) {
   bool isVolatile = op.getIsVolatile() && *op.getIsVolatile();
 
   os() << getIndent();
-  if (isVolatile) os() << "__asm__ __volatile__";
-  else os() << "__asm__";
+  if (isVolatile)
+    os() << "__asm__ __volatile__";
+  else
+    os() << "__asm__";
   os() << " (\"" << asmStr << "\"";
 
   auto outConstraints = op.getOutConstraints();
@@ -939,8 +932,7 @@ void CoIREmitterBase::emitAsm(AsmOp op) {
             mlir::cast<mlir::StringAttr>(outSymbolicNames[i]).getValue();
         if (!name.empty()) os() << "[" << name << "] ";
       }
-      os() << "\""
-           << mlir::cast<mlir::StringAttr>(outConstraints[i]).getValue()
+      os() << "\"" << mlir::cast<mlir::StringAttr>(outConstraints[i]).getValue()
            << "\"(" << getName(outOperands[i]) << ")";
     }
   }
@@ -953,12 +945,10 @@ void CoIREmitterBase::emitAsm(AsmOp op) {
       if (i > 0) os() << ",";
       os() << " ";
       if (i < inSymbolicNames.size()) {
-        auto name =
-            mlir::cast<mlir::StringAttr>(inSymbolicNames[i]).getValue();
+        auto name = mlir::cast<mlir::StringAttr>(inSymbolicNames[i]).getValue();
         if (!name.empty()) os() << "[" << name << "] ";
       }
-      os() << "\""
-           << mlir::cast<mlir::StringAttr>(inConstraints[i]).getValue()
+      os() << "\"" << mlir::cast<mlir::StringAttr>(inConstraints[i]).getValue()
            << "\"(" << getName(inOperands[i]) << ")";
     }
   }
@@ -969,8 +959,8 @@ void CoIREmitterBase::emitAsm(AsmOp op) {
   if (hasClobbers) {
     for (unsigned i = 0; i < clobbers.size(); ++i) {
       if (i > 0) os() << ",";
-      os() << " \""
-           << mlir::cast<mlir::StringAttr>(clobbers[i]).getValue() << "\"";
+      os() << " \"" << mlir::cast<mlir::StringAttr>(clobbers[i]).getValue()
+           << "\"";
     }
   }
 
@@ -988,6 +978,4 @@ std::string CoIREmitterBase::getAllocQualifier(TensorType tty) {
   return tty.getMemorySpace() == 1 ? "__shared__ " : "";
 }
 
-bool CoIREmitterBase::needsTMAAlignment(TensorType /*tty*/) {
-  return false;
-}
+bool CoIREmitterBase::needsTMAAlignment(TensorType /*tty*/) { return false; }

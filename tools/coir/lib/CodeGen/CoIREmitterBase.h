@@ -1,4 +1,5 @@
-//===- CoIREmitterBase.h - Unified base for CoIR emitters --------*- C++ -*-===//
+//===- CoIREmitterBase.h - Unified base for CoIR emitters --------*- C++
+//-*-===//
 //
 // Combined base class for CoIR-to-source-text emitters. Inherits from
 // CoIR::CodeGen to provide the full pipeline interface (EmitSource,
@@ -13,10 +14,10 @@
 #ifndef COIR_CODEGEN_COIREMITTERBASE_H
 #define COIR_CODEGEN_COIREMITTERBASE_H
 
-#include "Target/CodeGen.h"
+#include "Dialect/CoIR/CoIRAttrs.h"
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
-#include "Dialect/CoIR/CoIRAttrs.h"
+#include "Target/CodeGen.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -46,14 +47,14 @@ public:
   // to add their compiler-specific script.
 
   int EmitSource(mlir::ModuleOp module, llvm::StringRef arch,
-                 llvm::raw_ostream &os) override;
+                 llvm::raw_ostream& os) override;
 
   // -- Module emission (pure virtual, each target implements) --
-  virtual void emitModule(mlir::ModuleOp module, llvm::raw_ostream &os) = 0;
+  virtual void emitModule(mlir::ModuleOp module, llvm::raw_ostream& os) = 0;
 
 protected:
   // -- Emission state (set per EmitSource call) --
-  llvm::raw_ostream *os_ = nullptr;
+  llvm::raw_ostream* os_ = nullptr;
   unsigned indent = 0;
   llvm::DenseMap<mlir::Value, std::string> valueNames;
   llvm::DenseMap<unsigned, std::string> returnParamNames;
@@ -62,7 +63,7 @@ protected:
   std::string lastSpmName;
   bool dynSpmEmitted = false;
 
-  llvm::raw_ostream &os() { return *os_; }
+  llvm::raw_ostream& os() { return *os_; }
 
   /// Reset emission state for a new module.
   void resetState();
@@ -90,12 +91,12 @@ protected:
   void prescanReturnValues(KernelOp kernel);
 
   // -- Visitor-pattern op dispatch (template method) --
-  virtual void emitOp(mlir::Operation *op);
+  virtual void emitOp(mlir::Operation* op);
 
   // -- Common ops (concrete in base) --
   void emitConstant(mlir::arith::ConstantOp op);
-  bool emitArithBinOp(mlir::Operation *op);
-  bool emitCmpOp(mlir::Operation *op);
+  bool emitArithBinOp(mlir::Operation* op);
+  bool emitCmpOp(mlir::Operation* op);
   void emitIfOp(mlir::scf::IfOp op);
   void emitBreak(coir::CoIRBreakOp op);
   void emitContinue(coir::CoIRContinueOp op);
@@ -153,7 +154,7 @@ protected:
   virtual void emitAsm(AsmOp op);
 
   // -- Fallback for unhandled ops (override to add target ops) --
-  virtual void emitOpFallback(mlir::Operation *op);
+  virtual void emitOpFallback(mlir::Operation* op);
 
   // -- Alloc qualifier hook --
   virtual std::string getAllocQualifier(coir::TensorType tty);

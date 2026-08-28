@@ -33,9 +33,9 @@ std::unique_ptr<mlir::Pass> createEmitCUDAPass();
 std::unique_ptr<mlir::Pass> createEmitHIPPass();
 std::unique_ptr<mlir::Pass> createEmitCCPass();
 
-void emitCUDA(mlir::ModuleOp module, llvm::raw_ostream &os);
-void emitHIP(mlir::ModuleOp module, llvm::raw_ostream &os);
-void emitCC(mlir::ModuleOp module, llvm::raw_ostream &os);
+void emitCUDA(mlir::ModuleOp module, llvm::raw_ostream& os);
+void emitHIP(mlir::ModuleOp module, llvm::raw_ostream& os);
+void emitCC(mlir::ModuleOp module, llvm::raw_ostream& os);
 
 #define GEN_PASS_REGISTRATION
 #include "CoIR/Passes.h.inc"
@@ -86,13 +86,13 @@ llvm::StringRef GetArch(mlir::ModuleOp module);
 ///                    additional target-specific lowering before emission.
 class Pipeline {
 public:
-  Pipeline(mlir::ModuleOp module, mlir::MLIRContext &ctx,
-           int costThreshold = 4, bool collectStats = false)
+  Pipeline(mlir::ModuleOp module, mlir::MLIRContext& ctx, int costThreshold = 4,
+           bool collectStats = false)
       : module_(module), ctx_(ctx), cost_threshold_(costThreshold),
         collect_stats_(collectStats) {}
 
   /// Print the CoIR MLIR module (like clang -emit-llvm).
-  void EmitCoIR(llvm::raw_ostream &os);
+  void EmitCoIR(llvm::raw_ostream& os);
 
   /// Run safety instrumentation passes (always, not skippable by --no-opt):
   ///   1. HoistAssertions   -- LICM for assertions (SSA dominance)
@@ -113,19 +113,18 @@ public:
   /// Looks up a CodeGen from CodeGenRegistry, runs its target-specific
   /// Lower(), then emits.
   int EmitSource(llvm::StringRef target, bool script,
-                 llvm::StringRef output_path,
-                 llvm::StringRef arch = "");
+                 llvm::StringRef output_path, llvm::StringRef arch = "");
 
   /// Lower + compile to a native binary via the target's CodeGen.
   int CompileBinary(llvm::StringRef target, llvm::StringRef output_path,
                     llvm::StringRef arch = "");
 
   mlir::ModuleOp GetModule() { return module_; }
-  mlir::MLIRContext &GetContext() { return ctx_; }
+  mlir::MLIRContext& GetContext() { return ctx_; }
 
 private:
   mlir::ModuleOp module_;
-  mlir::MLIRContext &ctx_;
+  mlir::MLIRContext& ctx_;
   int cost_threshold_;
   bool collect_stats_;
 };

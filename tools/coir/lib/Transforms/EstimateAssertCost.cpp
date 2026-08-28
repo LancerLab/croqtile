@@ -33,7 +33,7 @@ constexpr uint64_t kHighCostThreshold = 500;
 
 static uint64_t estimateNestingCost(AssertOp assertOp, KernelOp kernel) {
   uint64_t cost = 1;
-  auto *current = assertOp->getParentOp();
+  auto* current = assertOp->getParentOp();
   while (current && current != kernel.getOperation()) {
     if (auto foreachOp = dyn_cast<ForeachOp>(current)) {
       auto ub = foreachOp.getUpperBound();
@@ -68,8 +68,8 @@ struct EstimateAssertCostPass
     // Read threshold from module attribute (set by Pipeline), or fall back to
     // the pass option (for standalone coir-opt usage).
     int threshold = costThreshold;
-    if (auto attr = getOperation()->getAttrOfType<IntegerAttr>(
-            "coir.cost_threshold"))
+    if (auto attr =
+            getOperation()->getAttrOfType<IntegerAttr>("coir.cost_threshold"))
       threshold = attr.getInt();
 
     getOperation()->walk([&](AssertOp assertOp) {
@@ -77,7 +77,7 @@ struct EstimateAssertCostPass
       uint64_t cost = kernel ? estimateNestingCost(assertOp, kernel) : 1;
       auto tier = categorizeCost(cost);
       bool enabled = static_cast<int>(tier) < threshold;
-      auto *ctx = assertOp.getContext();
+      auto* ctx = assertOp.getContext();
       assertOp->setAttr("estimated_cost",
                         IntegerAttr::get(IntegerType::get(ctx, 64), cost));
       assertOp->setAttr("cost_class", AssertCostAttr::get(ctx, tier));

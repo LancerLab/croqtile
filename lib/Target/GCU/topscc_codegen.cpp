@@ -354,7 +354,8 @@ bool TopsccCodeGen::BeforeVisitImpl(AST::Node& n) {
       }
       // The placeholder will be replaced with the actual DTE pool decl.
       if (use_dte_pool)
-        ds << R"(  /*__CHOREO_DTE_POOL_PLACEHOLDER__*/)" << "\n";
+        ds << R"(  /*__CHOREO_DTE_POOL_PLACEHOLDER__*/)"
+           << "\n";
       ds << d_indent << "{ // parallel-by: " << n.LOC() << "\n";
       VST_DEBUG(pb->InlinePrint(dbgs());
                 dbgs() << " (max-level: " << STR(TargetMaxLevel()) << ")\n");
@@ -3624,7 +3625,8 @@ void TopsccCodeGen::EmitHostRuntimeCheck() {
 void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
   const auto& mri = FCtx(fname).GetDynMemReuseInfo(df_name);
   if (!mri) return;
-  hs << h_indent << R"(// JIT memory reuse begin)" << "\n";
+  hs << h_indent << R"(// JIT memory reuse begin)"
+     << "\n";
   for (const auto& [sto, ie] : mri->infos) {
     hs << h_indent << "HeapSimulator::Chunks " << ie.chunks_name << ";\n";
     for (const auto& c : ie.chunks)
@@ -3691,7 +3693,8 @@ void TopsccCodeGen::EmitMemReuse(const std::string& df_name) {
         hs << h_indent << "}\n";);
     // --- end memory reuse diagnostics ---
   }
-  hs << h_indent << R"(// JIT memory reuse end)" << "\n";
+  hs << h_indent << R"(// JIT memory reuse end)"
+     << "\n";
 }
 
 static inline const std::string

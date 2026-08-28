@@ -105,10 +105,10 @@ inline std::string GetAcoreFuncName(const std::string& full_name) {
 enum class AcoreMMAFormat { MK_KN, MK_NK };
 
 struct AcoreMatmulPattern {
-  int M;                    // static-M value, or 0 for the dynamic (64-aligned) overload
-  AcoreMMAFormat format;    // MK_KN (ROW_COL) or MK_NK (ROW_ROW)
-  BaseType lhs_type;        // input (and rhs) element type
-  BaseType out_type;        // accumulator/output element type
+  int M; // static-M value, or 0 for the dynamic (64-aligned) overload
+  AcoreMMAFormat format; // MK_KN (ROW_COL) or MK_NK (ROW_ROW)
+  BaseType lhs_type;     // input (and rhs) element type
+  BaseType out_type;     // accumulator/output element type
   int K_align;
   int N_align;
 };
@@ -495,8 +495,8 @@ LibGemmLoweringInfo AnalyzeLibGemm(AST::Call& n, AssessFn /* assess_fn */,
     info.use_acore = true;
     info.use_static_M = true;
     info.static_M = static_M;
-    auto [ka, na] = GetAcoreAlignments(static_M, lhs_bt, out_bt,
-                                       AcoreMMAFormat::MK_KN);
+    auto [ka, na] =
+        GetAcoreAlignments(static_M, lhs_bt, out_bt, AcoreMMAFormat::MK_KN);
     info.K_align = ka;
     info.N_align = na;
     if (ka == 0) {
@@ -510,7 +510,8 @@ LibGemmLoweringInfo AnalyzeLibGemm(AST::Call& n, AssessFn /* assess_fn */,
     info.use_acore = true;
     info.use_static_M = false;
     info.static_M = static_M;
-    auto [ka, na] = GetAcoreAlignments(0, lhs_bt, out_bt, AcoreMMAFormat::MK_KN);
+    auto [ka, na] =
+        GetAcoreAlignments(0, lhs_bt, out_bt, AcoreMMAFormat::MK_KN);
     info.K_align = ka;
     info.N_align = na;
   } else if (static_M > 0) {

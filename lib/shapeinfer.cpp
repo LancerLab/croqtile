@@ -1268,8 +1268,8 @@ bool ShapeInference::Visit(AST::BufferMap& n) {
 
     auto size_vn = GetValNo(*n.size);
     auto size_shape = GenShape(size_vn);
-    auto map_sty = MakeDenseSpannedType(source_sty->ElementType(), size_shape,
-                                        n.storage);
+    auto map_sty =
+        MakeDenseSpannedType(source_sty->ElementType(), size_shape, n.storage);
     SetNodeType(n, map_sty);
 
     auto s = GenShape(source_vn);

@@ -407,9 +407,9 @@ public:
   //     local_per_replica * replicas_per_pool + shared <= pool_bytes
   // where replicas_per_pool is the number of LOCAL replicas sharing one pool.
   struct LocalSharedPool {
-    bool aliased = false;        // whether LOCAL and SHARED alias one pool
+    bool aliased = false;         // whether LOCAL and SHARED alias one pool
     size_t replicas_per_pool = 0; // LOCAL replicas sharing one pool
-    size_t pool_bytes = 0;       // total combined on-chip pool (LOCAL + SHARED)
+    size_t pool_bytes = 0; // total combined on-chip pool (LOCAL + SHARED)
   };
   virtual LocalSharedPool GetLocalSharedPool(const ArchId& arch) const {
     (void)arch;

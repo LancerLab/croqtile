@@ -683,8 +683,9 @@ public:
     auto pred = sbe::cmp("<=", bytes, sbe::nu((int64_t)max_bytes));
     if (auto bv = VIBool(pred); bv && bv.value()) return; // trivially safe
     Assess(pred,
-           "On " + cur_arch + ", the size of data mapped by "
-           "buffer.map/remap cannot exceed " +
+           "On " + cur_arch +
+               ", the size of data mapped by "
+               "buffer.map/remap cannot exceed " +
                std::to_string(max_bytes) + " bytes.",
            n, &n);
   }

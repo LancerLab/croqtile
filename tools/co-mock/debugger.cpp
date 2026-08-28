@@ -135,8 +135,7 @@ bool Debugger::ProcessCommand(const std::string& input, AST::Node& stmt) {
     if (mem_.Exists(cmd)) {
       CmdPrint(cmd);
     } else {
-      std::cout << "Unknown command: '" << cmd
-                << "'. Type 'h' for help.\n";
+      std::cout << "Unknown command: '" << cmd << "'. Type 'h' for help.\n";
     }
     mode_ = (Mode)-1;
   }
@@ -144,24 +143,23 @@ bool Debugger::ProcessCommand(const std::string& input, AST::Node& stmt) {
 }
 
 void Debugger::CmdHelp() {
-  std::cout
-      << "co-mock interactive debugger\n"
-      << "\n"
-      << "  s, step        Execute one statement (step into blocks)\n"
-      << "  n, next        Execute one statement (step over blocks)\n"
-      << "  c, continue    Run until next breakpoint or end\n"
-      << "  p <var>        Print variable value\n"
-      << "  l, list        Show source around current line\n"
-      << "  b <line>       Set breakpoint at line number\n"
-      << "  d <line>       Delete breakpoint at line number\n"
-      << "  info           Show all variables in scope\n"
-      << "  info futures   Show async DMA future status\n"
-      << "  info mem       Show memory allocations\n"
-      << "  info break     Show all breakpoints\n"
-      << "  q, quit        Exit the debugger\n"
-      << "  <Enter>        Repeat last step\n"
-      << "  <varname>      Print variable (shorthand for 'p <var>')\n"
-      << "\n";
+  std::cout << "co-mock interactive debugger\n"
+            << "\n"
+            << "  s, step        Execute one statement (step into blocks)\n"
+            << "  n, next        Execute one statement (step over blocks)\n"
+            << "  c, continue    Run until next breakpoint or end\n"
+            << "  p <var>        Print variable value\n"
+            << "  l, list        Show source around current line\n"
+            << "  b <line>       Set breakpoint at line number\n"
+            << "  d <line>       Delete breakpoint at line number\n"
+            << "  info           Show all variables in scope\n"
+            << "  info futures   Show async DMA future status\n"
+            << "  info mem       Show memory allocations\n"
+            << "  info break     Show all breakpoints\n"
+            << "  q, quit        Exit the debugger\n"
+            << "  <Enter>        Repeat last step\n"
+            << "  <varname>      Print variable (shorthand for 'p <var>')\n"
+            << "\n";
 }
 
 void Debugger::CmdList(AST::Node& stmt, int context_lines) {
@@ -289,9 +287,7 @@ void Debugger::CmdBreak(const std::string& arg) {
     int line = std::stoi(arg);
     breakpoints_.insert(line);
     std::cout << "Breakpoint set at line " << line << "\n";
-  } catch (...) {
-    std::cout << "Usage: b <line_number>\n";
-  }
+  } catch (...) { std::cout << "Usage: b <line_number>\n"; }
 }
 
 void Debugger::CmdDelete(const std::string& arg) {
@@ -306,9 +302,7 @@ void Debugger::CmdDelete(const std::string& arg) {
       std::cout << "Breakpoint at line " << line << " deleted.\n";
     else
       std::cout << "No breakpoint at line " << line << ".\n";
-  } catch (...) {
-    std::cout << "Usage: d <line_number>\n";
-  }
+  } catch (...) { std::cout << "Usage: d <line_number>\n"; }
 }
 
 void Debugger::CmdBreakpoints() {

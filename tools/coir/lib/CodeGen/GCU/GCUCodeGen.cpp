@@ -33,25 +33,23 @@ namespace mgpu = mlir::gpu;
 namespace {
 
 #ifdef __CHOREO_KURAMA_DIR__
-static constexpr const char *kKuramaDir = __CHOREO_KURAMA_DIR__;
+static constexpr const char* kKuramaDir = __CHOREO_KURAMA_DIR__;
 #else
-static constexpr const char *kKuramaDir = nullptr;
+static constexpr const char* kKuramaDir = nullptr;
 #endif
 
 #ifdef __CHOREO_TOPSCC_DIR__
-static constexpr const char *kTopsccDir = __CHOREO_TOPSCC_DIR__;
+static constexpr const char* kTopsccDir = __CHOREO_TOPSCC_DIR__;
 #else
-static constexpr const char *kTopsccDir = nullptr;
+static constexpr const char* kTopsccDir = nullptr;
 #endif
 
 std::string findTool(llvm::StringRef name, bool verbose = false) {
-  auto checkDir = [&](const char *label,
-                      const char *dir) -> std::string {
+  auto checkDir = [&](const char* label, const char* dir) -> std::string {
     if (!dir) return {};
     llvm::SmallString<256> path(dir);
     llvm::sys::path::append(path, "bin", name);
-    if (verbose)
-      llvm::errs() << "  " << label << ": " << path;
+    if (verbose) llvm::errs() << "  " << label << ": " << path;
     if (llvm::sys::fs::exists(path)) {
       if (verbose) llvm::errs() << " [found]\n";
       return std::string(path);
@@ -59,14 +57,12 @@ std::string findTool(llvm::StringRef name, bool verbose = false) {
     if (verbose) llvm::errs() << " [not found]\n";
     return {};
   };
-  if (verbose)
-    llvm::errs() << "findTool(\"" << name << "\") search order:\n";
+  if (verbose) llvm::errs() << "findTool(\"" << name << "\") search order:\n";
   if (auto p = checkDir("KURAMA_DIR", kKuramaDir); !p.empty()) return p;
   if (auto p = checkDir("TOPSCC_DIR", kTopsccDir); !p.empty()) return p;
   if (auto p = checkDir("/opt/tops", "/opt/tops"); !p.empty()) return p;
   if (auto found = llvm::sys::findProgramByName(name)) {
-    if (verbose)
-      llvm::errs() << "  PATH: " << *found << " [found]\n";
+    if (verbose) llvm::errs() << "  PATH: " << *found << " [found]\n";
     return std::string(*found);
   }
   if (verbose) llvm::errs() << "  PATH: [not found]\n";
@@ -82,24 +78,22 @@ public:
   }
 
   int EmitSource(mlir::ModuleOp, llvm::StringRef,
-                 llvm::raw_ostream &os) override {
+                 llvm::raw_ostream& os) override {
     os << "error: -t gcu does not support -es (emit source); "
           "use -t topscc for text emission\n";
     return 1;
   }
 
   int EmitScript(mlir::ModuleOp module, llvm::StringRef arch,
-                 llvm::raw_ostream &os) override {
+                 llvm::raw_ostream& os) override {
     emitScriptPrologue(os, "GCU native: compile device binary via kurama");
 
     std::string optPath = findTool("gcu-compiler-opt");
     std::string compilePath = findTool("gcu-compiler-compile");
     if (optPath.empty() || compilePath.empty()) {
       llvm::errs() << "error: required tools not found for GCU script.\n";
-      if (optPath.empty())
-        findTool("gcu-compiler-opt", true);
-      if (compilePath.empty())
-        findTool("gcu-compiler-compile", true);
+      if (optPath.empty()) findTool("gcu-compiler-opt", true);
+      if (compilePath.empty()) findTool("gcu-compiler-compile", true);
       return 1;
     }
 
@@ -107,8 +101,8 @@ public:
 
     // Emit explicit device code (__cok__ / __device__ blocks) as a separate
     // file for topscc compilation (Phase 1: script-based integration).
-    auto explicitDeviceAttr = module->getAttrOfType<mlir::StringAttr>(
-        "coir.explicit_device_code");
+    auto explicitDeviceAttr =
+        module->getAttrOfType<mlir::StringAttr>("coir.explicit_device_code");
     if (explicitDeviceAttr && !explicitDeviceAttr.getValue().empty()) {
       os << "# Explicit device code (__cok__ / __device__ blocks)\n";
       os << "EXPLICIT_DEVICE_FILE=\"$TMPDIR/explicit_device.cc\"\n";
@@ -152,15 +146,13 @@ public:
        << " \"$LOWFILE\" -o \"$BINMLIR\" || exit 1\n\n";
 
     os << "\"" << compilePath << "\""
-       << " \"$BINMLIR\" -a " << a
-       << " -o \"$BINFILE\" || exit 1\n\n";
+       << " \"$BINMLIR\" -a " << a << " -o \"$BINFILE\" || exit 1\n\n";
 
     // If explicit device code was emitted, compile it with topscc.
     if (explicitDeviceAttr && !explicitDeviceAttr.getValue().empty()) {
       os << "# Compile explicit device code with topscc\n";
       os << "\"${TOPSCC:-topscc}\" --cuda-device-only -c -emit-llvm"
-         << " -arch " << a
-         << " -o \"$TMPDIR/explicit_device.bc\""
+         << " -arch " << a << " -o \"$TMPDIR/explicit_device.bc\""
          << " \"$EXPLICIT_DEVICE_FILE\" 2>&1\n";
       os << "# TODO(Phase 1): link explicit_device.bc with kurama device"
          << " binary via llvm-link\n";
@@ -185,8 +177,8 @@ public:
     }
 
     llvm::SmallString<128> mlirFile;
-    if (auto ec = llvm::sys::fs::createTemporaryFile(
-            "choreo-gcu", "mlir", mlirFile)) {
+    if (auto ec = llvm::sys::fs::createTemporaryFile("choreo-gcu", "mlir",
+                                                     mlirFile)) {
       llvm::errs() << "error: cannot create temp file: " << ec.message()
                    << "\n";
       return 1;
@@ -205,8 +197,8 @@ public:
 
     // Step 1: Lower GPU MLIR to GCU LLVM dialect
     llvm::SmallString<128> loweredMlir;
-    if (auto ec = llvm::sys::fs::createTemporaryFile(
-            "choreo-gcu-low", "mlir", loweredMlir)) {
+    if (auto ec = llvm::sys::fs::createTemporaryFile("choreo-gcu-low", "mlir",
+                                                     loweredMlir)) {
       llvm::errs() << "error: cannot create temp file: " << ec.message()
                    << "\n";
       llvm::sys::fs::remove(mlirFile);
@@ -247,8 +239,8 @@ public:
 
     // Step 2: Serialize GPU module to binary object
     llvm::SmallString<128> binaryMlir;
-    if (auto ec = llvm::sys::fs::createTemporaryFile(
-            "choreo-gcu-bin", "mlir", binaryMlir)) {
+    if (auto ec = llvm::sys::fs::createTemporaryFile("choreo-gcu-bin", "mlir",
+                                                     binaryMlir)) {
       llvm::errs() << "error: cannot create temp file: " << ec.message()
                    << "\n";
       llvm::sys::fs::remove(mlirFile);
@@ -258,8 +250,8 @@ public:
 
     {
       llvm::SmallVector<llvm::StringRef, 8> args = {
-          optTool, "-gpu-module-to-binary=format=llvm",
-          loweredMlir, "-o", binaryMlir};
+          optTool, "-gpu-module-to-binary=format=llvm", loweredMlir, "-o",
+          binaryMlir};
 
       std::string errMsg;
       int rc = llvm::sys::ExecuteAndWait(optTool, args, /*Env=*/std::nullopt,
@@ -280,8 +272,8 @@ public:
 
     // Step 3: gcu-compiler-compile <binary.mlir> -o <output>
     {
-      llvm::SmallVector<llvm::StringRef, 8> args = {
-          compileTool, binaryMlir, "-o", outputPath};
+      llvm::SmallVector<llvm::StringRef, 8> args = {compileTool, binaryMlir,
+                                                    "-o", outputPath};
       llvm::SmallString<32> archFlag;
       if (!arch.empty()) {
         archFlag = "-a";
@@ -311,9 +303,8 @@ public:
 };
 
 static bool registered_gcu = [] {
-  CoIR::CodeGenRegistry::Register("gcu", [] {
-    return std::make_unique<GCUNativeCodeGen>();
-  });
+  CoIR::CodeGenRegistry::Register(
+      "gcu", [] { return std::make_unique<GCUNativeCodeGen>(); });
   return true;
 }();
 

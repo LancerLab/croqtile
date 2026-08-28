@@ -30,20 +30,16 @@ public:
       switch (sto) {
       case Storage::LOCAL:
         return 1.5 * 1024 * 1024 - 512; // 1.5MB L1 VDMEM minus reserved
-      case Storage::SHARED:
-        return 64ull * 1024 * 1024; // 64MB L2 SRAM
-      case Storage::GLOBAL:
-        return 40.75 * 1024 * 1024 * 1024; // 40.75GB
+      case Storage::SHARED: return 64ull * 1024 * 1024;        // 64MB L2 SRAM
+      case Storage::GLOBAL: return 40.75 * 1024 * 1024 * 1024; // 40.75GB
       default: choreo_unreachable("unsupported storage level.");
       }
     } else if (arch_num < 500) { // gcu400 / gcu450 (DSM, no L2 SRAM)
       switch (sto) {
       case Storage::LOCAL:
         return 0xE0000ull; // 896KB L1 VDMEM per SIP (GCU_VDMEM_SIZE)
-      case Storage::SHARED:
-        return 0x600000ull; // 6MB DSM (GCU_CSB_SIZE)
-      case Storage::GLOBAL:
-        return 144ull * 1024 * 1024 * 1024; // 144GB HBM3
+      case Storage::SHARED: return 0x600000ull; // 6MB DSM (GCU_CSB_SIZE)
+      case Storage::GLOBAL: return 144ull * 1024 * 1024 * 1024; // 144GB HBM3
       default: choreo_unreachable("unsupported storage level.");
       }
     } else { // gcu500 (DSM); per-storage capacities still to be verified
@@ -59,12 +55,14 @@ public:
     }
     return 0;
   }
-  Target::LocalSharedPool GetLocalSharedPool(const ArchId& arch) const override {
+  Target::LocalSharedPool
+  GetLocalSharedPool(const ArchId& arch) const override {
     // gcu400+ (gcu400/gcu450/gcu500 and sim variants) have no dedicated L2
     // SRAM: DSM (SHARED) is a cross-SIP view of the same L1 VDMEM (LOCAL).
     // Per topsop tiered_memory_alloc, "L1 + L2 share a fixed pool =
     // vdmem_size * sip_num", i.e. 8 SIPs x 896 KiB = 7 MiB per block. The
-    // joint budget is: local_per_sip * replicas_per_pool + shared <= pool_bytes.
+    // joint budget is: local_per_sip * replicas_per_pool + shared <=
+    // pool_bytes.
     if (ArchNum(arch) >= 400)
       return {true, /*replicas_per_pool=*/8,
               /*pool_bytes=*/7ull * 1024 * 1024};

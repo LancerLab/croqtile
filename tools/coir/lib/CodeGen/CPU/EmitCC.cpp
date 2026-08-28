@@ -6,12 +6,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Dialect/CoIR/Passes.h"
+#include "CodeGen/CoIREmitterBase.h"
+#include "Dialect/CoIR/CoIRAttrs.h"
 #include "Dialect/CoIR/CoIRDialect.h"
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
-#include "Dialect/CoIR/CoIRAttrs.h"
-#include "CodeGen/CoIREmitterBase.h"
+#include "Dialect/CoIR/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -36,7 +36,7 @@ class CCEmitter : public coir::CoIREmitterBase {
 public:
   CCEmitter() = default;
 
-  void emitModule(ModuleOp module, llvm::raw_ostream &os) override {
+  void emitModule(ModuleOp module, llvm::raw_ostream& os) override {
     os_ = &os;
     resetState();
     hasMMAOps = false;
@@ -48,19 +48,17 @@ public:
     scanFeatures(module);
     emitHeader();
     emitExplicitDeviceCode(module, os);
-    for (auto &op : module.getBody()->getOperations()) {
-      if (auto kernel = dyn_cast<KernelOp>(op))
-        emitKernel(kernel);
+    for (auto& op : module.getBody()->getOperations()) {
+      if (auto kernel = dyn_cast<KernelOp>(op)) emitKernel(kernel);
     }
-    for (auto &op : module.getBody()->getOperations()) {
-      if (auto kernel = dyn_cast<KernelOp>(op))
-        emitHostEntry(kernel);
+    for (auto& op : module.getBody()->getOperations()) {
+      if (auto kernel = dyn_cast<KernelOp>(op)) emitHostEntry(kernel);
     }
   }
 
   int EmitScript(mlir::ModuleOp module, llvm::StringRef /*arch*/,
-                 llvm::raw_ostream &os) override {
-    auto &sctx = CoIR::ScriptContext::Get();
+                 llvm::raw_ostream& os) override {
+    auto& sctx = CoIR::ScriptContext::Get();
     bool has_embedded = sctx.types_header && sctx.runtime_header;
 
     emitScriptPrologue(os, "compile and execute CPU kernel", "_cc");
@@ -92,32 +90,21 @@ private:
   std::string emitType(Type ty) override {
     if (auto tensorTy = dyn_cast<coir::TensorType>(ty))
       return emitElementType(tensorTy.getElementType()) + "*";
-    if (isa<coir::AsyncTokenType>(ty))
-      return "int";
-    if (ty.isIndex())
-      return "int";
-    if (ty.isBF16())
-      return "choreo::bf16";
-    if (ty.isF16())
-      return "choreo::f16";
-    if (ty.isF32())
-      return "float";
-    if (ty.isF64())
-      return "double";
+    if (isa<coir::AsyncTokenType>(ty)) return "int";
+    if (ty.isIndex()) return "int";
+    if (ty.isBF16()) return "choreo::bf16";
+    if (ty.isF16()) return "choreo::f16";
+    if (ty.isF32()) return "float";
+    if (ty.isF64()) return "double";
     if (auto fty = dyn_cast<FloatType>(ty)) {
       if (fty.getWidth() == 8) return "uint8_t";
       if (fty.getWidth() == 19) return "float"; // TF32
     }
-    if (ty.isInteger(1))
-      return "bool";
-    if (ty.isInteger(8))
-      return "uint8_t";
-    if (ty.isInteger(16))
-      return "int16_t";
-    if (ty.isInteger(32))
-      return "int";
-    if (ty.isInteger(64))
-      return "long long";
+    if (ty.isInteger(1)) return "bool";
+    if (ty.isInteger(8)) return "uint8_t";
+    if (ty.isInteger(16)) return "int16_t";
+    if (ty.isInteger(32)) return "int";
+    if (ty.isInteger(64)) return "long long";
     return "/* unknown type */";
   }
 
@@ -146,11 +133,10 @@ private:
   llvm::DenseSet<llvm::StringRef> eventNames;
 
   void scanFeatures(ModuleOp module) {
-    module.walk([&](Operation *op) {
+    module.walk([&](Operation* op) {
       if (isa<MMAFillOp, MMALoadOp, MMAExecOp, MMAStoreOp>(op))
         hasMMAOps = true;
-      if (isa<DmaCopyOp, AsyncUndefOp, FutureRotateOp>(op))
-        hasAsyncOps = true;
+      if (isa<DmaCopyOp, AsyncUndefOp, FutureRotateOp>(op)) hasAsyncOps = true;
       if (auto et = dyn_cast<EventTriggerOp>(op)) {
         hasEventOps = true;
         eventNames.insert(et.getEventName());
@@ -168,8 +154,7 @@ private:
             callee.starts_with("__sin") || callee.starts_with("__cos") ||
             callee.starts_with("__tanh"))
           hasLibCalls = true;
-        if (callee == "print" || callee == "println")
-          hasPrintCalls = true;
+        if (callee == "print" || callee == "println") hasPrintCalls = true;
       }
     });
   }
@@ -177,16 +162,12 @@ private:
   void emitHeader() {
     os() << "#define __CHOREO_TARGET_CPU__ 1\n";
     os() << "#include \"choreo.h\"\n";
-    if (hasMMAOps || hasEventOps)
-      os() << "#include \"choreo_cc.h\"\n";
+    if (hasMMAOps || hasEventOps) os() << "#include \"choreo_cc.h\"\n";
     os() << "#include <cstring>\n";
     os() << "#include <cstdlib>\n";
-    if (hasLibCalls)
-      os() << "#include <cmath>\n";
-    if (hasPrintCalls)
-      os() << "#include <iostream>\n";
-    if (hasAsyncOps)
-      os() << "#include <future>\n";
+    if (hasLibCalls) os() << "#include <cmath>\n";
+    if (hasPrintCalls) os() << "#include <iostream>\n";
+    if (hasAsyncOps) os() << "#include <future>\n";
     os() << "\n";
   }
 
@@ -194,15 +175,24 @@ private:
     if (auto tty = dyn_cast<coir::TensorType>(ty)) {
       std::string choreoElem;
       auto eTyML = tty.getElementType();
-      if (eTyML.isInteger(8)) choreoElem = "choreo::u8";
-      else if (eTyML.isInteger(16)) choreoElem = "choreo::s16";
-      else if (eTyML.isInteger(32)) choreoElem = "choreo::s32";
-      else if (eTyML.isInteger(64)) choreoElem = "choreo::s64";
-      else if (eTyML.isBF16()) choreoElem = "choreo::bf16";
-      else if (eTyML.isF32()) choreoElem = "choreo::f32";
-      else if (eTyML.isF16()) choreoElem = "choreo::f16";
-      else if (eTyML.isF64()) choreoElem = "choreo::f64";
-      else choreoElem = "choreo::s32";
+      if (eTyML.isInteger(8))
+        choreoElem = "choreo::u8";
+      else if (eTyML.isInteger(16))
+        choreoElem = "choreo::s16";
+      else if (eTyML.isInteger(32))
+        choreoElem = "choreo::s32";
+      else if (eTyML.isInteger(64))
+        choreoElem = "choreo::s64";
+      else if (eTyML.isBF16())
+        choreoElem = "choreo::bf16";
+      else if (eTyML.isF32())
+        choreoElem = "choreo::f32";
+      else if (eTyML.isF16())
+        choreoElem = "choreo::f16";
+      else if (eTyML.isF64())
+        choreoElem = "choreo::f64";
+      else
+        choreoElem = "choreo::s32";
       unsigned ndim = tty.getShape().size();
       if (asView)
         return "const choreo::spanned_view<" + choreoElem + ", " +
@@ -220,7 +210,7 @@ private:
 
   bool needsTMAAlignment(coir::TensorType /*tty*/) override { return false; }
 
-  void emitOpFallback(mlir::Operation *op) override {
+  void emitOpFallback(mlir::Operation* op) override {
     if (auto tmaCopy = dyn_cast<TmaCopyOp>(op))
       os() << getIndent() << "// TMA not supported on CPU target\n";
     else if (auto elemCopy = dyn_cast<ElementCopyOp>(op))
@@ -240,8 +230,7 @@ private:
   }
 
   void emitTensorAlloc(TensorAllocOp op) override {
-    if (returnValues.count(op.getResult()))
-      return;
+    if (returnValues.count(op.getResult())) return;
 
     auto tensorTy = cast<coir::TensorType>(op.getResult().getType());
     std::string name = getName(op.getResult());
@@ -252,15 +241,14 @@ private:
                 op->getAttrOfType<mlir::IntegerAttr>("spm_size")) {
           int64_t spmBytes = spmSizeAttr.getInt();
           lastSpmName = "__spm_" + std::to_string(nextId++);
-          os() << getIndent() << "alignas(64) unsigned char "
-               << lastSpmName << "[" << spmBytes << "];\n";
+          os() << getIndent() << "alignas(64) unsigned char " << lastSpmName
+               << "[" << spmBytes << "];\n";
         }
       }
       int64_t offset = op.getReuseOffset().value_or(0);
       std::string eType = emitElementType(tensorTy.getElementType());
       os() << getIndent() << eType << "* " << name << " = (" << eType
-           << "*)((unsigned char*)" << lastSpmName << " + " << offset
-           << ");\n";
+           << "*)((unsigned char*)" << lastSpmName << " + " << offset << ");\n";
       return;
     }
 
@@ -278,12 +266,12 @@ private:
     int64_t totalElems = 1;
     for (auto d : tensorTy.getShape()) totalElems *= d;
     os() << getIndent() << "alignas(64) "
-         << emitElementType(tensorTy.getElementType()) << " " << name
-         << "[" << totalElems << "];\n";
+         << emitElementType(tensorTy.getElementType()) << " " << name << "["
+         << totalElems << "];\n";
   }
 
   void emitForeach(ForeachOp op) override {
-    auto &body = op.getBody();
+    auto& body = op.getBody();
     auto args = body.front().getArguments();
     std::string iv = getName(args[0]);
     std::string ub = getName(op.getUpperBound());
@@ -295,13 +283,11 @@ private:
            << getName(iterArgs[i]) << ";\n";
     }
 
-    if (iterArgs.empty())
-      os() << getIndent() << "#pragma omp simd\n";
-    os() << getIndent() << "for (int " << iv << " = 0; " << iv << " < "
-         << ub << "; ++" << iv << ") {\n";
+    if (iterArgs.empty()) os() << getIndent() << "#pragma omp simd\n";
+    os() << getIndent() << "for (int " << iv << " = 0; " << iv << " < " << ub
+         << "; ++" << iv << ") {\n";
     incIndent();
-    for (auto &bodyOp : body.front().getOperations())
-      emitOp(&bodyOp);
+    for (auto& bodyOp : body.front().getOperations()) emitOp(&bodyOp);
     decIndent();
     os() << getIndent() << "}\n";
 
@@ -341,9 +327,8 @@ private:
     std::string eType = emitElementType(resTy.getElementType());
     os() << getIndent() << "alignas(64) " << eType << " " << name << "["
          << count << "];\n";
-    os() << getIndent() << "choreo::cc::mma_fill(" << name << ", ("
-         << eType << ")" << getName(op.getValue()) << ", " << count
-         << ");\n";
+    os() << getIndent() << "choreo::cc::mma_fill(" << name << ", (" << eType
+         << ")" << getName(op.getValue()) << ", " << count << ");\n";
   }
   void emitMMALoad(MMALoadOp op) override {
     auto srcTy = cast<coir::TensorType>(op.getSource().getType());
@@ -378,7 +363,7 @@ private:
     std::string accName = getName(op.getAccumulator());
     valueNames[op.getResult()] = accName;
 
-    const char *layoutFn = "mma_exec_row_col";
+    const char* layoutFn = "mma_exec_row_col";
     switch (op.getLayout()) {
     case coir::MMALayout::RowCol: layoutFn = "mma_exec_row_col"; break;
     case coir::MMALayout::RowRow: layoutFn = "mma_exec_row_row"; break;
@@ -386,20 +371,20 @@ private:
     case coir::MMALayout::ColCol: layoutFn = "mma_exec_col_col"; break;
     }
 
-    os() << getIndent() << "choreo::cc::" << layoutFn << "<" << accElem
-         << ", " << lhsElem << ", " << rhsElem << ", " << accElem << ">("
-         << accName << ", " << getName(op.getLhs()) << ", "
-         << getName(op.getRhs()) << ", " << accName << ", "
-         << M << ", " << N << ", " << K << ");\n";
+    os() << getIndent() << "choreo::cc::" << layoutFn << "<" << accElem << ", "
+         << lhsElem << ", " << rhsElem << ", " << accElem << ">(" << accName
+         << ", " << getName(op.getLhs()) << ", " << getName(op.getRhs()) << ", "
+         << accName << ", " << M << ", " << N << ", " << K << ");\n";
   }
   void emitMMAStore(MMAStoreOp op) override {
     auto fragTy = cast<coir::MMAFragType>(op.getFragment().getType());
     int64_t elems = 1;
     for (auto d : fragTy.getShape()) elems *= d;
-    int64_t bytes = elems * (fragTy.getElementType().getIntOrFloatBitWidth() / 8);
+    int64_t bytes =
+        elems * (fragTy.getElementType().getIntOrFloatBitWidth() / 8);
     if (bytes > 0) {
-      os() << getIndent() << "std::memcpy(" << getName(op.getDest())
-           << ", " << getName(op.getFragment()) << ", " << bytes << ");\n";
+      os() << getIndent() << "std::memcpy(" << getName(op.getDest()) << ", "
+           << getName(op.getFragment()) << ", " << bytes << ");\n";
     }
   }
 
@@ -420,7 +405,7 @@ private:
 
     os() << "void __" << symName << "_impl__(";
 
-    auto &body = kernel.getBody();
+    auto& body = kernel.getBody();
     unsigned paramIdx = 0;
     if (!body.empty()) {
       auto args = body.getArguments();
@@ -444,11 +429,9 @@ private:
 
     prescanReturnValues(kernel);
 
-    if (hasEventOps)
-      emitEventDecls(kernel);
+    if (hasEventOps) emitEventDecls(kernel);
 
-    for (auto &op : body.front().getOperations())
-      emitOp(&op);
+    for (auto& op : body.front().getOperations()) emitOp(&op);
 
     decIndent();
     os() << "}\n\n";
@@ -471,16 +454,14 @@ private:
   void emitEventTrigger(EventTriggerOp op) {
     auto name = op.getEventName();
     std::string ref = name.str();
-    if (auto sub = op.getSubscript())
-      ref += "[" + sub->str() + "]";
+    if (auto sub = op.getSubscript()) ref += "[" + sub->str() + "]";
     os() << getIndent() << ref << ".trigger();\n";
   }
 
   void emitEventWait(EventWaitOp op) {
     auto name = op.getEventName();
     std::string ref = name.str();
-    if (auto sub = op.getSubscript())
-      ref += "[" + sub->str() + "]";
+    if (auto sub = op.getSubscript()) ref += "[" + sub->str() + "]";
     os() << getIndent() << ref << ".wait();\n";
   }
 
@@ -515,8 +496,7 @@ private:
     auto resTy = dyn_cast<coir::TensorType>(fnType.getResult(0));
     if (!resTy) return;
 
-    os() << emitChoreoType(fnType.getResult(0), false) << " " << symName
-         << "(";
+    os() << emitChoreoType(fnType.getResult(0), false) << " " << symName << "(";
     for (unsigned i = 0; i < numInputs; ++i) {
       if (i > 0) os() << ", ";
       os() << emitChoreoType(fnType.getInput(i), true) << " p" << i;
@@ -535,15 +515,24 @@ private:
     }
     std::string choreoElem;
     auto resElemTy = resTy.getElementType();
-    if (resElemTy.isInteger(8)) choreoElem = "choreo::u8";
-    else if (resElemTy.isInteger(16)) choreoElem = "choreo::s16";
-    else if (resElemTy.isInteger(32)) choreoElem = "choreo::s32";
-    else if (resElemTy.isInteger(64)) choreoElem = "choreo::s64";
-    else if (resElemTy.isBF16()) choreoElem = "choreo::bf16";
-    else if (resElemTy.isF32()) choreoElem = "choreo::f32";
-    else if (resElemTy.isF16()) choreoElem = "choreo::f16";
-    else if (resElemTy.isF64()) choreoElem = "choreo::f64";
-    else choreoElem = "choreo::s32";
+    if (resElemTy.isInteger(8))
+      choreoElem = "choreo::u8";
+    else if (resElemTy.isInteger(16))
+      choreoElem = "choreo::s16";
+    else if (resElemTy.isInteger(32))
+      choreoElem = "choreo::s32";
+    else if (resElemTy.isInteger(64))
+      choreoElem = "choreo::s64";
+    else if (resElemTy.isBF16())
+      choreoElem = "choreo::bf16";
+    else if (resElemTy.isF32())
+      choreoElem = "choreo::f32";
+    else if (resElemTy.isF16())
+      choreoElem = "choreo::f16";
+    else if (resElemTy.isF64())
+      choreoElem = "choreo::f64";
+    else
+      choreoElem = "choreo::s32";
 
     os() << "  auto __result = choreo::make_spandata<" << choreoElem << ", "
          << resTy.getShape().size() << ">(" << shapeStr << ");\n";
@@ -572,12 +561,12 @@ private:
       entryAssertions.push_back({op});
       return;
     }
-    os() << getIndent() << "choreo::choreo_assert(" << getName(op.getCondition())
-         << ", \"" << msg << "\");\n";
+    os() << getIndent() << "choreo::choreo_assert("
+         << getName(op.getCondition()) << ", \"" << msg << "\");\n";
   }
 
   std::string emitExprInHostScope(Value v, KernelOp kernel,
-                                  DenseMap<Value, std::string> &hostNames) {
+                                  DenseMap<Value, std::string>& hostNames) {
     auto it = hostNames.find(v);
     if (it != hostNames.end()) return it->second;
 
@@ -589,7 +578,7 @@ private:
       }
     }
 
-    auto *defOp = v.getDefiningOp();
+    auto* defOp = v.getDefiningOp();
     if (!defOp) return "/* unknown */";
 
     if (auto constOp = dyn_cast<arith::ConstantOp>(defOp)) {
@@ -605,7 +594,7 @@ private:
     if (auto cmpOp = dyn_cast<arith::CmpIOp>(defOp)) {
       auto lhs = emitExprInHostScope(cmpOp.getLhs(), kernel, hostNames);
       auto rhs = emitExprInHostScope(cmpOp.getRhs(), kernel, hostNames);
-      const char *pred = "==";
+      const char* pred = "==";
       switch (cmpOp.getPredicate()) {
       case arith::CmpIPredicate::eq: pred = "=="; break;
       case arith::CmpIPredicate::ne: pred = "!="; break;
@@ -649,11 +638,10 @@ private:
 
   void emitEntryAssertions(KernelOp kernel) {
     DenseMap<Value, std::string> hostNames;
-    for (auto &ea : entryAssertions) {
-      auto cond =
-          emitExprInHostScope(ea.op.getCondition(), kernel, hostNames);
-      os() << "  choreo::runtime_check(" << cond << ", \""
-           << ea.op.getMessage() << "\");\n";
+    for (auto& ea : entryAssertions) {
+      auto cond = emitExprInHostScope(ea.op.getCondition(), kernel, hostNames);
+      os() << "  choreo::runtime_check(" << cond << ", \"" << ea.op.getMessage()
+           << "\");\n";
     }
   }
 
@@ -667,11 +655,9 @@ private:
       return;
     }
 
-    if (isExpr && emitArithBIF(op))
-      return;
+    if (isExpr && emitArithBIF(op)) return;
 
-    if (callee.substr(0, 6) == "__lib_" && emitLibCall(op))
-      return;
+    if (callee.substr(0, 6) == "__lib_" && emitLibCall(op)) return;
 
     os() << getIndent();
     if (isExpr) {
@@ -708,10 +694,8 @@ private:
 
   void emitPrint(CallOp op, bool newline) {
     os() << getIndent() << "std::cout";
-    for (auto a : op.getOperands_())
-      os() << " << " << getName(a);
-    if (newline)
-      os() << " << \"\\n\"";
+    for (auto a : op.getOperands_()) os() << " << " << getName(a);
+    if (newline) os() << " << \"\\n\"";
     os() << ";\n";
   }
 
@@ -720,29 +704,29 @@ private:
     auto operands = op.getOperands_();
     if (operands.empty() || !op.getResult()) return false;
 
-    static const std::pair<llvm::StringRef, const char *> unary_map[] = {
-      {"__sqrt", "std::sqrt"}, {"__exp", "std::exp"},
-      {"__expm1", "std::expm1"}, {"__log", "std::log"},
-      {"__log1p", "std::log1p"}, {"__log2", "std::log2"},
-      {"__abs", "std::abs"}, {"__fabs", "std::fabs"},
-      {"__ceil", "std::ceil"}, {"__floor", "std::floor"},
-      {"__round", "std::round"}, {"__sin", "std::sin"},
-      {"__cos", "std::cos"}, {"__tan", "std::tan"},
-      {"__asin", "std::asin"}, {"__acos", "std::acos"},
-      {"__atan", "std::atan"}, {"__sinh", "std::sinh"},
-      {"__cosh", "std::cosh"}, {"__tanh", "std::tanh"},
-      {"__erf", "std::erf"}, {"__erfc", "std::erfc"},
-      {"__cbrt", "std::cbrt"}, {"__signbit", "std::signbit"},
+    static const std::pair<llvm::StringRef, const char*> unary_map[] = {
+        {"__sqrt", "std::sqrt"},   {"__exp", "std::exp"},
+        {"__expm1", "std::expm1"}, {"__log", "std::log"},
+        {"__log1p", "std::log1p"}, {"__log2", "std::log2"},
+        {"__abs", "std::abs"},     {"__fabs", "std::fabs"},
+        {"__ceil", "std::ceil"},   {"__floor", "std::floor"},
+        {"__round", "std::round"}, {"__sin", "std::sin"},
+        {"__cos", "std::cos"},     {"__tan", "std::tan"},
+        {"__asin", "std::asin"},   {"__acos", "std::acos"},
+        {"__atan", "std::atan"},   {"__sinh", "std::sinh"},
+        {"__cosh", "std::cosh"},   {"__tanh", "std::tanh"},
+        {"__erf", "std::erf"},     {"__erfc", "std::erfc"},
+        {"__cbrt", "std::cbrt"},   {"__signbit", "std::signbit"},
     };
 
     std::string a0 = getName(operands[0]);
     std::string resName = getName(op.getResult());
     auto resTy = op.getResult().getType();
 
-    for (auto &[name, fn] : unary_map) {
+    for (auto& [name, fn] : unary_map) {
       if (callee == name) {
-        os() << getIndent() << emitType(resTy) << " " << resName << " = "
-             << fn << "(" << a0 << ");\n";
+        os() << getIndent() << emitType(resTy) << " " << resName << " = " << fn
+             << "(" << a0 << ");\n";
         return true;
       }
     }
@@ -752,20 +736,20 @@ private:
       return true;
     }
     if (callee == "__gelu") {
-      os() << getIndent() << emitType(resTy) << " " << resName << " = ("
-           << a0 << " * 0.5 * (1.0 + std::erf(" << a0
+      os() << getIndent() << emitType(resTy) << " " << resName << " = (" << a0
+           << " * 0.5 * (1.0 + std::erf(" << a0
            << " * 0.7071067811865476)));\n";
       return true;
     }
     // Binary arith BIFs
     if (operands.size() >= 2) {
       std::string a1 = getName(operands[1]);
-      static const std::pair<llvm::StringRef, const char *> bin_map[] = {
-        {"__max", "std::max"}, {"__min", "std::min"},
-        {"__pow", "std::pow"}, {"__fmod", "std::fmod"},
-        {"__atan2", "std::atan2"},
+      static const std::pair<llvm::StringRef, const char*> bin_map[] = {
+          {"__max", "std::max"},     {"__min", "std::min"},
+          {"__pow", "std::pow"},     {"__fmod", "std::fmod"},
+          {"__atan2", "std::atan2"},
       };
-      for (auto &[name, fn] : bin_map) {
+      for (auto& [name, fn] : bin_map) {
         if (callee == name) {
           os() << getIndent() << emitType(resTy) << " " << resName << " = "
                << fn << "(" << a0 << ", " << a1 << ");\n";
@@ -789,32 +773,32 @@ private:
       std::string K = arg(ki), N = arg(ni);
       std::string bias = has_bias ? arg(3) : "nullptr";
       auto outTy = dyn_cast<coir::TensorType>(operands[0].getType());
-      std::string eType = outTy ? emitElementType(outTy.getElementType())
-                                : "float";
-      os() << getIndent() << "choreo::cc::lib_gemm<" << eType << ">("
-           << out << ", " << A << ", " << B << ", " << bias << ", "
-           << K << ", " << N << ");\n";
+      std::string eType =
+          outTy ? emitElementType(outTy.getElementType()) : "float";
+      os() << getIndent() << "choreo::cc::lib_gemm<" << eType << ">(" << out
+           << ", " << A << ", " << B << ", " << bias << ", " << K << ", " << N
+           << ");\n";
       return true;
     }
 
     // Unary __lib_* (dst, src, num)
-    static const std::pair<llvm::StringRef, const char *> unary_map[] = {
-      {"__lib_abs", "std::abs"}, {"__lib_sqrt", "std::sqrt"},
-      {"__lib_exp", "std::exp"}, {"__lib_log", "std::log"},
-      {"__lib_ceil", "std::ceil"}, {"__lib_floor", "std::floor"},
-      {"__lib_round", "std::round"}, {"__lib_sin", "std::sin"},
-      {"__lib_cos", "std::cos"}, {"__lib_tan", "std::tan"},
-      {"__lib_asin", "std::asin"}, {"__lib_acos", "std::acos"},
-      {"__lib_atan", "std::atan"}, {"__lib_sinh", "std::sinh"},
-      {"__lib_cosh", "std::cosh"}, {"__lib_tanh", "std::tanh"},
-      {"__lib_erf", "std::erf"}, {"__lib_erfc", "std::erfc"},
-      {"__lib_cbrt", "std::cbrt"},
+    static const std::pair<llvm::StringRef, const char*> unary_map[] = {
+        {"__lib_abs", "std::abs"},     {"__lib_sqrt", "std::sqrt"},
+        {"__lib_exp", "std::exp"},     {"__lib_log", "std::log"},
+        {"__lib_ceil", "std::ceil"},   {"__lib_floor", "std::floor"},
+        {"__lib_round", "std::round"}, {"__lib_sin", "std::sin"},
+        {"__lib_cos", "std::cos"},     {"__lib_tan", "std::tan"},
+        {"__lib_asin", "std::asin"},   {"__lib_acos", "std::acos"},
+        {"__lib_atan", "std::atan"},   {"__lib_sinh", "std::sinh"},
+        {"__lib_cosh", "std::cosh"},   {"__lib_tanh", "std::tanh"},
+        {"__lib_erf", "std::erf"},     {"__lib_erfc", "std::erfc"},
+        {"__lib_cbrt", "std::cbrt"},
     };
-    for (auto &[name, fn] : unary_map) {
+    for (auto& [name, fn] : unary_map) {
       if (callee == name && argc >= 3) {
         os() << getIndent() << "for (int __i = 0; __i < " << arg(2)
-             << "; ++__i) " << arg(0) << "[__i] = " << fn << "("
-             << arg(1) << "[__i]);\n";
+             << "; ++__i) " << arg(0) << "[__i] = " << fn << "(" << arg(1)
+             << "[__i]);\n";
         return true;
       }
     }
@@ -828,18 +812,16 @@ private:
       else if (callee == "__lib_reciprocal")
         body = arg(0) + "[__i] = 1.0 / " + arg(1) + "[__i]";
       else if (callee == "__lib_sign")
-        body = arg(0) + "[__i] = (" + arg(1) + "[__i] > 0) - (" +
-               arg(1) + "[__i] < 0)";
+        body = arg(0) + "[__i] = (" + arg(1) + "[__i] > 0) - (" + arg(1) +
+               "[__i] < 0)";
       else if (callee == "__lib_relu")
-        body = arg(0) + "[__i] = " + arg(1) + "[__i] > 0 ? " +
-               arg(1) + "[__i] : 0";
+        body = arg(0) + "[__i] = " + arg(1) + "[__i] > 0 ? " + arg(1) +
+               "[__i] : 0";
       else if (callee == "__lib_gelu")
-        body = arg(0) + "[__i] = " + arg(1) +
-               "[__i] * 0.5 * (1.0 + std::erf(" + arg(1) +
-               "[__i] * 0.7071067811865476))";
+        body = arg(0) + "[__i] = " + arg(1) + "[__i] * 0.5 * (1.0 + std::erf(" +
+               arg(1) + "[__i] * 0.7071067811865476))";
       else if (callee == "__lib_sigmoid")
-        body = arg(0) + "[__i] = 1.0 / (1.0 + std::exp(-" +
-               arg(1) + "[__i]))";
+        body = arg(0) + "[__i] = 1.0 / (1.0 + std::exp(-" + arg(1) + "[__i]))";
       else if (callee == "__lib_silu")
         body = arg(0) + "[__i] = " + arg(1) + "[__i] / (1.0 + std::exp(-" +
                arg(1) + "[__i]))";
@@ -862,20 +844,20 @@ private:
       else if (callee == "__lib_div")
         body = arg(0) + "[__i] = " + arg(1) + "[__i] / " + arg(2) + "[__i]";
       else if (callee == "__lib_max")
-        body = arg(0) + "[__i] = std::max(" + arg(1) + "[__i], " +
-               arg(2) + "[__i])";
+        body = arg(0) + "[__i] = std::max(" + arg(1) + "[__i], " + arg(2) +
+               "[__i])";
       else if (callee == "__lib_min")
-        body = arg(0) + "[__i] = std::min(" + arg(1) + "[__i], " +
-               arg(2) + "[__i])";
+        body = arg(0) + "[__i] = std::min(" + arg(1) + "[__i], " + arg(2) +
+               "[__i])";
       else if (callee == "__lib_pow")
-        body = arg(0) + "[__i] = std::pow(" + arg(1) + "[__i], " +
-               arg(2) + "[__i])";
+        body = arg(0) + "[__i] = std::pow(" + arg(1) + "[__i], " + arg(2) +
+               "[__i])";
       else if (callee == "__lib_fmod")
-        body = arg(0) + "[__i] = std::fmod(" + arg(1) + "[__i], " +
-               arg(2) + "[__i])";
+        body = arg(0) + "[__i] = std::fmod(" + arg(1) + "[__i], " + arg(2) +
+               "[__i])";
       else if (callee == "__lib_atan2")
-        body = arg(0) + "[__i] = std::atan2(" + arg(1) + "[__i], " +
-               arg(2) + "[__i])";
+        body = arg(0) + "[__i] = std::atan2(" + arg(1) + "[__i], " + arg(2) +
+               "[__i])";
       else if (callee == "__lib_gt")
         body = arg(0) + "[__i] = " + arg(1) + "[__i] > " + arg(2) + "[__i]";
       else if (callee == "__lib_ge")
@@ -907,20 +889,18 @@ private:
         accum = "__acc += " + src + "[__outer * " + nreduce + " + __inner]";
       else if (callee == "__lib_reduce_max")
         init = src + "[__outer * " + nreduce + "]",
-        accum = "__acc = std::max(__acc, " + src +
-                "[__outer * " + nreduce + " + __inner])";
+        accum = "__acc = std::max(__acc, " + src + "[__outer * " + nreduce +
+                " + __inner])";
       else
         init = src + "[__outer * " + nreduce + "]",
-        accum = "__acc = std::min(__acc, " + src +
-                "[__outer * " + nreduce + " + __inner])";
-      std::string result =
-          "{ for (int __outer = 0; __outer < " + num +
-          " / " + nreduce +
-          "; ++__outer) { auto __acc = " + init +
-          "; for (int __inner = 0; __inner < " + nreduce +
-          "; ++__inner) { " + accum + "; } " + dst + "[__outer] = __acc";
-      if (callee == "__lib_reduce_mean")
-        result += " / " + nreduce;
+        accum = "__acc = std::min(__acc, " + src + "[__outer * " + nreduce +
+                " + __inner])";
+      std::string result = "{ for (int __outer = 0; __outer < " + num + " / " +
+                           nreduce + "; ++__outer) { auto __acc = " + init +
+                           "; for (int __inner = 0; __inner < " + nreduce +
+                           "; ++__inner) { " + accum + "; } " + dst +
+                           "[__outer] = __acc";
+      if (callee == "__lib_reduce_mean") result += " / " + nreduce;
       result += "; } }";
       os() << getIndent() << result << "\n";
       return true;
@@ -928,16 +908,16 @@ private:
 
     // Convert: (dst, src, num)
     if (callee == "__lib_convert" && argc >= 3) {
-      os() << getIndent() << "for (int __i = 0; __i < " << arg(2)
-           << "; ++__i) " << arg(0) << "[__i] = " << arg(1) << "[__i];\n";
+      os() << getIndent() << "for (int __i = 0; __i < " << arg(2) << "; ++__i) "
+           << arg(0) << "[__i] = " << arg(1) << "[__i];\n";
       return true;
     }
 
     // Where: (dst, cond, x, y, num)
     if (callee == "__lib_where" && argc >= 5) {
-      os() << getIndent() << "for (int __i = 0; __i < " << arg(4)
-           << "; ++__i) " << arg(0) << "[__i] = " << arg(1) << "[__i] ? "
-           << arg(2) << "[__i] : " << arg(3) << "[__i];\n";
+      os() << getIndent() << "for (int __i = 0; __i < " << arg(4) << "; ++__i) "
+           << arg(0) << "[__i] = " << arg(1) << "[__i] ? " << arg(2)
+           << "[__i] : " << arg(3) << "[__i];\n";
       return true;
     }
 
@@ -947,8 +927,7 @@ private:
   void emitInThreads(InThreadsOp op) {
     os() << getIndent() << "if (" << getName(op.getPredicate()) << ") {\n";
     incIndent();
-    for (auto &bodyOp : op.getBody().front().getOperations())
-      emitOp(&bodyOp);
+    for (auto& bodyOp : op.getBody().front().getOperations()) emitOp(&bodyOp);
     decIndent();
     os() << getIndent() << "}\n";
   }
@@ -1020,7 +999,7 @@ private:
   void emitParallel(ParallelOp op) override {
     auto level = op.getLevel();
     auto bounds = op.getBounds();
-    auto &body = op.getBody();
+    auto& body = op.getBody();
     auto args = body.getArguments();
 
     if (level == ParallelLevel::BLOCK || level == ParallelLevel::THREAD ||
@@ -1031,19 +1010,16 @@ private:
              << bounds[i] << "; ++" << iv << ") {\n";
         incIndent();
       }
-      for (auto &bodyOp : body.front().getOperations())
-        emitOp(&bodyOp);
+      for (auto& bodyOp : body.front().getOperations()) emitOp(&bodyOp);
       for (unsigned i = 0; i < args.size(); ++i) {
         decIndent();
         os() << getIndent() << "}\n";
       }
     } else {
-      for (unsigned i = 0; i < args.size(); ++i)
-        valueNames[args[i]] = "0";
+      for (unsigned i = 0; i < args.size(); ++i) valueNames[args[i]] = "0";
       os() << getIndent() << "{\n";
       incIndent();
-      for (auto &bodyOp : body.front().getOperations())
-        emitOp(&bodyOp);
+      for (auto& bodyOp : body.front().getOperations()) emitOp(&bodyOp);
       decIndent();
       os() << getIndent() << "}\n";
     }
@@ -1074,13 +1050,13 @@ private:
           os() << getIndent() << "auto " << tokName
                << " = std::async(std::launch::async, [&]() {\n";
           incIndent();
-          os() << getIndent() << "std::memcpy(" << dst << ", " << src
-               << ", " << bytes << ");\n";
+          os() << getIndent() << "std::memcpy(" << dst << ", " << src << ", "
+               << bytes << ");\n";
           decIndent();
           os() << getIndent() << "});\n";
         } else {
-          os() << getIndent() << "std::memcpy(" << getName(op.getDest())
-               << ", " << getName(op.getSource()) << ", " << bytes << ");\n";
+          os() << getIndent() << "std::memcpy(" << getName(op.getDest()) << ", "
+               << getName(op.getSource()) << ", " << bytes << ");\n";
           valueNames[op.getToken()] = "0";
         }
       }
@@ -1118,8 +1094,7 @@ private:
     llvm::SmallVector<int64_t> lowVals(rank, 0);
     if (auto pl = op.getPadLow()) {
       auto arr = pl.value();
-      for (int i = 0; i < rank && i < (int)arr.size(); ++i)
-        lowVals[i] = arr[i];
+      for (int i = 0; i < rank && i < (int)arr.size(); ++i) lowVals[i] = arr[i];
     }
 
     int64_t srcElems = 1;
@@ -1134,8 +1109,7 @@ private:
       if (d < rank - 1) {
         int64_t stride = 1;
         for (int k = d + 1; k < rank; ++k) stride *= srcShape[k];
-        os() << getIndent() << "int " << dn << " = __rem / " << stride
-             << ";\n";
+        os() << getIndent() << "int " << dn << " = __rem / " << stride << ";\n";
         os() << getIndent() << "__rem = __rem % " << stride << ";\n";
       } else {
         os() << getIndent() << "int " << dn << " = __rem;\n";
@@ -1154,8 +1128,8 @@ private:
         os() << coord;
     }
     os() << ";\n";
-    os() << getIndent() << "((" << eTy << "*)" << dstName
-         << ")[__dst_idx] = ((" << eTy << "*)" << srcName << ")[__i];\n";
+    os() << getIndent() << "((" << eTy << "*)" << dstName << ")[__dst_idx] = (("
+         << eTy << "*)" << srcName << ")[__i];\n";
     decIndent();
     os() << getIndent() << "}\n";
   }
@@ -1191,8 +1165,7 @@ private:
       if (d < rank - 1) {
         int64_t stride = 1;
         for (int k = d + 1; k < rank; ++k) stride *= srcShape[k];
-        os() << getIndent() << "int " << dn << " = __rem / " << stride
-             << ";\n";
+        os() << getIndent() << "int " << dn << " = __rem / " << stride << ";\n";
         os() << getIndent() << "__rem = __rem % " << stride << ";\n";
       } else {
         os() << getIndent() << "int " << dn << " = __rem;\n";
@@ -1210,8 +1183,8 @@ private:
         os() << coord;
     }
     os() << ";\n";
-    os() << getIndent() << "((" << eTy << "*)" << dstName
-         << ")[__dst_idx] = ((" << eTy << "*)" << srcName << ")[__i];\n";
+    os() << getIndent() << "((" << eTy << "*)" << dstName << ")[__dst_idx] = (("
+         << eTy << "*)" << srcName << ")[__i];\n";
     decIndent();
     os() << getIndent() << "}\n";
   }
@@ -1224,21 +1197,21 @@ private:
     }
     int64_t bytes = getTensorBytes(srcTy);
     if (bytes > 0) {
-      os() << getIndent() << "std::memcpy(" << getName(op.getDest())
-           << ", " << getName(op.getSource()) << ", " << bytes << ");\n";
+      os() << getIndent() << "std::memcpy(" << getName(op.getDest()) << ", "
+           << getName(op.getSource()) << ", " << bytes << ");\n";
     }
   }
 
   void emitBarrier(BarrierOp /*op*/) override {}
 
   void emitFence(FenceOp /*op*/) override {
-    os() << getIndent() << "std::atomic_thread_fence(std::memory_order_seq_cst);\n";
+    os() << getIndent()
+         << "std::atomic_thread_fence(std::memory_order_seq_cst);\n";
   }
 
   void emitWait(WaitOp op) override {
     std::string tok = getName(op.getToken());
-    if (tok != "0")
-      os() << getIndent() << tok << ".get();\n";
+    if (tok != "0") os() << getIndent() << tok << ".get();\n";
   }
 
   void emitFutureRotate(FutureRotateOp op) override {
@@ -1258,8 +1231,8 @@ private:
         os() << getIndent() << getName(futures[i]) << " = std::move("
              << getName(futures[i + 1]) << ");\n";
       }
-      os() << getIndent() << getName(futures.back()) << " = std::move("
-           << tmp << ");\n";
+      os() << getIndent() << getName(futures.back()) << " = std::move(" << tmp
+           << ");\n";
       for (unsigned i = 0; i < results.size(); ++i)
         valueNames[results[i]] = getName(futures[i]);
     }
@@ -1287,8 +1260,7 @@ private:
       if (i > 0) os() << " + ";
       os() << getName(indices[i]);
       int64_t stride = 1;
-      for (unsigned j = i + 1; j < srcShape.size(); ++j)
-        stride *= srcShape[j];
+      for (unsigned j = i + 1; j < srcShape.size(); ++j) stride *= srcShape[j];
       os() << " * " << stride;
     }
     os() << ");\n";
@@ -1315,9 +1287,8 @@ struct EmitCCPass : public ::coir::impl::EmitCCBase<EmitCCPass> {
 };
 
 static bool registered_cc = [] {
-  CoIR::CodeGenRegistry::Register("cc", [] {
-    return std::make_unique<CCEmitter>();
-  });
+  CoIR::CodeGenRegistry::Register("cc",
+                                  [] { return std::make_unique<CCEmitter>(); });
   return true;
 }();
 
@@ -1328,7 +1299,7 @@ std::unique_ptr<mlir::Pass> createEmitCCPass() {
   return std::make_unique<EmitCCPass>();
 }
 
-void emitCC(mlir::ModuleOp module, llvm::raw_ostream &os) {
+void emitCC(mlir::ModuleOp module, llvm::raw_ostream& os) {
   CCEmitter emitter;
   emitter.emitModule(module, os);
 }

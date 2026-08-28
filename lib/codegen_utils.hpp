@@ -156,7 +156,8 @@ public:
     dbgs()
         << "==================== Host Map Information ====================\n";
     dbgs() << std::setw(30) << std::left << "Symbol" << std::setw(50)
-           << std::left << " -> Host Name" << "\n";
+           << std::left << " -> Host Name"
+           << "\n";
     dbgs()
         << "--------------------------------------------------------------\n";
 
@@ -175,7 +176,8 @@ public:
     dbgs()
         << "==================== Device Map Information ====================\n";
     dbgs() << std::setw(30) << std::left << "Symbol" << std::setw(50)
-           << std::left << " -> Device Name" << "\n";
+           << std::left << " -> Device Name"
+           << "\n";
     dbgs()
         << "----------------------------------------------------------------\n";
 

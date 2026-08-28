@@ -1,14 +1,14 @@
 #ifndef __COIR_SESSION_HPP__
 #define __COIR_SESSION_HPP__
 
+#include "Dialect/CoIR/CoIRAttrs.h"
+#include "Dialect/CoIR/CoIRDialect.h"
+#include "Dialect/CoIR/CoIROps.h"
+#include "Dialect/CoIR/CoIRTypes.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
-#include "Dialect/CoIR/CoIRDialect.h"
-#include "Dialect/CoIR/CoIROps.h"
-#include "Dialect/CoIR/CoIRTypes.h"
-#include "Dialect/CoIR/CoIRAttrs.h"
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"

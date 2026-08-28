@@ -5,7 +5,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 namespace coir {
-void emitTopscc(mlir::ModuleOp module, llvm::raw_ostream &os);
+void emitTopscc(mlir::ModuleOp module, llvm::raw_ostream& os);
 } // namespace coir
 
 #endif

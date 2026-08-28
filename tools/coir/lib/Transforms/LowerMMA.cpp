@@ -5,10 +5,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Dialect/CoIR/Passes.h"
 #include "Dialect/CoIR/CoIRDialect.h"
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
+#include "Dialect/CoIR/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
@@ -35,12 +35,11 @@ struct LowerMMAFill : public OpRewritePattern<MMAFillOp> {
   using OpRewritePattern::OpRewritePattern;
 
   LogicalResult matchAndRewrite(MMAFillOp op,
-                                PatternRewriter &rewriter) const override {
+                                PatternRewriter& rewriter) const override {
     // Keep the fill as-is since it already represents the low-level operation.
     // The value is already a scalar constant that will become a register fill.
     // Mark it with an attribute to signal it's been lowered.
-    if (op->hasAttr("lowered"))
-      return failure();
+    if (op->hasAttr("lowered")) return failure();
     op->setAttr("lowered", rewriter.getUnitAttr());
     return success();
   }
@@ -53,9 +52,8 @@ struct LowerMMALoad : public OpRewritePattern<MMALoadOp> {
   using OpRewritePattern::OpRewritePattern;
 
   LogicalResult matchAndRewrite(MMALoadOp op,
-                                PatternRewriter &rewriter) const override {
-    if (op->hasAttr("lowered"))
-      return failure();
+                                PatternRewriter& rewriter) const override {
+    if (op->hasAttr("lowered")) return failure();
     op->setAttr("lowered", rewriter.getUnitAttr());
     return success();
   }
@@ -65,11 +63,9 @@ struct LowerMMALoad : public OpRewritePattern<MMALoadOp> {
 // For a matmul C[M,N] += A[M,K] * B[K,N], the LHS load source is [M,K].
 static int64_t inferKFromLHS(MMAExecOp op) {
   auto lhsLoad = op.getLhs().getDefiningOp<MMALoadOp>();
-  if (!lhsLoad)
-    return 0;
+  if (!lhsLoad) return 0;
   auto srcType = dyn_cast<coir::TensorType>(lhsLoad.getSource().getType());
-  if (!srcType || srcType.getShape().size() < 2)
-    return 0;
+  if (!srcType || srcType.getShape().size() < 2) return 0;
   return srcType.getShape().back();
 }
 
@@ -95,8 +91,7 @@ static int64_t getRegNumD(int64_t M, int64_t N, int64_t K,
   }
   int64_t base = M * N / 32;
   // f16/bf16 accumulators pack 2 values per uint32_t register
-  if (accumType.isF16() || accumType.isBF16())
-    return base / 2;
+  if (accumType.isF16() || accumType.isBF16()) return base / 2;
   return base;
 }
 
@@ -138,7 +133,8 @@ static std::string getArchPrefix(int64_t M, int64_t N, int64_t K) {
   return "SM80";
 }
 
-// Build the full CuTe FMA atom name (e.g., "cute::SM80_16x8x8_F32F16F16F32_TN").
+// Build the full CuTe FMA atom name (e.g.,
+// "cute::SM80_16x8x8_F32F16F16F32_TN").
 static std::string buildFMAAtomName(int64_t M, int64_t N, int64_t K,
                                     mlir::Type accumType, mlir::Type aType,
                                     mlir::Type bType) {
@@ -150,9 +146,8 @@ static std::string buildFMAAtomName(int64_t M, int64_t N, int64_t K,
   std::string b_str = isTF32 ? "TF32" : typeToFMALetter(bType);
   std::string c_str = d_str;
 
-  return "cute::" + prefix + "_" + std::to_string(M) + "x" +
-         std::to_string(N) + "x" + std::to_string(K) + "_" + d_str + a_str +
-         b_str + c_str + "_TN";
+  return "cute::" + prefix + "_" + std::to_string(M) + "x" + std::to_string(N) +
+         "x" + std::to_string(K) + "_" + d_str + a_str + b_str + c_str + "_TN";
 }
 
 // MMA exec: perform the matrix multiply-accumulate.
@@ -160,13 +155,12 @@ static std::string buildFMAAtomName(int64_t M, int64_t N, int64_t K,
 // which is set per-target by the driver (e.g. "wgmma", "mma_sync", "ukernel").
 struct LowerMMAExec : public OpRewritePattern<MMAExecOp> {
   std::string mmaTarget;
-  LowerMMAExec(MLIRContext *ctx, StringRef mmaTarget)
+  LowerMMAExec(MLIRContext* ctx, StringRef mmaTarget)
       : OpRewritePattern(ctx), mmaTarget(mmaTarget.str()) {}
 
   LogicalResult matchAndRewrite(MMAExecOp op,
-                                PatternRewriter &rewriter) const override {
-    if (op->hasAttr("lowered"))
-      return failure();
+                                PatternRewriter& rewriter) const override {
+    if (op->hasAttr("lowered")) return failure();
 
     if (!mmaTarget.empty())
       op->setAttr("target", rewriter.getStringAttr(mmaTarget));
@@ -181,9 +175,10 @@ struct LowerMMAExec : public OpRewritePattern<MMAExecOp> {
       auto rhsShape = rhsType.getShape();
       int64_t M = lhsShape.size() > 0 ? lhsShape[0] : 16;
       int64_t K = inferKFromLHS(op);
-      int64_t N = rhsShape.size() > 1 ? rhsShape[1] : (rhsShape.size() > 0 ? rhsShape[0] : 16);
-      if (K == 0)
-        K = lhsShape.size() > 1 ? lhsShape[1] : 16;
+      int64_t N = rhsShape.size() > 1
+                      ? rhsShape[1]
+                      : (rhsShape.size() > 0 ? rhsShape[0] : 16);
+      if (K == 0) K = lhsShape.size() > 1 ? lhsShape[1] : 16;
 
       if (K > 0 && isCTMMAConfig(M, N, K)) {
         // Infer element types from fragment types.
@@ -192,16 +187,17 @@ struct LowerMMAExec : public OpRewritePattern<MMAExecOp> {
         mlir::Type aType = lhsType.getElementType();
         mlir::Type bType = rhsType.getElementType();
 
-        std::string policyName =
-            "CUTE_MMA_M" + std::to_string(M) + "N" + std::to_string(N) +
-            "K" + std::to_string(K);
-        std::string fmaAtom = buildFMAAtomName(M, N, K, accumType, aType, bType);
+        std::string policyName = "CUTE_MMA_M" + std::to_string(M) + "N" +
+                                 std::to_string(N) + "K" + std::to_string(K);
+        std::string fmaAtom =
+            buildFMAAtomName(M, N, K, accumType, aType, bType);
 
         op.setMmaAtomNameAttr(rewriter.getStringAttr(policyName));
         op.setKDimAttr(rewriter.getI64IntegerAttr(K));
         op.setRegNumAAttr(rewriter.getI64IntegerAttr(getRegNumA(M, N, K)));
         op.setRegNumBAttr(rewriter.getI64IntegerAttr(getRegNumB(M, N, K)));
-        op.setRegNumDAttr(rewriter.getI64IntegerAttr(getRegNumD(M, N, K, accumType)));
+        op.setRegNumDAttr(
+            rewriter.getI64IntegerAttr(getRegNumD(M, N, K, accumType)));
         // Also store the FMA CuTe atom for emission.
         op->setAttr("fma_atom", rewriter.getStringAttr(fmaAtom));
       }
@@ -219,9 +215,8 @@ struct LowerMMAStore : public OpRewritePattern<MMAStoreOp> {
   using OpRewritePattern::OpRewritePattern;
 
   LogicalResult matchAndRewrite(MMAStoreOp op,
-                                PatternRewriter &rewriter) const override {
-    if (op->hasAttr("lowered"))
-      return failure();
+                                PatternRewriter& rewriter) const override {
+    if (op->hasAttr("lowered")) return failure();
     op->setAttr("lowered", rewriter.getUnitAttr());
     return success();
   }
@@ -231,7 +226,7 @@ struct LowerMMAPass : public ::coir::impl::LowerMMABase<LowerMMAPass> {
   using LowerMMABase::LowerMMABase;
 
   void runOnOperation() override {
-    auto *ctx = &getContext();
+    auto* ctx = &getContext();
 
     // Read coir.mma_target from the module (set by the driver via
     // Target::MMATargetName()). For standalone coir-opt tests, embed
@@ -242,9 +237,7 @@ struct LowerMMAPass : public ::coir::impl::LowerMMABase<LowerMMAPass> {
     else if (auto pm = getOperation()->getParentOfType<ModuleOp>())
       mmaTarget = CoIR::GetMMATarget(pm).str();
 
-    if (mmaTarget.empty()) {
-      return;
-    }
+    if (mmaTarget.empty()) { return; }
 
     RewritePatternSet patterns(ctx);
     patterns.add<LowerMMAFill>(ctx);

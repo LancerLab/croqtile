@@ -3,15 +3,15 @@
 #include <string>
 
 #include "ast.hpp"
+#include "choreo_sdk.hpp"
 #include "context.hpp"
+#include "interpreter.hpp"
 #include "io.hpp"
 #include "options.hpp"
 #include "pipeline.hpp"
 #include "preprocess.hpp"
 #include "scanner.hpp"
 #include "target_registry.hpp"
-#include "choreo_sdk.hpp"
-#include "interpreter.hpp"
 
 using namespace Choreo;
 extern AST::Program root;
@@ -85,9 +85,7 @@ int parse_source(const std::string& source, const std::string& target,
 
     if (run_pipeline) {
       auto& pl = ASTPipeline::Get().PlanAllRoutines();
-      if (!pl.RunOnProgram(root)) {
-        result = pl.Status();
-      }
+      if (!pl.RunOnProgram(root)) { result = pl.Status(); }
     }
   }
 
@@ -106,9 +104,7 @@ emscripten::val compile(const std::string& source, const std::string& target,
   capture_streams(out_stream, err_stream);
 
   int rc = parse_source(source, target, true);
-  if (rc == 0) {
-    root.Print(std::cout);
-  }
+  if (rc == 0) { root.Print(std::cout); }
   restore_streams();
 
   emscripten::val result = emscripten::val::object();
@@ -123,9 +119,7 @@ emscripten::val dumpAST(const std::string& source) {
   capture_streams(out_stream, err_stream);
 
   int rc = parse_source(source, "", false);
-  if (rc == 0) {
-    root.Print(std::cout);
-  }
+  if (rc == 0) { root.Print(std::cout); }
   restore_streams();
 
   emscripten::val result = emscripten::val::object();

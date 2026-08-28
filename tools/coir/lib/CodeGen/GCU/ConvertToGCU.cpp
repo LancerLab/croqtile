@@ -65,19 +65,17 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(ConvertToGCUPass)
   ConvertToGCUPass() : OperationPass(mlir::TypeID::get<ConvertToGCUPass>()) {}
   llvm::StringRef getName() const override { return "ConvertToGCU"; }
-  llvm::StringRef getArgument() const override {
-    return "coir-convert-to-gcu";
-  }
+  llvm::StringRef getArgument() const override { return "coir-convert-to-gcu"; }
   llvm::StringRef getDescription() const override {
     return "Lower CoIR kernel ops to GCU-compatible GPU/memref/arith dialects";
   }
   std::unique_ptr<mlir::Pass> clonePass() const override {
     return std::make_unique<ConvertToGCUPass>();
   }
-  void getDependentDialects(mlir::DialectRegistry &registry) const override {
-    registry.insert<mgpu::GPUDialect, memref::MemRefDialect,
-                    arith::ArithDialect, scf::SCFDialect,
-                    func::FuncDialect, LLVM::LLVMDialect>();
+  void getDependentDialects(mlir::DialectRegistry& registry) const override {
+    registry
+        .insert<mgpu::GPUDialect, memref::MemRefDialect, arith::ArithDialect,
+                scf::SCFDialect, func::FuncDialect, LLVM::LLVMDialect>();
   }
 
   MemRefType convertTensorType(coir::TensorType tty) override {
@@ -85,15 +83,15 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
     Attribute addrSpace;
     if (ms == 1)
       addrSpace = IntegerAttr::get(IntegerType::get(tty.getContext(), 64),
-                                 kGCUAddrWorkgroup);
-    else  // Global for ms==0 (explicit) or ms==-1 (default→global)
+                                   kGCUAddrWorkgroup);
+    else // Global for ms==0 (explicit) or ms==-1 (default→global)
       addrSpace = IntegerAttr::get(IntegerType::get(tty.getContext(), 64),
-                                 kGCUAddrGlobal);
-    return MemRefType::get(tty.getShape(), tty.getElementType(),
-                           AffineMap{}, addrSpace);
+                                   kGCUAddrGlobal);
+    return MemRefType::get(tty.getShape(), tty.getElementType(), AffineMap{},
+                           addrSpace);
   }
 
-  void preScanKernel(KernelOp kernel, OpBuilder &builder,
+  void preScanKernel(KernelOp kernel, OpBuilder& builder,
                      mgpu::GPUModuleOp gpuModule) override {
     kernel.getBody().walk([&](coir::ParallelOp par) {
       if (par.getLevel() == coir::ParallelLevel::BLOCK &&
@@ -114,9 +112,9 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
 
   /// Resolve a named kernel arg (mr_offset_* or spm_size) to the
   /// corresponding gpu.func argument via ctx.mapping.
-  Value resolveMRArg(KernelOp kernelOp, KernelConvertCtx &ctx,
+  Value resolveMRArg(KernelOp kernelOp, KernelConvertCtx& ctx,
                      llvm::StringRef name) {
-    auto &kernelBody = kernelOp.getBody();
+    auto& kernelBody = kernelOp.getBody();
     auto kernelArgs = kernelBody.getArguments();
 
     // MR args are at the end of the kernel signature:
@@ -129,8 +127,7 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
     // Check among offset args.
     if (mrOffsets) {
       for (unsigned i = 0; i < numMrOffsets; ++i) {
-        auto mrName =
-            mlir::cast<mlir::StringAttr>(mrOffsets[i]).getValue();
+        auto mrName = mlir::cast<mlir::StringAttr>(mrOffsets[i]).getValue();
         if (mrName == name)
           return ctx.mapping.lookup(kernelArgs[baseMrIdx + i]);
       }
@@ -145,8 +142,8 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
     return {};
   }
 
-  void convertAlloc(OpBuilder &builder, Location loc,
-                    TensorAllocOp alloc, KernelConvertCtx &ctx) override {
+  void convertAlloc(OpBuilder& builder, Location loc, TensorAllocOp alloc,
+                    KernelConvertCtx& ctx) override {
     auto tty = cast<coir::TensorType>(alloc.getResult().getType());
 
     // --- Dynamic memory reuse: offset comes from a kernel arg ---
@@ -166,7 +163,7 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
       }
 
       // Get or create the dynamic SPM pool (one per kernel).
-      Value &dynPool = ctx.spmPools["__dyn_spm__"];
+      Value& dynPool = ctx.spmPools["__dyn_spm__"];
       if (!dynPool) {
         auto spmSizeNameAttr =
             kernelOp->getAttrOfType<mlir::StringAttr>("coir.mr_spm_size_arg");
@@ -181,19 +178,17 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
                 mlir::IntegerType::get(builder.getContext(), 64),
                 kGCUAddrWorkgroup));
 
-        auto gpuFunc = builder.getBlock()
-                           ->getParent()
-                           ->getParentOfType<mgpu::GPUFuncOp>();
+        auto gpuFunc =
+            builder.getBlock()->getParent()->getParentOfType<mgpu::GPUFuncOp>();
         OpBuilder::InsertionGuard guard(builder);
-        auto &funcBody = gpuFunc.getBody().front();
+        auto& funcBody = gpuFunc.getBody().front();
         if (funcBody.empty() || funcBody.begin() == funcBody.end())
           builder.setInsertionPointToStart(&funcBody);
         else
           builder.setInsertionPoint(&funcBody, funcBody.begin());
 
         mlir::SmallVector<mlir::Value> dynSizes;
-        if (spmSizeVal)
-          dynSizes.push_back(spmSizeVal);
+        if (spmSizeVal) dynSizes.push_back(spmSizeVal);
         dynPool = builder.create<memref::AllocOp>(loc, dynPoolTy, dynSizes)
                       .getResult();
       }
@@ -205,9 +200,9 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
       mlir::SmallVector<mlir::Value> viewSizes;
       for (auto dim : alloc.getDynamicDims())
         viewSizes.push_back(ctx.mapping.lookup(dim));
-      auto view = builder.create<memref::ViewOp>(
-          loc, targetMemTy, dynPool, offsetVal,
-          /*sizes=*/viewSizes);
+      auto view =
+          builder.create<memref::ViewOp>(loc, targetMemTy, dynPool, offsetVal,
+                                         /*sizes=*/viewSizes);
 
       ctx.mapping.map(alloc.getResult(), view->getResult(0));
       return;
@@ -222,28 +217,26 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
 
     // Look up or create the SPM pool.
     llvm::StringRef poolName = *reuseSpm;
-    Value &poolBase = ctx.spmPools[poolName];
+    Value& poolBase = ctx.spmPools[poolName];
 
     if (!poolBase) {
-      auto spmSizeAttr =
-          alloc->getAttrOfType<mlir::IntegerAttr>("spm_size");
+      auto spmSizeAttr = alloc->getAttrOfType<mlir::IntegerAttr>("spm_size");
       int64_t poolBytes = spmSizeAttr ? spmSizeAttr.getInt() : 0;
       auto byteTy = mlir::IntegerType::get(builder.getContext(), 8);
       auto poolMemTy = MemRefType::get(
           {poolBytes}, byteTy, AffineMap{},
-          IntegerAttr::get(
-              IntegerType::get(builder.getContext(), 64),
-              kGCUAddrWorkgroup));
+          IntegerAttr::get(IntegerType::get(builder.getContext(), 64),
+                           kGCUAddrWorkgroup));
 
       // Walk up to find the enclosing gpu.func (builder may be inside
       // nested regions like scf.for).
-      auto gpuFunc = builder.getBlock()->getParent()->getParentOfType<
-          mgpu::GPUFuncOp>();
+      auto gpuFunc =
+          builder.getBlock()->getParent()->getParentOfType<mgpu::GPUFuncOp>();
       OpBuilder::InsertionGuard guard(builder);
 
       // Insert at the top of the function.  For subsequent pools we
       // insert after the last pool alloc so they appear in creation order.
-      auto &funcBody = gpuFunc.getBody().front();
+      auto& funcBody = gpuFunc.getBody().front();
       if (funcBody.empty() || funcBody.begin() == funcBody.end())
         builder.setInsertionPointToStart(&funcBody);
       else
@@ -257,17 +250,16 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
     // Create a view into the pool at the given byte offset.
     // Use the pool's workgroup address space for the view target type.
     auto targetMemTy = viewMemRefType(tty);
-    auto byteOffsetVal =
-        builder.create<arith::ConstantIndexOp>(loc, offset);
-    auto view = builder.create<memref::ViewOp>(
-        loc, targetMemTy, poolBase, byteOffsetVal,
-        /*sizes=*/mlir::ValueRange{});
+    auto byteOffsetVal = builder.create<arith::ConstantIndexOp>(loc, offset);
+    auto view = builder.create<memref::ViewOp>(loc, targetMemTy, poolBase,
+                                               byteOffsetVal,
+                                               /*sizes=*/mlir::ValueRange{});
 
     ctx.mapping.map(alloc.getResult(), view->getResult(0));
   }
 
-  bool convertTargetOp(OpBuilder &builder, Location loc, Operation &op,
-                       KernelConvertCtx &ctx) override {
+  bool convertTargetOp(OpBuilder& builder, Location loc, Operation& op,
+                       KernelConvertCtx& ctx) override {
     if (auto tile = dyn_cast<TensorTileOp>(op)) {
       Value src = ctx.mapping.lookup(tile.getSource());
       ctx.mapping.map(tile.getResult(), src);
@@ -294,8 +286,7 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
     if (auto callOp = dyn_cast<coir::CallOp>(op)) {
       // Intrinsic passthrough calls are emitted verbatim by the
       // target codegen; skip lowering to func.call.
-      if (callOp.getIsIntrinsic() && *callOp.getIsIntrinsic())
-        return true;
+      if (callOp.getIsIntrinsic() && *callOp.getIsIntrinsic()) return true;
 
       auto callee = callOp.getCallee().str();
       // Map operands through the convert context (tensor -> memref)
@@ -310,21 +301,20 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
       // Emit func.func private declaration in the gpu.module
       // (must be in gpu.module, not top-level ModuleOp, because
       //  SymbolTable::lookupNearestSymbolFrom stops at gpu.module)
-      auto gpuModule =
-          builder.getInsertionBlock()->getParentOp()->getParentOfType<
-              mgpu::GPUModuleOp>();
+      auto gpuModule = builder.getInsertionBlock()
+                           ->getParentOp()
+                           ->getParentOfType<mgpu::GPUModuleOp>();
       if (!gpuModule) {
         op.emitError("coir.call not inside a gpu.module");
         return false;
       }
 
       // Check if symbol name is already taken (e.g. by gpu.func)
-      if (auto *existingSym =
+      if (auto* existingSym =
               mlir::SymbolTable::lookupSymbolIn(gpuModule, callee)) {
         if (!isa<func::FuncOp>(existingSym)) {
           op.emitError("coir.call callee '")
-              << callee
-              << "' conflicts with existing symbol of type '"
+              << callee << "' conflicts with existing symbol of type '"
               << existingSym->getName().getStringRef() << "'";
           return false;
         }
@@ -354,8 +344,7 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
       return true;
     }
     // MMA ops should have been caught in runOnOperation validation
-    if (isa<MMAExecOp, MMALoadOp, MMAStoreOp, MMAFillOp>(op))
-      return true;
+    if (isa<MMAExecOp, MMALoadOp, MMAStoreOp, MMAFillOp>(op)) return true;
     return false;
   }
 
@@ -363,9 +352,8 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
     ModuleOp module = getOperation();
 
     bool hasMMA = false;
-    module.walk([&](Operation *op) {
-      if (isa<MMAExecOp, MMALoadOp, MMAStoreOp, MMAFillOp>(op))
-        hasMMA = true;
+    module.walk([&](Operation* op) {
+      if (isa<MMAExecOp, MMALoadOp, MMAStoreOp, MMAFillOp>(op)) hasMMA = true;
     });
     if (hasMMA) {
       module.emitError("GCU native codegen does not yet support MMA ops; "
@@ -373,14 +361,12 @@ struct ConvertToGCUPass : public mlir::OperationPass<mlir::ModuleOp>,
       return signalPassFailure();
     }
 
-    module->setAttr("gpu.container_module",
-                    UnitAttr::get(module.getContext()));
+    module->setAttr("gpu.container_module", UnitAttr::get(module.getContext()));
 
     SmallVector<KernelOp> kernels;
     module.walk([&](KernelOp k) { kernels.push_back(k); });
     for (auto kernel : kernels) {
-      if (failed(convertKernel(module, kernel)))
-        return signalPassFailure();
+      if (failed(convertKernel(module, kernel))) return signalPassFailure();
     }
   }
 };

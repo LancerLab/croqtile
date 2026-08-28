@@ -4,8 +4,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "ast.hpp"
 #include "ASTCoIRGen.hpp"
+#include "ast.hpp"
 #include "choreo_api.hpp"
 #include "command_line.hpp"
 #include "context.hpp"
@@ -25,11 +25,11 @@ using namespace Choreo;
 
 extern Option<bool> dump_ast;
 
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
   CommandLine cl;
   if (!cl.Parse(argc, argv)) return cl.ReturnCode();
 
-  auto &reg = OptionRegistry::GetInstance();
+  auto& reg = OptionRegistry::GetInstance();
   std::string input_file = reg.GetInputFileName();
 
   CompilerAPI api;

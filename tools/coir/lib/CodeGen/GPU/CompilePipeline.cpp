@@ -11,10 +11,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGen/GPU/CompilePipeline.h"
+#include "CoIRVersionCompat.h"
 #include "CodeGen/GPU/EmitHostStubs.h"
 #include "CodeGen/GPU/HostCompile.h"
 #include "CodeGen/GPU/NativePipeline.h"
-#include "CoIRVersionCompat.h"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -35,21 +35,20 @@
 namespace coir {
 namespace gpu {
 
-void embedPTXInHostModule(llvm::Module &hostMod, llvm::StringRef ptxString,
+void embedPTXInHostModule(llvm::Module& hostMod, llvm::StringRef ptxString,
                           llvm::StringRef globalName) {
-  auto &ctx = hostMod.getContext();
+  auto& ctx = hostMod.getContext();
 
-  llvm::Constant *ptxInit =
+  llvm::Constant* ptxInit =
       llvm::ConstantDataArray::getString(ctx, ptxString, /*AddNull=*/true);
-  auto *ptxGV = new llvm::GlobalVariable(
+  auto* ptxGV = new llvm::GlobalVariable(
       hostMod, ptxInit->getType(), /*isConstant=*/true,
       llvm::GlobalValue::PrivateLinkage, ptxInit, "__coir_ptx_data");
   ptxGV->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
 
-  auto *externPTX = hostMod.getNamedGlobal(globalName);
+  auto* externPTX = hostMod.getNamedGlobal(globalName);
   if (externPTX && externPTX != ptxGV) {
-    auto *bc =
-        llvm::ConstantExpr::getBitCast(ptxGV, externPTX->getType());
+    auto* bc = llvm::ConstantExpr::getBitCast(ptxGV, externPTX->getType());
     externPTX->replaceAllUsesWith(bc);
     externPTX->eraseFromParent();
   }
@@ -57,7 +56,7 @@ void embedPTXInHostModule(llvm::Module &hostMod, llvm::StringRef ptxString,
   ptxGV->setLinkage(llvm::GlobalValue::ExternalLinkage);
 }
 
-bool emitHostObjectFile(llvm::Module &hostMod, llvm::StringRef outputPath) {
+bool emitHostObjectFile(llvm::Module& hostMod, llvm::StringRef outputPath) {
   LLVMInitializeX86TargetInfo();
   LLVMInitializeX86Target();
   LLVMInitializeX86TargetMC();
@@ -68,7 +67,7 @@ bool emitHostObjectFile(llvm::Module &hostMod, llvm::StringRef outputPath) {
   COIR_SET_TARGET_TRIPLE(hostMod, triple);
 
   std::string errStr;
-  auto *target = llvm::TargetRegistry::lookupTarget(triple, errStr);
+  auto* target = llvm::TargetRegistry::lookupTarget(triple, errStr);
   if (!target) {
     llvm::errs() << "coir: cannot find x86 target: " << errStr << "\n";
     return false;
@@ -76,9 +75,8 @@ bool emitHostObjectFile(llvm::Module &hostMod, llvm::StringRef outputPath) {
 
   auto cpu = llvm::sys::getHostCPUName();
   llvm::TargetOptions tOpts;
-  auto tm = std::unique_ptr<llvm::TargetMachine>(
-      COIR_CREATE_TARGET_MACHINE(target, triple, cpu, "", tOpts,
-                                 llvm::Reloc::PIC_));
+  auto tm = std::unique_ptr<llvm::TargetMachine>(COIR_CREATE_TARGET_MACHINE(
+      target, triple, cpu, "", tOpts, llvm::Reloc::PIC_));
   if (!tm) {
     llvm::errs() << "coir: failed to create x86 TargetMachine\n";
     return false;
@@ -89,8 +87,8 @@ bool emitHostObjectFile(llvm::Module &hostMod, llvm::StringRef outputPath) {
   std::error_code ec;
   llvm::raw_fd_ostream out(outputPath, ec, llvm::sys::fs::OF_None);
   if (ec) {
-    llvm::errs() << "coir: cannot open " << outputPath << ": "
-                 << ec.message() << "\n";
+    llvm::errs() << "coir: cannot open " << outputPath << ": " << ec.message()
+                 << "\n";
     return false;
   }
 
@@ -147,9 +145,8 @@ bool linkHostExecutable(llvm::StringRef objectPath,
 }
 
 int compileToExecutable(mlir::ModuleOp module, llvm::StringRef arch,
-                        llvm::StringRef outputPath,
-                        const char *typesHeader, const char *runtimeHeader,
-                        llvm::StringRef cudaHome) {
+                        llvm::StringRef outputPath, const char* typesHeader,
+                        const char* runtimeHeader, llvm::StringRef cudaHome) {
   std::string a = arch.empty() ? "sm_80" : arch.str();
   std::string ptx = emitPTXFromCoIR(module, a);
   if (ptx.empty()) {
@@ -164,17 +161,14 @@ int compileToExecutable(mlir::ModuleOp module, llvm::StringRef arch,
     std::string tmp;
     llvm::raw_string_ostream oss(tmp);
     oss << "extern const char __coir_ptx_string[];\n\n";
-    if (typesHeader)
-      oss << "#include \"choreo_types.h\"\n";
-    if (runtimeHeader)
-      oss << "#include \"choreo.h\"\n";
+    if (typesHeader) oss << "#include \"choreo_types.h\"\n";
+    if (runtimeHeader) oss << "#include \"choreo.h\"\n";
     oss << "\n";
     oss << stubs;
 
     auto hostAttr =
         module->getAttrOfType<mlir::StringAttr>("coir.user_cpp_code");
-    if (hostAttr && !hostAttr.getValue().empty())
-      oss << hostAttr.getValue();
+    if (hostAttr && !hostAttr.getValue().empty()) oss << hostAttr.getValue();
     oss << "\n";
     hostSrc = oss.str();
   }
@@ -184,8 +178,7 @@ int compileToExecutable(mlir::ModuleOp module, llvm::StringRef arch,
   opts.cudaHome = cudaHome.str();
   if (typesHeader)
     opts.virtualFiles.emplace_back("choreo_types.h", typesHeader);
-  if (runtimeHeader)
-    opts.virtualFiles.emplace_back("choreo.h", runtimeHeader);
+  if (runtimeHeader) opts.virtualFiles.emplace_back("choreo.h", runtimeHeader);
 
   auto hostMod = compileHostToLLVM(hostSrc, llvmCtx, opts);
   if (!hostMod) {
