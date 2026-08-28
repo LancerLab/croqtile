@@ -363,6 +363,15 @@ void Choreo::PrintAssessmentStats(const AssessmentStats& s) {
   row(s.runtime_disabled, "Runtime assertions disabled by cost filter");
   errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
          << "\n";
+  row(s.st_structural, "Static-true needing block/thread structure");
+  row(s.st_scalar, "Static-true over scalar symbols only");
+  row(s.st_const, "Static-true constant-only");
+  row(s.rt_structural, "Runtime assertions referencing block/thread structure");
+  row(s.rt_scalar, "Runtime assertions over scalar symbols only");
+  row(s.rt_const, "Runtime assertions constant-only");
+  row(s.direct_checks, "Direct static checks (bypassing assessor)");
+  errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
+         << "\n";
   row(s.unclassified_total, "Assessments (unclassified)");
   row(s.shape_compat_total, "Assessments (shape-compatibility)");
   row(s.elem_access_total, "Assessments (element-access)");
