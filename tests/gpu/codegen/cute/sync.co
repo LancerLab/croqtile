@@ -44,7 +44,7 @@ __co__ void test_fences() {
     sync.fence.acq_rel : block;
 
     // CHECK: asm volatile("fence.sc.gpu;" ::: "memory");
-    sync.fence.sc : block;
+    sync.fence.seq_cst : block;
   }
 }
 

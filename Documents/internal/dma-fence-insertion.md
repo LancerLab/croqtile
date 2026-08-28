@@ -51,7 +51,7 @@ The core type is `FenceKind` (`lib/types.hpp`), a four-fold request
                                 loads), `ACQ_REL` (full barrier), or
                                 `SEQ_CST` (sequentially-consistent barrier).
                                 The parser maps a missing `.acq`/`.rel`/
-                                `.acq_rel`/`.sc` suffix to `FenceOrder::DEFAULT`,
+                                `.acq_rel`/`.seq_cst` suffix to `FenceOrder::DEFAULT`,
                                 which semantic analysis resolves to `SEQ_CST`
                                 on targets that support it and `ACQ_REL`
                                 otherwise.
@@ -238,23 +238,23 @@ Implemented (on `main`):
 - Stage 5: the COIR path -- lower the annotation through `ASTCoIRGen` into a
   `coir.fence` op / wait attribute, plus `FenceElision`.
 - Stage 6: an explicit `order` axis on `sync.fence` (`.acq` / `.rel` /
-  `.acq_rel` / `.sc`) and the corresponding COIR `order` attribute.
+  `.acq_rel` / `.seq_cst`) and the corresponding COIR `order` attribute.
 
 The `order` axis is honored by every target fence emitter to the extent its
 hardware allows:
 
 - GCU (topscc) is fully order-aware (`_STORE` / `_LOAD` / bare fence). It
-  does not support `.sc`; an explicit `.sc` is rejected in semantic analysis.
+  does not support `.seq_cst`; an explicit `.seq_cst` is rejected in semantic analysis.
 - CPU (cc) emits `memory_order_release` / `acquire` / `acq_rel` / `seq_cst`.
 - HIP (AMDGPU) emits directional `__builtin_amdgcn_fence` for
   `.rel` / `.acq`, full `__threadfence*` for `.acq_rel`, and
-  `__builtin_amdgcn_fence(__ATOMIC_SEQ_CST, ...)` for `.sc`.
+  `__builtin_amdgcn_fence(__ATOMIC_SEQ_CST, ...)` for `.seq_cst`.
 - CUDA (cute) collapses `.rel` / `.acq` / `.acq_rel` to the full
-  `__threadfence*` and lowers `.sc` to the PTX `fence.sc.{cta,gpu}`; the
+  `__threadfence*` and lowers `.seq_cst` to the PTX `fence.sc.{cta,gpu}`; the
   standalone `fence` instruction only offers `.acq_rel` and `.sc` (no
   release-only or acquire-only form).
 
-When no `.acq`/`.rel`/`.acq_rel`/`.sc` suffix is given, the default is
+When no `.acq`/`.rel`/`.acq_rel`/`.seq_cst` suffix is given, the default is
 `SEQ_CST` on targets that support it (CPU, AMDGPU, CUDA) and `ACQ_REL`
 otherwise (GCU), per `Target::SupportsSeqCstFence`.
 

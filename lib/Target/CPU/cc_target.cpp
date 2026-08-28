@@ -20,7 +20,7 @@ public:
   bool IsAsmSupported(const ArchId&) const override { return true; }
 
   // CPU has std::memory_order_seq_cst, so the default fence order is seq_cst
-  // and sync.fence.sc is accepted.
+  // and sync.fence.seq_cst is accepted.
   bool SupportsSeqCstFence(const ArchId&) const override { return true; }
 
   int DefaultOptLevel(const ArchId&) const override { return 2; }

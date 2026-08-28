@@ -1,12 +1,12 @@
 // RUN: choreo -arch=gcu300 %s 2>&1 | FileCheck %s
 // REQUIRES: TARGET-GCUALL
 
-// Test: sync.fence.sc is rejected on GCU, which has no sequentially-consistent
+// Test: sync.fence.seq_cst is rejected on GCU, which has no sequentially-consistent
 // standalone fence. An unspecified order still defaults to acq_rel.
-__co__ void test_fence_sc_unsupported() {
+__co__ void test_fence_seq_cst_unsupported() {
   parallel bx by 1 : block {
-    // CHECK: error: sync.fence.sc is not supported by target 'topscc'
-    sync.fence.sc<global> : block;
+    // CHECK: error: sync.fence.seq_cst is not supported by target 'topscc'
+    sync.fence.seq_cst<global> : block;
 
     // The default order is acq_rel on GCU (no seq_cst fence), so no error.
     sync.fence<global> : block;

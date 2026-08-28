@@ -849,7 +849,7 @@ bool SemaChecker::VisitNode(AST::Fence& n) {
   // Reject an explicit seq_cst fence on a target with no sequential fence.
   if (n.order == FenceOrder::SEQ_CST && CCtx().HasTarget() &&
       !CCtx().GetTarget().SupportsSeqCstFence(CCtx().GetArch())) {
-    Error1(n.LOC(), "sync.fence.sc is not supported by target '" +
+    Error1(n.LOC(), "sync.fence.seq_cst is not supported by target '" +
                         CCtx().GetTarget().Name() + "' on arch '" +
                         CCtx().GetArch() +
                         "'; the target has no sequentially-consistent "
