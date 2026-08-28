@@ -2710,13 +2710,17 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
             "error: shared/local buffer cannot be Choreo output.");
 
       auto type_modifiers = (sto == Storage::SHARED ? "__shared__ " : "");
+      std::string alignment_specifier;
+      if (n.HasNote("alignment"))
+        alignment_specifier = "alignas(" + n.GetNote("alignment") + ") ";
 
       if (!CCtx().MemReuse()) {
         if (n.HasNote("ref"))
           Error1(
               n.LOC(),
               "buffer reference is enabled only when memory reuse is enabled.");
-        ds << d_indent << type_modifiers << bts << " " << sym;
+        ds << d_indent << type_modifiers << alignment_specifier << bts << " "
+           << sym;
         for (const auto& dim : GetArrayDimensions(nty))
           ds << "[" << ValueSTR(dim) << "]";
         ds << "[" << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
@@ -2765,8 +2769,8 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
           for (const auto& dim : GetArrayDimensions(nty))
             total_elem_expr =
                 "(" + ValueSTR(dim) + ")*(" + total_elem_expr + ")";
-          ds << d_indent << type_modifiers << bts << " " << sym << "["
-             << total_elem_expr << "];\n";
+          ds << d_indent << type_modifiers << alignment_specifier << bts << " "
+             << sym << "[" << total_elem_expr << "];\n";
         }
       }
     };

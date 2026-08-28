@@ -1,0 +1,7 @@
+// RUN: not choreo -t cc -es %s -o - 2>&1 | FileCheck %s
+
+__co__ void invalid_alignment_storage() {
+  alignas(512) global u8[16] buffer;
+}
+
+// CHECK: error: alignas is supported only for local or shared buffers

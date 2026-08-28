@@ -84,6 +84,26 @@ size_t MemReuse::SharedAlignmentForDevFunc(const std::string& df_name) const {
   return alignment;
 }
 
+size_t
+MemReuse::RequestedAlignmentForDevFunc(Storage sto,
+                                       const std::string& df_name) const {
+  size_t alignment = 0;
+  for (const auto& [buffer_id, requested] : ma.buf_alignment) {
+    if (ma.buf_sto.at(buffer_id) != sto) continue;
+    if (GetDeclDevFuncOfBuffer(buffer_id) != df_name) continue;
+    alignment = std::max(alignment, requested);
+  }
+  return alignment;
+}
+
+size_t MemReuse::AlignmentForDevFunc(Storage sto,
+                                     const std::string& df_name) const {
+  size_t alignment = CCtx().GetMemoryAlignmentByte(sto);
+  if (sto == Storage::SHARED)
+    alignment = std::max(alignment, SharedAlignmentForDevFunc(df_name));
+  return std::max(alignment, RequestedAlignmentForDevFunc(sto, df_name));
+}
+
 bool MemAnalyzer::BeforeVisitImpl(AST::Node& n) {
   if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
     parallel_level = 0;
@@ -126,6 +146,8 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
   auto aty = dyn_cast<ArrayType>(ty);
   if (aty) elem_count = aty->ElemCount();
   auto sname = InScopeName(n.name_str);
+  if (n.HasNote("alignment"))
+    buf_alignment.emplace(sname, std::stoull(n.GetNote("alignment")));
 
   if (auto et = dyn_cast<EventType>(ty)) {
     // need to consider the event type!
@@ -173,7 +195,8 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
     if (pb->IsDeviceEntry()) {
       cur_dev_fname = SSTab().ScopeName();
       if (DFCtx().shared_spm_size != 0) {
-        size_t shared_alignment = SharedAlignmentForDevFunc(cur_dev_fname);
+        size_t shared_alignment =
+            AlignmentForDevFunc(Storage::SHARED, cur_dev_fname);
         DFCtx().shared_spm_name = SymbolTable::GetAnonName();
         auto shared_spm =
             AST::Make<AST::NamedVariableDecl>(n.LOC(), DFCtx().shared_spm_name);
@@ -185,6 +208,8 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
         shared_spm->SetType(ssty);
         shared_spm->AddNote("spm");
         shared_spm->AddNote("alignment", std::to_string(shared_alignment));
+        if (RequestedAlignmentForDevFunc(Storage::SHARED, cur_dev_fname) != 0)
+          shared_spm->AddNote("explicit_alignment");
         pb->stmts->values.insert(pb->stmts->values.begin(), shared_spm);
         SSTab().DefineSymbol(DFCtx().shared_spm_name, ssty);
         VST_DEBUG(dbgs() << "Defined shared scratch pad memory: "
@@ -202,9 +227,10 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
             Storage::LOCAL);
         local_spm->SetType(lsty);
         local_spm->AddNote("spm");
-        local_spm->AddNote(
-            "alignment",
-            std::to_string(CCtx().GetMemoryAlignmentByte(Storage::LOCAL)));
+        local_spm->AddNote("alignment", std::to_string(AlignmentForDevFunc(
+                                            Storage::LOCAL, cur_dev_fname)));
+        if (RequestedAlignmentForDevFunc(Storage::LOCAL, cur_dev_fname) != 0)
+          local_spm->AddNote("explicit_alignment");
         pb->stmts->values.insert(pb->stmts->values.begin(), local_spm);
         SSTab().DefineSymbol(DFCtx().local_spm_name, lsty);
         VST_DEBUG(dbgs() << "Defined local scratch pad memory: "
@@ -365,8 +391,7 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
     if (sto != Storage::LOCAL && sto != Storage::SHARED)
       choreo_unreachable("The storage type: " + STR(sto) +
                          " is not supported yet!");
-    size_t alignment = CCtx().GetMemoryAlignmentByte(sto);
-    if (sto == Storage::SHARED) alignment = SharedAlignmentForDevFunc(df_name);
+    size_t alignment = AlignmentForDevFunc(sto, df_name);
     if (ma.sto_have_dyn[df_name][sto]) {
       auto mri = FCtx(co_func_name).SetDynMemReuseInfo(df_name);
       std::string simulator =
@@ -714,9 +739,7 @@ void MemReuse::ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto) {
 
   n.AddNote("reuse", spm_name);
   n.AddNote("offset", offset);
-  size_t alignment = CCtx().GetMemoryAlignmentByte(sto);
-  if (sto == Storage::SHARED)
-    alignment = SharedAlignmentForDevFunc(cur_dev_fname);
+  size_t alignment = AlignmentForDevFunc(sto, cur_dev_fname);
   n.AddNote("alignment", std::to_string(alignment));
 }
 

@@ -524,6 +524,7 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
   "ituple"   return Choreo::Parser::make_ITUPLE(yytext, loc);
   "stream"   return Choreo::Parser::make_STREAM(yytext, loc);
   "event"    return Choreo::Parser::make_EVENT(yytext, loc);
+  "alignas"  return Choreo::Parser::make_ALIGNAS(yytext, loc);
   {removed_stage} return Choreo::Parser::make_REMOVED_STAGE(yytext, loc);
   "frag"     return Choreo::Parser::make_FRAG(yytext, loc);
   "print"    return Choreo::Parser::make_PRINT(yytext, loc);
