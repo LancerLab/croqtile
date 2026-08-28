@@ -675,7 +675,7 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
   ".acq_rel" return Choreo::Parser::make_ACQ_REL(loc);
   ".acq"     return Choreo::Parser::make_ACQ(loc);
   ".rel"     return Choreo::Parser::make_REL(loc);
-  ".sc"      return Choreo::Parser::make_SC(loc);
+  ".seq_cst" return Choreo::Parser::make_SEQ_CST(loc);
   "cooperative" return Choreo::Parser::make_COOPERATIVE(yytext, loc);
   "trigger"  return Choreo::Parser::make_TRIGGER(yytext, loc);
   "if"       return Choreo::Parser::make_IF(yytext, loc);

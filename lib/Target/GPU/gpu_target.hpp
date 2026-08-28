@@ -202,7 +202,7 @@ public:
   bool SupportsDirectionalFence(const ArchId&) const override { return false; }
 
   // CUDA exposes a sequentially-consistent fence via `fence.sc`, so the
-  // default fence order is seq_cst and `sync.fence.sc` is accepted.
+  // default fence order is seq_cst and `sync.fence.seq_cst` is accepted.
   bool SupportsSeqCstFence(const ArchId&) const override { return true; }
 
   ArchId ResolveNativeArch() const override;

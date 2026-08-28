@@ -244,7 +244,7 @@ public:
   // Whether the target has a sequentially-consistent standalone fence
   // (`fence.sc` on CUDA, `memory_order_seq_cst` on CPU, `__ATOMIC_SEQ_CST`
   // on AMDGPU). Targets without one return false, so the default fence order
-  // degrades to acq_rel and an explicit `sync.fence.sc` is rejected by the
+  // degrades to acq_rel and an explicit `sync.fence.seq_cst` is rejected by the
   // semantic checker.
   virtual bool SupportsSeqCstFence(const ArchId&) const { return false; }
   // Default memory scope for a fence at the given visibility level.

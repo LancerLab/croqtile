@@ -17,7 +17,7 @@ __co__ void test_fence_order_collapse() {
     // CHECK: asm volatile("fence.sc.gpu;" ::: "memory");
 
     // An explicit seq_cst fence is accepted on CUDA and emits fence.sc.
-    sync.fence.sc : block;
+    sync.fence.seq_cst : block;
     // CHECK: asm volatile("fence.sc.gpu;" ::: "memory");
   }
 }
