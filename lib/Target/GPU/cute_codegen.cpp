@@ -4733,9 +4733,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       bool is_multicast_tma = n.IsMulticast() && n.IsTMA();
       bool emit_tma_single_guard =
           !ScopeAlreadySingleThreadForLevel(tma_sync_level);
-      if (!warpspec_only)
-        assert(emit_tma_single_guard &&
-               "non-warpspec tma copy must be single-threaded");
+      // A non-warpspec TMA copy must be issued by a single thread.  That is
+      // satisfied either because the enclosing scope is already single-
+      // threaded (e.g. an elected lane `inthreads (t == C)` selects exactly
+      // one thread, so no guard is needed) or because the single-thread guard
+      // is emitted below.  Both cases leave the TMA single-threaded.
 
       std::string tma_issue_prefix = emit_tma_single_guard ? "  " : "";
 
