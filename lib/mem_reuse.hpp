@@ -31,6 +31,7 @@ struct MemAnalyzer : public VisitorWithSymTab {
   std::unordered_map<std::string, ValueItem> buf_size;
   std::unordered_map<std::string, Storage> buf_sto;
   std::unordered_map<std::string, std::string> buf_dev_func_name;
+  std::unordered_map<std::string, size_t> buf_alignment;
   std::set<std::string> event_vars;
 
   MemAnalyzer() : VisitorWithSymTab("memanlz") {}
@@ -122,6 +123,9 @@ private:
 
   void CollectSharedAlignmentRequirements(AST::Node& root);
   size_t SharedAlignmentForDevFunc(const std::string& df_name) const;
+  size_t RequestedAlignmentForDevFunc(Storage sto,
+                                      const std::string& df_name) const;
+  size_t AlignmentForDevFunc(Storage sto, const std::string& df_name) const;
 
 public:
   MemReuse() : VisitorWithSymTab("memreuse") {

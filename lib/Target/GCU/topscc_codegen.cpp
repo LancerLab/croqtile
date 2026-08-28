@@ -1174,9 +1174,14 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 
       auto type_modifiers =
           (sto == Storage::SHARED ? "__shared__ " : "__local__ __valigned__ ");
+      std::string alignment_specifier;
+      if (n.HasNote("alignment") &&
+          (!n.HasNote("spm") || n.HasNote("explicit_alignment")))
+        alignment_specifier = "alignas(" + n.GetNote("alignment") + ") ";
 
       if (!CCtx().MemReuse()) {
-        ds << d_indent << type_modifiers << bts << " " << sym;
+        ds << d_indent << alignment_specifier << type_modifiers << bts << " "
+           << sym;
         for (const auto& dim : GetArrayDimensions(nty))
           ds << "[" << ValueSTR(dim) << "]";
         ds << "[" << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
@@ -1187,8 +1192,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 
       if (n.HasNote("spm")) {
         if (!extern_smem || sto == Storage::LOCAL) {
-          ds << d_indent << type_modifiers << bts << " " << sym << "["
-             << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
+          ds << d_indent << alignment_specifier << type_modifiers << bts << " "
+             << sym << "[" << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
         } else {
           ds << d_indent << bts << "* " << sym << " = (" << bts << "*)"
              << device_fn << "__runtime_shared_buffer__;\n";
@@ -1211,8 +1216,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         } else {
           // which means that it is declared but never used.
           // TODO: should we DCE the unused buffer?
-          ds << d_indent << type_modifiers << bts << " " << sym << "["
-             << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
+          ds << d_indent << alignment_specifier << type_modifiers << bts << " "
+             << sym << "[" << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
         }
       }
     };

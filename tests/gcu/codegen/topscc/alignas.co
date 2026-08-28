@@ -1,0 +1,22 @@
+// RUN: choreo -t topscc -es --mem-reuse=false %s -o - | FileCheck %s --check-prefix=NOREUSE
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s --check-prefix=REUSE
+
+__co__ void explicit_alignment() {
+  parallel by 1 : block {
+    alignas(1024) shared u8[16] shared_buffer;
+    parallel by 1 : thread {
+      alignas(512 * 2) local u8[16] local_buffer;
+      local u8[16] other_buffer;
+      call consume(shared_buffer, local_buffer, other_buffer);
+    }
+  }
+}
+
+// NOREUSE: alignas(1024) __shared__ unsigned char shared_buffer[16];
+// NOREUSE: alignas(1024) __local__ __valigned__ unsigned char local_buffer[16];
+// NOREUSE: __local__ __valigned__ unsigned char other_buffer[16];
+
+// REUSE: alignas(1024) __local__ __valigned__ unsigned char anon_{{[0-9]+}}[2048];
+// REUSE: alignas(1024) __shared__ unsigned char anon_{{[0-9]+}}[1024];
+// REUSE: unsigned char* local_buffer = (unsigned char*)(anon_{{[0-9]+}} + 0);
+// REUSE: unsigned char* other_buffer = (unsigned char*)(anon_{{[0-9]+}} + 1024);

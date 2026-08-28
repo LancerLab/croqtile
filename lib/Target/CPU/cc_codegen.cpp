@@ -1647,8 +1647,13 @@ bool CCCodeGen::Visit(AST::NamedVariableDecl& n) {
     auto size = UnScopedExpr(SizeExprOf(*sty, true));
     if (sty->GetStorage() == Storage::LOCAL ||
         sty->GetStorage() == Storage::SHARED) {
-      os << indent << "alignas(64) " << elem_ty << " " << sym << "["
-         << UnScopedExpr(ValueSTR(sty->GetShape().ElementCountValue()))
+      size_t alignment = 64;
+      if (n.HasNote("alignment"))
+        alignment =
+            std::max(alignment,
+                     static_cast<size_t>(std::stoull(n.GetNote("alignment"))));
+      os << indent << "alignas(" << alignment << ") " << elem_ty << " " << sym
+         << "[" << UnScopedExpr(ValueSTR(sty->GetShape().ElementCountValue()))
          << "];\n";
     } else {
       os << indent << elem_ty << "* " << sym << " = static_cast<" << elem_ty

@@ -207,7 +207,7 @@ extern int yylex();
 %token <std::string> IDENTIFIER ATTR_CO DEVICE_EXPR
 %token <std::string> CONST STATIC EXTERN INLINE ATTR_ID ATTRIBUTE SIGNED UNSIGNED TYPENAME DEVICE_TEMPLATE
 // type related
-%token <std::string> MDSPAN ITUPLE EVENT MUTABLE STREAM REMOVED_STAGE
+%token <std::string> MDSPAN ITUPLE EVENT MUTABLE STREAM REMOVED_STAGE ALIGNAS
 %token <Choreo::Storage> STORAGE
 %token <Choreo::ParallelLevel> PBLEVEL
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
@@ -290,6 +290,7 @@ extern int yylex();
 %nterm <AST::MMAOperation::ExecMethod> mma_exec_method
 %nterm <std::vector<int>> mma_issue_order mma_schedule_attribute
 %nterm <Choreo::Storage> param_storage scoped_storage
+%nterm <int64_t> alignment_spec
 %nterm <PLAnnotation> note_pl
 
 // resolving the ambiguity of dangling ELSE
@@ -1055,9 +1056,33 @@ declaration
 
 multi_decls
     : named_spanned_decls { $$ = $1; }
+    | alignment_spec named_spanned_decls {
+        for (auto item : $2->AllSubs()) {
+          auto decl = cast<AST::NamedVariableDecl>(item);
+          auto storage = decl->GetMemory()->Get();
+          if (storage != Storage::LOCAL && storage != Storage::SHARED) {
+            error(@1, "alignas is supported only for local or shared buffers");
+            YYERROR;
+          }
+          decl->AddNote("alignment", std::to_string($1));
+        }
+        $2->SetLOC(@1);
+        $$ = $2;
+      }
     | named_fragment_decls { $$ = $1; }
     | named_scalar_decls  { $$ = $1; }
     | named_event_decls   { $$ = $1; }
+    ;
+
+alignment_spec
+    : ALIGNAS LPAREN num_expr RPAREN {
+        int64_t alignment = static_cast<int64_t>($3->Val());
+        if (alignment <= 0 || (alignment & (alignment - 1)) != 0) {
+          error(@3, "alignas argument must be a positive power of two");
+          YYERROR;
+        }
+        $$ = alignment;
+      }
     ;
 
 named_scalar_decls

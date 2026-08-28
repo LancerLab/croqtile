@@ -1554,15 +1554,21 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
         return true;
       }
       if (sto == Storage::SHARED) {
-        ds << d_indent << "__shared__ " << HIPNameBaseType(sty->ElementType())
-           << " " << sym << "[" << UnScopedSizeExpr(*sty) << " / sizeof("
+        ds << d_indent << "__shared__ ";
+        if (n.HasNote("alignment"))
+          ds << "alignas(" << n.GetNote("alignment") << ") ";
+        ds << HIPNameBaseType(sty->ElementType()) << " " << sym << "["
+           << UnScopedSizeExpr(*sty) << " / sizeof("
            << HIPNameBaseType(sty->ElementType()) << ")];\n";
         ssm.MapDeviceSymbolIfNotExist(sname, sym);
         return true;
       }
       if (sto == Storage::LOCAL || sto == Storage::REG) {
-        ds << d_indent << HIPNameBaseType(sty->ElementType()) << " " << sym
-           << "[" << UnScopedSizeExpr(*sty) << " / sizeof("
+        ds << d_indent;
+        if (n.HasNote("alignment"))
+          ds << "alignas(" << n.GetNote("alignment") << ") ";
+        ds << HIPNameBaseType(sty->ElementType()) << " " << sym << "["
+           << UnScopedSizeExpr(*sty) << " / sizeof("
            << HIPNameBaseType(sty->ElementType()) << ")];\n";
         ssm.MapDeviceSymbolIfNotExist(sname, sym);
         return true;
