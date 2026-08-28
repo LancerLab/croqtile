@@ -469,10 +469,22 @@ void AssertSite::EstimateAssertions() {
       case UsageType::HardwareConstraint: ++stats.hw_constraint_total; break;
       }
       switch (ae.outcome) {
-      case AssessOutcome::STATIC_TRUE: ++stats.static_true; break;
+      case AssessOutcome::STATIC_TRUE:
+        ++stats.static_true;
+        switch (ae.dependence) {
+        case AssessDependence::STRUCTURAL: ++stats.st_structural; break;
+        case AssessDependence::SCALAR_SYMBOLIC: ++stats.st_scalar; break;
+        case AssessDependence::CONSTANT: ++stats.st_const; break;
+        }
+        break;
       case AssessOutcome::STATIC_FALSE: ++stats.static_false; break;
       case AssessOutcome::RUNTIME: {
         ++stats.runtime_total;
+        switch (ae.dependence) {
+        case AssessDependence::STRUCTURAL: ++stats.rt_structural; break;
+        case AssessDependence::SCALAR_SYMBOLIC: ++stats.rt_scalar; break;
+        case AssessDependence::CONSTANT: ++stats.rt_const; break;
+        }
         // Per-usage-type runtime
         switch (ae.usage_type) {
         case UsageType::UnClassified: ++stats.unclassified_runtime; break;

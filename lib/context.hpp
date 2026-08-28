@@ -444,6 +444,14 @@ struct AssessmentStats {
   size_t static_true = 0;      // resolved at compile time (always passes)
   size_t static_false = 0;     // proven false at compile time (error/warning)
   size_t runtime_total = 0;    // runtime assertions generated
+  // Discharge information dependence (Assessor-logged path only; RQ4)
+  size_t st_structural = 0;    // static_true, needs block/thread structure
+  size_t st_scalar = 0;        // static_true, scalar symbols only
+  size_t st_const = 0;         // static_true, constants only
+  size_t rt_structural = 0;    // runtime, references block/thread structure
+  size_t rt_scalar = 0;        // runtime, scalar symbols only
+  size_t rt_const = 0;         // runtime, constants only
+  size_t direct_checks = 0;    // assessed via direct static checks (no log)
   size_t runtime_entry = 0;    // runtime assertions with entry estimated cost
   size_t runtime_low = 0;      // runtime assertions with low estimated cost
   size_t runtime_medium = 0;   // runtime assertions with medium estimated cost
@@ -462,7 +470,6 @@ struct AssessmentStats {
   size_t elem_access_runtime = 0;
   size_t loop_bound_runtime = 0;
   size_t hw_constraint_runtime = 0;
-
   // Automatic DMA fence-insertion statistics (gated by --collect-stats).
   struct FenceStats {
     size_t inserted = 0;        // auto fences emitted (producer + consumer)
