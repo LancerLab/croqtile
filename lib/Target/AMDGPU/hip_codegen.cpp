@@ -1580,9 +1580,10 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
         return true;
       }
       if (sto == Storage::SHARED) {
-        ds << d_indent << "__shared__ ";
+        ds << d_indent;
         if (n.HasNote("alignment"))
           ds << "alignas(" << n.GetNote("alignment") << ") ";
+        ds << "__shared__ ";
         ds << HIPNameBaseType(sty->ElementType()) << " " << sym << "["
            << UnScopedSizeExpr(*sty) << " / sizeof("
            << HIPNameBaseType(sty->ElementType()) << ")];\n";
