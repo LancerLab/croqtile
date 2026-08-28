@@ -1,0 +1,23 @@
+// RUN: choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+// Test: a directional fence order (release/acquire) collapses to the full
+// acq_rel fence on CUDA, whose standalone `fence` has no directional form.
+// The semantic checker notes this rather than failing silently.
+__co__ void test_fence_order_collapse() {
+  parallel bx by 1 : block {
+    // CHECK: info: sync.fence.rel on target 'cute' emits a full acq_rel fence
+    sync.fence.rel : block;
+
+    // CHECK: info: sync.fence.acq on target 'cute' emits a full acq_rel fence
+    sync.fence.acq : thread;
+
+    // The default order is seq_cst on CUDA (it has fence.sc), so no note and
+    // a seq_cst fence is emitted.
+    sync.fence : block;
+    // CHECK: asm volatile("fence.sc.gpu;" ::: "memory");
+
+    // An explicit seq_cst fence is accepted on CUDA and emits fence.sc.
+    sync.fence.sc : block;
+    // CHECK: asm volatile("fence.sc.gpu;" ::: "memory");
+  }
+}

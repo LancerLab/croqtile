@@ -1471,19 +1471,42 @@ private:
 
   void emitFence(FenceOp op) override {
     auto scope = op.getScope();
+    bool ctaScope;
     switch (scope) {
     case ParallelLevel::THREAD:
     case ParallelLevel::GROUP:
     case ParallelLevel::GROUPx4:
       // Fence within CTA: shared + global memory.
-      os() << getIndent() << "__threadfence_block();\n";
+      ctaScope = true;
       break;
     case ParallelLevel::BLOCK:
     case ParallelLevel::DEVICE:
       // Fence device-wide: global memory.
-      os() << getIndent() << "__threadfence();\n";
+      ctaScope = false;
       break;
     default: llvm_unreachable("unexpected fence scope"); break;
+    }
+    // AMDGPU fences support directional ordering via __builtin_amdgcn_fence:
+    // release publishes prior stores, acquire orders subsequent loads,
+    // acq_rel keeps the full __threadfence* forms, and seq_cst is the
+    // sequentially-consistent fence.
+    switch (op.getOrder()) {
+    case FenceOrder::Release:
+      os() << getIndent() << "__builtin_amdgcn_fence(__ATOMIC_RELEASE, \""
+           << (ctaScope ? "workgroup" : "agent") << "\");\n";
+      break;
+    case FenceOrder::Acquire:
+      os() << getIndent() << "__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, \""
+           << (ctaScope ? "workgroup" : "agent") << "\");\n";
+      break;
+    case FenceOrder::AcqRel:
+      os() << getIndent()
+           << (ctaScope ? "__threadfence_block();\n" : "__threadfence();\n");
+      break;
+    case FenceOrder::SeqCst:
+      os() << getIndent() << "__builtin_amdgcn_fence(__ATOMIC_SEQ_CST, \""
+           << (ctaScope ? "workgroup" : "agent") << "\");\n";
+      break;
     }
   }
 

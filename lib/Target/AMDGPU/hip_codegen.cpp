@@ -585,21 +585,47 @@ bool HIPCodeGen::Visit(AST::Fence& n) {
   TraceEachVisit(n);
 
   // GPU fences always cover shared+global; visibility distinguishes the scope.
+  bool cta_scope;
   switch (n.GetVisibility()) {
   case ParallelLevel::THREAD:
   case ParallelLevel::GROUP:
   case ParallelLevel::GROUPx4:
     // Fence within CTA: shared + global memory.
-    ds << d_indent << "__threadfence_block();\n";
+    cta_scope = true;
     break;
   case ParallelLevel::BLOCK:
   case ParallelLevel::DEVICE:
     // Fence device-wide: global memory.
-    ds << d_indent << "__threadfence();\n";
+    cta_scope = false;
     break;
   default:
     choreo_unreachable(
         "unsupported fence visibility: " + STR(n.GetVisibility()) + ".");
+  }
+
+  // AMDGPU fences support directional ordering via __builtin_amdgcn_fence:
+  // release publishes prior stores, acquire orders subsequent loads, acq_rel
+  // keeps the historical full __threadfence* forms, and seq_cst (the target
+  // default) is the sequentially-consistent fence.
+  switch (n.GetOrder()) {
+  case FenceOrder::RELEASE:
+    ds << d_indent << "__builtin_amdgcn_fence(__ATOMIC_RELEASE, \""
+       << (cta_scope ? "workgroup" : "agent") << "\");\n";
+    break;
+  case FenceOrder::ACQUIRE:
+    ds << d_indent << "__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, \""
+       << (cta_scope ? "workgroup" : "agent") << "\");\n";
+    break;
+  case FenceOrder::ACQ_REL:
+    ds << d_indent
+       << (cta_scope ? "__threadfence_block();\n" : "__threadfence();\n");
+    break;
+  case FenceOrder::SEQ_CST:
+    ds << d_indent << "__builtin_amdgcn_fence(__ATOMIC_SEQ_CST, \""
+       << (cta_scope ? "workgroup" : "agent") << "\");\n";
+    break;
+  default:
+    choreo_unreachable("unsupported fence order: " + STR(n.GetOrder()) + ".");
   }
 
   return true;

@@ -2,9 +2,10 @@
 
 ## Status
 
-Implemented on `main` (Stages 1-4 of the fence-insertion plan); COIR path
-(Stage 5) and the explicit-fence `order` axis (Stage 6) are planned but not
-implemented. See the "What is and is not implemented" section at the end.
+Implemented on `main` (all six stages of the fence-insertion plan: Stages
+1-4 GCU fence insertion, Stage 5 the COIR path, and Stage 6 the
+explicit-fence `order` axis). See the "What is and is not implemented"
+section at the end.
 
 ## Overview
 
@@ -47,7 +48,13 @@ The core type is `FenceKind` (`lib/types.hpp`), a four-fold request
 - `order`  (`FenceOrder`)    -- the direction and strength:
                                 `RELEASE` (publish the writer's stores),
                                 `ACQUIRE` (order/invalidate the reader's
-                                loads), or `ACQ_REL` (full barrier).
+                                loads), `ACQ_REL` (full barrier), or
+                                `SEQ_CST` (sequentially-consistent barrier).
+                                The parser maps a missing `.acq`/`.rel`/
+                                `.acq_rel`/`.sc` suffix to `FenceOrder::DEFAULT`,
+                                which semantic analysis resolves to `SEQ_CST`
+                                on targets that support it and `ACQ_REL`
+                                otherwise.
 - `scope`  (`ParallelLevel`) -- the coherence domain the ordering is made
                                 visible to. `kAutoScope` (`ParallelLevel::NONE`)
                                 means "derive from `space`" via
@@ -228,13 +235,28 @@ Implemented (on `main`):
 - Stage 2-3: the `AccessTracker` symbol-resolution extraction, the
   `BufferAccessAnalyzer`, and the `FenceInsertion` decision pass.
 - Stage 4: the topscc (GCU) emission sink.
-
-Planned but not implemented:
-
 - Stage 5: the COIR path -- lower the annotation through `ASTCoIRGen` into a
   `coir.fence` op / wait attribute, plus `FenceElision`.
 - Stage 6: an explicit `order` axis on `sync.fence` (`.acq` / `.rel` /
-  `.acq_rel`) and the corresponding COIR `order` attribute.
+  `.acq_rel` / `.sc`) and the corresponding COIR `order` attribute.
+
+The `order` axis is honored by every target fence emitter to the extent its
+hardware allows:
+
+- GCU (topscc) is fully order-aware (`_STORE` / `_LOAD` / bare fence). It
+  does not support `.sc`; an explicit `.sc` is rejected in semantic analysis.
+- CPU (cc) emits `memory_order_release` / `acquire` / `acq_rel` / `seq_cst`.
+- HIP (AMDGPU) emits directional `__builtin_amdgcn_fence` for
+  `.rel` / `.acq`, full `__threadfence*` for `.acq_rel`, and
+  `__builtin_amdgcn_fence(__ATOMIC_SEQ_CST, ...)` for `.sc`.
+- CUDA (cute) collapses `.rel` / `.acq` / `.acq_rel` to the full
+  `__threadfence*` and lowers `.sc` to the PTX `fence.sc.{cta,gpu}`; the
+  standalone `fence` instruction only offers `.acq_rel` and `.sc` (no
+  release-only or acquire-only form).
+
+When no `.acq`/`.rel`/`.acq_rel`/`.sc` suffix is given, the default is
+`SEQ_CST` on targets that support it (CPU, AMDGPU, CUDA) and `ACQ_REL`
+otherwise (GCU), per `Target::SupportsSeqCstFence`.
 
 ## Verification
 

@@ -3533,19 +3533,31 @@ private:
 
   void emitFence(FenceOp op) override {
     auto scope = op.getScope();
+    bool ctaScope;
     switch (scope) {
     case ParallelLevel::THREAD:
     case ParallelLevel::GROUP:
     case ParallelLevel::GROUPx4:
       // Fence within CTA: shared + global memory.
-      os() << getIndent() << "__threadfence_block();\n";
+      ctaScope = true;
       break;
     case ParallelLevel::BLOCK:
     case ParallelLevel::DEVICE:
       // Fence device-wide: global memory.
-      os() << getIndent() << "__threadfence();\n";
+      ctaScope = false;
       break;
     default: llvm_unreachable("unexpected fence scope"); break;
+    }
+    // The order axis selects between the two standalone fence forms CUDA
+    // offers: acq_rel (the full barrier, emitted as __threadfence*()) and
+    // seq_cst (emitted as fence.sc.*). Release/acquire have no standalone
+    // form and collapse to the full acq_rel barrier.
+    if (op.getOrder() == FenceOrder::SeqCst) {
+      os() << getIndent() << "asm volatile(\"fence.sc."
+           << (ctaScope ? "cta" : "gpu") << ";\" ::: \"memory\");\n";
+    } else {
+      os() << getIndent()
+           << (ctaScope ? "__threadfence_block();\n" : "__threadfence();\n");
     }
   }
 

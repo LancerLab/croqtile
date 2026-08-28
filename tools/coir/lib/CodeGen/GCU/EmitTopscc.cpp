@@ -4450,6 +4450,11 @@ private:
     case coir::FenceOrder::Release: ft += "_STORE"; break;
     case coir::FenceOrder::Acquire: ft += "_LOAD"; break;
     case coir::FenceOrder::AcqRel: break;
+    // GCU has no sequentially-consistent fence; the semantic checker rejects
+    // sync.fence.sc before IR generation, so this should be unreachable.
+    case coir::FenceOrder::SeqCst:
+      llvm_unreachable("seq_cst fence is unsupported on the GCU target");
+      break;
     }
     os() << getIndent() << "tcle::fence<tcle::FenceType::" << ft << ">();\n";
   }

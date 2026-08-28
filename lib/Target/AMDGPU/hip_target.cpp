@@ -24,6 +24,10 @@ public:
 
   bool IsAsmSupported(const ArchId&) const override { return true; }
 
+  // AMDGPU exposes __ATOMIC_SEQ_CST through __builtin_amdgcn_fence, so the
+  // default fence order is seq_cst and sync.fence.sc is accepted.
+  bool SupportsSeqCstFence(const ArchId&) const override { return true; }
+
   int DefaultOptLevel(const ArchId&) const override { return 3; }
 
   const std::set<SwizMode> SupportedSwizzleModes(const ArchId&) const override {

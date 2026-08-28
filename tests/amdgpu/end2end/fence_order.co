@@ -1,0 +1,36 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: choreo -gs %target %amdgpu_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
+
+// Fence order E2E: explicit release/acquire fences compile and run on HIP.
+// 256 threads = 4 wavefronts on gfx1030. The release fence publishes the
+// shared-buffer writes, the acquire fence orders the subsequent reads; the
+// barrier in between keeps the result deterministic regardless of the fence.
+__co__ auto fence_order_test(s32 [256] a) {
+  s32 [256] output;
+  parallel p by 256 : thread {
+    shared s32 [256] buf;
+    buf.at(p) = a.at(p) + 10;
+    sync.fence.rel : thread;
+    sync.barrier : thread;
+    sync.fence.acq : thread;
+    output.at(p) = buf.at(p);
+  }
+  return output;
+}
+// CHECK: fence_order_test: PASSED
+
+int main() {
+  auto a = choreo::make_spandata<choreo::s32>(256);
+  for (int i = 0; i < 256; ++i) a[i] = i;
+  auto out = fence_order_test(a.view());
+  bool ok = true;
+  for (int i = 0; i < 256; ++i) {
+    if (out[i] != i + 10) {
+      std::cerr << "FAIL at " << i << ": got " << out[i] << " expected "
+                << (i + 10) << "\n";
+      ok = false;
+    }
+  }
+  std::cout << "fence_order_test: " << (ok ? "PASSED" : "FAILED") << "\n";
+  return 0;
+}

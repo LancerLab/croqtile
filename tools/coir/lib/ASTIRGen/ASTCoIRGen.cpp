@@ -4079,6 +4079,10 @@ static coir::FenceOrder lowerFenceOrder(Choreo::FenceOrder o) {
   case Choreo::FenceOrder::RELEASE: return coir::FenceOrder::Release;
   case Choreo::FenceOrder::ACQUIRE: return coir::FenceOrder::Acquire;
   case Choreo::FenceOrder::ACQ_REL: return coir::FenceOrder::AcqRel;
+  case Choreo::FenceOrder::SEQ_CST: return coir::FenceOrder::SeqCst;
+  // DEFAULT is resolved by the semantic checker before IR generation; fall
+  // back to the full barrier if it ever leaks through.
+  case Choreo::FenceOrder::DEFAULT: return coir::FenceOrder::AcqRel;
   }
   llvm_unreachable("unsupported fence order");
   return coir::FenceOrder::AcqRel;

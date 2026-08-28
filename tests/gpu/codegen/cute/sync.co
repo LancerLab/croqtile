@@ -23,14 +23,28 @@ __co__ void test_cooperative_block_barrier() {
 }
 // CHECK: cudaLaunchCooperativeKernel(
 
-// Test: fence at thread/block visibility
+// Test: fence at thread/block visibility (CUDA: seq_cst is the default,
+// emitted as fence.sc; release/acquire/acq_rel collapse to the full
+// __threadfence* barrier; the standalone fence has no directional form)
 __co__ void test_fences() {
   parallel bx by 1 : block {
-    // CHECK: __threadfence();
+    // CHECK: asm volatile("fence.sc.gpu;" ::: "memory");
     sync.fence : block;
 
-    // CHECK: __threadfence_block();
+    // CHECK: asm volatile("fence.sc.cta;" ::: "memory");
     sync.fence : thread;
+
+    // CHECK: __threadfence();
+    sync.fence.rel : block;
+
+    // CHECK: __threadfence_block();
+    sync.fence.acq : thread;
+
+    // CHECK: __threadfence();
+    sync.fence.acq_rel : block;
+
+    // CHECK: asm volatile("fence.sc.gpu;" ::: "memory");
+    sync.fence.sc : block;
   }
 }
 

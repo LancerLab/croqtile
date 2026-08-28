@@ -1484,8 +1484,21 @@ bool CCCodeGen::Visit(AST::Barrier& n) {
 
 bool CCCodeGen::Visit(AST::Fence& n) {
   TraceEachVisit(n);
-  // Emit a full sequential-consistency fence for all CPU fence scopes.
-  IndStream() << "std::atomic_thread_fence(std::memory_order_seq_cst);\n";
+  // The order axis selects the fence strength: release publishes the
+  // writer's stores, acquire orders the reader's loads, acq_rel is the full
+  // bidirectional barrier, and seq_cst (the target default) is the
+  // sequentially-consistent fence.
+  const char* order = "seq_cst";
+  switch (n.GetOrder()) {
+  case FenceOrder::RELEASE: order = "release"; break;
+  case FenceOrder::ACQUIRE: order = "acquire"; break;
+  case FenceOrder::ACQ_REL: order = "acq_rel"; break;
+  case FenceOrder::SEQ_CST: order = "seq_cst"; break;
+  default:
+    choreo_unreachable("unsupported fence order: " + STR(n.GetOrder()) + ".");
+  }
+  IndStream() << "std::atomic_thread_fence(std::memory_order_" << order
+              << ");\n";
   return true;
 }
 
