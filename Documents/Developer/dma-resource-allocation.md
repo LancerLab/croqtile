@@ -153,11 +153,12 @@ interference matrix) generalized from buffers to DMA handles.
      only constant indices can be split (a runtime `ev[i]` needs guards or falls
      back to the array).
 
-5. **GPU FUTURE (TMA mbarrier) consumption.** The allocator computes
-   `future_slots` / `future_slot_count`, but the GPU backend does not read them
-   yet: TMA futures are still handed out by a monotonic counter
-   (`tma_future_count`), so non-interfering TMA transfers do not share an
-   mbarrier. Tracked at https://github.com/LancerLab/croqtile/issues/7.
+5. **GPU FUTURE (TMA mbarrier) consumption.** *(closed)* The GPU backend now
+   reads `future_slots` / `future_slot_count` at device entry and hands pooled
+   TMA futures their colored slot, so non-interfering TMA transfers share an
+   mbarrier. The monotonic counter (`tma_future_count`) is retained as a
+   fallback for uncolored futures and when `-fdma-alloc=false`.
+   (https://github.com/LancerLab/croqtile/issues/7)
 
 ## Switches
 
@@ -165,7 +166,7 @@ The two liveness-driven allocator switches are target-agnostic:
 
 | Switch | Default | Resource | Consumed by |
 |---|---|---|---|
-| `-fdma-alloc` | `true` | `FUTURE` | backends that pool DMA completion slots (GPU TMA mbarrier is not yet a consumer, #7) |
+| `-fdma-alloc` | `true` | `FUTURE` | backends that pool DMA completion slots (GPU TMA mbarrier, #7) |
 | `-fevent-alloc=<mode>` | `simple` | `EVENT` | GPU named barriers |
 
 `off` is a real, observable fallback on both switches:

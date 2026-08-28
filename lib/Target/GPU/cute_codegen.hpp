@@ -247,6 +247,10 @@ private:
   ValueItem shared_spm_size = sbe::nu(0);
   int tma_count = 0;
   int tma_future_count = 0;
+  // Liveness-colored FUTURE slots for the current device function (scoped
+  // handle name -> slot), populated at device entry from DmaResourcePlan.
+  // Non-interfering TMA futures share a slot (and thus an mbarrier).
+  std::map<std::string, size_t> tma_future_slots_;
   bool cluster_defers_launch = false;
   AST::ParallelBy* deferred_cluster_pb = nullptr;
   std::string deferred_spm_decls;

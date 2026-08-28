@@ -3568,6 +3568,18 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   // only do the whole codegen when accessing the outer parallel-by
   if (emit_launch) {
     tma_future_count = 0;
+    tma_future_slots_.clear();
+    // Liveness-driven FUTURE coloring (DmaResourcePlan) assigns each pooled
+    // future a slot in [0, future_slot_count).  Cache the colored slot map for
+    // the current device function and start the monotonic fallback counter
+    // past those slots so uncolored futures (e.g. direct TMA futures that
+    // liveness routes outside the pool) never collide with a colored one.
+    if (dma_alloc_mode) {
+      if (const auto* plan = DmaResourcePlan::Lookup(SSTab().ScopeName())) {
+        tma_future_count = static_cast<int>(plan->future_slot_count);
+        tma_future_slots_ = plan->future_slots;
+      }
+    }
     set_cuda_func_attribute_max_dynamic_shared_memory_size = false; // reset
     auto required_shared_align = [&]() -> size_t {
       size_t alignment = CCtx().GetMemoryAlignmentByte(Storage::SHARED);
@@ -3909,17 +3921,26 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (!IsHost() && !n.future.empty()) {
       std::string buf_name =
           const_cast<FutureBufferInfo&>(FBInfo())[InScopeName(n.future)].buffer;
+      size_t tma_slot = static_cast<size_t>(tma_future_count);
+      bool tma_slot_colored = false;
+      if (n.IsTMA() && dma_alloc_mode) {
+        auto it = tma_future_slots_.find(InScopeName(n.future));
+        if (it != tma_future_slots_.end()) {
+          tma_slot = it->second;
+          tma_slot_colored = true;
+        }
+      }
       auto cp_atom_name =
-          GetCopyAtomName(n.IsTMA(), n.IsTMA() ? tma_future_count : dma_count_);
+          GetCopyAtomName(n.IsTMA(), n.IsTMA() ? tma_slot : dma_count_);
       if (!claimed_futs.count(InScopeName(n.future))) {
         claimed_futs.emplace(InScopeName(n.future), cp_atom_name);
         ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
         ssm.MapDeviceSymbol(InScopeName(n.future) + ".data",
                             n.future + ".data()");
         future_count_++;
-        if (n.IsTMA())
-          ++tma_future_count;
-        else
+        if (n.IsTMA()) {
+          if (!tma_slot_colored) ++tma_future_count;
+        } else
           ++dma_count_;
         std::string buf_expr;
         if (ssm.HasDeviceName(buf_name))
@@ -3981,8 +4002,17 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (is_tma && !future_only && IsWarpSpecActive()) return "";
     auto future_name = n.future;
 
+    size_t tma_slot = static_cast<size_t>(tma_future_count);
+    bool tma_slot_colored = false;
+    if (is_tma && dma_alloc_mode && !future_name.empty()) {
+      auto it = tma_future_slots_.find(InScopeName(future_name));
+      if (it != tma_future_slots_.end()) {
+        tma_slot = it->second;
+        tma_slot_colored = true;
+      }
+    }
     auto cp_atom_name =
-        GetCopyAtomName(is_tma, (is_tma ? tma_future_count : dma_count_));
+        GetCopyAtomName(is_tma, (is_tma ? tma_slot : dma_count_));
     if (future_name.empty()) {
       future_name = "__choreo_anon_fut__" + std::to_string(future_count_);
     } else {
@@ -3996,9 +4026,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     }
 
     future_count_++;
-    if (is_tma)
-      ++tma_future_count;
-    else
+    if (is_tma) {
+      if (!tma_slot_colored) ++tma_future_count;
+    } else
       ++dma_count_;
 
     ds << d_indent << "future " << future_name;
@@ -4703,9 +4733,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       bool is_multicast_tma = n.IsMulticast() && n.IsTMA();
       bool emit_tma_single_guard =
           !ScopeAlreadySingleThreadForLevel(tma_sync_level);
-      if (!warpspec_only)
-        assert(emit_tma_single_guard &&
-               "non-warpspec tma copy must be single-threaded");
+      // A non-warpspec TMA copy must be issued by a single thread.  That is
+      // satisfied either because the enclosing scope is already single-
+      // threaded (e.g. an elected lane `inthreads (t == C)` selects exactly
+      // one thread, so no guard is needed) or because the single-thread guard
+      // is emitted below.  Both cases leave the TMA single-threaded.
 
       std::string tma_issue_prefix = emit_tma_single_guard ? "  " : "";
 
