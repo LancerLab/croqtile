@@ -72,8 +72,9 @@ inline const std::string STR(const UsageType& ut) {
 
 void Assessor::LogAssessment(const std::string& msg, const location& l,
                              AssessOutcome outcome, UsageType uty,
-                             AssessDependence dep, size_t assertion_idx) {
-  assessment_log.push_back({msg, l, outcome, uty, dep, assertion_idx,
+                             AssessDependence dep, size_t assertion_idx,
+                             AssessMechanism mech) {
+  assessment_log.push_back({msg, l, outcome, uty, dep, mech, assertion_idx,
                             current_predicate_, current_guard_});
 }
 
@@ -197,7 +198,8 @@ AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
                               AssessType aty, const location& l,
                               AST::Node* node, AST::Node* emit_node,
                               const ValueItem& guard,
-                              std::optional<AssessDependence> dep_override) {
+                              std::optional<AssessDependence> dep_override,
+                              AssessMechanism mech) {
   if (DebugOn())
     dbgs() << "[Assess] " << STR(bo) << ", type: " << STR(aty)
            << ", usage: " << STR(uty) << ", policy: " << STR(ap)
@@ -233,7 +235,7 @@ AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
           return {true, false, false};
         }
         LogAssessment(message, l, AssessOutcome::RUNTIME, uty, dep,
-                      assertions.size());
+                      assertions.size(), mech);
         AddAssertion(pred, l, message, aty, uty, node, emit_node);
         return {true, false, true};
       }
@@ -241,10 +243,12 @@ AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
         visitor->Error1(l, message);
       else
         visitor->Warning(l, message);
-      LogAssessment(message, l, AssessOutcome::STATIC_FALSE, uty, dep);
+      LogAssessment(message, l, AssessOutcome::STATIC_FALSE, uty, dep,
+                    static_cast<size_t>(-1), mech);
       return {ap == AssessPolicy::Warn, ap == AssessPolicy::Warn, false};
     }
-    LogAssessment(message, l, AssessOutcome::STATIC_TRUE, uty, dep);
+    LogAssessment(message, l, AssessOutcome::STATIC_TRUE, uty, dep,
+                  static_cast<size_t>(-1), mech);
     return {true, false, false};
   }
 
@@ -254,7 +258,7 @@ AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
   }
 
   LogAssessment(message, l, AssessOutcome::RUNTIME, uty, dep,
-                assertions.size());
+                assertions.size(), mech);
   AddAssertion(pred, l, message, aty, uty, node, emit_node);
   return {true, false, true};
 }
