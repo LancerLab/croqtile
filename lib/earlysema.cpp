@@ -1001,6 +1001,17 @@ bool EarlySemantics::CheckInitializerType(const ptr<Type>& ty,
 bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
   TraceEachVisit(n);
 
+  // `shared<group>` (Storage::GROUP_SHARED) is only valid on targets with a
+  // hardware GROUP tier between BLOCK and THREAD. Reject it early so
+  // downstream passes and codegen can treat GROUP_SHARED as unreachable on
+  // unsupported targets.
+  if (auto mem = n.GetMemory();
+      mem && mem->Get() == Storage::GROUP_SHARED &&
+      !CCtx().GetTarget().IsGroupSharedStorageSupported(CCtx().GetArch()))
+    Error1(n.LOC(),
+           "'shared<group>' is not supported by the current target; it "
+           "requires a target with a GROUP storage tier.");
+
   ptr<Type> tty = nullptr; // type from the annotation
   ptr<Type> ety = nullptr; // type from the initialization expression
 

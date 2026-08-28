@@ -416,6 +416,14 @@ public:
     return {};
   }
 
+  // Whether `shared<group>` (Storage::GROUP_SHARED) is a valid storage tier
+  // for the given architecture. Only targets with a hardware GROUP tier
+  // between BLOCK and THREAD support it; the default is false so targets
+  // without a group tier reject it in early semantic analysis.
+  virtual bool IsGroupSharedStorageSupported(const ArchId& /*arch*/) const {
+    return false;
+  }
+
   // Whether the target's code generation only produces binaries (no text
   // source or script emission).  Targets that return true default to
   // compile_binary mode and reject -es/-gs.

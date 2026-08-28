@@ -289,7 +289,7 @@ extern int yylex();
 %nterm <AST::ptr<AST::Select>> select_expr
 %nterm <AST::MMAOperation::ExecMethod> mma_exec_method
 %nterm <std::vector<int>> mma_issue_order mma_schedule_attribute
-%nterm <Choreo::Storage> param_storage
+%nterm <Choreo::Storage> param_storage scoped_storage
 %nterm <PLAnnotation> note_pl
 
 // resolving the ambiguity of dangling ELSE
@@ -707,12 +707,29 @@ parameter_list
       }
     ;
 
+scoped_storage
+    : STORAGE { $$ = $1; }
+    | STORAGE LT PBLEVEL GT {
+        if ($1 == Storage::SHARED && $3 == ParallelLevel::GROUP)
+          $$ = Storage::GROUP_SHARED;
+        else {
+          Parser::error(@3,
+              "only 'shared<group>' is a valid scoped storage; use bare "
+              "'local'/'shared'/'global' for other scopes.");
+          $$ = $1;
+        }
+      }
+    ;
+
 param_storage
-    : STORAGE {
+    : scoped_storage {
         if ($1 == Storage::SHARED)
           Parser::error(@1, "the shared data can not be used as a parameter.");
         else if ($1 == Storage::LOCAL)
           Parser::error(@1, "the local data can not be used as a parameter.");
+        else if ($1 == Storage::GROUP_SHARED)
+          Parser::error(@1,
+              "the shared<group> data can not be used as a parameter.");
         else
           $$ = $1;
       }
@@ -1079,7 +1096,7 @@ named_scalar_decls
         }
         $$ = $2;
       }
-    | STORAGE named_scalar_decls {
+    | scoped_storage named_scalar_decls {
         for (auto sub : $2->AllSubs()) {
           auto decl = cast<AST::NamedVariableDecl>(sub);
           decl->SetMemory(AST::Make<AST::Memory>(@1, $1));
@@ -1198,7 +1215,7 @@ named_fragment_decls
     ;
 
 named_spanned_decls
-    : STORAGE mdspan_as_type spanned_decls {
+    : scoped_storage mdspan_as_type spanned_decls {
         auto mem = AST::Make<AST::Memory>(@1, $1);
         for (auto item : $3->AllSubs()) {
           auto decl = cast<AST::NamedVariableDecl>(item);
@@ -1481,7 +1498,7 @@ note_pl
 
 storage_qual
     : %empty { $$ = AST::Make<AST::Memory>(loc); }
-    | STORAGE { $$ = AST::Make<AST::Memory>(@1, $1); }
+    | scoped_storage { $$ = AST::Make<AST::Memory>(@1, $1); }
     ;
 
 arith_operation
@@ -2183,7 +2200,7 @@ sync_type
 
 chunkat_or_storage_or_select
     : { ignore_fndata = true; } chunkat_expr { $$ = $2; ignore_fndata = false; }
-    | STORAGE { $$ = AST::Make<AST::Memory>(@1, $1); }
+    | scoped_storage { $$ = AST::Make<AST::Memory>(@1, $1); }
     | select_expr  { $$ = $1; }
     ;
 
