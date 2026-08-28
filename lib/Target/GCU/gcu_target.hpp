@@ -38,6 +38,8 @@ public:
       switch (sto) {
       case Storage::LOCAL:
         return 0xE0000ull; // 896KB L1 VDMEM per SIP (GCU_VDMEM_SIZE)
+      case Storage::GROUP_SHARED:
+        return 0xE0000ull; // 896KB L1 VDMEM per SIP (same heap as LOCAL)
       case Storage::SHARED: return 0x600000ull; // 6MB DSM (GCU_CSB_SIZE)
       case Storage::GLOBAL: return 144ull * 1024 * 1024 * 1024; // 144GB HBM3
       default: choreo_unreachable("unsupported storage level.");
@@ -45,6 +47,8 @@ public:
     } else { // gcu500 (DSM); per-storage capacities still to be verified
       switch (sto) {
       case Storage::LOCAL:
+        return 0xE0000ull; // 896KB L1 VDMEM per SIP (todo: verify for gcu500)
+      case Storage::GROUP_SHARED:
         return 0xE0000ull; // 896KB L1 VDMEM per SIP (todo: verify for gcu500)
       case Storage::SHARED:
         return 0x600000ull; // 6MB DSM (todo: verify for gcu500)
@@ -55,14 +59,23 @@ public:
     }
     return 0;
   }
+  // gcu400+ runs up to 4 THREADs (SIMT lanes) per GROUP (SIP) in SIMT
+  // lockstep, so the maximum GROUP dimension is 4 THREADs. Older arches have
+  // no GROUP tier, so THREAD == SIP and the GROUP dimension is one THREAD.
+  size_t GetMaxGroupDim(const ArchId& arch) const override {
+    return ArchNum(arch) >= 400 ? 4 : 1;
+  }
+
   Target::LocalSharedPool
   GetLocalSharedPool(const ArchId& arch) const override {
     // gcu400+ (gcu400/gcu450/gcu500 and sim variants) have no dedicated L2
     // SRAM: DSM (SHARED) is a cross-SIP view of the same L1 VDMEM (LOCAL).
     // Per topsop tiered_memory_alloc, "L1 + L2 share a fixed pool =
     // vdmem_size * sip_num", i.e. 8 SIPs x 896 KiB = 7 MiB per block. The
-    // joint budget is: local_per_sip * replicas_per_pool + shared <=
-    // pool_bytes.
+    // joint budget is:
+    //   local_per_thread * max_group_dim * replicas_per_pool
+    // + group_shared * replicas_per_pool + shared <= pool_bytes
+    // where max_group_dim == 4 (THREADs per GROUP) for gcu400+.
     if (ArchNum(arch) >= 400)
       return {true, /*replicas_per_pool=*/8,
               /*pool_bytes=*/7ull * 1024 * 1024};

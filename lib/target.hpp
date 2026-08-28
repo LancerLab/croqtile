@@ -412,15 +412,25 @@ public:
     return 0;
   }
 
+  // Maximum GROUP dimension for targets with a hardware GROUP tier: the
+  // number of THREADs (SIMT lanes) per GROUP. A THREAD-level `local` buffer is
+  // replicated once per THREAD, so its physical footprint is the declared
+  // per-thread size times max_group_dim times replicas_per_pool. Default 1: no
+  // lane dimension (THREAD == GROUP), e.g. targets without a GROUP tier.
+  virtual size_t GetMaxGroupDim(const ArchId& /*arch*/) const { return 1; }
+
   // Some targets have no dedicated shared-memory level: SHARED memory aliases
   // the same physical per-thread local memory that backs LOCAL. For such
   // targets LOCAL and SHARED cannot be budgeted independently; the memcheck
   // pass enforces them jointly as
-  //     local_per_replica * replicas_per_pool + shared <= pool_bytes
-  // where replicas_per_pool is the number of LOCAL replicas sharing one pool.
+  //     local_per_thread * max_group_dim * replicas_per_pool
+  //   + group_shared * replicas_per_pool
+  //   + shared <= pool_bytes
+  // where replicas_per_pool is the number of GROUPs sharing one pool and
+  // max_group_dim is the number of THREADs (lanes) per GROUP.
   struct LocalSharedPool {
     bool aliased = false;         // whether LOCAL and SHARED alias one pool
-    size_t replicas_per_pool = 0; // LOCAL replicas sharing one pool
+    size_t replicas_per_pool = 0; // GROUPs sharing one pool
     size_t pool_bytes = 0; // total combined on-chip pool (LOCAL + SHARED)
   };
   virtual LocalSharedPool GetLocalSharedPool(const ArchId& arch) const {

@@ -51,11 +51,10 @@ Choreo levels map onto gcu400 hardware as documented in `AGENTS.md`:
 | Choreo level | Hardware unit | Builtin |
 |--------------|---------------|---------|
 | `BLOCK`      | cluster / grid | `__tops_bid_*()` |
-| `GROUP`      | thread / SIP   | `__tops_tid_*()` |
-| `THREAD`     | subthread / SIMT lane | `__tops_stid_*()` |
+| `GROUP`      | thread          | `__tops_tid_*()` |
+| `THREAD`     | SIMT lane | `__tops_stid_*()` |
 
-`DEFAULT_SUBTHREAD_NUM == 4`: one GROUP (SIP) runs four THREADs (lanes) in
-SIMT lockstep.
+One GROUP runs four THREADs (SIMT lanes) in lockstep.
 
 The storage keywords lower to vendor address spaces and DTE contexts as follows:
 
@@ -80,7 +79,7 @@ Notes:
   gcu300-only concept; gcu300's `private_dte` is SDTE, while gcu400 `local_dte`,
   `private_dte`, and `shared_dte` are all CDTE.
 - `private_dte` does per-lane **partition** (not replication) via
-  `id = static_id * subthread_num + subthread_id`, so each lane owns its own
+  `id = static_id * lane_count + lane_id`, so each lane owns its own
   slice. This is why per-lane `local` buffers need no manual replication.
 
 ## 4. Allocation model
@@ -90,7 +89,7 @@ There are exactly two on-chip allocation pools:
 | Pool | Members | Replicated? | Driven by |
 |------|---------|-------------|-----------|
 | DSM (shared) | `shared` | no | host (`extern __shared__` + `shared_spm_size` at launch) |
-| VDMEM (local) | `local`, `shared<group>` | yes, `replicas_per_pool` per SIP | device, static |
+| VDMEM (local) | `local`, `shared<group>` | yes, `replicas_per_pool` per GROUP | device, static |
 
 `local` and `shared<group>` live in the **same** VDMEM pool and the **same**
 interference graph. They must NOT be treated as disjoint live ranges, because a
@@ -105,15 +104,18 @@ into one heap is what keeps the allocator correct.
 
 The joint on-chip budget check (compile time and runtime) becomes:
 
-    LOCAL elems * replicas_per_pool
+    LOCAL elems * replicas_per_pool * max_group_dim
   + GROUP_SHARED elems * replicas_per_pool
   + SHARED elems
   <= pool_bytes
 
 Where `GetLocalSharedPool()` returns `{ aliased = true, replicas_per_pool = 8,
-pool_bytes = 7 MB }` for gcu400 (8 SIPs x 896 KB VDMEM). Per-SIP capacity for
-both `local` and `shared<group>` is `GetMemCapacity(Storage::LOCAL) ==
-GetMemCapacity(Storage::GROUP_SHARED) == 0xE0000` (896 KB).
+pool_bytes = 7 MB }` and `GetMaxGroupDim()` returns 4 for gcu400 (8 GROUPs x
+896 KB VDMEM, 4 THREADs per GROUP). A `local` buffer is private to a THREAD
+(lane), so it is replicated `max_group_dim` times per GROUP; a
+`shared<group>` buffer has one copy per GROUP. Per-GROUP VDMEM capacity is
+`GetMemCapacity(Storage::LOCAL) == GetMemCapacity(Storage::GROUP_SHARED) ==
+0xE0000` (896 KB).
 
 ## 6. What the "stale" fix did and why it is removed
 

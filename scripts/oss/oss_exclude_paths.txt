@@ -24,8 +24,6 @@ Documents/internal/
 Documents/plans/
 Documents/Documentation/target/
 Documents/GPU-Examples/
-Documents/design/storage-scope.md
-Documents/design/group-shared-gcu400-plan.md
 
 # External build scripts (GCU toolchain)
 extern/Makefile

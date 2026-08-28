@@ -769,6 +769,19 @@ public:
                             "` to be dynamically shaped (by " +
                             STR(sty->GetShape()) + ").");
       break;
+    case Storage::GROUP_SHARED:
+      if (Level() == ParallelLevel::SEQ)
+        Error1(n.LOC(), "shared<group> variable '" + n.name_str +
+                            "` must be declared inside parallel-by.");
+      else if (Level() == ParallelLevel::DEVICE)
+        Error1(n.LOC(), "shared<group> variable '" + n.name_str +
+                            "` must be declared inside a kernel parallel-by "
+                            "(': block' or inner), not at device scope.");
+      if (sty->RuntimeShaped() && !CCtx().MemReuse())
+        Error1(n.LOC(), "GCU forbids shared<group> variable '" + n.name_str +
+                            "` to be dynamically shaped (by " +
+                            STR(sty->GetShape()) + ").");
+      break;
     default:
       Error1(n.LOC(), "can not declare variable '" + n.name_str + "` as " +
                           STR(st) + " inside choreo function.");

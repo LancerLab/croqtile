@@ -1,7 +1,7 @@
 # Plan: gcu400 `shared<group>` (group-shared) storage tier
 
 This is the implementation plan for the new `shared<group>` storage tier on
-gcu400, as designed in `Documents/design/storage-scope.md`. It replaces the
+gcu400, as designed in `Documents/internal/storage-scope.md`. It replaces the
 "stale" per-lane DMA fix (the `thread_replicate` note and the
 `block_level`-based `local_dte`/`private_dte` switch).
 
@@ -229,12 +229,17 @@ Add `GROUP_SHARED` to the set of checked storage classes (currently
 ### 5.2 Joint budget
 
 Update both the compile-time joint check and the runtime check list so
-`GROUP_SHARED` is counted on the replicated (per-SIP) side:
+`GROUP_SHARED` is counted on the replicated (per-GROUP) side and `LOCAL` is
+counted on the per-THREAD (per-lane) side:
 
-    local_total     = usage[LOCAL]         * replicas_per_pool
+    local_total        = usage[LOCAL]        * replicas_per_pool * max_group_dim
     group_shared_total = usage[GROUP_SHARED] * replicas_per_pool
-    shared_total    = usage[SHARED]
+    shared_total       = usage[SHARED]
     local_total + group_shared_total + shared_total <= pool_bytes
+
+`max_group_dim == 4` on gcu400+ (see `Target::GetMaxGroupDim`): a
+`local` buffer is private to a THREAD (lane), so it is replicated once per
+THREAD, whereas a `shared<group>` buffer has one copy per GROUP.
 
 - Compile-time: the `ct_tot_mem_usage` joint check (~`memcheck.hpp:141-175`).
 - Runtime: `rt_joint_mem_usage_check_list` snapshot (currently fires on
@@ -246,7 +251,7 @@ Update both the compile-time joint check and the runtime check list so
 Add the case (the current switch has `default: choreo_unreachable`):
 
 ```cpp
-case Storage::GROUP_SHARED: return 0xE0000; // 896 KB VDMEM, per SIP
+case Storage::GROUP_SHARED: return 0xE0000; // 896 KB VDMEM, per GROUP
 ```
 
 `GetLocalSharedPool()` needs no change: `replicas_per_pool` and `pool_bytes`
@@ -345,7 +350,7 @@ case Storage::GROUP_SHARED:
   ...
 ```
 
-On gcu400+ emit `__syncsubthreads()` (group/sip barrier), matching how `LOCAL`
+On gcu400+ emit `__syncsubthreads()` (group barrier), matching how `LOCAL`
 currently maps. On gcu300/GPU this is unreachable (sema rejects the category).
 
 ### 7.2 `Visit(AST::Fence)` and `EmitAutoFences`
@@ -475,13 +480,13 @@ phase's review gate is "its tests are added and green". Concrete files below.
   `shared<group>` buffer and a `local` buffer coexisting (verifies merged
   allocation + correct DTE + correct results).
 - **Update** any existing `.co` under `samples/`, `tests/`, `benchmark/` that
-  relied on `local` meaning "per-SIP" to use `shared<group>` explicitly.
+  relied on `local` meaning "per-GROUP" to use `shared<group>` explicitly.
 
 ---
 
 ## 10. Migration of existing code
 
-Existing `local` declarations that relied on group-shared (per-SIP) semantics
+Existing `local` declarations that relied on group-shared (per-GROUP) semantics
 must be rewritten to `shared<group>`. Search `samples/`, `tests/`, and
 `benchmark/` for `__local__`-intent buffers declared as `local` and update
 them. The stale `thread_replicate` note and per-lane offset logic are removed
@@ -550,7 +555,7 @@ case Storage::GROUP_SHARED:
 else -> global. `GroupShared` must map to the GCU VDMEM (local) address space;
 the exact constant is backend-specific (the file header comment lists
 `0 = generic/local, 1 = global, 2 = workgroup (shared), 5 = private`). Confirm
-which constant `-convert-memref-to-gcu` expects for per-SIP VDMEM and add the
+which constant `-convert-memref-to-gcu` expects for per-GROUP VDMEM and add the
 mapping. This is the one item that needs a vendor/backend check during
 implementation.
 
