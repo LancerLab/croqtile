@@ -58,9 +58,7 @@ bool HIPDMAPlan::Visit(AST::DMA& n) {
   return true;
 }
 
-bool HIPDMAPlan::Visit(AST::BufferMap&) {
-  return true;
-}
+bool HIPDMAPlan::Visit(AST::BufferMap&) { return true; }
 
 HIPDMADirection HIPDMAPlan::ResolveDirection(const AST::DMA& n) const {
   auto from_sty = GetSpannedType(NodeType(*n.GetFrom()));

@@ -5,17 +5,17 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Dialect/CoIR/Passes.h"
+#include "CodeGen/CoIREmitterBase.h"
+#include "Dialect/CoIR/CoIRAttrs.h"
 #include "Dialect/CoIR/CoIRDialect.h"
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
-#include "Dialect/CoIR/CoIRAttrs.h"
-#include "CodeGen/CoIREmitterBase.h"
+#include "Dialect/CoIR/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "llvm/ADT/SmallString.h"
@@ -42,7 +42,7 @@ public:
     return mlir::succeeded(pm.run(module));
   }
 
-  void emitModule(ModuleOp module, llvm::raw_ostream &os) override {
+  void emitModule(ModuleOp module, llvm::raw_ostream& os) override {
     os_ = &os;
     resetState();
     hasTMA = false;
@@ -54,19 +54,17 @@ public:
 
     emitHeader(hasTMA);
     emitExplicitDeviceCode(module, os);
-    for (auto &op : module.getBody()->getOperations()) {
-      if (auto kernel = dyn_cast<KernelOp>(op))
-        emitKernel(kernel);
+    for (auto& op : module.getBody()->getOperations()) {
+      if (auto kernel = dyn_cast<KernelOp>(op)) emitKernel(kernel);
     }
-    for (auto &op : module.getBody()->getOperations()) {
-      if (auto kernel = dyn_cast<KernelOp>(op))
-        emitHostEntry(kernel);
+    for (auto& op : module.getBody()->getOperations()) {
+      if (auto kernel = dyn_cast<KernelOp>(op)) emitHostEntry(kernel);
     }
   }
 
   int EmitScript(mlir::ModuleOp module, llvm::StringRef /*arch*/,
-                 llvm::raw_ostream &os) override {
-    auto &sctx = CoIR::ScriptContext::Get();
+                 llvm::raw_ostream& os) override {
+    auto& sctx = CoIR::ScriptContext::Get();
     bool has_embedded = sctx.types_header && sctx.runtime_header;
 
     emitScriptPrologue(os, "compile and execute kernel");
@@ -135,13 +133,13 @@ private:
     coir::TensorType srcType;
     coir::TensorType dstType;
     coir::DMAKind kind;
-    bool isTMA;   // global<->shared with hasTMA
-    bool isLoad;  // global->shared direction
-    Value constDescResult; // SSA value from DMAConstDescOp
+    bool isTMA;               // global<->shared with hasTMA
+    bool isLoad;              // global->shared direction
+    Value constDescResult;    // SSA value from DMAConstDescOp
     int64_t swizzleBytes = 0; // 0=none, 32, 64, 128
-    int storeArgIdx = -1; // kernel arg index for TMA store dest (-1=return)
-    bool zfill = false; // out-of-bounds zero fill
-    int srcParamIdx = -1; // source tensor kernel arg index
+    int storeArgIdx = -1;     // kernel arg index for TMA store dest (-1=return)
+    bool zfill = false;       // out-of-bounds zero fill
+    int srcParamIdx = -1;     // source tensor kernel arg index
   };
   llvm::SmallVector<DescInfo> descInfos;
   DenseMap<Value, unsigned> descValueToIndex;
@@ -165,38 +163,22 @@ private:
     if (auto fragTy = dyn_cast<coir::MMAFragType>(ty)) {
       return "/* mma_frag -- see declaration */";
     }
-    if (isa<coir::AsyncTokenType>(ty))
-      return "cuda::barrier::arrival_token";
-    if (ty.isIndex())
-      return "int";
-    if (ty.isF16())
-      return "half";
-    if (ty.isBF16())
-      return "__nv_bfloat16";
-    if (ty.isF32())
-      return "float";
-    if (ty.isF64())
-      return "double";
-    if (isa<mlir::Float8E4M3FNType>(ty))
-      return "choreo::f8_e4m3";
-    if (isa<mlir::Float8E5M2Type>(ty))
-      return "choreo::f8_e5m2";
-    if (isa<mlir::Float6E2M3FNType>(ty))
-      return "choreo::f6_e2m3";
-    if (isa<mlir::Float6E3M2FNType>(ty))
-      return "choreo::f6_e3m2";
-    if (isa<mlir::Float4E2M1FNType>(ty))
-      return "choreo::f4_e2m1";
-    if (ty.isInteger(1))
-      return "bool";
-    if (ty.isInteger(8))
-      return "uint8_t";
-    if (ty.isInteger(16))
-      return "int16_t";
-    if (ty.isInteger(32))
-      return "int";
-    if (ty.isInteger(64))
-      return "long long";
+    if (isa<coir::AsyncTokenType>(ty)) return "cuda::barrier::arrival_token";
+    if (ty.isIndex()) return "int";
+    if (ty.isF16()) return "half";
+    if (ty.isBF16()) return "__nv_bfloat16";
+    if (ty.isF32()) return "float";
+    if (ty.isF64()) return "double";
+    if (isa<mlir::Float8E4M3FNType>(ty)) return "choreo::f8_e4m3";
+    if (isa<mlir::Float8E5M2Type>(ty)) return "choreo::f8_e5m2";
+    if (isa<mlir::Float6E2M3FNType>(ty)) return "choreo::f6_e2m3";
+    if (isa<mlir::Float6E3M2FNType>(ty)) return "choreo::f6_e3m2";
+    if (isa<mlir::Float4E2M1FNType>(ty)) return "choreo::f4_e2m1";
+    if (ty.isInteger(1)) return "bool";
+    if (ty.isInteger(8)) return "uint8_t";
+    if (ty.isInteger(16)) return "int16_t";
+    if (ty.isInteger(32)) return "int";
+    if (ty.isInteger(64)) return "long long";
     return "/* unknown type */";
   }
 
@@ -214,7 +196,7 @@ private:
     CoIREmitterBase::emitTensorAlloc(op);
   }
 
-  void emitOpFallback(mlir::Operation *op) override {
+  void emitOpFallback(mlir::Operation* op) override {
     if (auto tmaCopy = dyn_cast<TmaCopyOp>(op))
       emitTmaCopy(tmaCopy);
     else if (auto elemCopy = dyn_cast<ElementCopyOp>(op))
@@ -234,9 +216,12 @@ private:
 
     if (callee.find("fragment_scalar_elementwise_") == 0) {
       std::string opSymbol;
-      if (callee == "fragment_scalar_elementwise_add") opSymbol = "+";
-      else if (callee == "fragment_scalar_elementwise_sub") opSymbol = "-";
-      else if (callee == "fragment_scalar_elementwise_mul") opSymbol = "*";
+      if (callee == "fragment_scalar_elementwise_add")
+        opSymbol = "+";
+      else if (callee == "fragment_scalar_elementwise_sub")
+        opSymbol = "-";
+      else if (callee == "fragment_scalar_elementwise_mul")
+        opSymbol = "*";
 
       auto operands = op.getOperands_();
       auto fragVal = operands[0];
@@ -248,9 +233,8 @@ private:
       valueNames[op.getResult()] = getName(fragVal);
       os() << getIndent()
            << "choreo::nv_cute::warp_cooperative::fragment_scalar_elementwise("
-           << getName(fragVal) << ", " << getName(scalarVal) << ", []("
-           << eTy << " a, " << eTy << " b) { return a " << opSymbol
-           << " b; });\n";
+           << getName(fragVal) << ", " << getName(scalarVal) << ", [](" << eTy
+           << " a, " << eTy << " b) { return a " << opSymbol << " b; });\n";
       return;
     }
 
@@ -263,8 +247,7 @@ private:
         funcName = it->second;
       } else {
         llvm::StringRef ref(callee);
-        if (ref.starts_with("__"))
-          ref = ref.drop_front(2);
+        if (ref.starts_with("__")) ref = ref.drop_front(2);
         std::string stripped = ref.str();
         if (stripped == "min" || stripped == "max")
           funcName = "(choreo::nv_cute::numerics::" + stripped + ")";
@@ -308,14 +291,15 @@ private:
 
   std::string emitWMMAFragType(coir::MMAFragType fragTy,
                                StringRef role = "accumulator",
-                               StringRef layout = "",
-                               Value fragVal = nullptr) {
+                               StringRef layout = "", Value fragVal = nullptr) {
     std::string result;
     llvm::raw_string_ostream ss(result);
     int64_t M = 16, N = 16, K = 16;
     if (fragVal && mmaTileDims.count(fragVal)) {
       auto [tM, tN, tK] = mmaTileDims[fragVal];
-      M = tM; N = tN; K = tK;
+      M = tM;
+      N = tN;
+      K = tK;
     } else {
       auto shape = fragTy.getShape();
       M = shape.size() > 0 ? shape[0] : 16;
@@ -324,10 +308,9 @@ private:
     std::string elemStr = emitElementType(fragTy.getElementType());
     if (fragTy.getElementType().isF32() && K == 8 && role != "accumulator")
       elemStr = "tf32";
-    ss << "wmma::fragment<wmma::" << role << ", "
-       << M << ", " << N << ", " << K << ", " << elemStr;
-    if (!layout.empty())
-      ss << ", wmma::" << layout;
+    ss << "wmma::fragment<wmma::" << role << ", " << M << ", " << N << ", " << K
+       << ", " << elemStr;
+    if (!layout.empty()) ss << ", wmma::" << layout;
     ss << ">";
     return result;
   }
@@ -342,13 +325,12 @@ private:
   llvm::SmallVector<Value, 4> globalBufferVals;
   DenseMap<Value, std::string> globalBufferNames;
 
-  void prescanMMAFragRoles(mlir::Operation *root) {
+  void prescanMMAFragRoles(mlir::Operation* root) {
     // Detect WGMMA: any GROUPx4 parallel level signals SM90+ warp-group MMA
     useWGMMA = false;
     wgmmaOperandFrags.clear();
     root->walk([&](coir::ParallelOp par) {
-      if (par.getLevel() == coir::ParallelLevel::GROUPx4)
-        useWGMMA = true;
+      if (par.getLevel() == coir::ParallelLevel::GROUPx4) useWGMMA = true;
     });
     if (useWGMMA) {
       root->walk([&](MMAExecOp exec) {
@@ -395,8 +377,8 @@ private:
     // is yielded as a foreach iter_arg, the initial value (fill) is also CTMMA.
     root->walk([&](coir::ForeachOp foreach) {
       auto iterArgs = foreach.getIterArgs();
-      auto &bodyRegion = foreach.getBody();
-      auto *bodyBlock = &bodyRegion.front();
+      auto& bodyRegion = foreach.getBody();
+      auto* bodyBlock = &bodyRegion.front();
       if (bodyBlock->getNumArguments() == 0) return;
       auto yieldOp = dyn_cast<coir::YieldOp>(bodyBlock->getTerminator());
       if (!yieldOp) return;
@@ -438,9 +420,7 @@ private:
     }
     os() << "#include \"choreo.h\"\n";
     os() << "#include <cooperative_groups.h>\n";
-    if (withTMA) {
-      os() << "namespace cde = cuda::device::experimental;\n";
-    }
+    if (withTMA) { os() << "namespace cde = cuda::device::experimental;\n"; }
     if (useWGMMA) {
       os() << "#include <cutlass/cutlass.h>\n";
       os() << "#include <cutlass/arch/barrier.h>\n";
@@ -470,8 +450,7 @@ private:
       bool isLoad = (srcMS <= 0) && (dstMS == 1);
 
       int64_t swizBytes = 0;
-      if (auto sb = op.getSwizzleBytes())
-        swizBytes = *sb;
+      if (auto sb = op.getSwizzleBytes()) swizBytes = *sb;
 
       int storeArgIdx = -1;
       if (isTMA && !isLoad) {
@@ -494,9 +473,9 @@ private:
       }
 
       unsigned idx = descInfos.size();
-      descInfos.push_back({idx, srcType, dstType, op.getKind(),
-                           isTMA, isLoad, op.getOut(), swizBytes, storeArgIdx,
-                           hasZfill, srcParamIdx});
+      descInfos.push_back({idx, srcType, dstType, op.getKind(), isTMA, isLoad,
+                           op.getOut(), swizBytes, storeArgIdx, hasZfill,
+                           srcParamIdx});
       descValueToIndex[op.getOut()] = idx;
     });
   }
@@ -526,24 +505,22 @@ private:
       }
     }
     if (auto nr = kernel.getMaxNregAttr()) {
-      if (nr.getValue() > 0)
-        os() << "__maxnreg__(" << nr.getValue() << ") ";
+      if (nr.getValue() > 0) os() << "__maxnreg__(" << nr.getValue() << ") ";
     }
     os() << "void " << devName << "(";
 
-    auto &body = kernel.getBody();
+    auto& body = kernel.getBody();
     unsigned paramIdx = 0;
     // Determine how many trailing args are memreuse params.
     unsigned mrTailCount = 0;
-    if (auto mrA = kernel->getAttrOfType<mlir::ArrayAttr>(
-            "coir.mr_offset_args"))
+    if (auto mrA =
+            kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_offset_args"))
       mrTailCount = mrA.size() + 1; // offset args + spm_size
     if (!body.empty()) {
       auto args = body.getArguments();
       unsigned regularArgCount = args.size() - mrTailCount;
       for (unsigned i = 0; i < regularArgCount; ++i) {
-        if (paramIdx > 0)
-          os() << ", ";
+        if (paramIdx > 0) os() << ", ";
         std::string name = "arg" + std::to_string(paramIdx);
         valueNames[args[i]] = name;
         os() << emitType(fnType.getInput(i)) << " " << name;
@@ -551,8 +528,7 @@ private:
       }
     }
     for (unsigned i = 0; i < fnType.getNumResults(); ++i) {
-      if (paramIdx > 0)
-        os() << ", ";
+      if (paramIdx > 0) os() << ", ";
       std::string name = "out" + std::to_string(i);
       os() << emitType(fnType.getResult(i)) << " " << name;
       returnParamNames[i] = name;
@@ -560,8 +536,7 @@ private:
     }
     // Hoisted device-global buffers as kernel pointer parameters.
     for (auto val : globalBufferVals) {
-      if (paramIdx > 0)
-        os() << ", ";
+      if (paramIdx > 0) os() << ", ";
       os() << emitType(val.getType()) << " " << globalBufferNames[val];
       paramIdx++;
     }
@@ -569,16 +544,15 @@ private:
     unsigned tmaParamCount = 0;
     for (unsigned i = 0; i < descInfos.size(); ++i) {
       if (!descInfos[i].isTMA) continue;
-      if (paramIdx > 0)
-        os() << ", ";
+      if (paramIdx > 0) os() << ", ";
       os() << "const __grid_constant__ CUtensorMap __choreo_tma_"
-         << tmaParamCount << "_tensor_map";
+           << tmaParamCount << "_tensor_map";
       paramIdx++;
       tmaParamCount++;
     }
     // Memory reuse offset and spm_size parameters
-    if (auto mrArgsAttr = kernel->getAttrOfType<mlir::ArrayAttr>(
-            "coir.mr_offset_args")) {
+    if (auto mrArgsAttr =
+            kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_offset_args")) {
       auto args = body.getArguments();
       unsigned mrArgStart = args.size() - mrArgsAttr.size() - 1;
       for (unsigned i = 0; i < mrArgsAttr.size(); ++i) {
@@ -593,7 +567,8 @@ private:
       if (paramIdx > 0) os() << ", ";
       auto spmSizeName =
           kernel->getAttrOfType<mlir::StringAttr>("coir.mr_spm_size_arg")
-              .getValue().str();
+              .getValue()
+              .str();
       os() << "unsigned " << spmSizeName;
       valueNames[args[mrArgStart + mrArgsAttr.size()]] = spmSizeName;
       paramIdx++;
@@ -609,22 +584,21 @@ private:
       if (!descInfos[i].isTMA) continue;
       if (descInfos[i].isLoad) {
         os() << getIndent() << "__shared__ __align__(8) uint64_t "
-           << "choreo_copy_atom_t_" << tmaIdx << "_barrier;\n";
+             << "choreo_copy_atom_t_" << tmaIdx << "_barrier;\n";
         os() << getIndent() << "if (threadIdx.x == 0 && threadIdx.y == 0) {\n";
         incIndent();
         os() << getIndent() << "choreo::tma_mbarrier_init(&choreo_copy_atom_t_"
-           << tmaIdx << "_barrier, 1);\n";
+             << tmaIdx << "_barrier, 1);\n";
         decIndent();
         os() << getIndent() << "}\n";
         os() << getIndent() << "__syncthreads();\n";
         os() << getIndent() << "TMAAtom choreo_copy_atom_t_" << tmaIdx
-           << "{&choreo_copy_atom_t_" << tmaIdx << "_barrier};\n\n";
+             << "{&choreo_copy_atom_t_" << tmaIdx << "_barrier};\n\n";
       }
       tmaIdx++;
     }
 
-    for (auto &op : body.front().getOperations())
-      emitOp(&op);
+    for (auto& op : body.front().getOperations()) emitOp(&op);
 
     decIndent();
     os() << "}\n\n";
@@ -638,14 +612,22 @@ private:
         choreoElem = "choreo::" + hostElemHint.str();
       } else {
         auto eTyML = tty.getElementType();
-        if (eTyML.isInteger(8)) choreoElem = "choreo::u8";
-        else if (eTyML.isInteger(16)) choreoElem = "choreo::s16";
-        else if (eTyML.isInteger(32)) choreoElem = "choreo::s32";
-        else if (eTyML.isInteger(64)) choreoElem = "choreo::s64";
-        else if (eTyML.isF32()) choreoElem = "choreo::f32";
-        else if (eTyML.isF16()) choreoElem = "choreo::f16";
-        else if (eTyML.isBF16()) choreoElem = "choreo::bf16";
-        else if (eTyML.isF64()) choreoElem = "choreo::f64";
+        if (eTyML.isInteger(8))
+          choreoElem = "choreo::u8";
+        else if (eTyML.isInteger(16))
+          choreoElem = "choreo::s16";
+        else if (eTyML.isInteger(32))
+          choreoElem = "choreo::s32";
+        else if (eTyML.isInteger(64))
+          choreoElem = "choreo::s64";
+        else if (eTyML.isF32())
+          choreoElem = "choreo::f32";
+        else if (eTyML.isF16())
+          choreoElem = "choreo::f16";
+        else if (eTyML.isBF16())
+          choreoElem = "choreo::bf16";
+        else if (eTyML.isF64())
+          choreoElem = "choreo::f64";
         else if (isa<mlir::Float8E4M3FNType>(eTyML))
           choreoElem = "choreo::f8_e4m3";
         else if (isa<mlir::Float8E5M2Type>(eTyML))
@@ -656,7 +638,8 @@ private:
           choreoElem = "choreo::f6_e3m2";
         else if (isa<mlir::Float4E2M1FNType>(eTyML))
           choreoElem = "choreo::f4_e2m1";
-        else choreoElem = "choreo::s32";
+        else
+          choreoElem = "choreo::s32";
       }
       unsigned ndim = tty.getShape().size();
       if (asView)
@@ -757,12 +740,11 @@ private:
     globalBufferNames.clear();
 
     llvm::DenseSet<Value> returns;
-    auto &body = kernel.getBody();
+    auto& body = kernel.getBody();
     if (!body.empty()) {
-      for (auto &op : body.front().getOperations()) {
+      for (auto& op : body.front().getOperations()) {
         if (auto ret = dyn_cast<KernelReturnOp>(op)) {
-          for (auto operand : ret.getOperands())
-            returns.insert(operand);
+          for (auto operand : ret.getOperands()) returns.insert(operand);
         }
       }
     }
@@ -770,10 +752,8 @@ private:
     unsigned idx = 0;
     kernel.getBody().walk([&](TensorAllocOp alloc) {
       auto tty = cast<coir::TensorType>(alloc.getResult().getType());
-      if (tty.getMemorySpace() != 0)
-        return;
-      if (returns.count(alloc.getResult()))
-        return;
+      if (tty.getMemorySpace() != 0) return;
+      if (returns.count(alloc.getResult())) return;
       std::string name = "__gbuf" + std::to_string(idx++);
       globalBufferNames[alloc.getResult()] = name;
       globalBufferVals.push_back(alloc.getResult());
@@ -788,7 +768,7 @@ private:
   };
 
   std::string reconstructCdivExpr(KernelOp kernel, unsigned boundIdx,
-                                   llvm::ArrayRef<DimArgMeta> dimArgMeta) {
+                                  llvm::ArrayRef<DimArgMeta> dimArgMeta) {
     // For dynamic grid bounds, reconstruct cdiv(dim, tileSize) expression.
     // The block-level parallel tiles the grid over the function's dynamic dims.
     // Match bound index to dim args and find tile size from TMA tile types.
@@ -796,9 +776,9 @@ private:
     // Strategy: find divsi ops (may be absent with --zero-cost). If present use
     // them. Otherwise, infer tile size from TMA tile shapes and match dim args
     // sequentially to grid dimensions.
-    auto &entryBlock = kernel.getBody().front();
+    auto& entryBlock = kernel.getBody().front();
     llvm::SmallVector<mlir::arith::DivSIOp> divOps;
-    for (auto &op : entryBlock) {
+    for (auto& op : entryBlock) {
       if (auto divOp = dyn_cast<mlir::arith::DivSIOp>(&op))
         divOps.push_back(divOp);
     }
@@ -824,7 +804,7 @@ private:
           else
             break;
         }
-        for (auto &da : dimArgMeta) {
+        for (auto& da : dimArgMeta) {
           unsigned kernelArgPos = numTensorArgs + (&da - dimArgMeta.data());
           if (kernelArgPos == argIdx) {
             std::string expr = "(((int)p" + std::to_string(da.paramIdx) +
@@ -842,12 +822,11 @@ private:
     // dim and what tile size is used for that grid dimension.
     ParallelOp blockPar = nullptr;
     kernel.getBody().walk([&](ParallelOp par) {
-      if (par.getLevel() == coir::ParallelLevel::BLOCK)
-        blockPar = par;
+      if (par.getLevel() == coir::ParallelLevel::BLOCK) blockPar = par;
     });
 
     if (blockPar) {
-      auto &blockBody = blockPar.getBody().front();
+      auto& blockBody = blockPar.getBody().front();
       auto blockArgs = blockBody.getArguments();
       if (boundIdx < blockArgs.size()) {
         Value blockArg = blockArgs[boundIdx];
@@ -856,8 +835,7 @@ private:
           if (auto tileOp = dyn_cast<coir::TensorTileOp>(user)) {
             Value src = tileOp.getSource();
             // Trace source to kernel block argument
-            while (auto parentTile =
-                       src.getDefiningOp<coir::TensorTileOp>())
+            while (auto parentTile = src.getDefiningOp<coir::TensorTileOp>())
               src = parentTile.getSource();
             if (auto kernelArg = dyn_cast<mlir::BlockArgument>(src)) {
               unsigned argNum = kernelArg.getArgNumber();
@@ -875,23 +853,23 @@ private:
                   if (indices[ii] == blockArg) {
                     int64_t tileSize = (ii < resSh.size()) ? resSh[ii] : 64;
                     // Match argNum to a dim arg (paramIdx/dimIdx)
-                    for (auto &da : dimArgMeta) {
+                    for (auto& da : dimArgMeta) {
                       if (da.paramIdx == (int64_t)argNum &&
                           da.dimIdx == (int64_t)ii) {
                         return "(((int)p" + std::to_string(da.paramIdx) +
                                ".shape()[" + std::to_string(da.dimIdx) +
-                               "] + " + std::to_string(tileSize - 1) +
-                               ") / " + std::to_string(tileSize) + ")";
+                               "] + " + std::to_string(tileSize - 1) + ") / " +
+                               std::to_string(tileSize) + ")";
                       }
                     }
                     // If not found by exact match, use the dim arg that refers
                     // to this param at any dim of matching index
-                    for (auto &da : dimArgMeta) {
+                    for (auto& da : dimArgMeta) {
                       if (da.paramIdx == (int64_t)argNum) {
                         return "(((int)p" + std::to_string(da.paramIdx) +
                                ".shape()[" + std::to_string(da.dimIdx) +
-                               "] + " + std::to_string(tileSize - 1) +
-                               ") / " + std::to_string(tileSize) + ")";
+                               "] + " + std::to_string(tileSize - 1) + ") / " +
+                               std::to_string(tileSize) + ")";
                       }
                     }
                   }
@@ -916,11 +894,11 @@ private:
         if (paramIdx >= 0 && tileType) {
           int64_t tileSize = tileType.getShape()[0];
           // Find the dim arg matching this param's dim 0
-          for (auto &da : dimArgMeta) {
+          for (auto& da : dimArgMeta) {
             if (da.paramIdx == paramIdx && da.dimIdx == 0) {
-              return "(((int)p" + std::to_string(da.paramIdx) +
-                     ".shape()[" + std::to_string(da.dimIdx) +
-                     "] + " + std::to_string(tileSize - 1) + ") / " +
+              return "(((int)p" + std::to_string(da.paramIdx) + ".shape()[" +
+                     std::to_string(da.dimIdx) + "] + " +
+                     std::to_string(tileSize - 1) + ") / " +
                      std::to_string(tileSize) + ")";
             }
           }
@@ -959,12 +937,14 @@ private:
         // Check for dynamic GROUP bounds
         bool anyDyn = false;
         for (auto b : bounds) {
-          if (b == DYN) { anyDyn = true; break; }
+          if (b == DYN) {
+            anyDyn = true;
+            break;
+          }
         }
         if (anyDyn) {
           hasDynGroup = true;
-          if (lvl == coir::ParallelLevel::GROUPx4)
-            dynGroupMult = 4;
+          if (lvl == coir::ParallelLevel::GROUPx4) dynGroupMult = 4;
           // Compute static factor (product of non-DYN bounds)
           int64_t staticProd = 1;
           for (auto b : bounds) {
@@ -972,12 +952,10 @@ private:
           }
           dynGroupStaticFactor = staticProd;
           // Extract param/dim mapping from op attributes
-          auto paramAttr =
-              par->getAttrOfType<mlir::DenseI64ArrayAttr>(
-                  "coir.dyn_group_bound_param");
-          auto dimAttr =
-              par->getAttrOfType<mlir::DenseI64ArrayAttr>(
-                  "coir.dyn_group_bound_dim");
+          auto paramAttr = par->getAttrOfType<mlir::DenseI64ArrayAttr>(
+              "coir.dyn_group_bound_param");
+          auto dimAttr = par->getAttrOfType<mlir::DenseI64ArrayAttr>(
+              "coir.dyn_group_bound_dim");
           if (paramAttr && dimAttr) {
             auto params = paramAttr.asArrayRef();
             auto dims_ = dimAttr.asArrayRef();
@@ -989,8 +967,7 @@ private:
         } else {
           int64_t nWarps = 1;
           for (auto b : bounds) nWarps *= b;
-          if (lvl == coir::ParallelLevel::GROUPx4)
-            nWarps *= 4;
+          if (lvl == coir::ParallelLevel::GROUPx4) nWarps *= 4;
           groupWarps = nWarps;
         }
       }
@@ -1005,11 +982,10 @@ private:
                      ".shape()[" + std::to_string(dynGroupDims[i]) + "]";
       }
       if (dynGroupMult != 1)
-        groupExpr = "(" + groupExpr + ") * " +
-                    std::to_string(dynGroupMult);
+        groupExpr = "(" + groupExpr + ") * " + std::to_string(dynGroupMult);
       if (dynGroupStaticFactor != 1)
-        groupExpr = "(" + groupExpr + ") * " +
-                    std::to_string(dynGroupStaticFactor);
+        groupExpr =
+            "(" + groupExpr + ") * " + std::to_string(dynGroupStaticFactor);
       std::string thrExpr;
       if (hasThreadLevel) {
         for (unsigned j = 0; j < dims.block.size(); ++j) {
@@ -1034,7 +1010,10 @@ private:
     // Handle dynamic grid dims (INT64_MIN sentinel)
     bool hasDynGrid = false;
     for (auto b : dims.grid)
-      if (b == DYN) { hasDynGrid = true; break; }
+      if (b == DYN) {
+        hasDynGrid = true;
+        break;
+      }
     if (hasDynGrid && !dimArgMeta.empty()) {
       for (unsigned i = 0; i < dims.grid.size(); ++i) {
         if (dims.grid[i] == DYN)
@@ -1066,11 +1045,10 @@ private:
     return "CU_TENSOR_MAP_DATA_TYPE_FLOAT32";
   }
 
-  void emitTMADescriptorSetup(unsigned descIdx, const std::string &dataPtr,
+  void emitTMADescriptorSetup(unsigned descIdx, const std::string& dataPtr,
                               coir::TensorType globalType,
                               coir::TensorType tileType,
-                              int64_t swizzleBytes = 0,
-                              bool zfill = false,
+                              int64_t swizzleBytes = 0, bool zfill = false,
                               int srcParamIdx = -1) {
     auto shape = globalType.getShape();
     auto elemTy = globalType.getElementType();
@@ -1085,11 +1063,10 @@ private:
     // Helper to emit a dim value (static or dynamic)
     constexpr int64_t DYN = mlir::ShapedType::kDynamic;
     auto dimExpr = [&](unsigned dimIdx) -> std::string {
-      if (shape[dimIdx] != DYN)
-        return std::to_string(shape[dimIdx]);
+      if (shape[dimIdx] != DYN) return std::to_string(shape[dimIdx]);
       if (srcParamIdx >= 0)
-        return "(uint64_t)p" + std::to_string(srcParamIdx) +
-               ".shape()[" + std::to_string(dimIdx) + "]";
+        return "(uint64_t)p" + std::to_string(srcParamIdx) + ".shape()[" +
+               std::to_string(dimIdx) + "]";
       return "1";
     };
 
@@ -1105,7 +1082,10 @@ private:
     os() << "  uint64_t " << prefix << "_strides[] = {";
     bool allStatic = true;
     for (unsigned i = 0; i < rank; ++i)
-      if (shape[i] == DYN) { allStatic = false; break; }
+      if (shape[i] == DYN) {
+        allStatic = false;
+        break;
+      }
 
     if (allStatic) {
       int64_t stride = elemBytes;
@@ -1119,8 +1099,7 @@ private:
       for (int i = (int)rank - 2; i >= 0; --i) {
         if (i < (int)rank - 2) os() << ", ";
         os() << "(uint64_t)(" << elemBytes;
-        for (int j = (int)rank - 1; j > i; --j)
-          os() << " * " << dimExpr(j);
+        for (int j = (int)rank - 1; j > i; --j) os() << " * " << dimExpr(j);
         os() << ")";
       }
     }
@@ -1147,7 +1126,8 @@ private:
     os() << "  alignas(64) CUtensorMap " << prefix << "_tensor_map{};\n";
     os() << "  CUresult " << prefix << "_res = cuTensorMapEncodeTiled(\n";
     os() << "          &" << prefix << "_tensor_map,\n";
-    os() << "          CUtensorMapDataType::" << emitTMADataType(elemTy) << ",\n";
+    os() << "          CUtensorMapDataType::" << emitTMADataType(elemTy)
+         << ",\n";
     os() << "          " << rank << ",\n";
     os() << "          " << dataPtr << ",\n";
     os() << "          " << prefix << "_shape,\n";
@@ -1155,16 +1135,19 @@ private:
     os() << "          " << prefix << "_box_shape,\n";
     os() << "          " << prefix << "_elem_strides,\n";
     os() << "          CUtensorMapInterleave::CU_TENSOR_MAP_INTERLEAVE_NONE,\n";
-    const char *swizEnum = "CU_TENSOR_MAP_SWIZZLE_NONE";
-    if (swizzleBytes == 32) swizEnum = "CU_TENSOR_MAP_SWIZZLE_32B";
-    else if (swizzleBytes == 64) swizEnum = "CU_TENSOR_MAP_SWIZZLE_64B";
-    else if (swizzleBytes == 128) swizEnum = "CU_TENSOR_MAP_SWIZZLE_128B";
+    const char* swizEnum = "CU_TENSOR_MAP_SWIZZLE_NONE";
+    if (swizzleBytes == 32)
+      swizEnum = "CU_TENSOR_MAP_SWIZZLE_32B";
+    else if (swizzleBytes == 64)
+      swizEnum = "CU_TENSOR_MAP_SWIZZLE_64B";
+    else if (swizzleBytes == 128)
+      swizEnum = "CU_TENSOR_MAP_SWIZZLE_128B";
     os() << "          CUtensorMapSwizzle::" << swizEnum << ",\n";
     os() << "          CUtensorMapL2promotion::"
-       << "CU_TENSOR_MAP_L2_PROMOTION_L2_128B,\n";
-    const char *oobEnum = zfill
-        ? "CU_TENSOR_MAP_FLOAT_OOB_FILL_NAN_REQUEST_ZERO_FMA"
-        : "CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE";
+         << "CU_TENSOR_MAP_L2_PROMOTION_L2_128B,\n";
+    const char* oobEnum =
+        zfill ? "CU_TENSOR_MAP_FLOAT_OOB_FILL_NAN_REQUEST_ZERO_FMA"
+              : "CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE";
     os() << "          CUtensorMapFloatOOBfill::" << oobEnum << ");\n";
     os() << "  choreo::abend_true(" << prefix << "_res != CUDA_SUCCESS);\n";
   }
@@ -1203,7 +1186,7 @@ private:
 
   unsigned countTMADescs() {
     unsigned count = 0;
-    for (auto &d : descInfos)
+    for (auto& d : descInfos)
       if (d.isTMA) count++;
     return count;
   }
@@ -1262,7 +1245,7 @@ private:
         auto dim = tty.getShape()[d];
         if (mlir::ShapedType::isDynamic(dim)) {
           bool found = false;
-          for (auto &da : dimArgMeta) {
+          for (auto& da : dimArgMeta) {
             if (da.dimIdx == (int64_t)d) {
               ss << "p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
               found = true;
@@ -1275,8 +1258,7 @@ private:
         }
       }
       unsigned elemBits = tty.getElementType().getIntOrFloatBitWidth();
-      if (elemBits > 8)
-        ss << " * " << (elemBits / 8);
+      if (elemBits > 8) ss << " * " << (elemBits / 8);
     });
     return expr;
   }
@@ -1285,8 +1267,7 @@ private:
   std::string globalBufferByteExpr(coir::TensorType tty,
                                    llvm::ArrayRef<DimArgMeta> dimArgMeta) {
     int64_t bytes = getTensorBytes(tty);
-    if (bytes >= 0)
-      return std::to_string(bytes) + "ULL";
+    if (bytes >= 0) return std::to_string(bytes) + "ULL";
 
     unsigned elemBits = tty.getElementType().getIntOrFloatBitWidth();
     unsigned elemBytes = elemBits > 8 ? (elemBits / 8) : 1;
@@ -1298,10 +1279,9 @@ private:
       auto dim = tty.getShape()[d];
       if (mlir::ShapedType::isDynamic(dim)) {
         bool found = false;
-        for (auto &da : dimArgMeta) {
+        for (auto& da : dimArgMeta) {
           if (da.dimIdx == (int64_t)d) {
-            ss << "(size_t)p" << da.paramIdx << ".shape()[" << da.dimIdx
-               << "]";
+            ss << "(size_t)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
             found = true;
             break;
           }
@@ -1342,8 +1322,8 @@ private:
     unsigned numTMA = countTMADescs();
     auto dimArgMeta = getDimArgs(kernel);
     unsigned numMrArgs = 0;
-    if (auto mrA = kernel->getAttrOfType<mlir::ArrayAttr>(
-            "coir.mr_offset_args"))
+    if (auto mrA =
+            kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_offset_args"))
       numMrArgs = mrA.size() + 1;
     unsigned numOrigInputs =
         fnType.getNumInputs() - dimArgMeta.size() - numMrArgs;
@@ -1351,7 +1331,8 @@ private:
     auto streamName = getStreamName(kernel);
 
     llvm::SmallVector<llvm::StringRef> hostElemHints;
-    if (auto attr = kernel->getAttrOfType<mlir::ArrayAttr>("coir.host_elem_types"))
+    if (auto attr =
+            kernel->getAttrOfType<mlir::ArrayAttr>("coir.host_elem_types"))
       for (auto a : attr)
         hostElemHints.push_back(cast<mlir::StringAttr>(a).getValue());
 
@@ -1359,7 +1340,8 @@ private:
       os() << "void " << symName << "(";
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os() << ", ";
-        llvm::StringRef hint = (i < hostElemHints.size()) ? hostElemHints[i] : "";
+        llvm::StringRef hint =
+            (i < hostElemHints.size()) ? hostElemHints[i] : "";
         os() << emitChoreoType(fnType.getInput(i), true, hint) << " p" << i;
       }
       if (!streamName.empty()) {
@@ -1372,8 +1354,8 @@ private:
         auto tty = dyn_cast<coir::TensorType>(fnType.getInput(i));
         if (!tty) continue;
         std::string eType = emitElementType(tty.getElementType());
-        os() << "  " << eType << "* p" << i << "__device = (" << eType
-             << "*)p" << i << ".data();\n";
+        os() << "  " << eType << "* p" << i << "__device = (" << eType << "*)p"
+             << i << ".data();\n";
       }
 
       emitGlobalBufferAllocs(dimArgMeta);
@@ -1382,17 +1364,15 @@ private:
       unsigned tmaIdx = 0;
       for (unsigned i = 0; i < descInfos.size(); ++i) {
         if (!descInfos[i].isTMA) continue;
-        auto globalType = descInfos[i].isLoad ? descInfos[i].srcType
-                                              : descInfos[i].dstType;
-        auto tileType = descInfos[i].isLoad ? descInfos[i].dstType
-                                            : descInfos[i].srcType;
-        int paramForShape = descInfos[i].isLoad
-            ? descInfos[i].srcParamIdx
-            : descInfos[i].storeArgIdx;
+        auto globalType =
+            descInfos[i].isLoad ? descInfos[i].srcType : descInfos[i].dstType;
+        auto tileType =
+            descInfos[i].isLoad ? descInfos[i].dstType : descInfos[i].srcType;
+        int paramForShape = descInfos[i].isLoad ? descInfos[i].srcParamIdx
+                                                : descInfos[i].storeArgIdx;
         std::string ptr = getTMAGlobalPtr(tmaIdx, kernel);
         emitTMADescriptorSetup(tmaIdx, ptr, globalType, tileType,
-                               descInfos[i].swizzleBytes,
-                               descInfos[i].zfill,
+                               descInfos[i].swizzleBytes, descInfos[i].zfill,
                                paramForShape);
         tmaIdx++;
       }
@@ -1405,31 +1385,35 @@ private:
       bool asyncLaunch = isAsyncLaunch(kernel);
 
       // Emit runtime HeapSimulator for dynamic memreuse.
-      auto mrChunksAttr = kernel->getAttrOfType<mlir::ArrayAttr>(
-          "coir.mr_chunks");
+      auto mrChunksAttr =
+          kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_chunks");
       std::string mrSpmSizeName;
       std::string mrOffsetsName;
       unsigned mrArgCount = 0;
       if (mrChunksAttr) {
         // Emit dimension aliases so chunk size exprs can reference them.
-        for (auto &da : dimArgMeta) {
+        for (auto& da : dimArgMeta) {
           os() << "  unsigned " << da.name << " = (int)p" << da.paramIdx
                << ".shape()[" << da.dimIdx << "];\n";
         }
         auto chunksName =
             kernel->getAttrOfType<mlir::StringAttr>("coir.mr_chunks_name")
-                .getValue().str();
+                .getValue()
+                .str();
         auto resultName =
             kernel->getAttrOfType<mlir::StringAttr>("coir.mr_result_name")
-                .getValue().str();
+                .getValue()
+                .str();
         mrOffsetsName =
             kernel->getAttrOfType<mlir::StringAttr>("coir.mr_offsets_name")
-                .getValue().str();
+                .getValue()
+                .str();
         mrSpmSizeName =
             kernel->getAttrOfType<mlir::StringAttr>("coir.mr_spm_size_arg")
-                .getValue().str();
-        auto mrArgsAttr = kernel->getAttrOfType<mlir::ArrayAttr>(
-            "coir.mr_offset_args");
+                .getValue()
+                .str();
+        auto mrArgsAttr =
+            kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_offset_args");
         mrArgCount = mrArgsAttr ? mrArgsAttr.size() : 0;
 
         os() << "  // JIT memory reuse\n";
@@ -1456,20 +1440,20 @@ private:
             if (!first) os() << ",";
             first = false;
             os() << (mlir::cast<mlir::BoolAttr>(v).getValue() ? "true"
-                                                               : "false");
+                                                              : "false");
           }
           os() << "};\n";
           os() << "  HeapSimulator::Result " << resultName
-               << " = __mr_sim.Allocate(" << chunksName << ", " << align
-               << ", " << imatName << ");\n";
+               << " = __mr_sim.Allocate(" << chunksName << ", " << align << ", "
+               << imatName << ");\n";
         } else {
           os() << "  HeapSimulator::Result " << resultName
                << " = __mr_sim.Allocate(" << chunksName << ", 512);\n";
         }
         os() << "  unsigned " << mrSpmSizeName << " = " << resultName
              << ".heap_size;\n";
-        os() << "  unsigned long " << mrOffsetsName << "["
-             << mrArgCount << "];\n";
+        os() << "  unsigned long " << mrOffsetsName << "[" << mrArgCount
+             << "];\n";
         os() << "  { size_t __idx = 0;\n";
         os() << "    for (const auto& [id, off] : " << resultName
              << ".chunk_offsets)\n";
@@ -1482,7 +1466,7 @@ private:
       }
 
       if (coopLaunch) {
-        for (auto &da : dimArgMeta)
+        for (auto& da : dimArgMeta)
           os() << "  int __dim_" << da.paramIdx << "_" << da.dimIdx
                << " = (int)p" << da.paramIdx << ".shape()[" << da.dimIdx
                << "];\n";
@@ -1499,7 +1483,7 @@ private:
           else
             os() << "(void*)&p" << i;
         }
-        for (auto &da : dimArgMeta) {
+        for (auto& da : dimArgMeta) {
           comma();
           os() << "(void*)&__dim_" << da.paramIdx << "_" << da.dimIdx;
         }
@@ -1520,18 +1504,16 @@ private:
           os() << "(void*)&" << mrSpmSizeName;
         }
         os() << "};\n";
-        os() << "  cudaLaunchCooperativeKernel((const void*)" << devName
-             << ", " << dims.gridStr() << ", " << dims.blockStr()
-             << ", __coop_args, "
+        os() << "  cudaLaunchCooperativeKernel((const void*)" << devName << ", "
+             << dims.gridStr() << ", " << dims.blockStr() << ", __coop_args, "
              << (dynShmem.empty() ? "0" : dynShmem) << ", "
              << (streamName.empty() ? "0" : streamName) << ");\n";
       } else {
         os() << "  " << devName << "<<<" << dims.gridStr() << ", "
-           << dims.blockStr();
+             << dims.blockStr();
         if (!dynShmem.empty() || !streamName.empty())
           os() << ", " << (dynShmem.empty() ? "0" : dynShmem);
-        if (!streamName.empty())
-          os() << ", " << streamName;
+        if (!streamName.empty()) os() << ", " << streamName;
         // Launch order must match kernel signature:
         //   [inputs] [dim args] [gbufs] [TMA maps] [mr_offsets] [spm_size]
         os() << ">>>(";
@@ -1547,7 +1529,7 @@ private:
           else
             os() << "p" << i;
         }
-        for (auto &da : dimArgMeta) {
+        for (auto& da : dimArgMeta) {
           comma();
           os() << "(int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
         }
@@ -1571,8 +1553,8 @@ private:
       }
       if (!asyncLaunch) {
         if (!streamName.empty())
-          os() << "  choreo::abend_true(cudaStreamSynchronize("
-             << streamName << "));\n";
+          os() << "  choreo::abend_true(cudaStreamSynchronize(" << streamName
+               << "));\n";
         else
           os() << "  cudaDeviceSynchronize();\n";
       }
@@ -1586,12 +1568,14 @@ private:
     if (!resTy) return;
 
     llvm::StringRef retHint;
-    if (auto retAttr = kernel->getAttrOfType<mlir::StringAttr>("coir.host_ret_elem_type"))
+    if (auto retAttr =
+            kernel->getAttrOfType<mlir::StringAttr>("coir.host_ret_elem_type"))
       retHint = retAttr.getValue();
-    os() << emitChoreoType(fnType.getResult(0), false, retHint) << " " << symName << "(";
+    os() << emitChoreoType(fnType.getResult(0), false, retHint) << " "
+         << symName << "(";
     for (unsigned i = 0; i < numOrigInputs; ++i) {
       if (i > 0) os() << ", ";
-      auto &body = kernel.getBody();
+      auto& body = kernel.getBody();
       std::string pName = "arg" + std::to_string(i);
       if (!body.empty() && i < body.getArguments().size()) {
         pName = "p" + std::to_string(i);
@@ -1615,14 +1599,14 @@ private:
       os() << "  " << inputEType << "* p" << i << "__device = nullptr;\n";
       if (bytes < 0) {
         os() << "  cudaMalloc(&p" << i << "__device, p" << i
-           << ".element_count() * sizeof(" << inputEType << "));\n";
-        os() << "  cudaMemcpy(p" << i << "__device, p" << i << ".data(), p"
-           << i << ".element_count() * sizeof(" << inputEType
-           << "), cudaMemcpyHostToDevice);\n";
+             << ".element_count() * sizeof(" << inputEType << "));\n";
+        os() << "  cudaMemcpy(p" << i << "__device, p" << i << ".data(), p" << i
+             << ".element_count() * sizeof(" << inputEType
+             << "), cudaMemcpyHostToDevice);\n";
       } else {
         os() << "  cudaMalloc(&p" << i << "__device, " << bytes << "ULL);\n";
         os() << "  cudaMemcpy(p" << i << "__device, p" << i << ".data(), "
-           << bytes << "ULL, cudaMemcpyHostToDevice);\n";
+             << bytes << "ULL, cudaMemcpyHostToDevice);\n";
       }
     }
 
@@ -1636,7 +1620,7 @@ private:
         auto dim = resTy.getShape()[d];
         if (mlir::ShapedType::isDynamic(dim)) {
           // Find matching dimArgMeta to get runtime shape
-          for (auto &da : dimArgMeta) {
+          for (auto& da : dimArgMeta) {
             if (da.dimIdx == (int64_t)d) {
               ss << "p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
               break;
@@ -1653,14 +1637,22 @@ private:
       choreoElem = "choreo::" + retHint.str();
     } else {
       auto resElemTy = resTy.getElementType();
-      if (resElemTy.isInteger(8)) choreoElem = "choreo::u8";
-      else if (resElemTy.isInteger(16)) choreoElem = "choreo::s16";
-      else if (resElemTy.isInteger(32)) choreoElem = "choreo::s32";
-      else if (resElemTy.isInteger(64)) choreoElem = "choreo::s64";
-      else if (resElemTy.isF32()) choreoElem = "choreo::f32";
-      else if (resElemTy.isF16()) choreoElem = "choreo::f16";
-      else if (resElemTy.isBF16()) choreoElem = "choreo::bf16";
-      else if (resElemTy.isF64()) choreoElem = "choreo::f64";
+      if (resElemTy.isInteger(8))
+        choreoElem = "choreo::u8";
+      else if (resElemTy.isInteger(16))
+        choreoElem = "choreo::s16";
+      else if (resElemTy.isInteger(32))
+        choreoElem = "choreo::s32";
+      else if (resElemTy.isInteger(64))
+        choreoElem = "choreo::s64";
+      else if (resElemTy.isF32())
+        choreoElem = "choreo::f32";
+      else if (resElemTy.isF16())
+        choreoElem = "choreo::f16";
+      else if (resElemTy.isBF16())
+        choreoElem = "choreo::bf16";
+      else if (resElemTy.isF64())
+        choreoElem = "choreo::f64";
       else if (isa<mlir::Float8E4M3FNType>(resElemTy))
         choreoElem = "choreo::f8_e4m3";
       else if (isa<mlir::Float8E5M2Type>(resElemTy))
@@ -1671,15 +1663,16 @@ private:
         choreoElem = "choreo::f6_e3m2";
       else if (isa<mlir::Float4E2M1FNType>(resElemTy))
         choreoElem = "choreo::f4_e2m1";
-      else choreoElem = "choreo::s32";
+      else
+        choreoElem = "choreo::s32";
     }
 
     os() << "  auto __result = choreo::make_spandata<" << choreoElem << ", "
-       << resTy.getShape().size() << ">(" << shapeStr << ");\n";
+         << resTy.getShape().size() << ">(" << shapeStr << ");\n";
     os() << "  " << eType << "* __result__device = nullptr;\n";
     if (resBytes < 0) {
       os() << "  cudaMalloc(&__result__device, __result.element_count()"
-         << " * sizeof(" << eType << "));\n";
+           << " * sizeof(" << eType << "));\n";
     } else {
       os() << "  cudaMalloc(&__result__device, " << resBytes << "ULL);\n";
     }
@@ -1690,17 +1683,15 @@ private:
     unsigned tmaIdx = 0;
     for (unsigned i = 0; i < descInfos.size(); ++i) {
       if (!descInfos[i].isTMA) continue;
-      auto globalType = descInfos[i].isLoad ? descInfos[i].srcType
-                                            : descInfos[i].dstType;
-      auto tileType = descInfos[i].isLoad ? descInfos[i].dstType
-                                          : descInfos[i].srcType;
-      int paramForShape = descInfos[i].isLoad
-          ? descInfos[i].srcParamIdx
-          : descInfos[i].storeArgIdx;
+      auto globalType =
+          descInfos[i].isLoad ? descInfos[i].srcType : descInfos[i].dstType;
+      auto tileType =
+          descInfos[i].isLoad ? descInfos[i].dstType : descInfos[i].srcType;
+      int paramForShape = descInfos[i].isLoad ? descInfos[i].srcParamIdx
+                                              : descInfos[i].storeArgIdx;
       std::string ptr = getTMAGlobalPtr(tmaIdx, kernel);
       emitTMADescriptorSetup(tmaIdx, ptr, globalType, tileType,
-                             descInfos[i].swizzleBytes,
-                             descInfos[i].zfill,
+                             descInfos[i].swizzleBytes, descInfos[i].zfill,
                              paramForShape);
       tmaIdx++;
     }
@@ -1712,31 +1703,35 @@ private:
     bool asyncLaunch = isAsyncLaunch(kernel);
 
     // Emit runtime HeapSimulator for dynamic memreuse (returning kernel).
-    auto mrChunksAttr2 = kernel->getAttrOfType<mlir::ArrayAttr>(
-        "coir.mr_chunks");
+    auto mrChunksAttr2 =
+        kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_chunks");
     std::string mrSpmSizeName2;
     std::string mrOffsetsName2;
     unsigned mrArgCount2 = 0;
     if (mrChunksAttr2) {
       // Emit dimension aliases so chunk size exprs can reference them.
-      for (auto &da : dimArgMeta) {
+      for (auto& da : dimArgMeta) {
         os() << "  unsigned " << da.name << " = (int)p" << da.paramIdx
              << ".shape()[" << da.dimIdx << "];\n";
       }
       auto chunksName =
           kernel->getAttrOfType<mlir::StringAttr>("coir.mr_chunks_name")
-              .getValue().str();
+              .getValue()
+              .str();
       auto resultName =
           kernel->getAttrOfType<mlir::StringAttr>("coir.mr_result_name")
-              .getValue().str();
+              .getValue()
+              .str();
       mrOffsetsName2 =
           kernel->getAttrOfType<mlir::StringAttr>("coir.mr_offsets_name")
-              .getValue().str();
+              .getValue()
+              .str();
       mrSpmSizeName2 =
           kernel->getAttrOfType<mlir::StringAttr>("coir.mr_spm_size_arg")
-              .getValue().str();
-      auto mrArgsAttr = kernel->getAttrOfType<mlir::ArrayAttr>(
-          "coir.mr_offset_args");
+              .getValue()
+              .str();
+      auto mrArgsAttr =
+          kernel->getAttrOfType<mlir::ArrayAttr>("coir.mr_offset_args");
       mrArgCount2 = mrArgsAttr ? mrArgsAttr.size() : 0;
 
       os() << "  // JIT memory reuse\n";
@@ -1750,8 +1745,8 @@ private:
            << " = __mr_sim.Allocate(" << chunksName << ", 512);\n";
       os() << "  unsigned " << mrSpmSizeName2 << " = " << resultName
            << ".heap_size;\n";
-      os() << "  unsigned long " << mrOffsetsName2 << "["
-           << mrArgCount2 << "];\n";
+      os() << "  unsigned long " << mrOffsetsName2 << "[" << mrArgCount2
+           << "];\n";
       os() << "  { size_t __idx = 0;\n";
       os() << "    for (const auto& [id, off] : " << resultName
            << ".chunk_offsets)\n";
@@ -1763,10 +1758,9 @@ private:
     }
 
     if (coopLaunch) {
-      for (auto &da : dimArgMeta)
-        os() << "  int __dim_" << da.paramIdx << "_" << da.dimIdx
-             << " = (int)p" << da.paramIdx << ".shape()[" << da.dimIdx
-             << "];\n";
+      for (auto& da : dimArgMeta)
+        os() << "  int __dim_" << da.paramIdx << "_" << da.dimIdx << " = (int)p"
+             << da.paramIdx << ".shape()[" << da.dimIdx << "];\n";
       os() << "  void* __coop_args[] = {";
       bool firstArg = true;
       auto comma = [&]() {
@@ -1780,7 +1774,7 @@ private:
         else
           os() << "(void*)&p" << i;
       }
-      for (auto &da : dimArgMeta) {
+      for (auto& da : dimArgMeta) {
         comma();
         os() << "(void*)&__dim_" << da.paramIdx << "_" << da.dimIdx;
       }
@@ -1803,18 +1797,16 @@ private:
         os() << "(void*)&" << mrSpmSizeName2;
       }
       os() << "};\n";
-      os() << "  cudaLaunchCooperativeKernel((const void*)" << devName
-           << ", " << dims.gridStr() << ", " << dims.blockStr()
-           << ", __coop_args, "
+      os() << "  cudaLaunchCooperativeKernel((const void*)" << devName << ", "
+           << dims.gridStr() << ", " << dims.blockStr() << ", __coop_args, "
            << (dynShmem.empty() ? "0" : dynShmem) << ", "
            << (streamName.empty() ? "0" : streamName) << ");\n";
     } else {
       os() << "  " << devName << "<<<" << dims.gridStr() << ", "
-         << dims.blockStr();
+           << dims.blockStr();
       if (!dynShmem.empty() || !streamName.empty())
         os() << ", " << (dynShmem.empty() ? "0" : dynShmem);
-      if (!streamName.empty())
-        os() << ", " << streamName;
+      if (!streamName.empty()) os() << ", " << streamName;
       // Launch order must match kernel signature:
       //   [inputs] [dim args] [output] [gbufs] [TMA maps] [mr] [spm_size]
       os() << ">>>(";
@@ -1830,7 +1822,7 @@ private:
         else
           os() << "p" << i;
       }
-      for (auto &da : dimArgMeta) {
+      for (auto& da : dimArgMeta) {
         comma();
         os() << "(int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
       }
@@ -1856,18 +1848,18 @@ private:
     }
     if (!asyncLaunch) {
       if (!streamName.empty())
-        os() << "  choreo::abend_true(cudaStreamSynchronize("
-             << streamName << "));\n";
+        os() << "  choreo::abend_true(cudaStreamSynchronize(" << streamName
+             << "));\n";
       else
         os() << "  cudaDeviceSynchronize();\n";
     }
     if (resBytes < 0) {
       os() << "  cudaMemcpy(__result.data(), __result__device, "
-         << "__result.element_count() * sizeof(" << eType
-         << "), cudaMemcpyDeviceToHost);\n";
+           << "__result.element_count() * sizeof(" << eType
+           << "), cudaMemcpyDeviceToHost);\n";
     } else {
-      os() << "  cudaMemcpy(__result.data(), __result__device, "
-         << resBytes << "ULL, cudaMemcpyDeviceToHost);\n";
+      os() << "  cudaMemcpy(__result.data(), __result__device, " << resBytes
+           << "ULL, cudaMemcpyDeviceToHost);\n";
     }
 
     for (unsigned i = 0; i < numOrigInputs; ++i) {
@@ -1889,13 +1881,15 @@ private:
       entryAssertions.push_back({op});
       return;
     }
-    os() << getIndent() << "choreo::choreo_assert(" << getName(op.getCondition())
-       << ", \"" << msg << "\");" << "\n";
+    os() << getIndent() << "choreo::choreo_assert("
+         << getName(op.getCondition()) << ", \"" << msg << "\");"
+         << "\n";
   }
 
-  std::string emitExprInHostScope(
-      Value v, KernelOp kernel, DenseMap<Value, std::string> &hostNames,
-      unsigned numOrigInputs, llvm::ArrayRef<DimArgMeta> dimArgMeta) {
+  std::string emitExprInHostScope(Value v, KernelOp kernel,
+                                  DenseMap<Value, std::string>& hostNames,
+                                  unsigned numOrigInputs,
+                                  llvm::ArrayRef<DimArgMeta> dimArgMeta) {
     auto it = hostNames.find(v);
     if (it != hostNames.end()) return it->second;
 
@@ -1909,7 +1903,7 @@ private:
         }
         unsigned daIdx = idx - numOrigInputs;
         if (daIdx < dimArgMeta.size()) {
-          auto &da = dimArgMeta[daIdx];
+          auto& da = dimArgMeta[daIdx];
           std::string name = "(int)p" + std::to_string(da.paramIdx) +
                              ".shape()[" + std::to_string(da.dimIdx) + "]";
           hostNames[v] = name;
@@ -1921,7 +1915,7 @@ private:
       }
     }
 
-    auto *defOp = v.getDefiningOp();
+    auto* defOp = v.getDefiningOp();
     if (!defOp) return "/* unknown */";
 
     if (auto constOp = dyn_cast<arith::ConstantOp>(defOp)) {
@@ -1944,7 +1938,7 @@ private:
                                      numOrigInputs, dimArgMeta);
       auto rhs = emitExprInHostScope(cmpOp.getRhs(), kernel, hostNames,
                                      numOrigInputs, dimArgMeta);
-      const char *pred = "==";
+      const char* pred = "==";
       switch (cmpOp.getPredicate()) {
       case arith::CmpIPredicate::eq: pred = "=="; break;
       case arith::CmpIPredicate::ne: pred = "!="; break;
@@ -2011,23 +2005,22 @@ private:
     return "/* unknown */";
   }
 
-  void emitEntryAssertions(KernelOp kernel,
-                           unsigned numOrigInputs,
+  void emitEntryAssertions(KernelOp kernel, unsigned numOrigInputs,
                            llvm::ArrayRef<DimArgMeta> dimArgMeta) {
     DenseMap<Value, std::string> hostNames;
-    for (auto &ea : entryAssertions) {
+    for (auto& ea : entryAssertions) {
       auto cond = emitExprInHostScope(ea.op.getCondition(), kernel, hostNames,
                                       numOrigInputs, dimArgMeta);
       if (cond.find("/* unknown */") != std::string::npos ||
           cond.find("/* arg") != std::string::npos)
         continue;
-      os() << "  choreo::runtime_check(" << cond << ", \""
-         << ea.op.getMessage() << "\");\n";
+      os() << "  choreo::runtime_check(" << cond << ", \"" << ea.op.getMessage()
+           << "\");\n";
     }
   }
 
   static std::string ordinal(int n) {
-    static const char *suffixes[] = {"th", "st", "nd", "rd", "th"};
+    static const char* suffixes[] = {"th", "st", "nd", "rd", "th"};
     int v = n % 100;
     int idx = (v >= 11 && v <= 13) ? 0 : std::min(v % 10, 4);
     return std::to_string(n) + suffixes[idx];
@@ -2035,15 +2028,14 @@ private:
 
   void emitDimChecks(KernelOp kernel) {
     auto checks = getDimChecks(kernel);
-    for (auto &c : checks) {
+    for (auto& c : checks) {
       os() << "  choreo::runtime_check("
            << "p" << c.param0 << ".shape()[" << c.dim0 << "]"
            << " == "
            << "p" << c.param1 << ".shape()[" << c.dim1 << "]"
            << ", \"The shapes of the " << ordinal(c.param0 + 1)
            << " parameter (dim: " << c.dim0 << ") and the "
-           << ordinal(c.param1 + 1)
-           << " parameter (dim: " << c.dim1
+           << ordinal(c.param1 + 1) << " parameter (dim: " << c.dim1
            << ") are inconsistent.\");\n";
     }
   }
@@ -2051,11 +2043,11 @@ private:
   void emitParallel(ParallelOp op) override {
     auto level = op.getLevel();
     auto bounds = op.getBounds();
-    auto &body = op.getBody();
+    auto& body = op.getBody();
     auto args = body.getArguments();
 
-    os() << getIndent() << "// parallel level="
-       << stringifyParallelLevel(level) << " bounds=[";
+    os() << getIndent() << "// parallel level=" << stringifyParallelLevel(level)
+         << " bounds=[";
     for (unsigned i = 0; i < bounds.size(); ++i) {
       if (i > 0) os() << ", ";
       os() << bounds[i];
@@ -2075,18 +2067,16 @@ private:
     } else if (level == ParallelLevel::GROUP ||
                level == ParallelLevel::GROUPx4) {
       int warpScale = (level == ParallelLevel::GROUPx4) ? 4 : 1;
-      std::string warpId = "(threadIdx.x / " +
-                           std::to_string(32 * warpScale) + ")";
+      std::string warpId =
+          "(threadIdx.x / " + std::to_string(32 * warpScale) + ")";
       if (args.size() == 1) {
         valueNames[args[0]] = warpId;
       } else {
         for (unsigned i = 0; i < args.size(); ++i) {
           int64_t divisor = 1;
-          for (unsigned j = i + 1; j < args.size(); ++j)
-            divisor *= bounds[j];
-          std::string expr = "(" + warpId + " / " +
-                             std::to_string(divisor) + " % " +
-                             std::to_string(bounds[i]) + ")";
+          for (unsigned j = i + 1; j < args.size(); ++j) divisor *= bounds[j];
+          std::string expr = "(" + warpId + " / " + std::to_string(divisor) +
+                             " % " + std::to_string(bounds[i]) + ")";
           valueNames[args[i]] = expr;
         }
       }
@@ -2097,8 +2087,7 @@ private:
 
     os() << getIndent() << "{\n";
     incIndent();
-    for (auto &bodyOp : body.front().getOperations())
-      emitOp(&bodyOp);
+    for (auto& bodyOp : body.front().getOperations()) emitOp(&bodyOp);
     decIndent();
     os() << getIndent() << "}\n";
   }
@@ -2108,18 +2097,15 @@ private:
   }
 
   // Find the MMAExecOp that uses this value (through the ctmmaValues set)
-  MMAExecOp findCTMMAExec(mlir::Operation *root) {
+  MMAExecOp findCTMMAExec(mlir::Operation* root) {
     MMAExecOp found = nullptr;
     root->walk([&](MMAExecOp exec) {
-      if (exec.getMmaAtomNameAttr())
-        found = exec;
+      if (exec.getMmaAtomNameAttr()) found = exec;
     });
     return found;
   }
 
-  bool isValueCTMMA(Value v) {
-    return ctmmaValues.count(v) > 0;
-  }
+  bool isValueCTMMA(Value v) { return ctmmaValues.count(v) > 0; }
 
   void emitMMAFill(MMAFillOp op) override {
     auto fragTy = cast<coir::MMAFragType>(op.getResult().getType());
@@ -2128,17 +2114,18 @@ private:
 
     if (isValueCTMMA(op.getResult())) {
       auto exec = findCTMMAExec(op->getParentOfType<KernelOp>());
-      int64_t regNum = (exec && exec.getRegNumDAttr()) ? exec.getRegNumDAttr().getInt() : 4;
+      int64_t regNum =
+          (exec && exec.getRegNumDAttr()) ? exec.getRegNumDAttr().getInt() : 4;
       auto eTy = fragTy.getElementType();
-      std::string elemTy = eTy.isF32() ? "float"
-                         : eTy.isF64() ? "double"
-                         : "uint32_t";
+      std::string elemTy = eTy.isF32()   ? "float"
+                           : eTy.isF64() ? "double"
+                                         : "uint32_t";
       os() << getIndent() << elemTy << " " << name << "[" << regNum << "];\n";
       std::string initVal = getName(op.getValue());
       if (elemTy == "uint32_t")
         initVal = "static_cast<uint32_t>(" + initVal + ")";
-      os() << getIndent() << "for (int __i = 0; __i < " << regNum
-           << "; ++__i) " << name << "[__i] = " << initVal << ";\n";
+      os() << getIndent() << "for (int __i = 0; __i < " << regNum << "; ++__i) "
+           << name << "[__i] = " << initVal << ";\n";
       return;
     }
 
@@ -2166,21 +2153,19 @@ private:
     }
 
     os() << getIndent()
-       << emitWMMAFragType(fragTy, "accumulator", "", op.getResult())
-       << " " << name << ";\n";
+         << emitWMMAFragType(fragTy, "accumulator", "", op.getResult()) << " "
+         << name << ";\n";
     os() << getIndent() << "wmma::fill_fragment(" << name << ", "
-       << getName(op.getValue()) << ");\n";
+         << getName(op.getValue()) << ");\n";
   }
 
   int64_t getSourceLeadingDim(Value v) {
     if (auto tileOp = v.getDefiningOp<TensorTileOp>()) {
       auto srcTy = dyn_cast<coir::TensorType>(tileOp.getSource().getType());
-      if (srcTy && srcTy.getShape().size() >= 2)
-        return srcTy.getShape().back();
+      if (srcTy && srcTy.getShape().size() >= 2) return srcTy.getShape().back();
     }
     if (auto tty = dyn_cast<coir::TensorType>(v.getType()))
-      if (tty.getShape().size() >= 2)
-        return tty.getShape().back();
+      if (tty.getShape().size() >= 2) return tty.getShape().back();
     return 16;
   }
 
@@ -2193,53 +2178,60 @@ private:
       if (exec) {
         std::string atomName = exec.getMmaAtomNameAttr().getValue().str();
         auto roleIt = mmaFragRoles.find(op.getResult());
-        std::string role = roleIt != mmaFragRoles.end() ? roleIt->second : "matrix_a";
+        std::string role =
+            roleIt != mmaFragRoles.end() ? roleIt->second : "matrix_a";
 
-        std::string srcTensor = emitCuteTensor(op.getSource(),
-                                               "_mma_ld_" + std::to_string(nextId++));
+        std::string srcTensor = emitCuteTensor(
+            op.getSource(), "_mma_ld_" + std::to_string(nextId++));
         if (role == "accumulator") {
           int64_t regNum = exec.getRegNumDAttr().getInt();
           auto eTy = fragTy.getElementType();
-          std::string regType = eTy.isF32() ? "float"
-                              : eTy.isF64() ? "double"
-                              : "uint32_t";
+          std::string regType = eTy.isF32()   ? "float"
+                                : eTy.isF64() ? "double"
+                                              : "uint32_t";
           std::string castTy = emitElementType(fragTy.getElementType());
-          os() << getIndent() << regType << " " << name << "[" << regNum << "];\n";
+          os() << getIndent() << regType << " " << name << "[" << regNum
+               << "];\n";
           os() << getIndent() << "load_fragment_d<" << atomName << ">("
-               << srcTensor << ", reinterpret_cast<" << castTy << "*>(" << name << "));\n";
+               << srcTensor << ", reinterpret_cast<" << castTy << "*>(" << name
+               << "));\n";
         } else {
           std::string suffix = (role == "matrix_a") ? "a" : "b";
-          os() << getIndent() << "auto " << name << " = load_fragment_" << suffix
-               << "<" << atomName << ">(" << srcTensor << ");\n";
+          os() << getIndent() << "auto " << name << " = load_fragment_"
+               << suffix << "<" << atomName << ">(" << srcTensor << ");\n";
         }
         return;
       }
     }
 
     if (useWGMMA) {
-      const char *swizEnum = "WGMMA_Swizzle::NS";
+      const char* swizEnum = "WGMMA_Swizzle::NS";
       if (auto sb = op.getSwizzleBytes()) {
-        if (*sb == 32) swizEnum = "WGMMA_Swizzle::B32";
-        else if (*sb == 64) swizEnum = "WGMMA_Swizzle::B64";
-        else if (*sb == 128) swizEnum = "WGMMA_Swizzle::B128";
+        if (*sb == 32)
+          swizEnum = "WGMMA_Swizzle::B32";
+        else if (*sb == 64)
+          swizEnum = "WGMMA_Swizzle::B64";
+        else if (*sb == 128)
+          swizEnum = "WGMMA_Swizzle::B128";
       }
       os() << getIndent() << "uint64_t " << name
-           << " = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, "
-           << swizEnum << ">("
-           << getName(op.getSource()) << ");\n";
+           << " = wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, " << swizEnum
+           << ">(" << getName(op.getSource()) << ");\n";
       return;
     }
 
     auto roleIt = mmaFragRoles.find(op.getResult());
-    std::string role = roleIt != mmaFragRoles.end() ? roleIt->second : "matrix_a";
+    std::string role =
+        roleIt != mmaFragRoles.end() ? roleIt->second : "matrix_a";
     auto layoutIt = mmaFragLayouts.find(op.getResult());
-    std::string layout = layoutIt != mmaFragLayouts.end() ? layoutIt->second : "";
+    std::string layout =
+        layoutIt != mmaFragLayouts.end() ? layoutIt->second : "";
     os() << getIndent()
-       << emitWMMAFragType(fragTy, role, layout, op.getResult())
-       << " " << name << ";\n";
+         << emitWMMAFragType(fragTy, role, layout, op.getResult()) << " "
+         << name << ";\n";
     int64_t ldm = getSourceLeadingDim(op.getSource());
     os() << getIndent() << "wmma::load_matrix_sync(" << name << ", "
-       << getName(op.getSource()) << ", " << ldm << ");\n";
+         << getName(op.getSource()) << ", " << ldm << ");\n";
   }
 
   void emitMMAExec(MMAExecOp op) override {
@@ -2260,12 +2252,9 @@ private:
         fmaAtom = "cute::SM80_16x8x8_F32F16F16F32_TN";
 
       os() << getIndent() << fmaAtom << "::fma(";
-      for (int64_t i = 0; i < regD; ++i)
-        os() << acc << "[" << i << "], ";
-      for (int64_t i = 0; i < regA; ++i)
-        os() << lhs << "[" << i << "], ";
-      for (int64_t i = 0; i < regB; ++i)
-        os() << rhs << "[" << i << "], ";
+      for (int64_t i = 0; i < regD; ++i) os() << acc << "[" << i << "], ";
+      for (int64_t i = 0; i < regA; ++i) os() << lhs << "[" << i << "], ";
+      for (int64_t i = 0; i < regB; ++i) os() << rhs << "[" << i << "], ";
       for (int64_t i = 0; i < regD; ++i) {
         os() << acc << "[" << i << "]";
         if (i < regD - 1) os() << ", ";
@@ -2300,7 +2289,8 @@ private:
       // A operand: 4 uint32_t regs from the register fragment
       if (isRS) {
         os() << getIndent();
-        int64_t lhsU32 = (M * K) / (128 * 2); // half->uint32 packing: 2 halves per u32
+        int64_t lhsU32 =
+            (M * K) / (128 * 2); // half->uint32 packing: 2 halves per u32
         for (int64_t i = 0; i < lhsU32; ++i) {
           os() << "reinterpret_cast<const uint32_t*>(" << lhs << ")[" << i
                << "]";
@@ -2328,8 +2318,8 @@ private:
     }
 
     os() << getIndent() << "wmma::mma_sync(" << acc << ", "
-       << getName(op.getLhs()) << ", " << getName(op.getRhs()) << ", "
-       << acc << ");\n";
+         << getName(op.getLhs()) << ", " << getName(op.getRhs()) << ", " << acc
+         << ");\n";
   }
 
   unsigned mmaStoreCvtIdx = 0;
@@ -2341,39 +2331,47 @@ private:
       auto exec = findCTMMAExec(op->getParentOfType<KernelOp>());
       if (exec) {
         std::string atomName = exec.getMmaAtomNameAttr().getValue().str();
-        // For CTMMA, the actual output tile is MxN (derived from operand shapes)
+        // For CTMMA, the actual output tile is MxN (derived from operand
+        // shapes)
         auto lhsTy = mlir::cast<coir::MMAFragType>(exec.getLhs().getType());
         auto rhsTy = mlir::cast<coir::MMAFragType>(exec.getRhs().getType());
         int64_t mmaM = lhsTy.getShape()[0];
-        int64_t mmaN = rhsTy.getShape().size() > 1 ? rhsTy.getShape()[1] : rhsTy.getShape()[0];
+        int64_t mmaN = rhsTy.getShape().size() > 1 ? rhsTy.getShape()[1]
+                                                   : rhsTy.getShape()[0];
         std::string suffix = "_mma_st_" + std::to_string(nextId++);
-        // Emit tensor with correct MxN shape (override the fragment type's shape)
+        // Emit tensor with correct MxN shape (override the fragment type's
+        // shape)
         auto dstTy = mlir::cast<coir::TensorType>(op.getDest().getType());
         std::string elemTy = emitElementType(dstTy.getElementType());
         int32_t ms = dstTy.getMemorySpace();
         int64_t ldm = dstTy.getShape().size() > 1 ? dstTy.getStrides().empty()
-            ? dstTy.getShape()[1] : dstTy.getStrides()[0] : 1;
+                                                        ? dstTy.getShape()[1]
+                                                        : dstTy.getStrides()[0]
+                                                  : 1;
         // Get leading dim from parent tensor shape
         auto srcOp = op.getDest().getDefiningOp();
         if (auto tileOp = mlir::dyn_cast_or_null<coir::TensorTileOp>(srcOp)) {
-          auto parentTy = mlir::cast<coir::TensorType>(tileOp.getSource().getType());
-          if (parentTy.getShape().size() > 1)
-            ldm = parentTy.getShape()[1];
+          auto parentTy =
+              mlir::cast<coir::TensorType>(tileOp.getSource().getType());
+          if (parentTy.getShape().size() > 1) ldm = parentTy.getShape()[1];
         }
         std::string shapeName = "__shape" + suffix;
         std::string strideName = "__stride" + suffix;
         std::string layoutName = "__layout" + suffix;
         std::string tensorName = "__tensor" + suffix;
         os() << getIndent() << "auto " << shapeName
-             << " = cute::make_shape(cute::Int<" << mmaM << ">{}, cute::Int<" << mmaN << ">{});\n";
+             << " = cute::make_shape(cute::Int<" << mmaM << ">{}, cute::Int<"
+             << mmaN << ">{});\n";
         os() << getIndent() << "auto " << strideName
-             << " = cute::make_stride(cute::Int<" << ldm << ">{}, cute::Int<1>{});\n";
-        os() << getIndent() << "auto " << layoutName
-             << " = cute::make_layout(" << shapeName << ", " << strideName << ");\n";
+             << " = cute::make_stride(cute::Int<" << ldm
+             << ">{}, cute::Int<1>{});\n";
+        os() << getIndent() << "auto " << layoutName << " = cute::make_layout("
+             << shapeName << ", " << strideName << ");\n";
         std::string ptrName = getName(op.getDest());
         os() << getIndent() << "auto " << tensorName << " = cute::make_tensor(";
         if (ms <= 0)
-          os() << "cute::make_gmem_ptr<" << elemTy << ">((" << elemTy << "*)" << ptrName << ")";
+          os() << "cute::make_gmem_ptr<" << elemTy << ">((" << elemTy << "*)"
+               << ptrName << ")";
         else if (ms == 1)
           os() << "cute::make_smem_ptr((" << elemTy << "*)" << ptrName << ")";
         else
@@ -2382,7 +2380,8 @@ private:
         auto fragTy = mlir::cast<coir::MMAFragType>(fragVal.getType());
         auto accumElemTy = fragTy.getElementType();
         std::string fragPtr = getName(fragVal);
-        // uint32_t accum arrays need reinterpret_cast to the actual element type
+        // uint32_t accum arrays need reinterpret_cast to the actual element
+        // type
         if (!accumElemTy.isF32() && !accumElemTy.isF64()) {
           fragPtr = "reinterpret_cast<" + elemTy + "*>(" + fragPtr + ")";
         }
@@ -2406,14 +2405,12 @@ private:
       std::string layoutName = "__layout" + suffix;
       std::string tensorName = "__tensor" + suffix;
       os() << getIndent() << "auto " << shapeName
-           << " = cute::make_shape(cute::Int<" << M << ">{}, cute::Int<"
-           << N << ">{});\n";
-      os() << getIndent() << "auto " << layoutName
-           << " = cute::make_layout(" << shapeName
-           << ", cute::make_stride(cute::Int<" << ldm
+           << " = cute::make_shape(cute::Int<" << M << ">{}, cute::Int<" << N
+           << ">{});\n";
+      os() << getIndent() << "auto " << layoutName << " = cute::make_layout("
+           << shapeName << ", cute::make_stride(cute::Int<" << ldm
            << ">{}, cute::Int<1>{}));\n";
-      os() << getIndent() << "auto " << tensorName
-           << " = cute::make_tensor(";
+      os() << getIndent() << "auto " << tensorName << " = cute::make_tensor(";
       if (ms == 1)
         os() << "cute::make_smem_ptr((" << elemTy << "*)"
              << getName(op.getDest()) << ")";
@@ -2454,12 +2451,11 @@ private:
       int64_t tileN = shape.size() > 1 ? shape[1] : 16;
       int64_t tileElems = tileM * tileN;
       int64_t numWarps = 1;
-      auto *parentOp = op->getParentOp();
+      auto* parentOp = op->getParentOp();
       while (parentOp) {
         if (auto par = dyn_cast<ParallelOp>(parentOp)) {
           auto lvl = par.getLevel();
-          if (lvl == ParallelLevel::GROUP ||
-              lvl == ParallelLevel::GROUPx4) {
+          if (lvl == ParallelLevel::GROUP || lvl == ParallelLevel::GROUPx4) {
             numWarps = 1;
             for (auto b : par.getBounds()) numWarps *= b;
             if (lvl == ParallelLevel::GROUPx4) numWarps *= 4;
@@ -2471,39 +2467,36 @@ private:
       std::string idx = std::to_string(mmaStoreCvtIdx++);
       os() << getIndent() << "{\n";
       incIndent();
-      os() << getIndent() << "__shared__ float __mma_cvt_" << idx
-           << "[" << numWarps * tileElems << "];\n";
-      os() << getIndent() << "float* __mma_cvt_" << idx
-           << "_local = __mma_cvt_" << idx
-           << " + (threadIdx.x / 32) * " << tileElems << ";\n";
+      os() << getIndent() << "__shared__ float __mma_cvt_" << idx << "["
+           << numWarps * tileElems << "];\n";
+      os() << getIndent() << "float* __mma_cvt_" << idx << "_local = __mma_cvt_"
+           << idx << " + (threadIdx.x / 32) * " << tileElems << ";\n";
       os() << getIndent() << "wmma::store_matrix_sync(__mma_cvt_" << idx
            << "_local, " << getName(op.getFragment()) << ", " << tileN
            << ", wmma::mem_row_major);\n";
       os() << getIndent() << "__syncwarp();\n";
-      os() << getIndent() << "for (int _r = 0; _r < " << tileM
-           << "; ++_r)\n";
+      os() << getIndent() << "for (int _r = 0; _r < " << tileM << "; ++_r)\n";
       incIndent();
-      os() << getIndent() << "for (int _c = threadIdx.x % 32; _c < "
-           << tileN << "; _c += 32)\n";
+      os() << getIndent() << "for (int _c = threadIdx.x % 32; _c < " << tileN
+           << "; _c += 32)\n";
       incIndent();
       os() << getIndent() << getName(op.getDest()) << "[_r * " << ldm
-           << " + _c] = __float2half(__mma_cvt_" << idx
-           << "_local[_r * " << tileN << " + _c]);\n";
+           << " + _c] = __float2half(__mma_cvt_" << idx << "_local[_r * "
+           << tileN << " + _c]);\n";
       decIndent();
       decIndent();
       decIndent();
       os() << getIndent() << "}\n";
     } else {
-      os() << getIndent() << "wmma::store_matrix_sync("
-           << getName(op.getDest()) << ", " << getName(op.getFragment())
-           << ", " << ldm << ", wmma::mem_row_major);\n";
+      os() << getIndent() << "wmma::store_matrix_sync(" << getName(op.getDest())
+           << ", " << getName(op.getFragment()) << ", " << ldm
+           << ", wmma::mem_row_major);\n";
     }
   }
 
   TileLayout getLayoutForValue(Value v) {
     auto it = tileLayouts.find(v);
-    if (it != tileLayouts.end())
-      return it->second;
+    if (it != tileLayouts.end()) return it->second;
     auto tty = dyn_cast<coir::TensorType>(v.getType());
     if (!tty) return {};
     auto shape = tty.getShape();
@@ -2521,8 +2514,8 @@ private:
   }
 
   void emitCuteMakeShape(llvm::StringRef varName,
-                         const llvm::SmallVector<int64_t> &dims,
-                         const llvm::SmallVector<std::string> &dynNames) {
+                         const llvm::SmallVector<int64_t>& dims,
+                         const llvm::SmallVector<std::string>& dynNames) {
     os() << getIndent() << "auto " << varName << " = cute::make_shape(";
     unsigned dynIdx = 0;
     for (unsigned i = 0; i < dims.size(); ++i) {
@@ -2541,7 +2534,7 @@ private:
   }
 
   void emitCuteMakeShape(llvm::StringRef varName,
-                         const llvm::SmallVector<int64_t> &dims,
+                         const llvm::SmallVector<int64_t>& dims,
                          KernelOp kernel = nullptr) {
     llvm::SmallVector<std::string> dimArgNames;
     if (kernel) {
@@ -2581,8 +2574,7 @@ private:
     // dimMapping[i] = which source dimension flows into result dimension i.
     Value srcVal = v;
     llvm::SmallVector<int> dimMapping;
-    for (unsigned i = 0; i < tty.getRank(); ++i)
-      dimMapping.push_back(i);
+    for (unsigned i = 0; i < tty.getRank(); ++i) dimMapping.push_back(i);
 
     // Walk through TensorTileOp chains
     while (auto tileOp = srcVal.getDefiningOp<TensorTileOp>()) {
@@ -2605,8 +2597,7 @@ private:
           auto srcTy = dyn_cast<coir::TensorType>(allocOp.getType());
           unsigned srcDynIdx = 0;
           for (unsigned d = 0; d < srcDim && srcTy; ++d)
-            if (mlir::ShapedType::isDynamic(srcTy.getShape()[d]))
-              srcDynIdx++;
+            if (mlir::ShapedType::isDynamic(srcTy.getShape()[d])) srcDynIdx++;
           if (srcDynIdx < dynOperands.size())
             result.push_back(getName(dynOperands[srcDynIdx]));
           else
@@ -2629,8 +2620,7 @@ private:
           auto srcTy = dyn_cast<coir::TensorType>(bindOp.getType());
           unsigned srcDynIdx = 0;
           for (unsigned d = 0; d < srcDim && srcTy; ++d)
-            if (mlir::ShapedType::isDynamic(srcTy.getShape()[d]))
-              srcDynIdx++;
+            if (mlir::ShapedType::isDynamic(srcTy.getShape()[d])) srcDynIdx++;
           if (srcDynIdx < dynOperands.size())
             result.push_back(getName(dynOperands[srcDynIdx]));
           else
@@ -2644,9 +2634,8 @@ private:
     // Now srcVal should be a kernel block argument (the original tensor param)
     int64_t paramIdx = -1;
     if (auto blockArg = dyn_cast<BlockArgument>(srcVal)) {
-      auto *parentOp = blockArg.getOwner()->getParentOp();
-      if (parentOp == kernel.getOperation())
-        paramIdx = blockArg.getArgNumber();
+      auto* parentOp = blockArg.getOwner()->getParentOp();
+      if (parentOp == kernel.getOperation()) paramIdx = blockArg.getArgNumber();
     }
     if (paramIdx < 0) return result;
 
@@ -2666,7 +2655,7 @@ private:
   }
 
   void emitCuteMakeStride(llvm::StringRef varName,
-                          const llvm::SmallVector<int64_t> &strides) {
+                          const llvm::SmallVector<int64_t>& strides) {
     os() << getIndent() << "auto " << varName << " = cute::make_stride(";
     for (unsigned i = 0; i < strides.size(); ++i) {
       if (i > 0) os() << ", ";
@@ -2678,7 +2667,7 @@ private:
     os() << ");\n";
   }
 
-  std::string emitCuteTensor(Value v, const std::string &suffix) {
+  std::string emitCuteTensor(Value v, const std::string& suffix) {
     auto layout = getLayoutForValue(v);
     auto tty = dyn_cast<coir::TensorType>(v.getType());
     int32_t ms = tty ? tty.getMemorySpace() : 0;
@@ -2690,7 +2679,7 @@ private:
 
     KernelOp enclosingKernel = nullptr;
     if (tty && tty.hasDynamicShape())
-      if (auto *block = v.getParentBlock())
+      if (auto* block = v.getParentBlock())
         enclosingKernel = block->getParent()->getParentOfType<KernelOp>();
     auto dynNames = resolveDynDimNames(v, enclosingKernel);
     if (!dynNames.empty())
@@ -2698,15 +2687,15 @@ private:
     else
       emitCuteMakeShape(shapeName, layout.shape, enclosingKernel);
 
-    // For dynamic tensors, use shape-only layout (CUTE computes row-major strides)
+    // For dynamic tensors, use shape-only layout (CUTE computes row-major
+    // strides)
     if (tty && tty.hasDynamicShape()) {
-      os() << getIndent() << "auto " << layoutName
-         << " = cute::make_layout(" << shapeName << ");\n";
+      os() << getIndent() << "auto " << layoutName << " = cute::make_layout("
+           << shapeName << ");\n";
     } else {
       emitCuteMakeStride(strideName, layout.strides);
-      os() << getIndent() << "auto " << layoutName
-         << " = cute::make_layout(" << shapeName << ", " << strideName
-         << ");\n";
+      os() << getIndent() << "auto " << layoutName << " = cute::make_layout("
+           << shapeName << ", " << strideName << ");\n";
     }
 
     std::string elemTy = tty ? emitElementType(tty.getElementType()) : "int";
@@ -2714,7 +2703,7 @@ private:
     os() << getIndent() << "auto " << tensorName << " = cute::make_tensor(";
     if (ms <= 0)
       os() << "cute::make_gmem_ptr<" << elemTy << ">((" << elemTy << "*)"
-         << ptrName << ")";
+           << ptrName << ")";
     else if (ms == 1)
       os() << "cute::make_smem_ptr((" << elemTy << "*)" << ptrName << ")";
     else
@@ -2724,10 +2713,10 @@ private:
     return tensorName;
   }
 
-  std::string emitCuteTensorFromPtr(const std::string &ptrExpr,
+  std::string emitCuteTensorFromPtr(const std::string& ptrExpr,
                                     coir::TensorType origType,
                                     llvm::ArrayRef<int64_t> shape,
-                                    const std::string &suffix,
+                                    const std::string& suffix,
                                     KernelOp kernel = nullptr) {
     int32_t ms = origType.getMemorySpace();
     std::string shapeName = "__shape" + suffix;
@@ -2739,8 +2728,8 @@ private:
     bool hasDyn = llvm::any_of(shape, mlir::ShapedType::isDynamic);
     emitCuteMakeShape(shapeName, shapeVec, kernel);
     if (hasDyn) {
-      os() << getIndent() << "auto " << layoutName
-         << " = cute::make_layout(" << shapeName << ");\n";
+      os() << getIndent() << "auto " << layoutName << " = cute::make_layout("
+           << shapeName << ");\n";
     } else {
       llvm::SmallVector<int64_t> strides(shape.size());
       int64_t s = 1;
@@ -2749,16 +2738,15 @@ private:
         s *= shape[i];
       }
       emitCuteMakeStride(strideName, strides);
-      os() << getIndent() << "auto " << layoutName
-         << " = cute::make_layout(" << shapeName << ", " << strideName
-         << ");\n";
+      os() << getIndent() << "auto " << layoutName << " = cute::make_layout("
+           << shapeName << ", " << strideName << ");\n";
     }
 
     std::string elemTy = emitElementType(origType.getElementType());
     os() << getIndent() << "auto " << tensorName << " = cute::make_tensor(";
     if (ms <= 0)
       os() << "cute::make_gmem_ptr<" << elemTy << ">((" << elemTy << "*)"
-         << ptrExpr << ")";
+           << ptrExpr << ")";
     else if (ms == 1)
       os() << "cute::make_smem_ptr((" << elemTy << "*)" << ptrExpr << ")";
     else
@@ -2773,7 +2761,7 @@ private:
     std::string srcTensor = emitCuteTensor(src, "_src_" + std::to_string(id));
     std::string dstTensor = emitCuteTensor(dst, "_dst_" + std::to_string(id));
     os() << getIndent() << "choreo::naive_copy(" << srcTensor << ", "
-       << dstTensor << ");\n";
+         << dstTensor << ");\n";
   }
 
   // --- DMA Descriptor Pipeline Emission ---
@@ -2820,8 +2808,7 @@ private:
   unsigned getTMAIndexForDesc(unsigned descIdx) {
     unsigned tmaIdx = 0;
     for (unsigned i = 0; i < descIdx; ++i) {
-      if (descInfos[i].isTMA)
-        tmaIdx++;
+      if (descInfos[i].isTMA) tmaIdx++;
     }
     return tmaIdx;
   }
@@ -2843,7 +2830,7 @@ private:
     }
 
     unsigned descIdx = it->second;
-    auto &desc = descInfos[descIdx];
+    auto& desc = descInfos[descIdx];
     registerDoneToken(op.getDone());
 
     // Check if PlanDMACopy stamped tiled copy attrs
@@ -2868,8 +2855,7 @@ private:
       }
     }
     auto offsIt = descRuntimeOffsets.find(lookupVal);
-    if (offsIt != descRuntimeOffsets.end())
-      offsets = offsIt->second;
+    if (offsIt != descRuntimeOffsets.end()) offsets = offsIt->second;
 
     if (desc.isTMA) {
       emitTMAInvoke(descIdx, desc, offsets);
@@ -2878,18 +2864,18 @@ private:
     }
   }
 
-  void emitTMAInvoke(unsigned descIdx, const DescInfo &desc,
-                     const SmallVector<Value, 4> &offsets) {
+  void emitTMAInvoke(unsigned descIdx, const DescInfo& desc,
+                     const SmallVector<Value, 4>& offsets) {
     unsigned tmaIdx = getTMAIndexForDesc(descIdx);
     std::string atomName = "choreo_copy_atom_t_" + std::to_string(tmaIdx);
-    std::string mapName = "__choreo_tma_" + std::to_string(tmaIdx) +
-                          "_tensor_map";
+    std::string mapName =
+        "__choreo_tma_" + std::to_string(tmaIdx) + "_tensor_map";
 
     // Compute TMA coordinates from runtime offsets.
     // Offsets from DMADescRuntimeOp are already element coordinates
     // (pre-multiplied by tile dims in LowerDMADesc). Emit them directly.
-    auto globalShape = desc.isLoad ? desc.srcType.getShape()
-                                   : desc.dstType.getShape();
+    auto globalShape =
+        desc.isLoad ? desc.srcType.getShape() : desc.dstType.getShape();
     unsigned rank = globalShape.size();
 
     if (desc.isLoad) {
@@ -2899,13 +2885,12 @@ private:
       for (auto d : shape) totalElems *= d;
       int64_t transferBytes = totalElems * elemBits / 8;
 
-      std::string loadFunc = rank <= 2
-          ? "choreo::tma_load_2d_shared_cta_global_mbarrier"
-          : "choreo::tma_load_3d_shared_cta_global_mbarrier";
+      std::string loadFunc =
+          rank <= 2 ? "choreo::tma_load_2d_shared_cta_global_mbarrier"
+                    : "choreo::tma_load_3d_shared_cta_global_mbarrier";
 
       std::string dstName;
-      if (auto constOp =
-              desc.constDescResult.getDefiningOp<DMAConstDescOp>()) {
+      if (auto constOp = desc.constDescResult.getDefiningOp<DMAConstDescOp>()) {
         dstName = getName(constOp.getDest());
       } else {
         dstName = "/* unknown dest */";
@@ -2913,11 +2898,11 @@ private:
 
       os() << getIndent() << "if (threadIdx.x == 0 && threadIdx.y == 0) {\n";
       incIndent();
-      os() << getIndent() << "choreo::tma_mbarrier_expect_tx("
-         << atomName << ".ptx_barrier(), " << transferBytes << ");\n";
+      os() << getIndent() << "choreo::tma_mbarrier_expect_tx(" << atomName
+           << ".ptx_barrier(), " << transferBytes << ");\n";
       os() << getIndent() << loadFunc << "((void*)(" << dstName
-         << "), (const void*)&" << mapName << ", "
-         << atomName << ".ptx_barrier()";
+           << "), (const void*)&" << mapName << ", " << atomName
+           << ".ptx_barrier()";
       // Emit coordinates (innermost-first).
       // Offsets from DMADescRuntimeOp are already element coordinates
       // (pre-multiplied by tile dims in LowerDMADesc).
@@ -2932,15 +2917,13 @@ private:
       decIndent();
       os() << getIndent() << "}\n";
 
-      os() << getIndent() << "choreo::tma_mbarrier_wait_parity("
-         << atomName << ".ptx_barrier(), "
-         << atomName << ".ptx_phase_bit());\n";
+      os() << getIndent() << "choreo::tma_mbarrier_wait_parity(" << atomName
+           << ".ptx_barrier(), " << atomName << ".ptx_phase_bit());\n";
       os() << getIndent() << atomName << ".toggle_ptx_phase();\n";
     } else {
       // S2G TMA store
       std::string srcName;
-      if (auto constOp =
-              desc.constDescResult.getDefiningOp<DMAConstDescOp>()) {
+      if (auto constOp = desc.constDescResult.getDefiningOp<DMAConstDescOp>()) {
         srcName = getName(constOp.getSource());
       } else {
         srcName = "/* unknown src */";
@@ -2951,9 +2934,9 @@ private:
       os() << getIndent() << "if (threadIdx.x == 0 && threadIdx.y == 0) {\n";
       incIndent();
 
-      std::string storeFunc = rank <= 2
-          ? "cde::cp_async_bulk_tensor_2d_shared_to_global"
-          : "cde::cp_async_bulk_tensor_3d_shared_to_global";
+      std::string storeFunc =
+          rank <= 2 ? "cde::cp_async_bulk_tensor_2d_shared_to_global"
+                    : "cde::cp_async_bulk_tensor_3d_shared_to_global";
 
       os() << getIndent() << storeFunc << "(&" << mapName;
       // Emit coordinates (innermost-first).
@@ -2974,7 +2957,7 @@ private:
     }
   }
 
-  void emitTiledCopy(DMAInvokeOp op, const DescInfo &desc) {
+  void emitTiledCopy(DMAInvokeOp op, const DescInfo& desc) {
     auto thrLayoutArr = *op.getThrLayout();
     auto valLayoutArr = *op.getValLayout();
     auto atomStr = op.getCopyAtomAttr().getValue().str();
@@ -3016,8 +2999,7 @@ private:
     Value descV = op.getDesc();
     SmallVector<Value, 4> offsets;
     auto offsIt = descRuntimeOffsets.find(descV);
-    if (offsIt != descRuntimeOffsets.end())
-      offsets = offsIt->second;
+    if (offsIt != descRuntimeOffsets.end()) offsets = offsIt->second;
 
     std::string srcTensor, dstTensor;
     if (!offsets.empty()) {
@@ -3032,8 +3014,7 @@ private:
         int64_t s = 1;
         for (int i = (int)globalShape.size() - 1; i >= 0; --i) {
           globalStrides[i] = s;
-          if (!mlir::ShapedType::isDynamic(globalShape[i]))
-            s *= globalShape[i];
+          if (!mlir::ShapedType::isDynamic(globalShape[i])) s *= globalShape[i];
         }
       }
 
@@ -3047,17 +3028,17 @@ private:
       for (unsigned i = 0; i < offsets.size(); ++i) {
         std::string term = getName(offsets[i]);
         int64_t stride = (i < globalStrides.size() ? globalStrides[i] : 1);
-        if (stride != 1)
-          term += " * " + std::to_string(stride);
-        if (i == 0) offExpr = term;
-        else offExpr += " + " + term;
+        if (stride != 1) term += " * " + std::to_string(stride);
+        if (i == 0)
+          offExpr = term;
+        else
+          offExpr += " + " + term;
       }
 
       std::string slicedPtr = "__tc_ptr_" + std::to_string(id);
-      os() << getIndent() << emitElementType(globalTy.getElementType())
-         << "* " << slicedPtr << " = ("
-         << emitElementType(globalTy.getElementType()) << "*)"
-         << ptrName << " + " << offExpr << ";\n";
+      os() << getIndent() << emitElementType(globalTy.getElementType()) << "* "
+           << slicedPtr << " = (" << emitElementType(globalTy.getElementType())
+           << "*)" << ptrName << " + " << offExpr << ";\n";
 
       auto copyShapeAttr = op.getCopyShape();
       llvm::ArrayRef<int64_t> tileShape = localTy.getShape();
@@ -3069,7 +3050,8 @@ private:
       }
 
       if (desc.isLoad) {
-        // Source tensor (global): use global strides to preserve actual memory layout
+        // Source tensor (global): use global strides to preserve actual memory
+        // layout
         {
           std::string shapeName = "__shape" + suffix + "_s";
           std::string strideName = "__stride" + suffix + "_s";
@@ -3080,22 +3062,21 @@ private:
           // Use global tensor strides (not row-major from tileShape)
           emitCuteMakeStride(strideName, globalStrides);
           os() << getIndent() << "auto " << layoutName
-             << " = cute::make_layout(" << shapeName << ", " << strideName
-             << ");\n";
+               << " = cute::make_layout(" << shapeName << ", " << strideName
+               << ");\n";
           std::string elemTy = emitElementType(globalTy.getElementType());
           os() << getIndent() << "auto " << tensorName
-             << " = cute::make_tensor(cute::make_gmem_ptr<" << elemTy
-             << ">((" << elemTy << "*)" << slicedPtr << "), " << layoutName
-             << ");\n";
+               << " = cute::make_tensor(cute::make_gmem_ptr<" << elemTy << ">(("
+               << elemTy << "*)" << slicedPtr << "), " << layoutName << ");\n";
           srcTensor = tensorName;
         }
         // Dest tensor (shared): uses tile shape with row-major strides
-        dstTensor = emitCuteTensorFromPtr(
-            getName(localVal), localTy, tileShape, suffix + "_d");
+        dstTensor = emitCuteTensorFromPtr(getName(localVal), localTy, tileShape,
+                                          suffix + "_d");
       } else {
         // Source tensor (shared): uses tile shape with row-major strides
-        srcTensor = emitCuteTensorFromPtr(
-            getName(localVal), localTy, tileShape, suffix + "_s");
+        srcTensor = emitCuteTensorFromPtr(getName(localVal), localTy, tileShape,
+                                          suffix + "_s");
         // Dest tensor (global): use global strides
         {
           std::string shapeName = "__shape" + suffix + "_d";
@@ -3106,13 +3087,12 @@ private:
                             /*kernel=*/nullptr);
           emitCuteMakeStride(strideName, globalStrides);
           os() << getIndent() << "auto " << layoutName
-             << " = cute::make_layout(" << shapeName << ", " << strideName
-             << ");\n";
+               << " = cute::make_layout(" << shapeName << ", " << strideName
+               << ");\n";
           std::string elemTy = emitElementType(globalTy.getElementType());
           os() << getIndent() << "auto " << tensorName
-             << " = cute::make_tensor(cute::make_gmem_ptr<" << elemTy
-             << ">((" << elemTy << "*)" << slicedPtr << "), " << layoutName
-             << ");\n";
+               << " = cute::make_tensor(cute::make_gmem_ptr<" << elemTy << ">(("
+               << elemTy << "*)" << slicedPtr << "), " << layoutName << ");\n";
           dstTensor = tensorName;
         }
       }
@@ -3124,10 +3104,10 @@ private:
         llvm::SmallVector<int64_t, 2> ceilShape = {cs[0], cs[1]};
         auto srcTy = cast<coir::TensorType>(srcVal.getType());
         auto dstTy = cast<coir::TensorType>(dstVal.getType());
-        srcTensor = emitCuteTensorFromPtr(
-            getName(srcVal), srcTy, ceilShape, suffix + "_s");
-        dstTensor = emitCuteTensorFromPtr(
-            getName(dstVal), dstTy, ceilShape, suffix + "_d");
+        srcTensor = emitCuteTensorFromPtr(getName(srcVal), srcTy, ceilShape,
+                                          suffix + "_s");
+        dstTensor = emitCuteTensorFromPtr(getName(dstVal), dstTy, ceilShape,
+                                          suffix + "_d");
       } else {
         srcTensor = emitCuteTensor(srcVal, suffix + "_s");
         dstTensor = emitCuteTensor(dstVal, suffix + "_d");
@@ -3136,30 +3116,28 @@ private:
 
     // For predicated G2S cp.async, enable ZFill (hardware fills zeros for
     // masked elements instead of issuing memory reads)
-    bool zfill = needPred && (atom.find("CP_ASYNC") != std::string::npos)
-                          && desc.isLoad;
+    bool zfill =
+        needPred && (atom.find("CP_ASYNC") != std::string::npos) && desc.isLoad;
 
     // Emit the choreo::tiled_copy call
-    os() << getIndent() << "choreo::tiled_copy<" << atom << ", "
-       << thrRows << ", " << thrCols << ", "
-       << valRows << ", " << valCols << ", "
-       << (swizzle ? "true" : "false") << ", "
-       << (needPred ? "true" : "false") << ", "
-       << (zfill ? "true" : "false") << ">("
-       << srcTensor << ", " << dstTensor << ", ";
+    os() << getIndent() << "choreo::tiled_copy<" << atom << ", " << thrRows
+         << ", " << thrCols << ", " << valRows << ", " << valCols << ", "
+         << (swizzle ? "true" : "false") << ", "
+         << (needPred ? "true" : "false") << ", " << (zfill ? "true" : "false")
+         << ">(" << srcTensor << ", " << dstTensor << ", ";
 
     if (needPred) {
       auto predArr = *op.getPrediction();
       os() << "[&](const auto& __coord) { return cute::elem_less(__coord, "
               "cute::make_shape(cute::Int<"
-           << predArr[0] << ">{}, cute::Int<"
-           << predArr[1] << ">{})); }";
+           << predArr[0] << ">{}, cute::Int<" << predArr[1] << ">{})); }";
     } else {
       os() << "[](const auto&) { return true; }";
     }
     os() << ");\n";
 
-    // Emit synchronization: cp.async fence/wait for cp_async atoms, else syncthreads
+    // Emit synchronization: cp.async fence/wait for cp_async atoms, else
+    // syncthreads
     bool isCpAsync = atom.find("CP_ASYNC") != std::string::npos;
     if (isCpAsync) {
       os() << getIndent() << "cute::cp_async_fence();\n";
@@ -3170,12 +3148,11 @@ private:
     }
   }
 
-  void emitCpAsyncInvoke(unsigned /*descIdx*/, const DescInfo &desc,
-                         const SmallVector<Value, 4> &offsets,
+  void emitCpAsyncInvoke(unsigned /*descIdx*/, const DescInfo& desc,
+                         const SmallVector<Value, 4>& offsets,
                          DMAInvokeOp invokeOp) {
     // cp.async DMA: cooperative copy with fence/wait
-    if (auto constOp =
-            desc.constDescResult.getDefiningOp<DMAConstDescOp>()) {
+    if (auto constOp = desc.constDescResult.getDefiningOp<DMAConstDescOp>()) {
       os() << getIndent() << "// cp.async DMA\n";
       if (!offsets.empty()) {
         Value globalVal = desc.isLoad ? constOp.getSource() : constOp.getDest();
@@ -3186,9 +3163,8 @@ private:
         // Find enclosing kernel for dynamic dim resolution
         KernelOp enclosingKernel = nullptr;
         if (localTy.hasDynamicShape() || globalTy.hasDynamicShape())
-          if (auto *block = constOp->getBlock())
-            enclosingKernel =
-                block->getParent()->getParentOfType<KernelOp>();
+          if (auto* block = constOp->getBlock())
+            enclosingKernel = block->getParent()->getParentOfType<KernelOp>();
 
         // Compute tile element count (static or runtime expression)
         bool hasDynLocal = localTy.hasDynamicShape();
@@ -3251,7 +3227,8 @@ private:
                 gDimNames.push_back(std::to_string(globalShape[d]));
               }
             }
-          } else if (auto gBind = gBase.getDefiningOp<coir::TensorBindDimsOp>()) {
+          } else if (auto gBind =
+                         gBase.getDefiningOp<coir::TensorBindDimsOp>()) {
             // SSA-pure: dynamic dims from bind_dims operands
             auto dynOps = gBind.getDynamicDims();
             unsigned dynIdx = 0;
@@ -3277,11 +3254,9 @@ private:
             llvm::SmallVector<Value> gIndexArgs;
             for (unsigned a = 0; a < gFnTy.getNumInputs(); ++a)
               if (gFnTy.getInput(a).isIndex())
-                gIndexArgs.push_back(
-                    enclosingKernel.getBody().getArgument(a));
+                gIndexArgs.push_back(enclosingKernel.getBody().getArgument(a));
             llvm::DenseMap<std::pair<int64_t, int64_t>, std::string> gMap;
-            for (unsigned m = 0; m < gDimMeta.size() &&
-                                 m < gIndexArgs.size();
+            for (unsigned m = 0; m < gDimMeta.size() && m < gIndexArgs.size();
                  ++m)
               gMap[{gDimMeta[m].paramIdx, gDimMeta[m].dimIdx}] =
                   getName(gIndexArgs[m]);
@@ -3292,7 +3267,7 @@ private:
                   gDimNames.push_back(it->second);
                 else {
                   std::string found;
-                  for (auto &dc : gDimChecks) {
+                  for (auto& dc : gDimChecks) {
                     if (dc.param1 == gParamIdx && (int64_t)d == dc.dim1) {
                       auto it2 = gMap.find({dc.param0, dc.dim0});
                       if (it2 != gMap.end()) {
@@ -3340,21 +3315,22 @@ private:
         std::string offExpr;
         if (offsets.size() == 1) {
           offExpr = getName(offsets[0]);
-          if (tileElemsExpr != "1")
-            offExpr += " * " + tileElemsExpr;
+          if (tileElemsExpr != "1") offExpr += " * " + tileElemsExpr;
         } else {
           for (unsigned i = 0; i < offsets.size(); ++i) {
             std::string term = getName(offsets[i]);
             if (globalStrideExprs[i] != "1")
               term += " * " + globalStrideExprs[i];
-            if (i == 0) offExpr = term;
-            else offExpr += " + " + term;
+            if (i == 0)
+              offExpr = term;
+            else
+              offExpr += " + " + term;
           }
         }
 
         std::string slicedPtr = "__slice_ptr_" + std::to_string(id);
-        os() << getIndent() << elemTy << "* " << slicedPtr << " = ("
-           << elemTy << "*)" << ptrName << " + " << offExpr << ";\n";
+        os() << getIndent() << elemTy << "* " << slicedPtr << " = (" << elemTy
+             << "*)" << ptrName << " + " << offExpr << ";\n";
 
         auto copyShapeAttr = invokeOp.getCopyShapeAttr();
         llvm::ArrayRef<int64_t> copyShape =
@@ -3376,12 +3352,10 @@ private:
             llvm::SmallVector<Value> indexArgs;
             for (unsigned a = 0; a < fnTy.getNumInputs(); ++a)
               if (fnTy.getInput(a).isIndex())
-                indexArgs.push_back(
-                    enclosingKernel.getBody().getArgument(a));
+                indexArgs.push_back(enclosingKernel.getBody().getArgument(a));
             // Build (param, dim) -> argName from dim_args
             llvm::DenseMap<std::pair<int64_t, int64_t>, std::string> dimMap;
-            for (unsigned m = 0; m < dimArgMeta.size() &&
-                                 m < indexArgs.size();
+            for (unsigned m = 0; m < dimArgMeta.size() && m < indexArgs.size();
                  ++m)
               dimMap[{dimArgMeta[m].paramIdx, dimArgMeta[m].dimIdx}] =
                   getName(indexArgs[m]);
@@ -3397,17 +3371,15 @@ private:
                 if (it != dimMap.end()) {
                   positionedNames[d] = it->second;
                 } else {
-                  for (auto &dc : dimChecks) {
+                  for (auto& dc : dimChecks) {
                     if (dc.param1 == paramIdx && (int64_t)d == dc.dim1) {
                       auto it2 = dimMap.find({dc.param0, dc.dim0});
-                      if (it2 != dimMap.end())
-                        positionedNames[d] = it2->second;
+                      if (it2 != dimMap.end()) positionedNames[d] = it2->second;
                       break;
                     }
                     if (dc.param0 == paramIdx && (int64_t)d == dc.dim0) {
                       auto it2 = dimMap.find({dc.param1, dc.dim1});
-                      if (it2 != dimMap.end())
-                        positionedNames[d] = it2->second;
+                      if (it2 != dimMap.end()) positionedNames[d] = it2->second;
                       break;
                     }
                   }
@@ -3468,47 +3440,43 @@ private:
           os() << ");\n";
           std::string layoutName = "__dma_layout" + suffix;
           os() << getIndent() << "auto " << layoutName
-             << " = cute::make_layout(" << shapeName << ");\n";
+               << " = cute::make_layout(" << shapeName << ");\n";
 
           std::string elemTySrc = emitElementType(globalTy.getElementType());
           if (desc.isLoad) {
             srcTensor = "__dma_src" + suffix;
             os() << getIndent() << "auto " << srcTensor
-               << " = cute::make_tensor(cute::make_gmem_ptr<" << elemTySrc
-               << ">((" << elemTySrc << "*)" << slicedPtr << "), "
-               << layoutName << ");\n";
+                 << " = cute::make_tensor(cute::make_gmem_ptr<" << elemTySrc
+                 << ">((" << elemTySrc << "*)" << slicedPtr << "), "
+                 << layoutName << ");\n";
             dstTensor = "__dma_dst" + suffix;
             std::string elemTyDst = emitElementType(localTy.getElementType());
             os() << getIndent() << "auto " << dstTensor
-               << " = cute::make_tensor(cute::make_smem_ptr(("
-               << elemTyDst << "*)" << getName(localVal) << "), "
-               << layoutName << ");\n";
+                 << " = cute::make_tensor(cute::make_smem_ptr((" << elemTyDst
+                 << "*)" << getName(localVal) << "), " << layoutName << ");\n";
           } else {
             srcTensor = "__dma_src" + suffix;
             std::string elemTyS = emitElementType(localTy.getElementType());
             os() << getIndent() << "auto " << srcTensor
-               << " = cute::make_tensor(cute::make_smem_ptr(("
-               << elemTyS << "*)" << getName(localVal) << "), "
-               << layoutName << ");\n";
+                 << " = cute::make_tensor(cute::make_smem_ptr((" << elemTyS
+                 << "*)" << getName(localVal) << "), " << layoutName << ");\n";
             dstTensor = "__dma_dst" + suffix;
             os() << getIndent() << "auto " << dstTensor
-               << " = cute::make_tensor(cute::make_gmem_ptr<" << elemTySrc
-               << ">((" << elemTySrc << "*)" << slicedPtr << "), "
-               << layoutName << ");\n";
+                 << " = cute::make_tensor(cute::make_gmem_ptr<" << elemTySrc
+                 << ">((" << elemTySrc << "*)" << slicedPtr << "), "
+                 << layoutName << ");\n";
           }
         } else if (desc.isLoad) {
-          srcTensor = emitCuteTensorFromPtr(slicedPtr, globalTy,
-                                            copyShape, suffix + "_s",
-                                            enclosingKernel);
+          srcTensor = emitCuteTensorFromPtr(slicedPtr, globalTy, copyShape,
+                                            suffix + "_s", enclosingKernel);
           dstTensor = emitCuteTensor(localVal, suffix + "_d");
         } else {
           srcTensor = emitCuteTensor(localVal, suffix + "_s");
-          dstTensor = emitCuteTensorFromPtr(slicedPtr, globalTy,
-                                            copyShape, suffix + "_d",
-                                            enclosingKernel);
+          dstTensor = emitCuteTensorFromPtr(slicedPtr, globalTy, copyShape,
+                                            suffix + "_d", enclosingKernel);
         }
         os() << getIndent() << "choreo::naive_copy(" << srcTensor << ", "
-           << dstTensor << ");\n";
+             << dstTensor << ");\n";
       } else {
         os() << getIndent() << "if (__CHOREO_BLOCK_SINGLE__) {\n";
         incIndent();
@@ -3558,12 +3526,8 @@ private:
     case ParallelLevel::GROUPx4:
       os() << getIndent() << "__syncwarp();\n";
       break;
-    case ParallelLevel::THREAD:
-      os() << getIndent() << "__syncwarp();\n";
-      break;
-    default:
-      llvm_unreachable("unexpected barrier scope");
-      break;
+    case ParallelLevel::THREAD: os() << getIndent() << "__syncwarp();\n"; break;
+    default: llvm_unreachable("unexpected barrier scope"); break;
     }
   }
 
@@ -3581,17 +3545,13 @@ private:
       // Fence device-wide: global memory.
       os() << getIndent() << "__threadfence();\n";
       break;
-    default:
-      llvm_unreachable("unexpected fence scope");
-      break;
+    default: llvm_unreachable("unexpected fence scope"); break;
     }
   }
 
   void emitWait(WaitOp op) override {
     auto token = op.getToken();
-    if (dmaTokens.count(token)) {
-      return;
-    }
+    if (dmaTokens.count(token)) { return; }
     os() << getIndent() << "__syncthreads();\n";
   }
 
@@ -3670,8 +3630,7 @@ private:
           bool isConst0 = false;
           if (auto constOp = indices[i].getDefiningOp<arith::ConstantOp>())
             if (auto intAttr = dyn_cast<IntegerAttr>(constOp.getValue()))
-              if (intAttr.getInt() == 0)
-                isConst0 = true;
+              if (intAttr.getInt() == 0) isConst0 = true;
           if (isConst0 && srcShape[i] > 1)
             perIdxTileSize[i] = srcShape[i];
           else
@@ -3688,8 +3647,7 @@ private:
       }
     }
 
-    if (hasWildcard)
-      tileStrides[op.getResult()] = wildcardStride;
+    if (hasWildcard) tileStrides[op.getResult()] = wildcardStride;
 
     TileLayout layout;
     layout.shape.assign(perIdxTileSize.begin(), perIdxTileSize.end());
@@ -3714,15 +3672,15 @@ private:
     using AK = coir::AtomicKind;
     llvm::StringRef fnName;
     switch (op.getKind()) {
-    case AK::Add:  fnName = "atomicAdd"; break;
-    case AK::Sub:  fnName = "atomicSub"; break;
+    case AK::Add: fnName = "atomicAdd"; break;
+    case AK::Sub: fnName = "atomicSub"; break;
     case AK::Exch: fnName = "atomicExch"; break;
-    case AK::Min:  fnName = "atomicMin"; break;
-    case AK::Max:  fnName = "atomicMax"; break;
-    case AK::And:  fnName = "atomicAnd"; break;
-    case AK::Or:   fnName = "atomicOr"; break;
-    case AK::Xor:  fnName = "atomicXor"; break;
-    case AK::CAS:  fnName = "atomicCAS"; break;
+    case AK::Min: fnName = "atomicMin"; break;
+    case AK::Max: fnName = "atomicMax"; break;
+    case AK::And: fnName = "atomicAnd"; break;
+    case AK::Or: fnName = "atomicOr"; break;
+    case AK::Xor: fnName = "atomicXor"; break;
+    case AK::CAS: fnName = "atomicCAS"; break;
     }
     auto tty = cast<coir::TensorType>(op.getDest().getType());
     os() << getIndent();
@@ -3732,8 +3690,7 @@ private:
     os() << fnName << "(&" << getName(op.getDest()) << "[";
     emitLinearIndex(op.getIndices(), tty);
     os() << "], " << getName(op.getValue());
-    if (op.getCompare())
-      os() << ", " << getName(op.getCompare());
+    if (op.getCompare()) os() << ", " << getName(op.getCompare());
     os() << ");\n";
   }
 
@@ -3765,9 +3722,8 @@ struct EmitCUDAPass : public ::coir::impl::EmitCUDABase<EmitCUDAPass> {
 };
 
 static bool registered_gpu = [] {
-  CoIR::CodeGenRegistry::Register("cute", [] {
-    return std::make_unique<CUDAEmitter>();
-  });
+  CoIR::CodeGenRegistry::Register(
+      "cute", [] { return std::make_unique<CUDAEmitter>(); });
   return true;
 }();
 
@@ -3778,7 +3734,7 @@ std::unique_ptr<mlir::Pass> createEmitCUDAPass() {
   return std::make_unique<EmitCUDAPass>();
 }
 
-void emitCUDA(mlir::ModuleOp module, llvm::raw_ostream &os) {
+void emitCUDA(mlir::ModuleOp module, llvm::raw_ostream& os) {
   CUDAEmitter emitter;
   emitter.emitModule(module, os);
 }

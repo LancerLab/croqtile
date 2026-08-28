@@ -1,20 +1,20 @@
 #ifndef __AST_COIR_GEN_HPP__
 #define __AST_COIR_GEN_HPP__
 
-#include "ast.hpp"
-#include "assess.hpp"
-#include "codegen.hpp"
 #include "MLIRUtility.hpp"
 #include "Session.hpp"
+#include "assess.hpp"
+#include "ast.hpp"
+#include "codegen.hpp"
 #include "symbexpr.hpp"
 #include "types.hpp"
 
+#include "Dialect/CoIR/CoIRAttrs.h"
 #include "Dialect/CoIR/CoIRDialect.h"
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
-#include "Dialect/CoIR/CoIRAttrs.h"
-#include "mlir/IR/Builders.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/Builders.h"
 
 using namespace Choreo;
 
@@ -25,18 +25,18 @@ struct ASTCoIRGen : public CodeGenerator {
 
 private:
   mlir::ModuleOp IRModule() { return IRSession::Get().Module(); }
-  mlir::MLIRContext &IRContext() { return IRSession::Get().Context(); }
+  mlir::MLIRContext& IRContext() { return IRSession::Get().Context(); }
   mlir::OpBuilder builder;
 
-  const mlir::Location ToLoc(const Choreo::location &cloc) {
+  const mlir::Location ToLoc(const Choreo::location& cloc) {
     return ToMLIRLoc(IRContext(), cloc);
   }
-  const mlir::Location Loc(const Choreo::AST::Node &n) {
+  const mlir::Location Loc(const Choreo::AST::Node& n) {
     return ToLoc(n.LOC());
   }
 
   mlir::Type LowerBaseType(BaseType bt);
-  coir::TensorType LowerSpannedType(const ptr<SpannedType> &sty);
+  coir::TensorType LowerSpannedType(const ptr<SpannedType>& sty);
   coir::ParallelLevelAttr LowerParallelLevel(ParallelLevel pl);
 
   llvm::SmallVector<llvm::StringMap<mlir::Value>> value_stack;
@@ -62,8 +62,7 @@ private:
   }
   mlir::Value LookupValue(llvm::StringRef name) {
     for (auto it = value_stack.rbegin(); it != value_stack.rend(); ++it)
-      if (auto found = it->find(name); found != it->end())
-        return found->second;
+      if (auto found = it->find(name); found != it->end()) return found->second;
     if (name.ends_with(".data")) {
       auto base = name.drop_back(5);
       for (auto it = value_stack.rbegin(); it != value_stack.rend(); ++it)
@@ -76,7 +75,7 @@ private:
   llvm::SmallVector<std::pair<std::string, mlir::Value>> pendingYields;
   unsigned foreachNestDepth = 0;
   llvm::StringMap<int64_t> pendingSpmSizes;
-  std::string pendingDmaAssignName;  // enclosing Assignment LHS for sync DMA
+  std::string pendingDmaAssignName; // enclosing Assignment LHS for sync DMA
   mlir::Value lastSpanAsResult;
 
   struct IfMergeInfo {
@@ -87,7 +86,7 @@ private:
   llvm::SmallVector<IfMergeInfo> ifMergeStack;
 
   struct WhileMergeInfo {
-    mlir::Operation *whileOp;
+    mlir::Operation* whileOp;
     llvm::SmallVector<std::string> iterNames;
     llvm::SmallVector<mlir::Type> iterTypes;
     bool isCoirWhile = false;
@@ -103,9 +102,9 @@ private:
     return v;
   }
 
-  mlir::Value EmitExpr(AST::Node &n);
-  mlir::Value EmitChunkAtTile(AST::ChunkAt &chunk, mlir::Value baseVal);
-  void CreateKernelOp(AST::ChoreoFunction &cf);
+  mlir::Value EmitExpr(AST::Node& n);
+  mlir::Value EmitChunkAtTile(AST::ChunkAt& chunk, mlir::Value baseVal);
+  void CreateKernelOp(AST::ChoreoFunction& cf);
 
   void EmitAssert(mlir::Location loc, mlir::Value condition,
                   llvm::StringRef message,
@@ -146,83 +145,81 @@ private:
 
   /// Resolve the existing mapped tensor for a buffer.remap from the
   /// bufferMapMappings_ table using the source value.
-  mlir::Value resolveRemapExisting(AST::BufferMap &n, mlir::Value srcVal);
+  mlir::Value resolveRemapExisting(AST::BufferMap& n, mlir::Value srcVal);
 
   // Resolve a bounded variable (within or parallel-by) to its total
   // iteration extent by looking up bv_map -> MLIR values or BoundedType.
   int64_t ResolveBoundedVarExtent(llvm::StringRef rvName);
 
-  int64_t resolveRangeBound(AST::LoopRange *lr);
-  mlir::Value resolveRangeUBValue(AST::LoopRange *lr, int64_t bound);
+  int64_t resolveRangeBound(AST::LoopRange* lr);
+  mlir::Value resolveRangeUBValue(AST::LoopRange* lr, int64_t bound);
 
 public:
-  ASTCoIRGen()
-      : CodeGenerator("ast-coir-gen"),
-        builder(&IRContext()) {}
+  ASTCoIRGen() : CodeGenerator("ast-coir-gen"), builder(&IRContext()) {}
 
-  bool BeforeVisitImpl(AST::Node &) override;
-  bool InMidVisitImpl(AST::Node &) override;
-  bool AfterVisitImpl(AST::Node &) override;
+  bool BeforeVisitImpl(AST::Node&) override;
+  bool InMidVisitImpl(AST::Node&) override;
+  bool AfterVisitImpl(AST::Node&) override;
 
   // Nodes with real translation logic
-  bool Visit(AST::Program &) override;
-  bool Visit(AST::ChoreoFunction &) override;
-  bool Visit(AST::ParallelBy &) override;
-  bool Visit(AST::ForeachBlock &) override;
-  bool Visit(AST::Assignment &) override;
-  bool Visit(AST::Return &) override;
-  bool Visit(AST::NamedVariableDecl &) override;
-  bool Visit(AST::FunctionDecl &) override;
+  bool Visit(AST::Program&) override;
+  bool Visit(AST::ChoreoFunction&) override;
+  bool Visit(AST::ParallelBy&) override;
+  bool Visit(AST::ForeachBlock&) override;
+  bool Visit(AST::Assignment&) override;
+  bool Visit(AST::Return&) override;
+  bool Visit(AST::NamedVariableDecl&) override;
+  bool Visit(AST::FunctionDecl&) override;
 
   // Stub overrides for all other pure-virtual Visit methods
-  bool Visit(AST::MultiNodes &) override { return true; }
-  bool Visit(AST::MultiValues &) override { return true; }
-  bool Visit(AST::NoValue &) override { return true; }
-  bool Visit(AST::IntLiteral &) override { return true; }
-  bool Visit(AST::FloatLiteral &) override { return true; }
-  bool Visit(AST::StringLiteral &) override { return true; }
-  bool Visit(AST::BoolLiteral &) override { return true; }
-  bool Visit(AST::Expr &) override { return true; }
-  bool Visit(AST::CastExpr &) override { return true; }
-  bool Visit(AST::AttributeExpr &) override { return true; }
-  bool Visit(AST::MultiDimSpans &) override { return true; }
-  bool Visit(AST::NamedTypeDecl &) override { return true; }
-  bool Visit(AST::IntTuple &) override { return true; }
-  bool Visit(AST::DataAccess &) override { return true; }
-  bool Visit(AST::IntIndex &) override { return true; }
-  bool Visit(AST::DataType &) override { return true; }
-  bool Visit(AST::Identifier &) override { return true; }
-  bool Visit(AST::Parameter &) override { return true; }
-  bool Visit(AST::ParamList &) override { return true; }
-  bool Visit(AST::WhereBind &) override { return true; }
-  bool Visit(AST::WithIn &) override;
-  bool Visit(AST::WithBlock &) override { return true; }
-  bool Visit(AST::Memory &) override { return true; }
-  bool Visit(AST::SpanAs &) override;
-  bool Visit(AST::DMA &) override;
-  bool Visit(AST::BufferMap &) override;
-  bool Visit(AST::MMA &) override;
-  bool Visit(AST::ChunkAt &) override { return true; }
-  bool Visit(AST::Wait &) override;
-  bool Visit(AST::Trigger &) override;
-  bool Visit(AST::Break &) override;
-  bool Visit(AST::Continue &) override;
-  bool Visit(AST::Yield &) override { return true; }
-  bool Visit(AST::Call &) override;
-  mlir::Value emitAtomicCall(AST::Call &call);
-  bool Visit(AST::Rotate &) override;
-  bool Visit(AST::Synchronize &) override;
-  bool Visit(AST::Barrier &) override;
-  bool Visit(AST::Fence &) override;
-  bool Visit(AST::AsmStmt &) override;
-  bool Visit(AST::Select &) override { return true; }
-  bool Visit(AST::LoopRange &) override { return true; }
-  bool Visit(AST::InThreadsBlock &) override;
+  bool Visit(AST::MultiNodes&) override { return true; }
+  bool Visit(AST::MultiValues&) override { return true; }
+  bool Visit(AST::NoValue&) override { return true; }
+  bool Visit(AST::IntLiteral&) override { return true; }
+  bool Visit(AST::FloatLiteral&) override { return true; }
+  bool Visit(AST::StringLiteral&) override { return true; }
+  bool Visit(AST::BoolLiteral&) override { return true; }
+  bool Visit(AST::Expr&) override { return true; }
+  bool Visit(AST::CastExpr&) override { return true; }
+  bool Visit(AST::AttributeExpr&) override { return true; }
+  bool Visit(AST::MultiDimSpans&) override { return true; }
+  bool Visit(AST::NamedTypeDecl&) override { return true; }
+  bool Visit(AST::IntTuple&) override { return true; }
+  bool Visit(AST::DataAccess&) override { return true; }
+  bool Visit(AST::IntIndex&) override { return true; }
+  bool Visit(AST::DataType&) override { return true; }
+  bool Visit(AST::Identifier&) override { return true; }
+  bool Visit(AST::Parameter&) override { return true; }
+  bool Visit(AST::ParamList&) override { return true; }
+  bool Visit(AST::WhereBind&) override { return true; }
+  bool Visit(AST::WithIn&) override;
+  bool Visit(AST::WithBlock&) override { return true; }
+  bool Visit(AST::Memory&) override { return true; }
+  bool Visit(AST::SpanAs&) override;
+  bool Visit(AST::DMA&) override;
+  bool Visit(AST::BufferMap&) override;
+  bool Visit(AST::MMA&) override;
+  bool Visit(AST::ChunkAt&) override { return true; }
+  bool Visit(AST::Wait&) override;
+  bool Visit(AST::Trigger&) override;
+  bool Visit(AST::Break&) override;
+  bool Visit(AST::Continue&) override;
+  bool Visit(AST::Yield&) override { return true; }
+  bool Visit(AST::Call&) override;
+  mlir::Value emitAtomicCall(AST::Call& call);
+  bool Visit(AST::Rotate&) override;
+  bool Visit(AST::Synchronize&) override;
+  bool Visit(AST::Barrier&) override;
+  bool Visit(AST::Fence&) override;
+  bool Visit(AST::AsmStmt&) override;
+  bool Visit(AST::Select&) override { return true; }
+  bool Visit(AST::LoopRange&) override { return true; }
+  bool Visit(AST::InThreadsBlock&) override;
   // AfterVisit handled via AfterVisitImpl dispatch
-  bool Visit(AST::WhileBlock &) override;
-  bool Visit(AST::IfElseBlock &) override;
-  bool Visit(AST::CppSourceCode &) override;
-  bool Visit(AST::DeviceFunctionDecl &) override { return true; }
+  bool Visit(AST::WhileBlock&) override;
+  bool Visit(AST::IfElseBlock&) override;
+  bool Visit(AST::CppSourceCode&) override;
+  bool Visit(AST::DeviceFunctionDecl&) override { return true; }
 };
 
 } // namespace CoIR

@@ -5,12 +5,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Dialect/CoIR/Passes.h"
+#include "CodeGen/CoIREmitterBase.h"
+#include "Dialect/CoIR/CoIRAttrs.h"
 #include "Dialect/CoIR/CoIRDialect.h"
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
-#include "Dialect/CoIR/CoIRAttrs.h"
-#include "CodeGen/CoIREmitterBase.h"
+#include "Dialect/CoIR/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -34,24 +34,22 @@ class HIPEmitter : public coir::CoIREmitterBase {
 public:
   HIPEmitter() = default;
 
-  void emitModule(ModuleOp module, llvm::raw_ostream &os) override {
+  void emitModule(ModuleOp module, llvm::raw_ostream& os) override {
     os_ = &os;
     resetState();
     emitHeader();
     emitExplicitDeviceCode(module, os);
-    for (auto &op : module.getBody()->getOperations()) {
-      if (auto kernel = dyn_cast<KernelOp>(op))
-        emitKernel(kernel);
+    for (auto& op : module.getBody()->getOperations()) {
+      if (auto kernel = dyn_cast<KernelOp>(op)) emitKernel(kernel);
     }
-    for (auto &op : module.getBody()->getOperations()) {
-      if (auto kernel = dyn_cast<KernelOp>(op))
-        emitHostEntry(kernel);
+    for (auto& op : module.getBody()->getOperations()) {
+      if (auto kernel = dyn_cast<KernelOp>(op)) emitHostEntry(kernel);
     }
   }
 
   int EmitScript(mlir::ModuleOp module, llvm::StringRef /*arch*/,
-                 llvm::raw_ostream &os) override {
-    auto &sctx = CoIR::ScriptContext::Get();
+                 llvm::raw_ostream& os) override {
+    auto& sctx = CoIR::ScriptContext::Get();
     bool has_embedded = sctx.types_header && sctx.runtime_header;
 
     emitScriptPrologue(os, "compile and execute HIP kernel", "_hip");
@@ -79,7 +77,8 @@ public:
             "-I\"$TMPDIR\" -o \"$BINFILE\" \"$TMPFILE\" 2>&1\n";
     } else {
       os << "\"$HIPCC\" -std=c++17 --offload-arch=\"$amdgpu_arch\" "
-            "-I\"$CHOREO_INC\" -I\"$TMPDIR\" -o \"$BINFILE\" \"$TMPFILE\" 2>&1\n";
+            "-I\"$CHOREO_INC\" -I\"$TMPDIR\" -o \"$BINFILE\" \"$TMPFILE\" "
+            "2>&1\n";
     }
     emitScriptExecuteBlock(os);
     return 0;
@@ -115,28 +114,17 @@ private:
   std::string emitType(Type ty) override {
     if (auto tensorTy = dyn_cast<coir::TensorType>(ty))
       return emitElementType(tensorTy.getElementType()) + "*";
-    if (isa<coir::AsyncTokenType>(ty))
-      return "int";
-    if (ty.isIndex())
-      return "int";
-    if (ty.isBF16())
-      return "__hip_bfloat16";
-    if (ty.isF16())
-      return "__half";
-    if (ty.isF32())
-      return "float";
-    if (ty.isF64())
-      return "double";
-    if (ty.isInteger(1))
-      return "bool";
-    if (ty.isInteger(8))
-      return "uint8_t";
-    if (ty.isInteger(16))
-      return "int16_t";
-    if (ty.isInteger(32))
-      return "int";
-    if (ty.isInteger(64))
-      return "long long";
+    if (isa<coir::AsyncTokenType>(ty)) return "int";
+    if (ty.isIndex()) return "int";
+    if (ty.isBF16()) return "__hip_bfloat16";
+    if (ty.isF16()) return "__half";
+    if (ty.isF32()) return "float";
+    if (ty.isF64()) return "double";
+    if (ty.isInteger(1)) return "bool";
+    if (ty.isInteger(8)) return "uint8_t";
+    if (ty.isInteger(16)) return "int16_t";
+    if (ty.isInteger(32)) return "int";
+    if (ty.isInteger(64)) return "long long";
     return "/* unknown type */";
   }
 
@@ -171,15 +159,24 @@ private:
         choreoElem = "choreo::" + hostElemHint.str();
       } else {
         auto eTyML = tty.getElementType();
-        if (eTyML.isInteger(8)) choreoElem = "choreo::u8";
-        else if (eTyML.isInteger(16)) choreoElem = "choreo::s16";
-        else if (eTyML.isInteger(32)) choreoElem = "choreo::s32";
-        else if (eTyML.isInteger(64)) choreoElem = "choreo::s64";
-        else if (eTyML.isBF16()) choreoElem = "choreo::bf16";
-        else if (eTyML.isF32()) choreoElem = "choreo::f32";
-        else if (eTyML.isF16()) choreoElem = "choreo::f16";
-        else if (eTyML.isF64()) choreoElem = "choreo::f64";
-        else choreoElem = "choreo::s32";
+        if (eTyML.isInteger(8))
+          choreoElem = "choreo::u8";
+        else if (eTyML.isInteger(16))
+          choreoElem = "choreo::s16";
+        else if (eTyML.isInteger(32))
+          choreoElem = "choreo::s32";
+        else if (eTyML.isInteger(64))
+          choreoElem = "choreo::s64";
+        else if (eTyML.isBF16())
+          choreoElem = "choreo::bf16";
+        else if (eTyML.isF32())
+          choreoElem = "choreo::f32";
+        else if (eTyML.isF16())
+          choreoElem = "choreo::f16";
+        else if (eTyML.isF64())
+          choreoElem = "choreo::f64";
+        else
+          choreoElem = "choreo::s32";
       }
       unsigned ndim = tty.getShape().size();
       if (asView)
@@ -210,7 +207,7 @@ private:
     CoIREmitterBase::emitTensorAlloc(op);
   }
 
-  void emitOpFallback(mlir::Operation *op) override {
+  void emitOpFallback(mlir::Operation* op) override {
     using namespace mlir;
     if (auto tmaCopy = dyn_cast<TmaCopyOp>(op))
       os() << getIndent() << "// ERROR: TMA not supported on HIP target\n";
@@ -253,9 +250,8 @@ private:
       bool isLoad = (srcMS <= 0) && (dstMS == 1);
 
       unsigned idx = descInfos.size();
-      descInfos.push_back(
-          {idx, srcType, dstType, op.getKind(), op.getTma(), isLoad,
-           op.getOut()});
+      descInfos.push_back({idx, srcType, dstType, op.getKind(), op.getTma(),
+                           isLoad, op.getOut()});
       descValueToIndex[op.getOut()] = idx;
     });
   }
@@ -302,7 +298,7 @@ private:
     }
 
     unsigned descIdx = it->second;
-    auto &desc = descInfos[descIdx];
+    auto& desc = descInfos[descIdx];
     auto constOp = desc.constDescResult.getDefiningOp<DMAConstDescOp>();
     if (!constOp) {
       os() << getIndent() << "__syncthreads();\n";
@@ -314,8 +310,7 @@ private:
 
     SmallVector<Value, 4> offsets;
     auto offsIt = descRuntimeOffsets.find(descVal);
-    if (offsIt != descRuntimeOffsets.end())
-      offsets = offsIt->second;
+    if (offsIt != descRuntimeOffsets.end()) offsets = offsIt->second;
 
     if (!offsets.empty()) {
       Value globalVal = desc.isLoad ? srcVal : dstVal;
@@ -328,12 +323,11 @@ private:
         std::string elemTy = emitElementType(globalTy.getElementType());
         std::string ptrName = getName(globalVal);
         std::string offExpr = getName(offsets[0]);
-        if (tileElems > 1)
-          offExpr += " * " + std::to_string(tileElems);
+        if (tileElems > 1) offExpr += " * " + std::to_string(tileElems);
         unsigned id = nextId++;
         std::string slicedPtr = "__slice_ptr_" + std::to_string(id);
-        os() << getIndent() << elemTy << "* " << slicedPtr << " = ("
-             << elemTy << "*)" << ptrName << " + " << offExpr << ";\n";
+        os() << getIndent() << elemTy << "* " << slicedPtr << " = (" << elemTy
+             << "*)" << ptrName << " + " << offExpr << ";\n";
 
         if (desc.isLoad)
           valueNames[srcVal] = slicedPtr;
@@ -349,9 +343,7 @@ private:
     case DMAKind::Transpose:
       emitCopyWithTranspose(srcVal, dstVal, std::nullopt);
       break;
-    default:
-      emitCooperativeCopy(srcVal, dstVal);
-      break;
+    default: emitCooperativeCopy(srcVal, dstVal); break;
     }
     os() << getIndent() << "__syncthreads();\n";
 
@@ -445,12 +437,11 @@ private:
     globalBufferNames.clear();
 
     llvm::DenseSet<Value> returns;
-    auto &body = kernel.getBody();
+    auto& body = kernel.getBody();
     if (!body.empty()) {
-      for (auto &op : body.front().getOperations()) {
+      for (auto& op : body.front().getOperations()) {
         if (auto ret = dyn_cast<KernelReturnOp>(op)) {
-          for (auto operand : ret.getOperands())
-            returns.insert(operand);
+          for (auto operand : ret.getOperands()) returns.insert(operand);
         }
       }
     }
@@ -458,10 +449,8 @@ private:
     unsigned idx = 0;
     kernel.getBody().walk([&](TensorAllocOp alloc) {
       auto tty = cast<coir::TensorType>(alloc.getResult().getType());
-      if (tty.getMemorySpace() != 0)
-        return;
-      if (returns.count(alloc.getResult()))
-        return;
+      if (tty.getMemorySpace() != 0) return;
+      if (returns.count(alloc.getResult())) return;
       std::string name = "__gbuf" + std::to_string(idx++);
       globalBufferNames[alloc.getResult()] = name;
       globalBufferVals.push_back(alloc.getResult());
@@ -473,8 +462,7 @@ private:
   std::string globalBufferByteExpr(coir::TensorType tty,
                                    llvm::ArrayRef<DimArgMeta> dimArgMeta) {
     int64_t bytes = getTensorBytes(tty);
-    if (bytes >= 0)
-      return std::to_string(bytes) + "ULL";
+    if (bytes >= 0) return std::to_string(bytes) + "ULL";
 
     unsigned elemBits = tty.getElementType().getIntOrFloatBitWidth();
     unsigned elemBytes = elemBits > 8 ? (elemBits / 8) : 1;
@@ -486,10 +474,9 @@ private:
       auto dim = tty.getShape()[d];
       if (mlir::ShapedType::isDynamic(dim)) {
         bool found = false;
-        for (auto &da : dimArgMeta) {
+        for (auto& da : dimArgMeta) {
           if (da.dimIdx == (int64_t)d) {
-            ss << "(size_t)p" << da.paramIdx << ".shape()[" << da.dimIdx
-               << "]";
+            ss << "(size_t)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
             found = true;
             break;
           }
@@ -571,12 +558,11 @@ private:
     }
     if (auto nr = kernel.getMaxNregAttr()) {
       if (nr.getValue() > 0)
-        os() << "__attribute__((amdgpu_num_vgpr(" << nr.getValue()
-             << "))) ";
+        os() << "__attribute__((amdgpu_num_vgpr(" << nr.getValue() << "))) ";
     }
     os() << "void " << devName << "(";
 
-    auto &body = kernel.getBody();
+    auto& body = kernel.getBody();
     unsigned paramIdx = 0;
     if (!body.empty()) {
       auto args = body.getArguments();
@@ -606,8 +592,7 @@ private:
 
     prescanReturnValues(kernel);
 
-    for (auto &op : body.front().getOperations())
-      emitOp(&op);
+    for (auto& op : body.front().getOperations()) emitOp(&op);
 
     decIndent();
     os() << "}\n\n";
@@ -627,7 +612,7 @@ private:
         auto dim = tty.getShape()[d];
         if (mlir::ShapedType::isDynamic(dim)) {
           bool found = false;
-          for (auto &da : dimArgMeta) {
+          for (auto& da : dimArgMeta) {
             if (da.dimIdx == (int64_t)d) {
               ss << "p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
               found = true;
@@ -640,8 +625,7 @@ private:
         }
       }
       unsigned elemBits = tty.getElementType().getIntOrFloatBitWidth();
-      if (elemBits > 8)
-        ss << " * " << (elemBits / 8);
+      if (elemBits > 8) ss << " * " << (elemBits / 8);
     });
     return expr;
   }
@@ -708,7 +692,7 @@ private:
 
       if (coopLaunch) {
         // Extract dimension args to temporaries for address-of in launch.
-        for (auto &da : dimArgMeta)
+        for (auto& da : dimArgMeta)
           os() << "  int __dim_" << da.paramIdx << "_" << da.dimIdx
                << " = (int)p" << da.paramIdx << ".shape()[" << da.dimIdx
                << "];\n";
@@ -719,7 +703,7 @@ private:
           os() << "(void*)&p" << i << "__device";
           first = false;
         }
-        for (auto &da : dimArgMeta) {
+        for (auto& da : dimArgMeta) {
           if (!first) os() << ", ";
           os() << "(void*)&__dim_" << da.paramIdx << "_" << da.dimIdx;
           first = false;
@@ -730,9 +714,8 @@ private:
           first = false;
         }
         os() << "};\n";
-        os() << "  hipLaunchCooperativeKernel((void*)" << devName
-             << ", " << dims.gridStr() << ", " << dims.blockStr()
-             << ", __coop_args, "
+        os() << "  hipLaunchCooperativeKernel((void*)" << devName << ", "
+             << dims.gridStr() << ", " << dims.blockStr() << ", __coop_args, "
              << (dynShmem.empty() ? "0" : dynShmem) << ", "
              << (streamName.empty() ? "0" : streamName) << ");\n";
       } else {
@@ -740,14 +723,13 @@ private:
              << dims.blockStr();
         if (!dynShmem.empty() || !streamName.empty())
           os() << ", " << (dynShmem.empty() ? "0" : dynShmem);
-        if (!streamName.empty())
-          os() << ", " << streamName;
+        if (!streamName.empty()) os() << ", " << streamName;
         os() << ">>>(";
         for (unsigned i = 0; i < numOrigInputs; ++i) {
           if (i > 0) os() << ", ";
           os() << "p" << i << "__device";
         }
-        for (auto &da : dimArgMeta) {
+        for (auto& da : dimArgMeta) {
           os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
         }
         for (auto val : globalBufferVals)
@@ -780,8 +762,7 @@ private:
          << symName << "(";
     for (unsigned i = 0; i < numOrigInputs; ++i) {
       if (i > 0) os() << ", ";
-      llvm::StringRef hint =
-          (i < hostElemHints.size()) ? hostElemHints[i] : "";
+      llvm::StringRef hint = (i < hostElemHints.size()) ? hostElemHints[i] : "";
       os() << emitChoreoType(fnType.getInput(i), true, hint) << " p" << i;
     }
     if (!streamName.empty()) {
@@ -801,14 +782,14 @@ private:
       if (bytes < 0) {
         os() << "  (void)hipMalloc(&p" << i << "__device, p" << i
              << ".element_count() * sizeof(" << inputEType << "));\n";
-        os() << "  (void)hipMemcpy(p" << i << "__device, p" << i
-             << ".data(), p" << i << ".element_count() * sizeof(" << inputEType
+        os() << "  (void)hipMemcpy(p" << i << "__device, p" << i << ".data(), p"
+             << i << ".element_count() * sizeof(" << inputEType
              << "), hipMemcpyHostToDevice);\n";
       } else {
         os() << "  (void)hipMalloc(&p" << i << "__device, " << bytes
              << "ULL);\n";
-        os() << "  (void)hipMemcpy(p" << i << "__device, p" << i
-             << ".data(), " << bytes << "ULL, hipMemcpyHostToDevice);\n";
+        os() << "  (void)hipMemcpy(p" << i << "__device, p" << i << ".data(), "
+             << bytes << "ULL, hipMemcpyHostToDevice);\n";
       }
     }
 
@@ -828,26 +809,34 @@ private:
       choreoElem = "choreo::" + retHint.str();
     } else {
       auto resElemTy = resTy.getElementType();
-      if (resElemTy.isInteger(8)) choreoElem = "choreo::u8";
-      else if (resElemTy.isInteger(16)) choreoElem = "choreo::s16";
-      else if (resElemTy.isInteger(32)) choreoElem = "choreo::s32";
-      else if (resElemTy.isInteger(64)) choreoElem = "choreo::s64";
-      else if (resElemTy.isBF16()) choreoElem = "choreo::bf16";
-      else if (resElemTy.isF32()) choreoElem = "choreo::f32";
-      else if (resElemTy.isF16()) choreoElem = "choreo::f16";
-      else if (resElemTy.isF64()) choreoElem = "choreo::f64";
-      else choreoElem = "choreo::s32";
+      if (resElemTy.isInteger(8))
+        choreoElem = "choreo::u8";
+      else if (resElemTy.isInteger(16))
+        choreoElem = "choreo::s16";
+      else if (resElemTy.isInteger(32))
+        choreoElem = "choreo::s32";
+      else if (resElemTy.isInteger(64))
+        choreoElem = "choreo::s64";
+      else if (resElemTy.isBF16())
+        choreoElem = "choreo::bf16";
+      else if (resElemTy.isF32())
+        choreoElem = "choreo::f32";
+      else if (resElemTy.isF16())
+        choreoElem = "choreo::f16";
+      else if (resElemTy.isF64())
+        choreoElem = "choreo::f64";
+      else
+        choreoElem = "choreo::s32";
     }
 
     os() << "  auto __result = choreo::make_spandata<" << choreoElem << ", "
-       << resTy.getShape().size() << ">(" << shapeStr << ");\n";
+         << resTy.getShape().size() << ">(" << shapeStr << ");\n";
     os() << "  " << eType << "* __result__device = nullptr;\n";
     if (resBytes < 0) {
       os() << "  (void)hipMalloc(&__result__device, __result.element_count()"
            << " * sizeof(" << eType << "));\n";
     } else {
-      os() << "  (void)hipMalloc(&__result__device, " << resBytes
-           << "ULL);\n";
+      os() << "  (void)hipMalloc(&__result__device, " << resBytes << "ULL);\n";
     }
     emitGlobalBufferAllocs(dimArgMeta);
 
@@ -859,10 +848,9 @@ private:
     bool coopLaunch = isCooperativeLaunch(kernel);
 
     if (coopLaunch) {
-      for (auto &da : dimArgMeta)
-        os() << "  int __dim_" << da.paramIdx << "_" << da.dimIdx
-             << " = (int)p" << da.paramIdx << ".shape()[" << da.dimIdx
-             << "];\n";
+      for (auto& da : dimArgMeta)
+        os() << "  int __dim_" << da.paramIdx << "_" << da.dimIdx << " = (int)p"
+             << da.paramIdx << ".shape()[" << da.dimIdx << "];\n";
       os() << "  void* __coop_args[] = {";
       bool first = true;
       for (unsigned i = 0; i < numOrigInputs; ++i) {
@@ -870,7 +858,7 @@ private:
         os() << "(void*)&p" << i << "__device";
         first = false;
       }
-      for (auto &da : dimArgMeta) {
+      for (auto& da : dimArgMeta) {
         if (!first) os() << ", ";
         os() << "(void*)&__dim_" << da.paramIdx << "_" << da.dimIdx;
         first = false;
@@ -884,9 +872,8 @@ private:
         first = false;
       }
       os() << "};\n";
-      os() << "  hipLaunchCooperativeKernel((void*)" << devName
-           << ", " << dims.gridStr() << ", " << dims.blockStr()
-           << ", __coop_args, "
+      os() << "  hipLaunchCooperativeKernel((void*)" << devName << ", "
+           << dims.gridStr() << ", " << dims.blockStr() << ", __coop_args, "
            << (dynShmem.empty() ? "0" : dynShmem) << ", "
            << (streamName.empty() ? "0" : streamName) << ");\n";
     } else {
@@ -894,14 +881,13 @@ private:
            << dims.blockStr();
       if (!dynShmem.empty() || !streamName.empty())
         os() << ", " << (dynShmem.empty() ? "0" : dynShmem);
-      if (!streamName.empty())
-        os() << ", " << streamName;
+      if (!streamName.empty()) os() << ", " << streamName;
       os() << ">>>(";
       for (unsigned i = 0; i < numOrigInputs; ++i) {
         if (i > 0) os() << ", ";
         os() << "p" << i << "__device";
       }
-      for (auto &da : dimArgMeta) {
+      for (auto& da : dimArgMeta) {
         os() << ", (int)p" << da.paramIdx << ".shape()[" << da.dimIdx << "]";
       }
       os() << ", __result__device";
@@ -941,13 +927,14 @@ private:
       entryAssertions.push_back({op});
       return;
     }
-    os() << getIndent() << "choreo::choreo_assert(" << getName(op.getCondition())
-       << ", \"" << msg << "\");\n";
+    os() << getIndent() << "choreo::choreo_assert("
+         << getName(op.getCondition()) << ", \"" << msg << "\");\n";
   }
 
-  std::string emitExprInHostScope(
-      Value v, KernelOp kernel, DenseMap<Value, std::string> &hostNames,
-      unsigned numOrigInputs, llvm::ArrayRef<DimArgMeta> dimArgMeta) {
+  std::string emitExprInHostScope(Value v, KernelOp kernel,
+                                  DenseMap<Value, std::string>& hostNames,
+                                  unsigned numOrigInputs,
+                                  llvm::ArrayRef<DimArgMeta> dimArgMeta) {
     auto it = hostNames.find(v);
     if (it != hostNames.end()) return it->second;
 
@@ -961,7 +948,7 @@ private:
         }
         unsigned daIdx = idx - numOrigInputs;
         if (daIdx < dimArgMeta.size()) {
-          auto &da = dimArgMeta[daIdx];
+          auto& da = dimArgMeta[daIdx];
           std::string name = "(int)p" + std::to_string(da.paramIdx) +
                              ".shape()[" + std::to_string(da.dimIdx) + "]";
           hostNames[v] = name;
@@ -973,7 +960,7 @@ private:
       }
     }
 
-    auto *defOp = v.getDefiningOp();
+    auto* defOp = v.getDefiningOp();
     if (!defOp) return "/* unknown */";
 
     if (auto constOp = dyn_cast<arith::ConstantOp>(defOp)) {
@@ -996,7 +983,7 @@ private:
                                      numOrigInputs, dimArgMeta);
       auto rhs = emitExprInHostScope(cmpOp.getRhs(), kernel, hostNames,
                                      numOrigInputs, dimArgMeta);
-      const char *pred = "==";
+      const char* pred = "==";
       switch (cmpOp.getPredicate()) {
       case arith::CmpIPredicate::eq: pred = "=="; break;
       case arith::CmpIPredicate::ne: pred = "!="; break;
@@ -1056,11 +1043,11 @@ private:
   void emitEntryAssertions(KernelOp kernel, unsigned numOrigInputs,
                            llvm::ArrayRef<DimArgMeta> dimArgMeta) {
     DenseMap<Value, std::string> hostNames;
-    for (auto &ea : entryAssertions) {
+    for (auto& ea : entryAssertions) {
       auto cond = emitExprInHostScope(ea.op.getCondition(), kernel, hostNames,
                                       numOrigInputs, dimArgMeta);
-      os() << "  choreo::runtime_check(" << cond << ", \""
-         << ea.op.getMessage() << "\");\n";
+      os() << "  choreo::runtime_check(" << cond << ", \"" << ea.op.getMessage()
+           << "\");\n";
     }
   }
 
@@ -1089,7 +1076,7 @@ private:
   }
 
   static std::string ordinal(int n) {
-    static const char *suffixes[] = {"th", "st", "nd", "rd", "th"};
+    static const char* suffixes[] = {"th", "st", "nd", "rd", "th"};
     int v = n % 100;
     int idx = (v >= 11 && v <= 13) ? 0 : std::min(v % 10, 4);
     return std::to_string(n) + suffixes[idx];
@@ -1097,15 +1084,14 @@ private:
 
   void emitDimChecks(KernelOp kernel) {
     auto checks = getDimChecks(kernel);
-    for (auto &c : checks) {
+    for (auto& c : checks) {
       os() << "  choreo::runtime_check("
            << "p" << c.param0 << ".shape()[" << c.dim0 << "]"
            << " == "
            << "p" << c.param1 << ".shape()[" << c.dim1 << "]"
            << ", \"The shapes of the " << ordinal(c.param0 + 1)
            << " parameter (dim: " << c.dim0 << ") and the "
-           << ordinal(c.param1 + 1)
-           << " parameter (dim: " << c.dim1
+           << ordinal(c.param1 + 1) << " parameter (dim: " << c.dim1
            << ") are inconsistent.\");\n";
     }
   }
@@ -1124,8 +1110,7 @@ private:
         funcName = it->second;
       } else {
         llvm::StringRef ref(callee);
-        if (ref.starts_with("__"))
-          ref = ref.drop_front(2);
+        if (ref.starts_with("__")) ref = ref.drop_front(2);
         funcName = ref.str();
       }
     }
@@ -1166,14 +1151,12 @@ private:
   void emitInThreads(InThreadsOp op) {
     os() << getIndent() << "if (" << getName(op.getPredicate()) << ") {\n";
     incIndent();
-    for (auto &bodyOp : op.getBody().front().getOperations())
-      emitOp(&bodyOp);
+    for (auto& bodyOp : op.getBody().front().getOperations()) emitOp(&bodyOp);
     decIndent();
     os() << getIndent() << "}";
     bool isAsync = op.getAsync() && *op.getAsync();
     bool isOuter = !op.getOuter() || *op.getOuter();
-    if (!isAsync && isOuter)
-      os() << "\n" << getIndent() << "__syncthreads();";
+    if (!isAsync && isOuter) os() << "\n" << getIndent() << "__syncthreads();";
     os() << "\n";
   }
 
@@ -1181,15 +1164,15 @@ private:
     using AK = coir::AtomicKind;
     llvm::StringRef fnName;
     switch (op.getKind()) {
-    case AK::Add:  fnName = "atomicAdd"; break;
-    case AK::Sub:  fnName = "atomicSub"; break;
+    case AK::Add: fnName = "atomicAdd"; break;
+    case AK::Sub: fnName = "atomicSub"; break;
     case AK::Exch: fnName = "atomicExch"; break;
-    case AK::Min:  fnName = "atomicMin"; break;
-    case AK::Max:  fnName = "atomicMax"; break;
-    case AK::And:  fnName = "atomicAnd"; break;
-    case AK::Or:   fnName = "atomicOr"; break;
-    case AK::Xor:  fnName = "atomicXor"; break;
-    case AK::CAS:  fnName = "atomicCAS"; break;
+    case AK::Min: fnName = "atomicMin"; break;
+    case AK::Max: fnName = "atomicMax"; break;
+    case AK::And: fnName = "atomicAnd"; break;
+    case AK::Or: fnName = "atomicOr"; break;
+    case AK::Xor: fnName = "atomicXor"; break;
+    case AK::CAS: fnName = "atomicCAS"; break;
     }
 
     auto dstTy = mlir::cast<coir::TensorType>(op.getDest().getType());
@@ -1200,19 +1183,18 @@ private:
     os() << fnName << "(&" << getName(op.getDest()) << "[";
     emitLinearIndex(op.getIndices(), dstTy);
     os() << "], " << getName(op.getValue());
-    if (op.getCompare())
-      os() << ", " << getName(op.getCompare());
+    if (op.getCompare()) os() << ", " << getName(op.getCompare());
     os() << ");\n";
   }
 
   void emitParallel(ParallelOp op) override {
     auto level = op.getLevel();
     auto bounds = op.getBounds();
-    auto &body = op.getBody();
+    auto& body = op.getBody();
     auto args = body.getArguments();
 
-    os() << getIndent() << "// parallel level="
-       << stringifyParallelLevel(level) << " bounds=[";
+    os() << getIndent() << "// parallel level=" << stringifyParallelLevel(level)
+         << " bounds=[";
     for (unsigned i = 0; i < bounds.size(); ++i) {
       if (i > 0) os() << ", ";
       os() << bounds[i];
@@ -1230,9 +1212,8 @@ private:
         for (auto b : bounds) threadsPerGroup *= b;
         std::string mod = std::to_string(threadsPerGroup);
         for (unsigned i = 0; i < args.size(); ++i) {
-          std::string dim = i == 0
-              ? "(threadIdx.x % " + mod + ")"
-              : "(threadIdx.y % " + mod + ")";
+          std::string dim = i == 0 ? "(threadIdx.x % " + mod + ")"
+                                   : "(threadIdx.y % " + mod + ")";
           valueNames[args[i]] = dim;
         }
       } else {
@@ -1253,11 +1234,9 @@ private:
       } else {
         for (unsigned i = 0; i < args.size(); ++i) {
           int64_t divisor = 1;
-          for (unsigned j = i + 1; j < args.size(); ++j)
-            divisor *= bounds[j];
-          std::string expr = "(" + warpId + " / " +
-                             std::to_string(divisor) + " % " +
-                             std::to_string(bounds[i]) + ")";
+          for (unsigned j = i + 1; j < args.size(); ++j) divisor *= bounds[j];
+          std::string expr = "(" + warpId + " / " + std::to_string(divisor) +
+                             " % " + std::to_string(bounds[i]) + ")";
           valueNames[args[i]] = expr;
         }
       }
@@ -1268,8 +1247,7 @@ private:
 
     os() << getIndent() << "{\n";
     incIndent();
-    for (auto &bodyOp : body.front().getOperations())
-      emitOp(&bodyOp);
+    for (auto& bodyOp : body.front().getOperations()) emitOp(&bodyOp);
     decIndent();
     os() << getIndent() << "}\n";
   }
@@ -1286,11 +1264,11 @@ private:
     std::string dstName = getName(dst);
     std::string eTy = emitElementType(srcTy.getElementType());
 
-    os() << getIndent() << "for (size_t __i = threadIdx.x; __i < "
-       << totalElems << "; __i += blockDim.x) {\n";
+    os() << getIndent() << "for (size_t __i = threadIdx.x; __i < " << totalElems
+         << "; __i += blockDim.x) {\n";
     incIndent();
     os() << getIndent() << "((" << eTy << "*)" << dstName << ")[__i] = (("
-       << eTy << "*)" << srcName << ")[__i];\n";
+         << eTy << "*)" << srcName << ")[__i];\n";
     decIndent();
     os() << getIndent() << "}\n";
   }
@@ -1325,11 +1303,11 @@ private:
 
     int64_t dstElems = 1;
     for (auto d : dstShape) dstElems *= d;
-    os() << getIndent() << "for (size_t __i = threadIdx.x; __i < "
-       << dstElems << "; __i += blockDim.x) {\n";
+    os() << getIndent() << "for (size_t __i = threadIdx.x; __i < " << dstElems
+         << "; __i += blockDim.x) {\n";
     incIndent();
-    os() << getIndent() << "((" << eTy << "*)" << dstName << ")[__i] = ("
-       << eTy << ")" << padVal << ";\n";
+    os() << getIndent() << "((" << eTy << "*)" << dstName << ")[__i] = (" << eTy
+         << ")" << padVal << ";\n";
     decIndent();
     os() << getIndent() << "}\n";
     os() << getIndent() << "__syncthreads();\n";
@@ -1337,15 +1315,14 @@ private:
     llvm::SmallVector<int64_t> lowVals(rank, 0);
     if (padLow) {
       auto pl = *padLow;
-      for (int i = 0; i < rank && i < (int)pl.size(); ++i)
-        lowVals[i] = pl[i];
+      for (int i = 0; i < rank && i < (int)pl.size(); ++i) lowVals[i] = pl[i];
     }
 
     int64_t srcElems = 1;
     for (auto d : srcShape) srcElems *= d;
 
-    os() << getIndent() << "for (size_t __i = threadIdx.x; __i < "
-       << srcElems << "; __i += blockDim.x) {\n";
+    os() << getIndent() << "for (size_t __i = threadIdx.x; __i < " << srcElems
+         << "; __i += blockDim.x) {\n";
     incIndent();
     os() << getIndent() << "size_t __rem = __i;\n";
     for (int d = 0; d < rank; ++d) {
@@ -1354,7 +1331,7 @@ private:
         int64_t stride = 1;
         for (int k = d + 1; k < rank; ++k) stride *= srcShape[k];
         os() << getIndent() << "size_t " << dn << " = __rem / " << stride
-           << ";\n";
+             << ";\n";
         os() << getIndent() << "__rem = __rem % " << stride << ";\n";
       } else {
         os() << getIndent() << "size_t " << dn << " = __rem;\n";
@@ -1363,8 +1340,8 @@ private:
     os() << getIndent() << "size_t __dst_idx = ";
     for (int d = 0; d < rank; ++d) {
       if (d > 0) os() << " + ";
-      std::string coord = "(__d" + std::to_string(d) + " + "
-                         + std::to_string(lowVals[d]) + ")";
+      std::string coord =
+          "(__d" + std::to_string(d) + " + " + std::to_string(lowVals[d]) + ")";
       int64_t stride = 1;
       for (int k = d + 1; k < rank; ++k) stride *= dstShape[k];
       if (stride != 1)
@@ -1374,7 +1351,7 @@ private:
     }
     os() << ";\n";
     os() << getIndent() << "((" << eTy << "*)" << dstName << ")[__dst_idx] = (("
-       << eTy << "*)" << srcName << ")[__i];\n";
+         << eTy << "*)" << srcName << ")[__i];\n";
     decIndent();
     os() << getIndent() << "}\n";
   }
@@ -1405,8 +1382,8 @@ private:
     int64_t srcElems = 1;
     for (auto d : srcShape) srcElems *= d;
 
-    os() << getIndent() << "for (size_t __i = threadIdx.x; __i < "
-       << srcElems << "; __i += blockDim.x) {\n";
+    os() << getIndent() << "for (size_t __i = threadIdx.x; __i < " << srcElems
+         << "; __i += blockDim.x) {\n";
     incIndent();
     os() << getIndent() << "size_t __rem = __i;\n";
     for (int d = 0; d < rank; ++d) {
@@ -1415,7 +1392,7 @@ private:
         int64_t stride = 1;
         for (int k = d + 1; k < rank; ++k) stride *= srcShape[k];
         os() << getIndent() << "size_t " << dn << " = __rem / " << stride
-           << ";\n";
+             << ";\n";
         os() << getIndent() << "__rem = __rem % " << stride << ";\n";
       } else {
         os() << getIndent() << "size_t " << dn << " = __rem;\n";
@@ -1434,7 +1411,7 @@ private:
     }
     os() << ";\n";
     os() << getIndent() << "((" << eTy << "*)" << dstName << ")[__dst_idx] = (("
-       << eTy << "*)" << srcName << ")[__i];\n";
+         << eTy << "*)" << srcName << ")[__i];\n";
     decIndent();
     os() << getIndent() << "}\n";
   }
@@ -1455,8 +1432,7 @@ private:
       emitCopyWithPad(op.getSource(), op.getDest(), pl, ph, pv);
     } else if (kind == DMAKind::Transpose) {
       std::optional<ArrayRef<int64_t>> perm = std::nullopt;
-      if (auto tp = op.getTransposePerm())
-        perm = tp.value();
+      if (auto tp = op.getTransposePerm()) perm = tp.value();
       emitCopyWithTranspose(op.getSource(), op.getDest(), perm);
     } else {
       emitCooperativeCopy(op.getSource(), op.getDest());
@@ -1489,9 +1465,7 @@ private:
     case ParallelLevel::THREAD:
       os() << getIndent() << "__builtin_amdgcn_wave_barrier();\n";
       break;
-    default:
-      llvm_unreachable("unexpected barrier scope");
-      break;
+    default: llvm_unreachable("unexpected barrier scope"); break;
     }
   }
 
@@ -1509,16 +1483,13 @@ private:
       // Fence device-wide: global memory.
       os() << getIndent() << "__threadfence();\n";
       break;
-    default:
-      llvm_unreachable("unexpected fence scope");
-      break;
+    default: llvm_unreachable("unexpected fence scope"); break;
     }
   }
 
   void emitWait(WaitOp op) override {
     auto token = op.getToken();
-    if (dmaTokens.count(token))
-      return;
+    if (dmaTokens.count(token)) return;
     os() << getIndent() << "__syncthreads();\n";
   }
 
@@ -1539,8 +1510,7 @@ private:
       if (i > 0) os() << " + ";
       os() << getName(indices[i]);
       int64_t stride = 1;
-      for (unsigned j = i + 1; j < srcShape.size(); ++j)
-        stride *= srcShape[j];
+      for (unsigned j = i + 1; j < srcShape.size(); ++j) stride *= srcShape[j];
       os() << " * " << stride;
     }
     os() << ");\n";
@@ -1561,7 +1531,6 @@ private:
       os() << "] += " << val << ";\n";
     }
   }
-
 };
 
 struct EmitHIPPass : public ::coir::impl::EmitHIPBase<EmitHIPPass> {
@@ -1575,9 +1544,8 @@ struct EmitHIPPass : public ::coir::impl::EmitHIPBase<EmitHIPPass> {
 };
 
 static bool registered_hip = [] {
-  CoIR::CodeGenRegistry::Register("hip", [] {
-    return std::make_unique<HIPEmitter>();
-  });
+  CoIR::CodeGenRegistry::Register(
+      "hip", [] { return std::make_unique<HIPEmitter>(); });
   return true;
 }();
 
@@ -1588,9 +1556,8 @@ std::unique_ptr<mlir::Pass> createEmitHIPPass() {
   return std::make_unique<EmitHIPPass>();
 }
 
-void emitHIP(mlir::ModuleOp module, llvm::raw_ostream &os) {
+void emitHIP(mlir::ModuleOp module, llvm::raw_ostream& os) {
   HIPEmitter emitter;
   emitter.emitModule(module, os);
 }
 } // namespace coir
-

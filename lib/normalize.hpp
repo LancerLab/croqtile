@@ -873,7 +873,8 @@ public:
       }
 
       for (auto& repl : repls) {
-        VST_DEBUG(dbgs() << n.TypeNameString() << ": " << "replace "
+        VST_DEBUG(dbgs() << n.TypeNameString() << ": "
+                         << "replace "
                          << PSTR(n.GetRangeNodes()->ValueAt(repl.first))
                          << " with ");
         auto lr = cast<AST::LoopRange>(n.GetRangeNodes()->values[repl.first]);

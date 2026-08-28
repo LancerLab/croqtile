@@ -1,5 +1,5 @@
-#include <emscripten/bind.h>
 #include <emscripten.h>
+#include <emscripten/bind.h>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -35,11 +35,13 @@ void initRuntime() {
   if (runtime_initialized) return;
   runtime_initialized = true;
 
-  EM_ASM({
-    if (typeof FS !== 'undefined') {
-      FS.writeFile('/choreo.h', UTF8ToString($0));
-    }
-  }, __choreo_header_as_string);
+  EM_ASM(
+      {
+        if (typeof FS != = 'undefined') {
+          FS.writeFile('/choreo.h', UTF8ToString($0));
+        }
+      },
+      __choreo_header_as_string);
 }
 
 void resetGlobalState() {
@@ -113,8 +115,10 @@ CompileResult runCompilation(const std::string& source,
     if (!CCtx().NoPreProcess()) {
       if (CCtx().GetOutputKind() == OutputKind::PreProcessedCode) {
         auto spp = CCtx().GetTarget().MakePP(outputCapture);
-        if (!spp->Process(reg.GetInputStream())) exitCode = 1;
-        else result.success = true;
+        if (!spp->Process(reg.GetInputStream()))
+          exitCode = 1;
+        else
+          result.success = true;
         goto cleanup;
       } else {
         auto spp = CCtx().GetTarget().MakePP(pps);
@@ -257,9 +261,7 @@ CompileResult mockRun(const std::string& source,
     result.success = true;
   } catch (const std::exception& e) {
     errorCapture << "Exception: " << e.what() << "\n";
-  } catch (...) {
-    errorCapture << "Unknown exception occurred.\n";
-  }
+  } catch (...) { errorCapture << "Unknown exception occurred.\n"; }
 
 cleanup:
   std::cin.rdbuf(origCin);

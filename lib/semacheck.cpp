@@ -1232,12 +1232,10 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
 }
 
 bool SemaChecker::VisitNode(AST::BufferMap& n) {
-  if (!n.source)
-    return true;
+  if (!n.source) return true;
 
   auto srcTy = GetSpannedType(NodeType(*n.source));
-  if (!srcTy)
-    return true; // earlysema already reported the error
+  if (!srcTy) return true; // earlysema already reported the error
 
   auto dense = srcTy->IsDense();
   if (dense == Modality::NOT) {

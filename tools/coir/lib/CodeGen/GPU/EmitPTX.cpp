@@ -5,13 +5,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "CodeGen/GPU/NativePipeline.h"
 #include "CoIRVersionCompat.h"
+#include "CodeGen/GPU/NativePipeline.h"
 
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
-#include "mlir/IR/IRMapping.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/NVVMDialect.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/GPU/GPUToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
@@ -46,7 +46,7 @@ createNVPTXTargetMachine(llvm::StringRef arch) {
   ensureNVPTXTargetInitialized();
 
   std::string error;
-  const llvm::Target *target =
+  const llvm::Target* target =
       llvm::TargetRegistry::lookupTarget("nvptx64-nvidia-cuda", error);
   if (!target) {
     llvm::errs() << "NVPTX target not found: " << error << "\n";
@@ -54,13 +54,12 @@ createNVPTXTargetMachine(llvm::StringRef arch) {
   }
 
   llvm::TargetOptions opts;
-  return std::unique_ptr<llvm::TargetMachine>(
-      COIR_CREATE_TARGET_MACHINE(target, "nvptx64-nvidia-cuda", arch,
-                                 "+ptx78", opts, llvm::Reloc::PIC_));
+  return std::unique_ptr<llvm::TargetMachine>(COIR_CREATE_TARGET_MACHINE(
+      target, "nvptx64-nvidia-cuda", arch, "+ptx78", opts, llvm::Reloc::PIC_));
 }
 
 std::string emitPTX(mlir::ModuleOp gpuModule, llvm::StringRef arch) {
-  mlir::MLIRContext &ctx = *gpuModule.getContext();
+  mlir::MLIRContext& ctx = *gpuModule.getContext();
 
   mlir::registerBuiltinDialectTranslation(ctx);
   mlir::registerLLVMDialectTranslation(ctx);
@@ -119,14 +118,12 @@ std::string emitPTXFromCoIR(mlir::ModuleOp module, llvm::StringRef arch) {
   llvm::DenseSet<llvm::StringRef> seenSymbols;
   builder.setInsertionPointToStart(tempModule.getBody());
   for (auto gpuMod : gpuMods) {
-    for (auto &op : llvm::make_early_inc_range(
-             gpuMod.getBody()->getOperations())) {
-      if (op.hasTrait<mlir::OpTrait::IsTerminator>())
-        continue;
+    for (auto& op :
+         llvm::make_early_inc_range(gpuMod.getBody()->getOperations())) {
+      if (op.hasTrait<mlir::OpTrait::IsTerminator>()) continue;
       if (auto sym = op.getAttrOfType<mlir::StringAttr>(
               mlir::SymbolTable::getSymbolAttrName())) {
-        if (!seenSymbols.insert(sym.getValue()).second)
-          continue;
+        if (!seenSymbols.insert(sym.getValue()).second) continue;
       }
       op.moveBefore(tempModule.getBody(), tempModule.getBody()->end());
     }

@@ -1,4 +1,5 @@
-//===- EmitHostStubs.h - Host entry stub generation from CoIR ----*- C++ -*-===//
+//===- EmitHostStubs.h - Host entry stub generation from CoIR ----*- C++
+//-*-===//
 //
 // Generates C++ host entry function text for each coir.kernel op, using
 // metadata attrs captured during ASTCoIRGen (param names, attrs, refs,

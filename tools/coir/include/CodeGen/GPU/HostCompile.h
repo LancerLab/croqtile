@@ -1,4 +1,5 @@
-//===- HostCompile.h - In-memory host C++ -> LLVM IR via clang ---*- C++ -*-===//
+//===- HostCompile.h - In-memory host C++ -> LLVM IR via clang ---*- C++
+//-*-===//
 //
 // Compiles a C++ source string to an LLVM IR Module in-memory, using
 // clang as a library (CompilerInstance + EmitLLVMOnlyAction).
@@ -28,8 +29,8 @@ struct HostCompileOptions {
 /// VFS so headers like choreo_types.h / choreo.h are available.
 /// Returns nullptr on failure (diagnostics printed to stderr).
 std::unique_ptr<llvm::Module>
-compileHostToLLVM(llvm::StringRef source, llvm::LLVMContext &ctx,
-                  const HostCompileOptions &opts = {});
+compileHostToLLVM(llvm::StringRef source, llvm::LLVMContext& ctx,
+                  const HostCompileOptions& opts = {});
 
 } // namespace gpu
 } // namespace coir

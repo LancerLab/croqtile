@@ -1016,9 +1016,8 @@ public:
       // WGMMA may consume shared-memory operands directly. Other MMA families
       // consume register fragments, so accepting a shared operand here would
       // leave the fragment unmaterialized in their codegen.
-      if (mma_ty != MMAType::WGMMA &&
-          (a_sty->GetStorage() == Storage::SHARED ||
-            b_sty->GetStorage() == Storage::SHARED))
+      if (mma_ty != MMAType::WGMMA && (a_sty->GetStorage() == Storage::SHARED ||
+                                       b_sty->GetStorage() == Storage::SHARED))
         Error1(n.LOC(),
                "direct shared-memory operands are only valid for WGMMA; use "
                "mma.load for WMMA/mma.sync operands.");

@@ -34,7 +34,7 @@ EventAllocMode ParseEventAllocMode() {
   return EventAllocMode::Simple;
 }
 
-}  // namespace Choreo
+} // namespace Choreo
 
 bool DmaResourceAllocator::RunOnProgramImpl(AST::Node& root) {
   DmaResourcePlan::Reset();

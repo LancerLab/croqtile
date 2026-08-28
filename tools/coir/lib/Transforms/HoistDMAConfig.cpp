@@ -6,14 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Dialect/CoIR/Passes.h"
 #include "Dialect/CoIR/CoIRDialect.h"
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
+#include "Dialect/CoIR/Passes.h"
 
 #include "mlir/Interfaces/LoopLikeInterface.h"
-#include "mlir/Transforms/LoopInvariantCodeMotionUtils.h"
 #include "mlir/Pass/Pass.h"
+#include "mlir/Transforms/LoopInvariantCodeMotionUtils.h"
 
 namespace coir {
 #define GEN_PASS_DECL_HOISTDMACONFIG
@@ -34,16 +34,16 @@ struct HoistDMAConfigPass
     getOperation()->walk([&](LoopLikeOpInterface loopLike) {
       moveLoopInvariantCode(
           loopLike.getLoopRegions(),
-          [&](Value value, Region *) {
+          [&](Value value, Region*) {
             return loopLike.isDefinedOutsideOfLoop(value);
           },
-          [](Operation *op, Region *) {
+          [](Operation* op, Region*) {
             // Hoist DMA descriptor ops and their tensor.alloc operands.
             return isa<DMAConstDescOp, DMADescPrefetchOp, DMACheckOp>(op) ||
                    (isa<TensorAllocOp>(op) && op->hasOneUse() &&
                     isa<DMAConstDescOp>(*op->getUsers().begin()));
           },
-          [](Operation *op, Region *region) {
+          [](Operation* op, Region* region) {
             op->moveBefore(region->getParentOp());
           });
     });

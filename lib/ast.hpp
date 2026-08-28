@@ -3786,7 +3786,9 @@ struct Synchronize : public Node, public TypeIDProvider<Synchronize> {
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool = false) const override {
-    os << "\n" << prefix << "`- " << "Synchronize: " << STR(buf_ty);
+    os << "\n"
+       << prefix << "`- "
+       << "Synchronize: " << STR(buf_ty);
   }
   void accept(Visitor&) override;
 
@@ -3804,7 +3806,9 @@ struct Barrier : public Node, public TypeIDProvider<Barrier> {
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool = false) const override {
-    os << "\n" << prefix << "`- " << "Barrier: " << STR(level);
+    os << "\n"
+       << prefix << "`- "
+       << "Barrier: " << STR(level);
   }
   void accept(Visitor&) override;
 
@@ -3830,7 +3834,9 @@ struct Fence : public Node, public TypeIDProvider<Fence> {
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool = false) const override {
-    os << "\n" << prefix << "`- " << "Fence: " << STR(visibility);
+    os << "\n"
+       << prefix << "`- "
+       << "Fence: " << STR(visibility);
     if (memory != Storage::NONE) os << "<" << STR(memory) << ">";
     os << " " << STR(order);
   }

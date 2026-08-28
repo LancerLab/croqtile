@@ -37,40 +37,41 @@
 // --- Version classification -----------------------------------------
 // Versions before 21.1 use the older API; 21.1 and later use the new one.
 #if defined(LLVM_VERSION_MAJOR) && defined(LLVM_VERSION_MINOR)
-#  if LLVM_VERSION_MAJOR < 21 || \
+  #if LLVM_VERSION_MAJOR < 21 ||                                               \
       (LLVM_VERSION_MAJOR == 21 && LLVM_VERSION_MINOR < 1)
-#    define COIR_LLVM_PRE_21_1 1
-#  else
-#    define COIR_LLVM_21_1_PLUS 1
-#  endif
+    #define COIR_LLVM_PRE_21_1 1
+  #else
+    #define COIR_LLVM_21_1_PLUS 1
+  #endif
 #else
-// Fallback: assume the newer public API.
-#  define COIR_LLVM_21_1_PLUS 1
+  // Fallback: assume the newer public API.
+  #define COIR_LLVM_21_1_PLUS 1
 #endif
 
 // --- LLVM Target / Triple helpers ----------------------------------
 
 // Module::setTargetTriple: StringRef (pre-21.1) vs Triple (21.1+)
-#define COIR_SET_TARGET_TRIPLE(mod, tripleExpr) \
+#define COIR_SET_TARGET_TRIPLE(mod, tripleExpr)                                \
   COIR_SET_TARGET_TRIPLE_IMPL(mod, tripleExpr)
 
 #ifdef COIR_LLVM_PRE_21_1
-#  define COIR_SET_TARGET_TRIPLE_IMPL(mod, tripleExpr) \
+  #define COIR_SET_TARGET_TRIPLE_IMPL(mod, tripleExpr)                         \
     (mod).setTargetTriple((tripleExpr))
 #else
-#  define COIR_SET_TARGET_TRIPLE_IMPL(mod, tripleExpr) \
+  #define COIR_SET_TARGET_TRIPLE_IMPL(mod, tripleExpr)                         \
     (mod).setTargetTriple(llvm::Triple((tripleExpr)))
 #endif
 
 // Target::createTargetMachine: StringRef (pre-21.1) vs Triple (21.1+)
-#define COIR_CREATE_TARGET_MACHINE(target, tripleExpr, cpu, features, opts, reloc) \
-  (target)->createTargetMachine(                                            \
-      COIR_TRIPLE_OR_REF(tripleExpr), (cpu), (features), (opts), (reloc))
+#define COIR_CREATE_TARGET_MACHINE(target, tripleExpr, cpu, features, opts,    \
+                                   reloc)                                      \
+  (target)->createTargetMachine(COIR_TRIPLE_OR_REF(tripleExpr), (cpu),         \
+                                (features), (opts), (reloc))
 
 #ifdef COIR_LLVM_PRE_21_1
-#  define COIR_TRIPLE_OR_REF(tripleExpr) (tripleExpr)
+  #define COIR_TRIPLE_OR_REF(tripleExpr) (tripleExpr)
 #else
-#  define COIR_TRIPLE_OR_REF(tripleExpr) llvm::Triple((tripleExpr))
+  #define COIR_TRIPLE_OR_REF(tripleExpr) llvm::Triple((tripleExpr))
 #endif
 
 // --- MLIR Arith constant builders ---------------------------------
@@ -84,14 +85,14 @@
 //   21.1+:     (loc, type, value)
 
 #ifdef COIR_LLVM_PRE_21_1
-#  define COIR_CONSTANT_INT(builder, loc, value, type) \
+  #define COIR_CONSTANT_INT(builder, loc, value, type)                         \
     (builder).create<mlir::arith::ConstantIntOp>((loc), (value), (type))
-#  define COIR_CONSTANT_FLOAT(builder, loc, value, type) \
+  #define COIR_CONSTANT_FLOAT(builder, loc, value, type)                       \
     (builder).create<mlir::arith::ConstantFloatOp>((loc), (value), (type))
 #else
-#  define COIR_CONSTANT_INT(builder, loc, value, type) \
+  #define COIR_CONSTANT_INT(builder, loc, value, type)                         \
     (builder).create<mlir::arith::ConstantIntOp>((loc), (type), (value))
-#  define COIR_CONSTANT_FLOAT(builder, loc, value, type) \
+  #define COIR_CONSTANT_FLOAT(builder, loc, value, type)                       \
     (builder).create<mlir::arith::ConstantFloatOp>((loc), (type), (value))
 #endif
 
@@ -121,24 +122,23 @@
 //    form requires two statements)
 
 #ifdef COIR_LLVM_PRE_21_1
-// Use IntrusiveRefCntPtr + raw pointer API (older LLVM 21.x).
-#  define COIR_DIAG_OPTS_TYPE() \
+  // Use IntrusiveRefCntPtr + raw pointer API (older LLVM 21.x).
+  #define COIR_DIAG_OPTS_TYPE()                                                \
     llvm::makeIntrusiveRefCnt<clang::DiagnosticOptions>()
-#  define COIR_DIAG_OPTS_GET_PTR(opts) (opts).get()
-#  define COIR_DIAG_OPTS_DEREF(opts) (opts).get()
-#  define COIR_TEXT_DIAG_PRINTER(os, opts) \
+  #define COIR_DIAG_OPTS_GET_PTR(opts) (opts).get()
+  #define COIR_DIAG_OPTS_DEREF(opts) (opts).get()
+  #define COIR_TEXT_DIAG_PRINTER(os, opts)                                     \
     std::make_unique<clang::TextDiagnosticPrinter>((os), (opts).get())
-#  define COIR_DIAGS_ENGINE(diagIDs, opts, printer) \
+  #define COIR_DIAGS_ENGINE(diagIDs, opts, printer)                            \
     clang::DiagnosticsEngine((diagIDs), (opts), (printer).release())
 #else
-// Use unique_ptr + reference API (LLVM 21.1+).
-#  define COIR_DIAG_OPTS_TYPE() \
-    std::make_unique<clang::DiagnosticOptions>()
-#  define COIR_DIAG_OPTS_GET_PTR(opts) (opts).get()
-#  define COIR_DIAG_OPTS_DEREF(opts) *(opts)
-#  define COIR_TEXT_DIAG_PRINTER(os, opts) \
+  // Use unique_ptr + reference API (LLVM 21.1+).
+  #define COIR_DIAG_OPTS_TYPE() std::make_unique<clang::DiagnosticOptions>()
+  #define COIR_DIAG_OPTS_GET_PTR(opts) (opts).get()
+  #define COIR_DIAG_OPTS_DEREF(opts) *(opts)
+  #define COIR_TEXT_DIAG_PRINTER(os, opts)                                     \
     std::make_unique<clang::TextDiagnosticPrinter>((os), *(opts))
-#  define COIR_DIAGS_ENGINE(diagIDs, opts, printer) \
+  #define COIR_DIAGS_ENGINE(diagIDs, opts, printer)                            \
     clang::DiagnosticsEngine((diagIDs), *(opts), (printer).release())
 #endif
 

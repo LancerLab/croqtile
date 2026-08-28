@@ -21,8 +21,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "CodeGen/GPU/NativePipeline.h"
 #include "CodeGen/CoIRKernelLowering.h"
+#include "CodeGen/GPU/NativePipeline.h"
 #include "Dialect/CoIR/CoIRAttrs.h"
 #include "Dialect/CoIR/CoIRDialect.h"
 #include "Dialect/CoIR/CoIROps.h"
@@ -51,19 +51,16 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(ConvertToGPUPass)
   ConvertToGPUPass() : OperationPass(mlir::TypeID::get<ConvertToGPUPass>()) {}
   llvm::StringRef getName() const override { return "ConvertToGPU"; }
-  llvm::StringRef getArgument() const override {
-    return "coir-convert-to-gpu";
-  }
+  llvm::StringRef getArgument() const override { return "coir-convert-to-gpu"; }
   llvm::StringRef getDescription() const override {
     return "Lower CoIR kernel ops to GPU/memref/arith dialects";
   }
   std::unique_ptr<mlir::Pass> clonePass() const override {
     return std::make_unique<ConvertToGPUPass>();
   }
-  void getDependentDialects(mlir::DialectRegistry &registry) const override {
+  void getDependentDialects(mlir::DialectRegistry& registry) const override {
     registry.insert<mgpu::GPUDialect, memref::MemRefDialect,
-                    arith::ArithDialect, scf::SCFDialect,
-                    LLVM::LLVMDialect>();
+                    arith::ArithDialect, scf::SCFDialect, LLVM::LLVMDialect>();
   }
 
   void runOnOperation() override {
@@ -79,8 +76,7 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
       gridCntGlobal_.clear();
       gridGenGlobal_.clear();
       isCooperative_ = false;
-      if (failed(convertKernel(module, kernel)))
-        return signalPassFailure();
+      if (failed(convertKernel(module, kernel))) return signalPassFailure();
       if (!adjustedBlockDims_.empty()) {
         module.walk([&](mgpu::GPUModuleOp gpuMod) {
           if (gpuMod->hasAttr("coir.block_dims")) {
@@ -100,16 +96,16 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
       addrSpace = IntegerAttr::get(IntegerType::get(tty.getContext(), 64), 3);
     else if (ms == 0 || ms == -1)
       addrSpace = IntegerAttr::get(IntegerType::get(tty.getContext(), 64), 0);
-    return MemRefType::get(tty.getShape(), tty.getElementType(),
-                           AffineMap{}, addrSpace);
+    return MemRefType::get(tty.getShape(), tty.getElementType(), AffineMap{},
+                           addrSpace);
   }
 
-  void preScanKernel(KernelOp kernel, OpBuilder &builder,
+  void preScanKernel(KernelOp kernel, OpBuilder& builder,
                      mgpu::GPUModuleOp gpuModule) override {
     Location loc = kernel.getLoc();
     StringRef symName = kernel.getSymName();
     unsigned shmIdx = 0;
-    auto &kernelBody = kernel.getBody();
+    auto& kernelBody = kernel.getBody();
     kernelBody.walk([&](TensorAllocOp alloc) {
       auto tty = cast<coir::TensorType>(alloc.getResult().getType());
       if (tty.getMemorySpace() != 1) return;
@@ -120,9 +116,8 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
       shmGlobalTypes_[alloc.getOperation()] = memTy;
       builder.setInsertionPointToStart(gpuModule.getBody());
       builder.create<memref::GlobalOp>(
-          loc, globalName,
-          builder.getStringAttr("private"),
-          memTy, Attribute(), /*constant=*/false, IntegerAttr());
+          loc, globalName, builder.getStringAttr("private"), memTy, Attribute(),
+          /*constant=*/false, IntegerAttr());
     });
 
     isCooperative_ = isKernelCooperative(kernel);
@@ -131,8 +126,7 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
       // arguments, so they must not be hoisted.
       llvm::DenseSet<Value> returnVals;
       kernelBody.walk([&](KernelReturnOp ret) {
-        for (auto v : ret.getOperands())
-          returnVals.insert(v);
+        for (auto v : ret.getOperands()) returnVals.insert(v);
       });
 
       // Hoist global (device) tensor allocs to device-global buffers so all
@@ -177,9 +171,8 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
     mmaFragRoles_.clear();
     mmaFragTranspose_.clear();
     mmaStoreShmNames_.clear();
-    kernelBody.walk([&](MMAFillOp fill) {
-      mmaFragRoles_[fill.getResult()] = "COp";
-    });
+    kernelBody.walk(
+        [&](MMAFillOp fill) { mmaFragRoles_[fill.getResult()] = "COp"; });
     kernelBody.walk([&](MMAExecOp exec) {
       mmaFragRoles_[exec.getAccumulator()] = "COp";
       mmaFragRoles_[exec.getLhs()] = "AOp";
@@ -199,8 +192,7 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
     LaunchDims baseDims = collectLaunchDims(kernel);
     kernelBody.walk([&](ParallelOp par) {
       auto lvl = par.getLevel();
-      if (lvl == ParallelLevel::GROUP ||
-          lvl == ParallelLevel::GROUPx4) {
+      if (lvl == ParallelLevel::GROUP || lvl == ParallelLevel::GROUPx4) {
         int64_t nWarps = 1;
         for (auto b : par.getBounds()) nWarps *= b;
         if (lvl == ParallelLevel::GROUPx4) nWarps *= 4;
@@ -235,25 +227,23 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
         auto fragShape = fragTy.getShape();
         int64_t elemsPerWarp = 1;
         for (auto d : fragShape) elemsPerWarp *= d;
-        auto memTy = MemRefType::get(
-            {warpsPerBlock_ * elemsPerWarp}, fragTy.getElementType(),
-            AffineMap{}, addrSpace);
+        auto memTy =
+            MemRefType::get({warpsPerBlock_ * elemsPerWarp},
+                            fragTy.getElementType(), AffineMap{}, addrSpace);
         std::string globalName =
-            ("__mma_cvt_" + symName + "_" +
-             std::to_string(mmaShmIdx++)).str();
+            ("__mma_cvt_" + symName + "_" + std::to_string(mmaShmIdx++)).str();
         mmaStoreShmNames_[store.getOperation()] = globalName;
         mmaStoreShmElemsPerWarp_[store.getOperation()] = elemsPerWarp;
         builder.setInsertionPointToStart(gpuModule.getBody());
         builder.create<memref::GlobalOp>(
-            loc, globalName,
-            builder.getStringAttr("private"),
-            memTy, Attribute(), /*constant=*/false, IntegerAttr());
+            loc, globalName, builder.getStringAttr("private"), memTy,
+            Attribute(), /*constant=*/false, IntegerAttr());
       }
     });
   }
 
-  bool convertTargetOp(OpBuilder &builder, Location loc,
-                       Operation &op, KernelConvertCtx &ctx) override {
+  bool convertTargetOp(OpBuilder& builder, Location loc, Operation& op,
+                       KernelConvertCtx& ctx) override {
     if (auto par = dyn_cast<ParallelOp>(op)) {
       if (par.getLevel() == ParallelLevel::GROUP ||
           par.getLevel() == ParallelLevel::GROUPx4) {
@@ -321,8 +311,8 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
     return false;
   }
 
-  void convertAlloc(OpBuilder &builder, Location loc,
-                    TensorAllocOp alloc, KernelConvertCtx &ctx) override {
+  void convertAlloc(OpBuilder& builder, Location loc, TensorAllocOp alloc,
+                    KernelConvertCtx& ctx) override {
     auto tty = cast<coir::TensorType>(alloc.getResult().getType());
     auto it = ctx.returnAllocMap.find(alloc.getResult());
     if (it != ctx.returnAllocMap.end()) {
@@ -332,16 +322,14 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
     auto shmIt = shmGlobalNames_.find(alloc.getOperation());
     if (shmIt != shmGlobalNames_.end()) {
       auto memTy = shmGlobalTypes_[alloc.getOperation()];
-      auto ref =
-          builder.create<memref::GetGlobalOp>(loc, memTy, shmIt->second);
+      auto ref = builder.create<memref::GetGlobalOp>(loc, memTy, shmIt->second);
       ctx.mapping.map(alloc.getResult(), ref.getResult());
       return;
     }
     auto gblIt = gblGlobalNames_.find(alloc.getOperation());
     if (gblIt != gblGlobalNames_.end()) {
       auto memTy = gblGlobalTypes_[alloc.getOperation()];
-      auto ref =
-          builder.create<memref::GetGlobalOp>(loc, memTy, gblIt->second);
+      auto ref = builder.create<memref::GetGlobalOp>(loc, memTy, gblIt->second);
       ctx.mapping.map(alloc.getResult(), ref.getResult());
       return;
     }
@@ -356,19 +344,18 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
     }
   }
 
-  void convertDmaCopy(OpBuilder &builder, Location loc,
-                      DmaCopyOp copyOp, KernelConvertCtx &ctx) override {
+  void convertDmaCopy(OpBuilder& builder, Location loc, DmaCopyOp copyOp,
+                      KernelConvertCtx& ctx) override {
     CoIRKernelLoweringBase::convertDmaCopy(builder, loc, copyOp, ctx);
     builder.create<mgpu::BarrierOp>(loc);
   }
 
-  void emitFlatCopyLoop(OpBuilder &builder, Location loc,
-                        Value src, Value dst) override {
+  void emitFlatCopyLoop(OpBuilder& builder, Location loc, Value src,
+                        Value dst) override {
     auto srcTy = cast<MemRefType>(src.getType());
     auto dstTy = cast<MemRefType>(dst.getType());
     int64_t totalElems = 1;
-    for (auto dim : srcTy.getShape())
-      totalElems *= dim;
+    for (auto dim : srcTy.getShape()) totalElems *= dim;
 
     bool srcIsStridedTile = false, dstIsStridedTile = false;
     if (srcTy.getRank() > 1) {
@@ -413,12 +400,12 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
                                                ShapedType::kDynamic, {1});
           flatTy = MemRefType::get({totalElems}, elemTy, layout, addrSpace);
         } else if (staticOff != 0) {
-          auto layout = StridedLayoutAttr::get(builder.getContext(),
-                                               staticOff, {1});
+          auto layout =
+              StridedLayoutAttr::get(builder.getContext(), staticOff, {1});
           flatTy = MemRefType::get({totalElems}, elemTy, layout, addrSpace);
         } else {
-          flatTy = MemRefType::get({totalElems}, elemTy, AffineMap{},
-                                   addrSpace);
+          flatTy =
+              MemRefType::get({totalElems}, elemTy, AffineMap{}, addrSpace);
         }
         OpFoldResult offsetAttr =
             hasDynOffset ? OpFoldResult(offset)
@@ -429,10 +416,10 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
             ArrayRef<OpFoldResult>{builder.getIndexAttr(1)});
       };
 
-      auto flatSrc = makeFlatView(srcBase, srcOffset,
-                                  srcBaseTy.getMemorySpace());
-      auto flatDst = makeFlatView(dstBase, dstOffset,
-                                  dstBaseTy.getMemorySpace());
+      auto flatSrc =
+          makeFlatView(srcBase, srcOffset, srcBaseTy.getMemorySpace());
+      auto flatDst =
+          makeFlatView(dstBase, dstOffset, dstBaseTy.getMemorySpace());
 
       auto loop = builder.create<scf::ForOp>(loc, zero, total, one);
       {
@@ -479,8 +466,7 @@ struct ConvertToGPUPass : public mlir::OperationPass<mlir::ModuleOp>,
       builder.create<memref::StoreOp>(loc, elem, dst, linearIdx);
     }
 
-    if (!loops.empty())
-      builder.setInsertionPointAfter(loops.front());
+    if (!loops.empty()) builder.setInsertionPointAfter(loops.front());
   }
 
 private:
@@ -501,8 +487,8 @@ private:
   bool isKernelCooperative(KernelOp kernel) {
     bool found = false;
     kernel.getBody().walk([&](ParallelOp p) {
-      if (p.getLevel() == ParallelLevel::BLOCK &&
-          p.getCooperativeAttr() && p.getCooperativeAttr().getValue())
+      if (p.getLevel() == ParallelLevel::BLOCK && p.getCooperativeAttr() &&
+          p.getCooperativeAttr().getValue())
         found = true;
     });
     return found;
@@ -512,7 +498,7 @@ private:
   // barrier. The GPU/NVVM dialects have no grid-barrier op, so we synthesize
   // one from a device-global arrival counter and generation counter using
   // atomic RMW ops (release-acquire), mirroring cooperative_groups grid sync.
-  void emitGridBarrier(OpBuilder &builder, Location loc) {
+  void emitGridBarrier(OpBuilder& builder, Location loc) {
     auto i32Type = builder.getI32Type();
     auto idxType = builder.getIndexType();
     auto globalAS = builder.getIntegerAttr(builder.getIntegerType(64), 1);
@@ -524,26 +510,26 @@ private:
         builder.create<memref::GetGlobalOp>(loc, cntMemTy, gridGenGlobal_);
 
     Value zeroIdx = builder.create<arith::ConstantIndexOp>(loc, 0);
-    Value zeroI32 = builder.create<arith::ConstantOp>(
-        loc, builder.getI32IntegerAttr(0));
-    Value oneI32 = builder.create<arith::ConstantOp>(
-        loc, builder.getI32IntegerAttr(1));
+    Value zeroI32 =
+        builder.create<arith::ConstantOp>(loc, builder.getI32IntegerAttr(0));
+    Value oneI32 =
+        builder.create<arith::ConstantOp>(loc, builder.getI32IntegerAttr(1));
 
     // Total number of blocks in the launched grid (gridDim.x * y * z).
-    Value gx = builder.create<mgpu::GridDimOp>(loc, idxType,
-                                               mgpu::Dimension::x);
-    Value gy = builder.create<mgpu::GridDimOp>(loc, idxType,
-                                               mgpu::Dimension::y);
-    Value gz = builder.create<mgpu::GridDimOp>(loc, idxType,
-                                               mgpu::Dimension::z);
+    Value gx =
+        builder.create<mgpu::GridDimOp>(loc, idxType, mgpu::Dimension::x);
+    Value gy =
+        builder.create<mgpu::GridDimOp>(loc, idxType, mgpu::Dimension::y);
+    Value gz =
+        builder.create<mgpu::GridDimOp>(loc, idxType, mgpu::Dimension::z);
     Value gxy = builder.create<arith::MulIOp>(loc, gx, gy);
     Value gxyz = builder.create<arith::MulIOp>(loc, gxy, gz);
     Value gridSize = builder.create<arith::IndexCastOp>(loc, i32Type, gxyz);
     Value gridm1 = builder.create<arith::SubIOp>(loc, gridSize, oneI32);
 
     // Only thread 0 of each block participates in the grid barrier.
-    Value tidX = builder.create<mgpu::ThreadIdOp>(loc, idxType,
-                                                  mgpu::Dimension::x);
+    Value tidX =
+        builder.create<mgpu::ThreadIdOp>(loc, idxType, mgpu::Dimension::x);
     Value isT0 = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
                                                tidX, zeroIdx);
 
@@ -576,9 +562,9 @@ private:
         builder.create<memref::AtomicRMWOp>(
             loc, i32Type, arith::AtomicRMWKind::assign, zeroI32, cntRef,
             ValueRange{zeroIdx});
-        builder.create<memref::AtomicRMWOp>(
-            loc, i32Type, arith::AtomicRMWKind::addi, oneI32, genRef,
-            ValueRange{zeroIdx});
+        builder.create<memref::AtomicRMWOp>(loc, i32Type,
+                                            arith::AtomicRMWKind::addi, oneI32,
+                                            genRef, ValueRange{zeroIdx});
       }
       builder.create<scf::YieldOp>(loc, gen);
       builder.setInsertionPointToStart(&phase1.getElseRegion().front());
@@ -595,20 +581,20 @@ private:
     {
       OpBuilder::InsertionGuard guard(builder);
       builder.setInsertionPointToStart(&phase3.getThenRegion().front());
-      Value falseVal = builder.create<arith::ConstantOp>(
-          loc, builder.getBoolAttr(false));
+      Value falseVal =
+          builder.create<arith::ConstantOp>(loc, builder.getBoolAttr(false));
       builder.create<scf::WhileOp>(
           loc, TypeRange{builder.getI1Type()}, ValueRange{falseVal},
-          [&](OpBuilder &b, Location l, ValueRange args) {
+          [&](OpBuilder& b, Location l, ValueRange args) {
             Value g2 = b.create<memref::AtomicRMWOp>(
                 l, i32Type, arith::AtomicRMWKind::addi, zeroI32, genRef,
                 ValueRange{zeroIdx});
             // Keep polling while the generation has not advanced yet.
-            Value stillWaiting = b.create<arith::CmpIOp>(
-                l, arith::CmpIPredicate::eq, g2, myGen);
+            Value stillWaiting =
+                b.create<arith::CmpIOp>(l, arith::CmpIPredicate::eq, g2, myGen);
             b.create<scf::ConditionOp>(l, stillWaiting, args);
           },
-          [&](OpBuilder &b, Location l, ValueRange args) {
+          [&](OpBuilder& b, Location l, ValueRange args) {
             b.create<scf::YieldOp>(l, args);
           });
       // Acquire: once the generation advances, make all prior global writes
@@ -621,11 +607,10 @@ private:
     builder.create<mgpu::BarrierOp>(loc);
   }
 
-  Value flattenIfNeeded(OpBuilder &builder, Location loc, Value memref,
+  Value flattenIfNeeded(OpBuilder& builder, Location loc, Value memref,
                         unsigned numIndices) {
     auto memTy = cast<MemRefType>(memref.getType());
-    if ((unsigned)memTy.getRank() == numIndices)
-      return memref;
+    if ((unsigned)memTy.getRank() == numIndices) return memref;
     int64_t totalElems = 1;
     for (auto d : memTy.getShape()) totalElems *= d;
     Value base = getBaseMemRef(memref);
@@ -642,13 +627,13 @@ private:
     if (hasDynOffset) {
       auto layout = StridedLayoutAttr::get(builder.getContext(),
                                            ShapedType::kDynamic, {1});
-      flatTy = MemRefType::get({totalElems}, memTy.getElementType(),
-                               layout, memTy.getMemorySpace());
+      flatTy = MemRefType::get({totalElems}, memTy.getElementType(), layout,
+                               memTy.getMemorySpace());
     } else if (staticOff != 0) {
-      auto layout = StridedLayoutAttr::get(builder.getContext(),
-                                           staticOff, {1});
-      flatTy = MemRefType::get({totalElems}, memTy.getElementType(),
-                               layout, memTy.getMemorySpace());
+      auto layout =
+          StridedLayoutAttr::get(builder.getContext(), staticOff, {1});
+      flatTy = MemRefType::get({totalElems}, memTy.getElementType(), layout,
+                               memTy.getMemorySpace());
     } else {
       flatTy = MemRefType::get({totalElems}, memTy.getElementType(),
                                AffineMap{}, memTy.getMemorySpace());
@@ -663,8 +648,8 @@ private:
         ArrayRef<OpFoldResult>{builder.getIndexAttr(1)});
   }
 
-  void gpuConvertLoadElem(OpBuilder &builder, Location loc,
-                         TensorLoadElemOp loadElem, IRMapping &mapping) {
+  void gpuConvertLoadElem(OpBuilder& builder, Location loc,
+                          TensorLoadElemOp loadElem, IRMapping& mapping) {
     Value src = mapping.lookup(loadElem.getSource());
     SmallVector<Value> indices;
     for (auto idx : loadElem.getIndices())
@@ -674,8 +659,8 @@ private:
     mapping.map(loadElem.getResult(), loaded.getResult());
   }
 
-  void gpuConvertStoreElem(OpBuilder &builder, Location loc,
-                           TensorStoreElemOp storeElem, IRMapping &mapping) {
+  void gpuConvertStoreElem(OpBuilder& builder, Location loc,
+                           TensorStoreElemOp storeElem, IRMapping& mapping) {
     Value dst = mapping.lookup(storeElem.getDest());
     Value val = mapping.lookup(storeElem.getValue());
     SmallVector<Value> indices;
@@ -694,9 +679,8 @@ private:
     builder.create<memref::StoreOp>(loc, val, dst, indices);
   }
 
-  void gpuConvertReduceElem(OpBuilder &builder, Location loc,
-                            TensorReduceElemOp reduceElem,
-                            IRMapping &mapping) {
+  void gpuConvertReduceElem(OpBuilder& builder, Location loc,
+                            TensorReduceElemOp reduceElem, IRMapping& mapping) {
     Value dst = mapping.lookup(reduceElem.getDest());
     Value val = mapping.lookup(reduceElem.getValue());
     SmallVector<Value> indices;
@@ -713,27 +697,25 @@ private:
   }
 
   mgpu::MMAMatrixType getMMAMatrixType(coir::MMAFragType fragTy,
-                                      StringRef role) {
-    return mgpu::MMAMatrixType::get(fragTy.getShape(),
-                                    fragTy.getElementType(), role);
+                                       StringRef role) {
+    return mgpu::MMAMatrixType::get(fragTy.getShape(), fragTy.getElementType(),
+                                    role);
   }
 
   bool getFragTranspose(Value coirVal) {
     auto it = mmaFragTranspose_.find(coirVal);
-    if (it != mmaFragTranspose_.end())
-      return it->second;
+    if (it != mmaFragTranspose_.end()) return it->second;
     return false;
   }
 
   StringRef getFragRole(Value coirVal) {
     auto it = mmaFragRoles_.find(coirVal);
-    if (it != mmaFragRoles_.end())
-      return it->second;
+    if (it != mmaFragRoles_.end()) return it->second;
     return "COp";
   }
 
-  void convertMMAFill(OpBuilder &builder, Location loc, MMAFillOp fill,
-                      IRMapping &mapping) {
+  void convertMMAFill(OpBuilder& builder, Location loc, MMAFillOp fill,
+                      IRMapping& mapping) {
     auto fragTy = cast<MMAFragType>(fill.getResult().getType());
     auto matTy = getMMAMatrixType(fragTy, "COp");
     Value val = mapping.lookup(fill.getValue());
@@ -742,8 +724,8 @@ private:
     mapping.map(fill.getResult(), result.getResult());
   }
 
-  void convertMMALoad(OpBuilder &builder, Location loc, MMALoadOp load,
-                      IRMapping &mapping) {
+  void convertMMALoad(OpBuilder& builder, Location loc, MMALoadOp load,
+                      IRMapping& mapping) {
     auto fragTy = cast<MMAFragType>(load.getResult().getType());
     StringRef role = getFragRole(load.getResult());
     auto matTy = getMMAMatrixType(fragTy, role);
@@ -757,24 +739,21 @@ private:
       auto strides = strided.getStrides();
       if (!strides.empty() && strides[0] != ShapedType::kDynamic)
         leadDim = strides[0];
-    } else if (auto castOp =
-                   src.getDefiningOp<memref::ReinterpretCastOp>()) {
+    } else if (auto castOp = src.getDefiningOp<memref::ReinterpretCastOp>()) {
       auto staticStrides = castOp.getStaticStrides();
-      if (!staticStrides.empty() &&
-          staticStrides[0] != ShapedType::kDynamic)
+      if (!staticStrides.empty() && staticStrides[0] != ShapedType::kDynamic)
         leadDim = staticStrides[0];
     }
 
     Value zero = builder.create<arith::ConstantIndexOp>(loc, 0);
     auto result = builder.create<mgpu::SubgroupMmaLoadMatrixOp>(
-        loc, matTy, src, ValueRange{zero, zero},
-        builder.getIndexAttr(leadDim),
+        loc, matTy, src, ValueRange{zero, zero}, builder.getIndexAttr(leadDim),
         /*transpose=*/UnitAttr());
     mapping.map(load.getResult(), result.getResult());
   }
 
-  void convertMMAExec(OpBuilder &builder, Location loc, MMAExecOp exec,
-                      IRMapping &mapping) {
+  void convertMMAExec(OpBuilder& builder, Location loc, MMAExecOp exec,
+                      IRMapping& mapping) {
     Value acc = mapping.lookup(exec.getAccumulator());
     Value lhs = mapping.lookup(exec.getLhs());
     Value rhs = mapping.lookup(exec.getRhs());
@@ -785,35 +764,33 @@ private:
     mapping.map(exec.getResult(), result.getResult());
   }
 
-  void convertMMAStore(OpBuilder &builder, Location loc, MMAStoreOp store,
-                       IRMapping &mapping) {
+  void convertMMAStore(OpBuilder& builder, Location loc, MMAStoreOp store,
+                       IRMapping& mapping) {
     Value frag = mapping.lookup(store.getFragment());
     Value dst = mapping.lookup(store.getDest());
     auto dstMemTy = cast<MemRefType>(dst.getType());
     auto fragTy = cast<mgpu::MMAMatrixType>(frag.getType());
 
-    bool needsConversion =
-        fragTy.getElementType() != dstMemTy.getElementType();
+    bool needsConversion = fragTy.getElementType() != dstMemTy.getElementType();
 
     if (needsConversion) {
       auto fragShape = fragTy.getShape();
       auto shmNameIt = mmaStoreShmNames_.find(store.getOperation());
       assert(shmNameIt != mmaStoreShmNames_.end());
       int64_t elemsPerWarp = mmaStoreShmElemsPerWarp_[store.getOperation()];
-      auto addrSpace =
-          builder.getIntegerAttr(builder.getIntegerType(64), 3);
+      auto addrSpace = builder.getIntegerAttr(builder.getIntegerType(64), 3);
 
       // Get the full 1D shared buffer (sized for all warps).
-      auto globalMemTy = MemRefType::get(
-          {warpsPerBlock_ * elemsPerWarp}, fragTy.getElementType(),
-          AffineMap{}, addrSpace);
-      auto globalRef = builder.create<memref::GetGlobalOp>(
-          loc, globalMemTy, shmNameIt->second);
+      auto globalMemTy =
+          MemRefType::get({warpsPerBlock_ * elemsPerWarp},
+                          fragTy.getElementType(), AffineMap{}, addrSpace);
+      auto globalRef = builder.create<memref::GetGlobalOp>(loc, globalMemTy,
+                                                           shmNameIt->second);
       Value zero = builder.create<arith::ConstantIndexOp>(loc, 0);
 
       // Compute warp index: threadIdx.x / 32
-      Value tidX = builder.create<mgpu::ThreadIdOp>(
-          loc, builder.getIndexType(), mgpu::Dimension::x);
+      Value tidX = builder.create<mgpu::ThreadIdOp>(loc, builder.getIndexType(),
+                                                    mgpu::Dimension::x);
       Value warpSize = builder.create<arith::ConstantIndexOp>(loc, 32);
       Value warpId = builder.create<arith::DivUIOp>(loc, tidX, warpSize);
       Value elemsPerWarpVal =
@@ -825,20 +802,18 @@ private:
       // Row index = warpId * fragShape[0], col index = 0.
       Value rowsPerWarp =
           builder.create<arith::ConstantIndexOp>(loc, fragShape[0]);
-      Value rowOffset =
-          builder.create<arith::MulIOp>(loc, warpId, rowsPerWarp);
+      Value rowOffset = builder.create<arith::MulIOp>(loc, warpId, rowsPerWarp);
 
-      auto tmpMemTy = MemRefType::get(
-          {warpsPerBlock_ * fragShape[0], fragShape[1]},
-          fragTy.getElementType(), AffineMap{}, addrSpace);
+      auto tmpMemTy =
+          MemRefType::get({warpsPerBlock_ * fragShape[0], fragShape[1]},
+                          fragTy.getElementType(), AffineMap{}, addrSpace);
       auto globalRef2D = builder.create<memref::ReinterpretCastOp>(
           loc, tmpMemTy, globalRef.getResult(), builder.getIndexAttr(0),
           ArrayRef<OpFoldResult>{
               builder.getIndexAttr(warpsPerBlock_ * fragShape[0]),
               builder.getIndexAttr(fragShape[1])},
-          ArrayRef<OpFoldResult>{
-              builder.getIndexAttr(fragShape[1]),
-              builder.getIndexAttr(1)});
+          ArrayRef<OpFoldResult>{builder.getIndexAttr(fragShape[1]),
+                                 builder.getIndexAttr(1)});
 
       builder.create<mgpu::SubgroupMmaStoreMatrixOp>(
           loc, frag, globalRef2D, ValueRange{rowOffset, zero},
@@ -848,10 +823,8 @@ private:
 
       // Read from warp's portion and convert with 2D indexing into dst.
       Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
-      Value nRows =
-          builder.create<arith::ConstantIndexOp>(loc, fragShape[0]);
-      Value nCols =
-          builder.create<arith::ConstantIndexOp>(loc, fragShape[1]);
+      Value nRows = builder.create<arith::ConstantIndexOp>(loc, fragShape[0]);
+      Value nCols = builder.create<arith::ConstantIndexOp>(loc, fragShape[1]);
 
       auto outerLoop = builder.create<scf::ForOp>(loc, zero, nRows, one);
       {
@@ -859,25 +832,21 @@ private:
         builder.setInsertionPointToStart(outerLoop.getBody());
         Value row = outerLoop.getInductionVar();
 
-        auto innerLoop =
-            builder.create<scf::ForOp>(loc, zero, nCols, one);
+        auto innerLoop = builder.create<scf::ForOp>(loc, zero, nCols, one);
         {
           OpBuilder::InsertionGuard innerGuard(builder);
           builder.setInsertionPointToStart(innerLoop.getBody());
           Value col = innerLoop.getInductionVar();
 
-          Value linearIdx =
-              builder.create<arith::MulIOp>(loc, row, nCols);
-          linearIdx =
-              builder.create<arith::AddIOp>(loc, linearIdx, col);
+          Value linearIdx = builder.create<arith::MulIOp>(loc, row, nCols);
+          linearIdx = builder.create<arith::AddIOp>(loc, linearIdx, col);
           Value srcIdx =
               builder.create<arith::AddIOp>(loc, linearIdx, warpOffset);
-          Value elem = builder.create<memref::LoadOp>(
-              loc, globalRef, ValueRange{srcIdx});
+          Value elem = builder.create<memref::LoadOp>(loc, globalRef,
+                                                      ValueRange{srcIdx});
           Value cvt = builder.create<arith::TruncFOp>(
               loc, dstMemTy.getElementType(), elem);
-          builder.create<memref::StoreOp>(loc, cvt, dst,
-                                          ValueRange{row, col});
+          builder.create<memref::StoreOp>(loc, cvt, dst, ValueRange{row, col});
         }
       }
       return;
@@ -889,34 +858,30 @@ private:
       auto strides = strided.getStrides();
       if (!strides.empty() && strides[0] != ShapedType::kDynamic)
         leadDim = strides[0];
-    } else if (auto castOp =
-                   dst.getDefiningOp<memref::ReinterpretCastOp>()) {
+    } else if (auto castOp = dst.getDefiningOp<memref::ReinterpretCastOp>()) {
       auto staticStrides = castOp.getStaticStrides();
-      if (!staticStrides.empty() &&
-          staticStrides[0] != ShapedType::kDynamic)
+      if (!staticStrides.empty() && staticStrides[0] != ShapedType::kDynamic)
         leadDim = staticStrides[0];
     }
 
     Value zero = builder.create<arith::ConstantIndexOp>(loc, 0);
     builder.create<mgpu::SubgroupMmaStoreMatrixOp>(
-        loc, frag, dst, ValueRange{zero, zero},
-        builder.getIndexAttr(leadDim),
+        loc, frag, dst, ValueRange{zero, zero}, builder.getIndexAttr(leadDim),
         /*transpose=*/UnitAttr());
   }
 
-  void convertGroupParallel(OpBuilder &builder, Location loc,
-                            ParallelOp par, KernelConvertCtx &ctx) {
-    auto &body = par.getBody();
+  void convertGroupParallel(OpBuilder& builder, Location loc, ParallelOp par,
+                            KernelConvertCtx& ctx) {
+    auto& body = par.getBody();
     if (body.empty()) return;
     auto args = body.getArguments();
     auto bounds = par.getBounds();
-    int warpScale =
-        (par.getLevel() == ParallelLevel::GROUPx4) ? 4 : 1;
+    int warpScale = (par.getLevel() == ParallelLevel::GROUPx4) ? 4 : 1;
 
-    Value tidX = builder.create<mgpu::ThreadIdOp>(
-        loc, builder.getIndexType(), mgpu::Dimension::x);
-    Value warpSizeVal = builder.create<arith::ConstantIndexOp>(
-        loc, 32 * warpScale);
+    Value tidX = builder.create<mgpu::ThreadIdOp>(loc, builder.getIndexType(),
+                                                  mgpu::Dimension::x);
+    Value warpSizeVal =
+        builder.create<arith::ConstantIndexOp>(loc, 32 * warpScale);
     Value warpId = builder.create<arith::DivUIOp>(loc, tidX, warpSizeVal);
 
     if (args.size() == 1) {
@@ -924,22 +889,19 @@ private:
     } else {
       Value remaining = warpId;
       for (int i = (int)args.size() - 1; i >= 0; --i) {
-        Value bound =
-            builder.create<arith::ConstantIndexOp>(loc, bounds[i]);
-        Value dimIdx =
-            builder.create<arith::RemUIOp>(loc, remaining, bound);
+        Value bound = builder.create<arith::ConstantIndexOp>(loc, bounds[i]);
+        Value dimIdx = builder.create<arith::RemUIOp>(loc, remaining, bound);
         ctx.mapping.map(args[i], dimIdx);
-        remaining =
-            builder.create<arith::DivUIOp>(loc, remaining, bound);
+        remaining = builder.create<arith::DivUIOp>(loc, remaining, bound);
       }
     }
 
-    for (auto &op : body.front().getOperations())
+    for (auto& op : body.front().getOperations())
       convertOp(builder, loc, op, ctx);
   }
 
-  void convertTensorTile(OpBuilder &builder, Location loc,
-                         TensorTileOp tileOp, IRMapping &mapping) {
+  void convertTensorTile(OpBuilder& builder, Location loc, TensorTileOp tileOp,
+                         IRMapping& mapping) {
     auto srcTy = cast<coir::TensorType>(tileOp.getSource().getType());
     auto tileTy = cast<coir::TensorType>(tileOp.getResult().getType());
     Value src = mapping.lookup(tileOp.getSource());
@@ -963,8 +925,7 @@ private:
         Value idx = mapping.lookup(indices[i]);
         int64_t tileDim = (i < tileShape.size()) ? tileShape[i] : 1;
         int64_t elemStride = tileDim * srcStrides[i];
-        Value stride =
-            builder.create<arith::ConstantIndexOp>(loc, elemStride);
+        Value stride = builder.create<arith::ConstantIndexOp>(loc, elemStride);
         Value term = builder.create<arith::MulIOp>(loc, idx, stride);
         offset = builder.create<arith::AddIOp>(loc, offset, term);
       }
@@ -992,12 +953,11 @@ private:
     bool needsLayout = hasDynOffset || staticOffset != 0;
     MemRefType tileMem;
     if (needsLayout) {
-      int64_t layoutOffset =
-          hasDynOffset ? ShapedType::kDynamic : staticOffset;
-      auto layout = StridedLayoutAttr::get(builder.getContext(),
-                                           layoutOffset, tileStrides);
-      tileMem = MemRefType::get(tileShape, srcMemTy.getElementType(),
-                                layout, srcMemTy.getMemorySpace());
+      int64_t layoutOffset = hasDynOffset ? ShapedType::kDynamic : staticOffset;
+      auto layout = StridedLayoutAttr::get(builder.getContext(), layoutOffset,
+                                           tileStrides);
+      tileMem = MemRefType::get(tileShape, srcMemTy.getElementType(), layout,
+                                srcMemTy.getMemorySpace());
     } else {
       tileMem = MemRefType::get(tileShape, srcMemTy.getElementType(),
                                 AffineMap{}, srcMemTy.getMemorySpace());
@@ -1027,18 +987,17 @@ private:
     mapping.map(tileOp.getResult(), cast.getResult());
   }
 
-  void convertTmaCopy(OpBuilder &builder, Location loc,
-                      TmaCopyOp copyOp, KernelConvertCtx &ctx) {
+  void convertTmaCopy(OpBuilder& builder, Location loc, TmaCopyOp copyOp,
+                      KernelConvertCtx& ctx) {
     Value src = ctx.mapping.lookup(copyOp.getSource());
     Value dst = ctx.mapping.lookup(copyOp.getDest());
     emitFlatCopyLoop(builder, loc, src, dst);
     builder.create<mgpu::BarrierOp>(loc);
-    if (copyOp.getToken())
-      ctx.mapping.map(copyOp.getToken(), dst);
+    if (copyOp.getToken()) ctx.mapping.map(copyOp.getToken(), dst);
   }
 
-  void convertDMAInvoke(OpBuilder &builder, Location loc,
-                        DMAInvokeOp invoke, KernelConvertCtx &ctx) {
+  void convertDMAInvoke(OpBuilder& builder, Location loc, DMAInvokeOp invoke,
+                        KernelConvertCtx& ctx) {
     Value desc = invoke.getDesc();
     DMAConstDescOp constDesc = nullptr;
     DMADescRuntimeOp rtDesc = nullptr;
@@ -1059,8 +1018,7 @@ private:
       if (rtDesc && !rtDesc.getOffsets().empty()) {
         auto srcCoirTy =
             cast<coir::TensorType>(constDesc.getSource().getType());
-        auto dstCoirTy =
-            cast<coir::TensorType>(constDesc.getDest().getType());
+        auto dstCoirTy = cast<coir::TensorType>(constDesc.getDest().getType());
         bool isLoad = (srcCoirTy.getMemorySpace() <= 0) &&
                       (dstCoirTy.getMemorySpace() == 1);
 
@@ -1071,8 +1029,8 @@ private:
         auto tileShape = localCoirTy.getShape();
 
         Value sliced =
-            applyTileOffset(builder, loc, globalMem, globalShape,
-                            tileShape, rtDesc.getOffsets(), ctx.mapping);
+            applyTileOffset(builder, loc, globalMem, globalShape, tileShape,
+                            rtDesc.getOffsets(), ctx.mapping);
         if (isLoad)
           emitFlatCopyLoop(builder, loc, sliced, dst);
         else
@@ -1084,10 +1042,10 @@ private:
     builder.create<mgpu::BarrierOp>(loc);
   }
 
-  Value applyTileOffset(OpBuilder &builder, Location loc, Value base,
+  Value applyTileOffset(OpBuilder& builder, Location loc, Value base,
                         ArrayRef<int64_t> baseShape,
-                        ArrayRef<int64_t> tileShape,
-                        OperandRange coirOffsets, IRMapping &mapping) {
+                        ArrayRef<int64_t> tileShape, OperandRange coirOffsets,
+                        IRMapping& mapping) {
     auto baseTy = cast<MemRefType>(base.getType());
 
     SmallVector<int64_t> baseStrides(baseShape.size());
@@ -1128,10 +1086,9 @@ private:
     else
       hasDynOffset = true;
 
-    int64_t layoutOffset =
-        hasDynOffset ? ShapedType::kDynamic : staticOffset;
-    auto layout = StridedLayoutAttr::get(builder.getContext(),
-                                         layoutOffset, tileStrides);
+    int64_t layoutOffset = hasDynOffset ? ShapedType::kDynamic : staticOffset;
+    auto layout =
+        StridedLayoutAttr::get(builder.getContext(), layoutOffset, tileStrides);
     MemRefType tileMem = MemRefType::get(tileShape, baseTy.getElementType(),
                                          layout, baseTy.getMemorySpace());
 
@@ -1157,8 +1114,8 @@ private:
         loc, tileMem, basePtr, offsetAttr, sizes, strides);
   }
 
-  void convertAtomic(OpBuilder &builder, Location loc, AtomicOp atomicOp,
-                     IRMapping &mapping) {
+  void convertAtomic(OpBuilder& builder, Location loc, AtomicOp atomicOp,
+                     IRMapping& mapping) {
     Value dst = mapping.lookup(atomicOp.getDest());
     Value val = mapping.lookup(atomicOp.getValue());
     SmallVector<Value> indices;
@@ -1174,13 +1131,13 @@ private:
 
     auto mapKind = [&]() -> std::optional<RMW> {
       switch (kind) {
-      case AK::Add:  return isFloat ? RMW::addf : RMW::addi;
+      case AK::Add: return isFloat ? RMW::addf : RMW::addi;
       case AK::Exch: return RMW::assign;
-      case AK::Min:  return isFloat ? RMW::minimumf : RMW::mins;
-      case AK::Max:  return isFloat ? RMW::maximumf : RMW::maxs;
-      case AK::And:  return RMW::andi;
-      case AK::Or:   return RMW::ori;
-      default:       return std::nullopt;
+      case AK::Min: return isFloat ? RMW::minimumf : RMW::mins;
+      case AK::Max: return isFloat ? RMW::maximumf : RMW::maxs;
+      case AK::And: return RMW::andi;
+      case AK::Or: return RMW::ori;
+      default: return std::nullopt;
       }
     };
 
@@ -1204,9 +1161,9 @@ private:
       if (atomicOp.getResult())
         mapping.map(atomicOp.getResult(), rmw.getResult());
     } else {
-      auto genAtomic = builder.create<memref::GenericAtomicRMWOp>(
-          loc, dst, indices);
-      Block *body = &genAtomic.body().front();
+      auto genAtomic =
+          builder.create<memref::GenericAtomicRMWOp>(loc, dst, indices);
+      Block* body = &genAtomic.body().front();
       {
         OpBuilder::InsertionGuard guard(builder);
         builder.setInsertionPointToStart(body);
@@ -1229,25 +1186,23 @@ private:
     }
   }
 
-  void convertScfIf(OpBuilder &builder, Location loc, scf::IfOp ifOp,
-                    KernelConvertCtx &ctx) {
+  void convertScfIf(OpBuilder& builder, Location loc, scf::IfOp ifOp,
+                    KernelConvertCtx& ctx) {
     Value cond = ctx.mapping.lookup(ifOp.getCondition());
 
     bool hasElse = !ifOp.getElseRegion().empty();
     SmallVector<Type> resultTypes;
-    for (auto r : ifOp.getResults())
-      resultTypes.push_back(r.getType());
+    for (auto r : ifOp.getResults()) resultTypes.push_back(r.getType());
 
     auto newIf = builder.create<scf::IfOp>(loc, resultTypes, cond, hasElse);
 
     {
       OpBuilder::InsertionGuard guard(builder);
-      Block &thenBlock = newIf.getThenRegion().front();
-      if (thenBlock.mightHaveTerminator())
-        thenBlock.getTerminator()->erase();
+      Block& thenBlock = newIf.getThenRegion().front();
+      if (thenBlock.mightHaveTerminator()) thenBlock.getTerminator()->erase();
       builder.setInsertionPointToEnd(&thenBlock);
 
-      for (auto &op : ifOp.getThenRegion().front().getOperations()) {
+      for (auto& op : ifOp.getThenRegion().front().getOperations()) {
         if (isa<scf::YieldOp>(op)) {
           SmallVector<Value> yieldVals;
           for (auto v : op.getOperands())
@@ -1257,18 +1212,16 @@ private:
         }
         convertOp(builder, loc, op, ctx);
       }
-      if (!thenBlock.mightHaveTerminator())
-        builder.create<scf::YieldOp>(loc);
+      if (!thenBlock.mightHaveTerminator()) builder.create<scf::YieldOp>(loc);
     }
 
     if (hasElse) {
       OpBuilder::InsertionGuard guard(builder);
-      Block &elseBlock = newIf.getElseRegion().front();
-      if (elseBlock.mightHaveTerminator())
-        elseBlock.getTerminator()->erase();
+      Block& elseBlock = newIf.getElseRegion().front();
+      if (elseBlock.mightHaveTerminator()) elseBlock.getTerminator()->erase();
       builder.setInsertionPointToEnd(&elseBlock);
 
-      for (auto &op : ifOp.getElseRegion().front().getOperations()) {
+      for (auto& op : ifOp.getElseRegion().front().getOperations()) {
         if (isa<scf::YieldOp>(op)) {
           SmallVector<Value> yieldVals;
           for (auto v : op.getOperands())
@@ -1278,17 +1231,15 @@ private:
         }
         convertOp(builder, loc, op, ctx);
       }
-      if (!elseBlock.mightHaveTerminator())
-        builder.create<scf::YieldOp>(loc);
+      if (!elseBlock.mightHaveTerminator()) builder.create<scf::YieldOp>(loc);
     }
 
     for (unsigned i = 0; i < ifOp.getNumResults(); ++i)
       ctx.mapping.map(ifOp.getResult(i), newIf.getResult(i));
   }
 
-  Value extractOffset(OpBuilder &builder, Location loc, Value memref) {
-    if (auto castOp =
-            memref.getDefiningOp<memref::ReinterpretCastOp>()) {
+  Value extractOffset(OpBuilder& builder, Location loc, Value memref) {
+    if (auto castOp = memref.getDefiningOp<memref::ReinterpretCastOp>()) {
       auto staticOffsets = castOp.getStaticOffsets();
       if (!staticOffsets.empty() && staticOffsets[0] == ShapedType::kDynamic)
         return castOp.getOffsets()[0];
@@ -1299,8 +1250,7 @@ private:
   }
 
   Value getBaseMemRef(Value memref) {
-    if (auto castOp =
-            memref.getDefiningOp<memref::ReinterpretCastOp>())
+    if (auto castOp = memref.getDefiningOp<memref::ReinterpretCastOp>())
       return castOp.getSource();
     return memref;
   }

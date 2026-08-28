@@ -22,9 +22,7 @@ void Interpreter::ExecBlock(AST::Node& node) {
   if (!node.HasBody()) return;
   auto body = node.GetBody();
   if (!body) return;
-  for (size_t i = 0; i < body->Count(); ++i) {
-    ExecNode(*body->SubAt(i));
-  }
+  for (size_t i = 0; i < body->Count(); ++i) { ExecNode(*body->SubAt(i)); }
 }
 
 void Interpreter::ExecNode(AST::Node& node) {
@@ -47,9 +45,7 @@ void Interpreter::ExecNode(AST::Node& node) {
   }
 }
 
-void Interpreter::ExecFunction(AST::ChoreoFunction& fn) {
-  ExecBlock(fn);
-}
+void Interpreter::ExecFunction(AST::ChoreoFunction& fn) { ExecBlock(fn); }
 
 void Interpreter::ExecParallel(AST::ParallelBy& pb) {
   size_t n = pb.SubPVCount();
@@ -138,8 +134,7 @@ void Interpreter::ExecIfElse(AST::IfElseBlock& ife) {
   } else if (ife.HasElse()) {
     auto body = ife.else_stmts;
     if (body) {
-      for (size_t i = 0; i < body->Count(); ++i)
-        ExecNode(*body->SubAt(i));
+      for (size_t i = 0; i < body->Count(); ++i) ExecNode(*body->SubAt(i));
     }
   }
 }
@@ -228,27 +223,19 @@ void Interpreter::ExecMemoryDecl(AST::Memory&) {
 }
 
 Value Interpreter::Eval(AST::Node& node) {
-  if (auto* il = dyn_cast<AST::IntLiteral>(&node)) {
-    return il->Val();
-  }
+  if (auto* il = dyn_cast<AST::IntLiteral>(&node)) { return il->Val(); }
   if (auto* fl = dyn_cast<AST::FloatLiteral>(&node)) {
     if (fl->IsFloat64()) return fl->Val_f64();
     return (double)fl->Val_f32();
   }
-  if (auto* sl = dyn_cast<AST::StringLiteral>(&node)) {
-    return sl->Val();
-  }
-  if (auto* bl = dyn_cast<AST::BoolLiteral>(&node)) {
-    return bl->Val();
-  }
+  if (auto* sl = dyn_cast<AST::StringLiteral>(&node)) { return sl->Val(); }
+  if (auto* bl = dyn_cast<AST::BoolLiteral>(&node)) { return bl->Val(); }
   if (auto* id = dyn_cast<AST::Identifier>(&node)) {
     auto it = vars_.find(id->name);
     if (it != vars_.end()) return it->second;
     return int64_t(0);
   }
-  if (auto* expr = dyn_cast<AST::Expr>(&node)) {
-    return EvalExpr(*expr);
-  }
+  if (auto* expr = dyn_cast<AST::Expr>(&node)) { return EvalExpr(*expr); }
   if (auto* da = dyn_cast<AST::DataAccess>(&node)) {
     return EvalDataAccess(*da);
   }
@@ -257,8 +244,7 @@ Value Interpreter::Eval(AST::Node& node) {
     if (!val_node) return int64_t(0);
     Value inner = Eval(*val_node);
     auto bt = ce->ToType();
-    if (bt == BaseType::F32 || bt == BaseType::F64)
-      return ToDouble(inner);
+    if (bt == BaseType::F32 || bt == BaseType::F64) return ToDouble(inner);
     return ToInt(inner);
   }
   return int64_t(0);
@@ -320,25 +306,31 @@ Value Interpreter::EvalExpr(AST::Expr& expr) {
       int64_t d = ToInt(rv);
       return d != 0 ? Value(ToInt(lv) % d) : Value(int64_t(0));
     }
-    case Op::Lt: return Value(use_float ? ToDouble(lv) < ToDouble(rv)
-                                        : ToInt(lv) < ToInt(rv));
-    case Op::Gt: return Value(use_float ? ToDouble(lv) > ToDouble(rv)
-                                        : ToInt(lv) > ToInt(rv));
-    case Op::Le: return Value(use_float ? ToDouble(lv) <= ToDouble(rv)
-                                        : ToInt(lv) <= ToInt(rv));
-    case Op::Ge: return Value(use_float ? ToDouble(lv) >= ToDouble(rv)
-                                        : ToInt(lv) >= ToInt(rv));
-    case Op::Eq: return Value(use_float ? ToDouble(lv) == ToDouble(rv)
-                                        : ToInt(lv) == ToInt(rv));
-    case Op::Ne: return Value(use_float ? ToDouble(lv) != ToDouble(rv)
-                                        : ToInt(lv) != ToInt(rv));
+    case Op::Lt:
+      return Value(use_float ? ToDouble(lv) < ToDouble(rv)
+                             : ToInt(lv) < ToInt(rv));
+    case Op::Gt:
+      return Value(use_float ? ToDouble(lv) > ToDouble(rv)
+                             : ToInt(lv) > ToInt(rv));
+    case Op::Le:
+      return Value(use_float ? ToDouble(lv) <= ToDouble(rv)
+                             : ToInt(lv) <= ToInt(rv));
+    case Op::Ge:
+      return Value(use_float ? ToDouble(lv) >= ToDouble(rv)
+                             : ToInt(lv) >= ToInt(rv));
+    case Op::Eq:
+      return Value(use_float ? ToDouble(lv) == ToDouble(rv)
+                             : ToInt(lv) == ToInt(rv));
+    case Op::Ne:
+      return Value(use_float ? ToDouble(lv) != ToDouble(rv)
+                             : ToInt(lv) != ToInt(rv));
     case Op::LogicAnd: return Value(ToBool(lv) && ToBool(rv));
-    case Op::LogicOr:  return Value(ToBool(lv) || ToBool(rv));
+    case Op::LogicOr: return Value(ToBool(lv) || ToBool(rv));
     case Op::BitAnd: return Value(ToInt(lv) & ToInt(rv));
-    case Op::BitOr:  return Value(ToInt(lv) | ToInt(rv));
+    case Op::BitOr: return Value(ToInt(lv) | ToInt(rv));
     case Op::BitXor: return Value(ToInt(lv) ^ ToInt(rv));
-    case Op::Shl:    return Value(ToInt(lv) << ToInt(rv));
-    case Op::Shr:    return Value(ToInt(lv) >> ToInt(rv));
+    case Op::Shl: return Value(ToInt(lv) << ToInt(rv));
+    case Op::Shr: return Value(ToInt(lv) >> ToInt(rv));
     default: break;
     }
   }
@@ -348,7 +340,7 @@ Value Interpreter::EvalExpr(AST::Expr& expr) {
     Value v = Eval(*operand);
     switch (op) {
     case Op::LogicNot: return Value(!ToBool(v));
-    case Op::BitNot:   return Value(~ToInt(v));
+    case Op::BitNot: return Value(~ToInt(v));
     default: return v;
     }
   }
@@ -377,15 +369,13 @@ Value Interpreter::EvalDataAccess(AST::DataAccess& da) {
 
   if (indices.size() == 1) {
     int64_t idx = ToInt(Eval(*indices[0]));
-    if (idx >= 0 && idx < (int64_t)arr.data.size())
-      return arr.data[idx];
+    if (idx >= 0 && idx < (int64_t)arr.data.size()) return arr.data[idx];
   } else if (indices.size() >= 2) {
     int64_t r = ToInt(Eval(*indices[0]));
     int64_t c = ToInt(Eval(*indices[1]));
     int64_t cols = arr.dims.size() >= 2 ? arr.dims[1] : 1;
     int64_t flat = r * cols + c;
-    if (flat >= 0 && flat < (int64_t)arr.data.size())
-      return arr.data[flat];
+    if (flat >= 0 && flat < (int64_t)arr.data.size()) return arr.data[flat];
   }
   return 0.0;
 }

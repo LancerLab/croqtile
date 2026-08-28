@@ -11,10 +11,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Dialect/CoIR/Passes.h"
 #include "Dialect/CoIR/CoIRDialect.h"
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
+#include "Dialect/CoIR/Passes.h"
 
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
@@ -47,14 +47,13 @@ struct RedundantFencePattern : public OpRewritePattern<FenceOp> {
   using OpRewritePattern<FenceOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(FenceOp op,
-                                PatternRewriter &rewriter) const override {
+                                PatternRewriter& rewriter) const override {
     // Walk backward within the block. Effect-free ops (const.desc, check,
     // prefetch.desc, runtime.desc) do not order memory, so they are skipped;
     // any other operation is a memory boundary that ends the search.
-    for (Operation *prev = op->getPrevNode(); prev != nullptr;
+    for (Operation* prev = op->getPrevNode(); prev != nullptr;
          prev = prev->getPrevNode()) {
-      if (mlir::isMemoryEffectFree(prev))
-        continue;
+      if (mlir::isMemoryEffectFree(prev)) continue;
       if (auto prevFence = dyn_cast<FenceOp>(prev)) {
         if (sameFence(prevFence, op)) {
           rewriter.eraseOp(op);

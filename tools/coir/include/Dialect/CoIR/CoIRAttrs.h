@@ -2,8 +2,8 @@
 #define COIR_ATTRS_H
 
 #include "mlir/IR/Attributes.h"
-#include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/DialectImplementation.h"
 
 namespace coir {
 class CoIRDialect;

@@ -1,10 +1,10 @@
 #ifndef COIR_TYPES_H
 #define COIR_TYPES_H
 
-#include "mlir/IR/Types.h"
-#include "mlir/IR/TypeSupport.h"
-#include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/DialectImplementation.h"
+#include "mlir/IR/TypeSupport.h"
+#include "mlir/IR/Types.h"
 
 namespace coir {
 class CoIRDialect;

@@ -10,27 +10,27 @@
 
 #ifdef COIR_HAS_CLANG
 
-#include "clang/Basic/DiagnosticOptions.h"
-#include "clang/CodeGen/CodeGenAction.h"
-#include "clang/Frontend/CompilerInstance.h"
-#include "clang/Frontend/CompilerInvocation.h"
-#include "clang/Frontend/TextDiagnosticPrinter.h"
+  #include "clang/Basic/DiagnosticOptions.h"
+  #include "clang/CodeGen/CodeGenAction.h"
+  #include "clang/Frontend/CompilerInstance.h"
+  #include "clang/Frontend/CompilerInvocation.h"
+  #include "clang/Frontend/TextDiagnosticPrinter.h"
 
-#include "llvm/ADT/IntrusiveRefCntPtr.h"
-#include "llvm/Support/VirtualFileSystem.h"
-#include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/TargetParser/Host.h"
+  #include "llvm/ADT/IntrusiveRefCntPtr.h"
+  #include "llvm/Support/MemoryBuffer.h"
+  #include "llvm/Support/VirtualFileSystem.h"
+  #include "llvm/Support/raw_ostream.h"
+  #include "llvm/TargetParser/Host.h"
 
-#include <vector>
-#include <string>
+  #include <string>
+  #include <vector>
 
 using namespace llvm;
 using namespace clang;
 
 std::unique_ptr<llvm::Module>
-coir::gpu::compileHostToLLVM(StringRef source, LLVMContext &ctx,
-                             const HostCompileOptions &opts) {
+coir::gpu::compileHostToLLVM(StringRef source, LLVMContext& ctx,
+                             const HostCompileOptions& opts) {
   // Build an in-memory VFS overlaid on the real filesystem.
   auto realFS = vfs::getRealFileSystem();
   auto memFS = makeIntrusiveRefCnt<vfs::InMemoryFileSystem>();
@@ -38,10 +38,9 @@ coir::gpu::compileHostToLLVM(StringRef source, LLVMContext &ctx,
   overlayFS->pushOverlay(memFS);
 
   // Inject virtual files (choreo headers, etc.).
-  for (auto &[name, contents] : opts.virtualFiles) {
-    memFS->addFile(
-        "/virtual_inc/" + name, 0,
-        MemoryBuffer::getMemBufferCopy(contents, name));
+  for (auto& [name, contents] : opts.virtualFiles) {
+    memFS->addFile("/virtual_inc/" + name, 0,
+                   MemoryBuffer::getMemBufferCopy(contents, name));
   }
 
   // Inject the source file itself.
@@ -51,11 +50,7 @@ coir::gpu::compileHostToLLVM(StringRef source, LLVMContext &ctx,
 
   // Compiler arguments.
   std::vector<std::string> argStrs = {
-      "coir-clang",
-      opts.standard,
-      "-xc++",
-      "-I/virtual_inc",
-      srcPath,
+      "coir-clang", opts.standard, "-xc++", "-I/virtual_inc", srcPath,
   };
 
   if (!opts.cudaHome.empty()) {
@@ -65,10 +60,9 @@ coir::gpu::compileHostToLLVM(StringRef source, LLVMContext &ctx,
   // Suppress default system header warnings for generated code.
   argStrs.push_back("-w");
 
-  std::vector<const char *> args;
+  std::vector<const char*> args;
   args.reserve(argStrs.size());
-  for (auto &s : argStrs)
-    args.push_back(s.c_str());
+  for (auto& s : argStrs) args.push_back(s.c_str());
 
   // Diagnostics.
   auto diagOpts = COIR_DIAG_OPTS_TYPE();
@@ -84,17 +78,17 @@ coir::gpu::compileHostToLLVM(StringRef source, LLVMContext &ctx,
   }
 
   // Set up CompilerInstance.
-#ifdef COIR_LLVM_PRE_21_1
+  #ifdef COIR_LLVM_PRE_21_1
   CompilerInstance ci;
   ci.setInvocation(std::move(invocation));
-#else
+  #else
   CompilerInstance ci(std::move(invocation));
-#endif
+  #endif
   ci.setDiagnostics(&diags);
   ci.createFileManager(overlayFS);
 
   // Target triple -- host.
-  auto &targetOpts = ci.getTargetOpts();
+  auto& targetOpts = ci.getTargetOpts();
   if (targetOpts.Triple.empty())
     targetOpts.Triple = sys::getDefaultTargetTriple();
 
@@ -111,8 +105,8 @@ coir::gpu::compileHostToLLVM(StringRef source, LLVMContext &ctx,
 #else // !COIR_HAS_CLANG
 
 std::unique_ptr<llvm::Module>
-coir::gpu::compileHostToLLVM(llvm::StringRef, llvm::LLVMContext &,
-                             const HostCompileOptions &) {
+coir::gpu::compileHostToLLVM(llvm::StringRef, llvm::LLVMContext&,
+                             const HostCompileOptions&) {
   llvm::errs() << "coir host compile: built without clang support "
                   "(COIR_HAS_CLANG not defined)\n";
   return nullptr;

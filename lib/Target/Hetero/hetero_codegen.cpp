@@ -272,9 +272,7 @@ bool HeteroCodeGen::Visit(AST::DMA& n) {
   return CCCodeGen::Visit(n);
 }
 
-bool HeteroCodeGen::Visit(AST::BufferMap&) {
-  return true;
-}
+bool HeteroCodeGen::Visit(AST::BufferMap&) { return true; }
 
 bool HeteroCodeGen::Visit(AST::Break& n) {
   if (in_offload_device_block_) return true;

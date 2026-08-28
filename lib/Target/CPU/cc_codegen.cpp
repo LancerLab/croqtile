@@ -1119,9 +1119,7 @@ bool CCCodeGen::Visit(AST::DMA& n) {
   return true;
 }
 
-bool CCCodeGen::Visit(AST::BufferMap&) {
-  return true;
-}
+bool CCCodeGen::Visit(AST::BufferMap&) { return true; }
 
 bool CCCodeGen::Visit(AST::MMA& n) {
   TraceEachVisit(n);
@@ -1339,8 +1337,7 @@ bool CCCodeGen::Visit(AST::AsmStmt& n) {
       t.op = op;
       t.tempName = symtab.GetAnonName();
       t.isOutput = isOutput;
-      t.isReadWrite =
-          !op->constraint.empty() && op->constraint[0] == '+';
+      t.isReadWrite = !op->constraint.empty() && op->constraint[0] == '+';
       tempOps.push_back(t);
     }
   };
@@ -1349,13 +1346,12 @@ bool CCCodeGen::Visit(AST::AsmStmt& n) {
   for (auto& op : n.inputOperands) CollectTemps(op, false);
 
   // Emit compiler barrier before volatile asm
-  if (n.isVolatile)
-    IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
+  if (n.isVolatile) IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
 
   // Emit temp variable declarations with copy-in from the expression.
   for (auto& t : tempOps) {
-    IndStream() << "auto " << t.tempName << " = "
-                << ExprSTR(t.op->expression) << ";\n";
+    IndStream() << "auto " << t.tempName << " = " << ExprSTR(t.op->expression)
+                << ";\n";
   }
 
   // Helper: get the C variable name to use for an operand.
@@ -1384,8 +1380,7 @@ bool CCCodeGen::Visit(AST::AsmStmt& n) {
         first = false;
         if (!op->symbolicName.empty())
           IndStream() << "[" << op->symbolicName << "] ";
-        IndStream() << "\"" << op->constraint << "\"("
-                    << OpName(op) << ")";
+        IndStream() << "\"" << op->constraint << "\"(" << OpName(op) << ")";
       }
     }
   }
@@ -1401,8 +1396,7 @@ bool CCCodeGen::Visit(AST::AsmStmt& n) {
         first = false;
         if (!op->symbolicName.empty())
           IndStream() << "[" << op->symbolicName << "] ";
-        IndStream() << "\"" << op->constraint << "\"("
-                    << OpName(op) << ")";
+        IndStream() << "\"" << op->constraint << "\"(" << OpName(op) << ")";
       }
     }
   }
@@ -1423,14 +1417,12 @@ bool CCCodeGen::Visit(AST::AsmStmt& n) {
   // Write back temps for output and read-write operands.
   for (auto& t : tempOps) {
     if (t.isOutput) {
-      IndStream() << ExprSTR(t.op->expression) << " = "
-                  << t.tempName << ";\n";
+      IndStream() << ExprSTR(t.op->expression) << " = " << t.tempName << ";\n";
     }
   }
 
   // Emit compiler barrier after volatile asm
-  if (n.isVolatile)
-    IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
+  if (n.isVolatile) IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
 
   return true;
 }
