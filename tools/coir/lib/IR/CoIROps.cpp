@@ -826,13 +826,17 @@ ParseResult TensorBindDimsOp::parse(OpAsmParser& parser,
   Type elemType;
   if (parser.parseType(elemType)) return failure();
 
-  // optional memory space + strides
+  // optional memory space + signedness + strides
   int32_t memSpace = -1;
+  bool isUnsigned = false;
   SmallVector<int64_t> strides;
-  if (succeeded(parser.parseOptionalComma())) {
+  while (succeeded(parser.parseOptionalComma())) {
     StringRef kw;
-    if (parser.parseKeyword(&kw)) return failure();
-    if (kw == "strides") {
+    if (parser.parseKeyword(&kw))
+      return failure();
+    if (kw == "unsigned") {
+      isUnsigned = true;
+    } else if (kw == "strides") {
       // strides without memspace
       if (parser.parseColon() || parser.parseLSquare()) return failure();
       int64_t s;
@@ -849,23 +853,8 @@ ParseResult TensorBindDimsOp::parse(OpAsmParser& parser,
       memSpace = parseMemSpace(kw);
       if (memSpace == -2) {
         parser.emitError(parser.getCurrentLocation(),
-                         "unknown memory space: " + kw);
+                         "unknown tensor suffix: " + kw);
         return failure();
-      }
-      if (succeeded(parser.parseOptionalComma())) {
-        StringRef stKw;
-        if (parser.parseKeyword(&stKw) || stKw != "strides") return failure();
-        if (parser.parseColon() || parser.parseLSquare()) return failure();
-        int64_t s;
-        auto res2 = parser.parseOptionalInteger(s);
-        if (res2.has_value() && succeeded(*res2)) {
-          strides.push_back(s);
-          while (succeeded(parser.parseOptionalComma())) {
-            if (parser.parseInteger(s)) return failure();
-            strides.push_back(s);
-          }
-        }
-        if (parser.parseRSquare()) return failure();
       }
     }
   }
@@ -873,8 +862,8 @@ ParseResult TensorBindDimsOp::parse(OpAsmParser& parser,
   if (parser.parseGreater()) return failure();
 
   // ---- build the result type (with kDynamic sentinels)          ---- //
-  auto resultType =
-      TensorType::get(parser.getContext(), elemType, shape, memSpace, strides);
+  auto resultType = TensorType::get(parser.getContext(), elemType, shape,
+                                    memSpace, isUnsigned, strides);
   result.addTypes(resultType);
 
   // ---- resolve operands                                         ---- //
@@ -932,6 +921,8 @@ void TensorBindDimsOp::print(OpAsmPrinter& printer) {
     case TensorMemorySpace::Register: printer << "register"; break;
     }
   }
+  if (resultTy.getIsUnsigned())
+    printer << ", unsigned";
   auto stridesArr = resultTy.getStrides();
   if (!stridesArr.empty()) {
     printer << ", strides: [";

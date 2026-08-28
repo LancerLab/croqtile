@@ -66,6 +66,57 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
     llvm::SmallVector<Value> srcOffsets;
     llvm::SmallVector<Value> dstOffsets;
 
+    // Materialize a tensor's per-dim extent as an index SSA value. Anchor
+    // tiles (result shape `1x1x...`) carry only the chunk index, so the
+    // element offset must be scaled by the DMA counterpart's actual per-dim
+    // chunk extent (e.g. `K/2` for a dynamic `i0.span / #idx` chunk).
+    auto materializeDimExtent = [&](Value tensor, unsigned dim) -> Value {
+      while (auto t = tensor.getDefiningOp<TensorTileOp>())
+        tensor = t.getSource();
+      auto tty = llvm::cast<coir::TensorType>(tensor.getType());
+      if (!tty.isDynamicDim(dim))
+        return rewriter.create<mlir::arith::ConstantIndexOp>(
+            op.getLoc(), tty.getShape()[dim]);
+      auto resolve = [&](mlir::OperandRange dynDims) -> Value {
+        unsigned dynIdx = 0;
+        for (unsigned i = 0; i < tty.getShape().size(); ++i) {
+          if (!tty.isDynamicDim(i))
+            continue;
+          if (i == dim)
+            return dynDims[dynIdx];
+          ++dynIdx;
+        }
+        llvm_unreachable("dynamic dim not found in operands");
+      };
+      if (auto alloc = tensor.getDefiningOp<TensorAllocOp>())
+        return resolve(alloc.getDynamicDims());
+      if (auto bind = tensor.getDefiningOp<TensorBindDimsOp>())
+        return resolve(bind.getDynamicDims());
+      return nullptr;
+    };
+
+    // Scale a tile index to an element offset. Tiles with a static chunk size
+    // (>1) scale by that size; anchor tiles (size 1) scale by the counterpart's
+    // dim extent, which may be dynamic.
+    auto scaleTileIndex = [&](Value idx, int64_t tileDim, Value counterpart,
+                              unsigned i) -> Value {
+      if (tileDim > 1) {
+        auto tileSize = rewriter.create<mlir::arith::ConstantIndexOp>(
+            op.getLoc(), tileDim);
+        return rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, tileSize);
+      }
+      auto cTy = llvm::dyn_cast<coir::TensorType>(counterpart.getType());
+      if (!cTy || i >= cTy.getShape().size())
+        return idx;
+      Value extent = materializeDimExtent(counterpart, i);
+      if (!extent)
+        return idx;
+      if (auto c = extent.getDefiningOp<mlir::arith::ConstantIndexOp>())
+        if (c.value() == 1)
+          return idx;
+      return rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, extent);
+    };
+
     if (auto tileOp = srcBase.template getDefiningOp<TensorTileOp>()) {
       srcBase = tileOp.getSource();
       auto tileTy = llvm::cast<coir::TensorType>(tileOp.getResult().getType());
@@ -82,12 +133,8 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
           continue;
         }
         // Multiply tile index by tile size to get the per-dim offset.
-        if (i < tileShape.size() && tileShape[i] > 1) {
-          auto tileSize = rewriter.create<mlir::arith::ConstantIndexOp>(
-              op.getLoc(), tileShape[i]);
-          idx =
-              rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, tileSize);
-        }
+        if (i < tileShape.size())
+          idx = scaleTileIndex(idx, tileShape[i], op.getDest(), i);
         srcOffsets.push_back(idx);
       }
     }
@@ -104,12 +151,8 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
           dstOffsets.push_back(idx);
           continue;
         }
-        if (i < tileShape.size() && tileShape[i] > 1) {
-          auto tileSize = rewriter.create<mlir::arith::ConstantIndexOp>(
-              op.getLoc(), tileShape[i]);
-          idx =
-              rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, tileSize);
-        }
+        if (i < tileShape.size())
+          idx = scaleTileIndex(idx, tileShape[i], op.getSource(), i);
         dstOffsets.push_back(idx);
       }
     }

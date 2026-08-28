@@ -52,12 +52,18 @@ def CoIR_TensorType : TypeDef<CoIR_Dialect, "Tensor"> {
       !coir.tensor<?x?xi8, shared>                         // dynamic dims
       !coir.tensor<128x?xf16, global>                      // mixed static/dynamic
       !coir.tensor<128x64xf16, global, strides: [64, 1]>  // explicit strides
+      !coir.tensor<64xi8, default, unsigned>              // unsigned i8 elements
+
+    The optional `unsigned` keyword records the signedness of integer element
+    types (the MLIR element type itself stays signless so that arith ops keep
+    working). It is omitted (and treated as signed) when not present.
   }];
 
   let parameters = (ins
     "mlir::Type":$elementType,
     ArrayRefParameter<"int64_t">:$shape,
     DefaultValuedParameter<"int32_t", "-1">:$memorySpace,
+    DefaultValuedParameter<"bool", "false">:$isUnsigned,
     OptionalArrayRefParameter<"int64_t">:$strides
   );
 

@@ -446,7 +446,10 @@ coir::TensorType ASTCoIRGen::LowerSpannedType(const ptr<SpannedType>& sty) {
     if (isDense) strides.clear();
   }
 
-  return coir::TensorType::get(&IRContext(), elemType, dims, memSpace, strides);
+  bool isUnsigned =
+      IsIntegerType(sty->ElementType()) && IsUnsignedType(sty->ElementType());
+  return coir::TensorType::get(&IRContext(), elemType, dims, memSpace,
+                               isUnsigned, strides);
 }
 
 coir::ParallelLevelAttr ASTCoIRGen::LowerParallelLevel(ParallelLevel pl) {
@@ -1660,39 +1663,54 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock& fb) {
             size_t numDims = dims.size();
             std::string baseName = lr->GetIVName();
             llvm::SmallVector<mlir::Value> elemVals;
-            // Compute strides: stride[i] = product of dims[i+1..end]
-            llvm::SmallVector<int64_t> strides(numDims, 1);
-            for (int d = (int)numDims - 2; d >= 0; --d) {
-              int64_t dimVal = 1;
-              if (dims[d + 1] && dims[d + 1]->IsNumeric())
-                dimVal = EvalToInt(dims[d + 1]);
-              strides[d] = strides[d + 1] * dimVal;
+
+            // Materialize a per-dim with-in extent as an index SSA value.
+            // Returns nullptr when the extent is the constant 1 so callers can
+            // skip the division/remainder.
+            auto dimExtent = [&](const ValueItem &dim) -> mlir::Value {
+              if (!dim) return nullptr;
+              if (dim->IsNumeric()) {
+                int64_t v = EvalToInt(dim);
+                if (v <= 1) return nullptr;
+                return builder.create<mlir::arith::ConstantIndexOp>(loc, v);
+              }
+              mlir::Value v = MaterializeSBE(loc, dim);
+              if (v && !mlir::isa<mlir::IndexType>(v.getType()))
+                v = builder.create<mlir::arith::IndexCastOp>(loc, indexType, v);
+              return v;
+            };
+
+            // Compute row-major strides as runtime values:
+            // stride[i] = product of dims[i+1..end].  Runtime (non-numeric)
+            // extents must contribute as SSA values, otherwise the flattened
+            // IV decomposes incorrectly (e.g. `foreach idx in [2, 1, N]`
+            // would produce idx__elem__0 = flat % 2 instead of flat / N).
+            llvm::SmallVector<mlir::Value> strides(numDims, nullptr);
+            {
+              mlir::Value acc =
+                  builder.create<mlir::arith::ConstantIndexOp>(loc, 1);
+              for (int d = (int)numDims - 1; d >= 0; --d) {
+                strides[d] = acc;
+                mlir::Value dimVal = dimExtent(dims[d]);
+                if (dimVal)
+                  acc = builder.create<mlir::arith::MulIOp>(loc, acc, dimVal);
+              }
             }
+
             for (size_t d = 0; d < numDims; ++d) {
               std::string elemName = baseName + "__elem__" + std::to_string(d);
               mlir::Value elemVal = mappedIV;
               // elem_d = (flat / stride_d) % dim_d
-              if (strides[d] > 1) {
-                auto strideConst = builder.create<mlir::arith::ConstantIndexOp>(
-                    loc, strides[d]);
-                elemVal = builder.create<mlir::arith::DivSIOp>(loc, elemVal,
-                                                               strideConst);
+              if (strides[d]) {
+                bool isOne = false;
+                if (auto cst =
+                        strides[d].getDefiningOp<mlir::arith::ConstantIndexOp>())
+                  isOne = (cst.value() == 1);
+                if (!isOne)
+                  elemVal = builder.create<mlir::arith::DivSIOp>(
+                      loc, elemVal, strides[d]);
               }
-              mlir::Value dimModVal;
-              if (dims[d] && dims[d]->IsNumeric()) {
-                int64_t dimVal = EvalToInt(dims[d]);
-                if (dimVal > 1)
-                  dimModVal =
-                      builder.create<mlir::arith::ConstantIndexOp>(loc, dimVal);
-              } else if (dims[d]) {
-                // Runtime with-in extent (e.g. N/#p): materialize it and take
-                // the remainder so the decomposed index ranges correctly.
-                dimModVal = MaterializeSBE(loc, dims[d]);
-                if (dimModVal &&
-                    !mlir::isa<mlir::IndexType>(dimModVal.getType()))
-                  dimModVal = builder.create<mlir::arith::IndexCastOp>(
-                      loc, mlir::IndexType::get(&IRContext()), dimModVal);
-              }
+              mlir::Value dimModVal = dimExtent(dims[d]);
               if (dimModVal)
                 elemVal = builder.create<mlir::arith::RemSIOp>(loc, elemVal,
                                                                dimModVal);
@@ -1780,10 +1798,11 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node& n) {
     if (newShape.empty() || !allStatic) return srcVal;
 
     auto reshapedTy = coir::TensorType::get(
-        &IRContext(), srcTy.getElementType(), newShape, srcTy.getMemorySpace(),
+        &IRContext(), srcTy.getElementType(), newShape,
+        srcTy.getMemorySpace(), srcTy.getIsUnsigned(),
         llvm::ArrayRef<int64_t>{});
-    auto tileOp = builder.create<coir::TensorTileOp>(loc, reshapedTy, srcVal,
-                                                     mlir::ValueRange{});
+    auto tileOp = builder.create<coir::TensorTileOp>(
+        loc, reshapedTy, srcVal, mlir::ValueRange{});
     return tileOp.getResult();
   }
 
@@ -2611,6 +2630,35 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl& nvd) {
     }
 
     auto tty = LowerSpannedType(sty);
+
+    // An array-of-spanned (e.g. `local s32[32,64] l[2][3]`) is a contiguous
+    // run of equal-shaped spanned tensors. Flatten it to a 1-D buffer of
+    // array_elems * span_elems so `l[row][col]` lowers to a flat element
+    // offset (the choreo reference emits a byte-offset mdspan + flat memcpy
+    // for this pattern).
+    if (auto aty = dyn_cast<SpannedArrayType>(symType)) {
+      int64_t totalElems = 1;
+      bool isDynamic = false;
+      auto &spanShape = aty->spty->GetShape();
+      if (spanShape.IsValid())
+        for (auto &v : spanShape.Value()) {
+          auto d = EvalToInt(v);
+          if (mlir::ShapedType::isDynamic(d)) { isDynamic = true; break; }
+          totalElems *= d;
+        }
+      if (!isDynamic)
+        for (auto &d : aty->Dimensions()) {
+          auto v = EvalToInt(d);
+          if (mlir::ShapedType::isDynamic(v)) { isDynamic = true; break; }
+          totalElems *= v;
+        }
+      llvm::SmallVector<int64_t> flatDims;
+      flatDims.push_back(isDynamic ? mlir::ShapedType::kDynamic : totalElems);
+      tty = coir::TensorType::get(&IRContext(), tty.getElementType(), flatDims,
+                                  tty.getMemorySpace(), tty.getIsUnsigned(),
+                                  llvm::ArrayRef<int64_t>{});
+    }
+
     llvm::SmallVector<mlir::Value> dynDimVals;
     if (tty.hasDynamicShape()) {
       for (unsigned d = 0; d < tty.getRank(); ++d) {
@@ -2747,11 +2795,12 @@ bool ASTCoIRGen::Visit(AST::SpanAs& sa) {
       CollectStaticShapeDims(v.get(), newShape, allStatic);
   if (newShape.empty() || !allStatic) return true;
 
-  auto reshapedTy =
-      coir::TensorType::get(&IRContext(), srcTy.getElementType(), newShape,
-                            srcTy.getMemorySpace(), llvm::ArrayRef<int64_t>{});
-  auto tileOp = builder.create<coir::TensorTileOp>(loc, reshapedTy, srcVal,
-                                                   mlir::ValueRange{});
+  auto reshapedTy = coir::TensorType::get(
+      &IRContext(), srcTy.getElementType(), newShape,
+      srcTy.getMemorySpace(), srcTy.getIsUnsigned(),
+      llvm::ArrayRef<int64_t>{});
+  auto tileOp = builder.create<coir::TensorTileOp>(
+      loc, reshapedTy, srcVal, mlir::ValueRange{});
 
   if (sa.nid && !sa.nid->name.empty())
     MapValue(sa.nid->name, tileOp.getResult());
@@ -2885,6 +2934,65 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt& chunk,
   llvm::SmallVector<mlir::Value> accOffsets;
   bool elementOffsetTile = false;
 
+  // Array-of-spanned subscript (e.g. `l[row][col]` where `l` is
+  // `local s32[32,64] l[2][3]`): the chunk indices are ARRAY subscripts, not
+  // tensor dims. Lower to a flat element-offset tile so the emitters produce
+  // a byte-offset mdspan + flat memcpy (matching the choreo reference).
+  if (!chunk.HasOperation() && chunk.indices) {
+    auto symTy = GetSymbolType(chunk.data->name);
+    if (auto aty = dyn_cast<SpannedArrayType>(symTy)) {
+      auto &arrDims = aty->Dimensions();
+      auto &idxNodes = chunk.indices->AllValues();
+      if (idxNodes.size() == arrDims.size()) {
+        // Result shape = the spanned element shape (e.g. [32, 64]).
+        llvm::SmallVector<int64_t> resultShape;
+        int64_t spanElems = 1;
+        auto &spanShape = aty->spty->GetShape();
+        if (spanShape.IsValid())
+          for (auto &v : spanShape.Value()) {
+            auto d = EvalToInt(v);
+            resultShape.push_back(d);
+            if (!mlir::ShapedType::isDynamic(d)) spanElems *= d;
+          }
+        if (resultShape.empty()) resultShape.push_back(1);
+
+        // Flat array index = row * dim[1] + col (row-major), scaled by the
+        // spanned element count to yield a flat element offset.
+        mlir::Value flatIdx;
+        for (unsigned j = 0; j < arrDims.size(); ++j) {
+          auto idxV = emitIdx(idxNodes[j].get());
+          if (!idxV) { flatIdx = nullptr; break; }
+          int64_t stride = 1;
+          for (unsigned k = j + 1; k < arrDims.size(); ++k)
+            stride *= EvalToInt(arrDims[k]);
+          if (stride != 1) {
+            auto strideC =
+                builder.create<mlir::arith::ConstantIndexOp>(loc, stride);
+            idxV = builder.create<mlir::arith::MulIOp>(loc, idxV, strideC);
+          }
+          flatIdx = flatIdx
+                        ? builder.create<mlir::arith::AddIOp>(loc, flatIdx, idxV)
+                        : idxV;
+        }
+        if (flatIdx && spanElems != 1) {
+          auto spanC =
+              builder.create<mlir::arith::ConstantIndexOp>(loc, spanElems);
+          flatIdx = builder.create<mlir::arith::MulIOp>(loc, flatIdx, spanC);
+        }
+        if (flatIdx) {
+          auto tileTy = coir::TensorType::get(
+              &IRContext(), baseTy.getElementType(), resultShape,
+              baseTy.getMemorySpace(), baseTy.getIsUnsigned(),
+              llvm::ArrayRef<int64_t>{});
+          auto tile = builder.create<coir::TensorTileOp>(
+              loc, tileTy, baseVal, mlir::ValueRange{flatIdx});
+          tile->setAttr("coir.element_offset", builder.getUnitAttr());
+          return tile;
+        }
+      }
+    }
+  }
+
   if (chunk.HasOperation()) {
     for (auto& sop : chunk.AllOperations()) {
       if (auto* reshapeOp = dyn_cast<AST::SOP::Reshape>(sop.get())) {
@@ -2901,9 +3009,10 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt& chunk,
         if (!newShape.empty() && allStatic) {
           auto reTy = coir::TensorType::get(
               &IRContext(), baseTy.getElementType(), newShape,
-              baseTy.getMemorySpace(), llvm::ArrayRef<int64_t>{});
-          auto aliasOp = builder.create<coir::TensorTileOp>(loc, reTy, baseVal,
-                                                            mlir::ValueRange{});
+              baseTy.getMemorySpace(), baseTy.getIsUnsigned(),
+              llvm::ArrayRef<int64_t>{});
+          auto aliasOp = builder.create<coir::TensorTileOp>(
+              loc, reTy, baseVal, mlir::ValueRange{});
           baseVal = aliasOp.getResult();
           baseTy = reTy;
           baseShape = baseTy.getShape();
@@ -3178,9 +3287,10 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt& chunk,
     llvm::SmallVector<int64_t> eoShape;
     for (auto d : tileShape) eoShape.push_back(d);
     if (eoShape.empty()) eoShape.push_back(1);
-    auto eoTy = coir::TensorType::get(&IRContext(), baseTy.getElementType(),
-                                      eoShape, baseTy.getMemorySpace(),
-                                      llvm::ArrayRef<int64_t>{});
+    auto eoTy = coir::TensorType::get(
+        &IRContext(), baseTy.getElementType(), eoShape,
+        baseTy.getMemorySpace(), baseTy.getIsUnsigned(),
+        llvm::ArrayRef<int64_t>{});
     auto eoTile =
         builder.create<coir::TensorTileOp>(loc, eoTy, baseVal, idxVals);
     eoTile->setAttr("coir.element_offset", builder.getUnitAttr());
@@ -3195,9 +3305,10 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt& chunk,
 
   for (auto& v : dynDimVals) idxVals.push_back(v);
 
-  auto tileTy =
-      coir::TensorType::get(&IRContext(), baseTy.getElementType(), resultShape,
-                            baseTy.getMemorySpace(), llvm::ArrayRef<int64_t>{});
+  auto tileTy = coir::TensorType::get(
+      &IRContext(), baseTy.getElementType(), resultShape,
+      baseTy.getMemorySpace(), baseTy.getIsUnsigned(),
+      llvm::ArrayRef<int64_t>{});
   return builder.create<coir::TensorTileOp>(loc, tileTy, baseVal, idxVals);
 }
 
@@ -3255,7 +3366,8 @@ bool ASTCoIRGen::Visit(AST::DMA& dma) {
           space = coir::TensorMemorySpace::Shared;
         auto dstTy = coir::TensorType::get(
             &IRContext(), srcTy.getElementType(), srcTy.getShape(),
-            static_cast<int32_t>(space), srcTy.getStrides());
+            static_cast<int32_t>(space), srcTy.getIsUnsigned(),
+            srcTy.getStrides());
         llvm::SmallVector<mlir::Value> dstDynDims;
         if (dstTy.hasDynamicShape()) {
           if (auto srcAlloc = srcVal.getDefiningOp<coir::TensorAllocOp>())
@@ -3461,9 +3573,10 @@ bool ASTCoIRGen::Visit(AST::BufferMap& n) {
     }
     auto shape = srcTensorTy.getShape();
     auto elemTy = srcTensorTy.getElementType();
-    auto resTy = coir::TensorType::get(builder.getContext(), elemTy, shape,
-                                       (int32_t)coir::TensorMemorySpace::Local,
-                                       llvm::ArrayRef<int64_t>());
+    auto resTy = coir::TensorType::get(
+        builder.getContext(), elemTy, shape,
+        (int32_t)coir::TensorMemorySpace::Local, srcTensorTy.getIsUnsigned(),
+        llvm::ArrayRef<int64_t>());
 
     auto mapOp = builder.create<coir::BufferMapOp>(loc, resTy, srcVal,
                                                    offsetVal, sizeVal);
@@ -3487,9 +3600,10 @@ bool ASTCoIRGen::Visit(AST::BufferMap& n) {
     }
     auto shape = existingTy.getShape();
     auto elemTy = existingTy.getElementType();
-    auto resTy = coir::TensorType::get(builder.getContext(), elemTy, shape,
-                                       (int32_t)coir::TensorMemorySpace::Local,
-                                       llvm::ArrayRef<int64_t>());
+    auto resTy = coir::TensorType::get(
+        builder.getContext(), elemTy, shape,
+        (int32_t)coir::TensorMemorySpace::Local, existingTy.getIsUnsigned(),
+        llvm::ArrayRef<int64_t>());
 
     auto remapOp = builder.create<coir::BufferRemapOp>(
         loc, resTy, existingVal, srcVal, offsetVal, sizeVal);
@@ -3668,11 +3782,12 @@ bool ASTCoIRGen::Visit(AST::MMA& n) {
     }
     if (tileShape.empty()) tileShape = {16, 16};
 
-    auto tileTy = coir::TensorType::get(&IRContext(), srcTy.getElementType(),
-                                        tileShape, srcTy.getMemorySpace(),
-                                        llvm::ArrayRef<int64_t>{});
-    auto tileOp =
-        builder.create<coir::TensorTileOp>(loc, tileTy, srcVal, idxVals);
+    auto tileTy = coir::TensorType::get(
+        &IRContext(), srcTy.getElementType(), tileShape,
+        srcTy.getMemorySpace(), srcTy.getIsUnsigned(),
+        llvm::ArrayRef<int64_t>{});
+    auto tileOp = builder.create<coir::TensorTileOp>(
+        loc, tileTy, srcVal, idxVals);
 
     auto fragTy =
         coir::MMAFragType::get(&IRContext(), srcTy.getElementType(), tileShape);
@@ -3781,11 +3896,12 @@ bool ASTCoIRGen::Visit(AST::MMA& n) {
     if (storeShape.empty())
       storeShape.assign(fragTy.getShape().begin(), fragTy.getShape().end());
 
-    auto tileTy = coir::TensorType::get(&IRContext(), dstTy.getElementType(),
-                                        storeShape, dstTy.getMemorySpace(),
-                                        llvm::ArrayRef<int64_t>{});
-    auto tileOp =
-        builder.create<coir::TensorTileOp>(loc, tileTy, dstVal, idxVals);
+    auto tileTy = coir::TensorType::get(
+        &IRContext(), dstTy.getElementType(), storeShape,
+        dstTy.getMemorySpace(), dstTy.getIsUnsigned(),
+        llvm::ArrayRef<int64_t>{});
+    auto tileOp = builder.create<coir::TensorTileOp>(
+        loc, tileTy, dstVal, idxVals);
 
     builder.create<coir::MMAStoreOp>(loc, fragVal, tileOp.getResult());
     break;
