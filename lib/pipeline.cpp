@@ -370,6 +370,8 @@ void Choreo::PrintAssessmentStats(const AssessmentStats& s) {
   row(s.rt_scalar, "Runtime assertions over scalar symbols only");
   row(s.rt_const, "Runtime assertions constant-only");
   row(s.direct_checks, "Direct static checks (bypassing assessor)");
+  row(s.st_canonical, "Static-true via canonical normalization");
+  row(s.st_interval, "Static-true via interval/bounded-type proof");
   errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
          << "\n";
   row(s.unclassified_total, "Assessments (unclassified)");

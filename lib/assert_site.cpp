@@ -476,6 +476,10 @@ void AssertSite::EstimateAssertions() {
         case AssessDependence::SCALAR_SYMBOLIC: ++stats.st_scalar; break;
         case AssessDependence::CONSTANT: ++stats.st_const; break;
         }
+        switch (ae.mechanism) {
+        case AssessMechanism::CANONICAL: ++stats.st_canonical; break;
+        case AssessMechanism::INTERVAL: ++stats.st_interval; break;
+        }
         break;
       case AssessOutcome::STATIC_FALSE: ++stats.static_false; break;
       case AssessOutcome::RUNTIME: {
