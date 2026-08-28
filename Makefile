@@ -432,7 +432,7 @@ lines:
 	  echo "- tests, samples & benchmarks: $$(wc -l $$test_files | grep total)"; \
 	fi;
 
-FORMAT_DIRS := $(SRC_DIR) $(RT_DIR) tests/standalone
+FORMAT_DIRS := $(SRC_DIR) $(RT_DIR) tools tests/standalone
 format:
 	files="$$(find $(FORMAT_DIRS) -type f \( \
 		-name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' -o \
