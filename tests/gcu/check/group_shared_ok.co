@@ -1,0 +1,21 @@
+// RUN: choreo -sa=latenorm -t topscc -arch=gcu400 %s
+
+// `shared<group>` is a valid storage tier on gcu400 (has a GROUP level). It
+// parses in array decls, scalar decls, and DMA destinations. Compilation
+// through semantic analysis (stop after LateNorm, before the allocation pass
+// that still lacks a GROUP_SHARED arm) must succeed (exit code 0, no
+// FileCheck needed).
+
+__co__ void group_shared_ok(f32 [64] input) {
+  parallel p by 1 : block {
+    gload = dma.copy.async input.chunkat(p) => shared<group>;
+    parallel q by 4 : group {
+      shared<group> f32 [64] gbuf;
+      shared<group> f32 gscalar;
+      parallel r by 1 : thread {
+        gbuf.at(0) = gscalar;
+        gscalar = 1.0f;
+      }
+    }
+  }
+}

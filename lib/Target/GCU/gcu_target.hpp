@@ -143,6 +143,10 @@ public:
               ParallelLevel::GROUP, ParallelLevel::THREAD};
   }
 
+  bool IsGroupSharedStorageSupported(const ArchId& arch) const override {
+    return ArchNum(arch) >= 400;
+  }
+
   bool IsLibCallSupported(const std::string& name) const override {
     static const std::set<std::string> supported = {
         // GEMM: (out, A, B, K, N) or (out, A, B, bias, K, N)

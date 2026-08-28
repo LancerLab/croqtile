@@ -1,0 +1,20 @@
+// RUN: not choreo -t topscc -arch=gcu400 %s 2>&1 | FileCheck %s
+
+// Only `shared<group>` is a valid scoped storage. `shared<block>`,
+// `local<...>`, and `global<...>` are rejected by the parser, and
+// `shared<group>` may not be used as a kernel parameter.
+
+__co__ void illegal_scoped_storage(
+    shared<group> f32 [64] bad_param) {
+  parallel p by 1 : block {
+    shared<block> f32 [64] a;
+    local<group> f32 [64] b;
+    global<group> f32 [64] c;
+    a.at(0) = b.at(0) + c.at(0);
+  }
+}
+
+// CHECK: error: the shared<group> data can not be used as a parameter.
+// CHECK: error: only 'shared<group>' is a valid scoped storage; use bare 'local'/'shared'/'global' for other scopes.
+// CHECK: error: only 'shared<group>' is a valid scoped storage; use bare 'local'/'shared'/'global' for other scopes.
+// CHECK: error: only 'shared<group>' is a valid scoped storage; use bare 'local'/'shared'/'global' for other scopes.

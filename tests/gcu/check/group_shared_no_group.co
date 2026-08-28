@@ -1,0 +1,15 @@
+// RUN: not choreo -t topscc -arch=gcu300 %s 2>&1 | FileCheck %s --check-prefix=GCU300
+
+// `shared<group>` requires a hardware GROUP tier for group-shared storage,
+// which gcu300 does not provide.
+
+__co__ void group_shared_rejected(f32 [64] input) {
+  parallel p by 1 : block {
+    parallel q by 1 : thread {
+      shared<group> f32 [64] gbuf;
+      gbuf.at(0) = 0.0f;
+    }
+  }
+}
+
+// GCU300: error: 'shared<group>' is not supported by the current target; it requires a target with a GROUP storage tier.
