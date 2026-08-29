@@ -3024,13 +3024,21 @@ mlir::Value ASTCoIRGen::EmitChunkAtTile(AST::ChunkAt& chunk,
         auto offsets = viewOp->GetOffsets();
         auto subspan = viewOp->GetSubSpan();
         if (!offsets || !subspan) continue;
+        // View `.from(off...)` offsets are element coordinates (not chunk
+        // indices): the AST semantic multiplies each offset by the base
+        // tensor's row-major stride. Record them as a flat per-dim element
+        // offset and mark the tile with coir.element_offset so the DMA
+        // descriptor lowering passes them through unchanged instead of
+        // re-scaling them by the tile/counterpart extent.
+        elementOffsetTile = true;
+        accOffsets.clear();
         for (auto& off : offsets->AllValues()) {
           auto v = emitIdx(off.get());
           if (v)
-            idxVals.push_back(v);
+            accOffsets.push_back(v);
           else {
             auto zero = builder.create<mlir::arith::ConstantIndexOp>(loc, 0);
-            idxVals.push_back(zero);
+            accOffsets.push_back(zero);
           }
         }
         unsigned dimIdx = 0;
