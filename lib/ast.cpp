@@ -416,8 +416,8 @@ void Fence::accept(Choreo::Visitor& v) {
 }
 
 void LoopRange::accept(Choreo::Visitor& v) {
-  if (lbound) lbound->accept(v);
-  if (ubound) ubound->accept(v);
+  if (lb_mutator) lb_mutator->accept(v);
+  if (ub_mutator) ub_mutator->accept(v);
   if (rv) rv->accept(v);
   if (HasExplicitIV()) iv->accept(v);
   v.Visit(*this);

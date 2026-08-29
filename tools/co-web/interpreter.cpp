@@ -113,8 +113,8 @@ void Interpreter::ExecForeach(AST::ForeachBlock& fb) {
   int64_t start = 0, end_val = 0;
   int step = range->step;
   if (!IsValidStep(step)) step = 1;
-  if (range->lbound) start = ToInt(Eval(*range->lbound));
-  if (range->ubound) end_val = ToInt(Eval(*range->ubound));
+  if (range->lb_mutator) start = ToInt(Eval(*range->lb_mutator));
+  if (range->ub_mutator) end_val = ToInt(Eval(*range->ub_mutator));
   if (step == 0) step = 1;
 
   std::string idx_name = range->GetIVName();

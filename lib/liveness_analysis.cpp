@@ -1160,8 +1160,8 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
       if (i > 0) os << ", ";
       auto lr = cast<AST::LoopRange>(fb->ranges->values[i]);
       os << lr->GetRV()->name << "(";
-      os << (lr->lbound ? PSTR(lr->lbound) : "") << ":";
-      os << (lr->ubound ? PSTR(lr->ubound) : "") << ":";
+      os << (lr->lb_mutator ? PSTR(lr->lb_mutator) : "") << ":";
+      os << (lr->ub_mutator ? PSTR(lr->ub_mutator) : "") << ":";
       os << (IsValidStep(lr->step) ? std::to_string(lr->step) : "") << ")";
     }
   } else if (const auto wb = dyn_cast<AST::WhileBlock>(&n)) {
@@ -2210,7 +2210,7 @@ bool LivenessAnalyzer::Visit(AST::ForeachBlock& n) {
     auto range = cast<AST::LoopRange>(item);
     // Although the range var is reset to zero, still treat it as a use.
     AddUse(current_stmt, range->GetRVName());
-    for (const auto& offset : {range->lbound, range->ubound}) {
+    for (const auto& offset : {range->lb_mutator, range->ub_mutator}) {
       if (!offset) continue;
       if (auto id = AST::GetIdentifier(*offset))
         AddUse(current_stmt, id->name);

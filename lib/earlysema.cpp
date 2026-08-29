@@ -3234,10 +3234,10 @@ bool EarlySemantics::Visit(AST::Return& n) {
 bool EarlySemantics::Visit(AST::LoopRange& n) {
   TraceEachVisit(n);
 
-  if (n.lbound && !isa<ScalarIntegerType>(NodeType(*n.lbound)))
-    Error1(n.lbound->LOC(), "the lower bound is not an integer.");
-  if (n.ubound && !isa<ScalarIntegerType>(NodeType(*n.ubound)))
-    Error1(n.ubound->LOC(), "the upper bound is not an integer.");
+  if (n.lb_mutator && !isa<ScalarIntegerType>(NodeType(*n.lb_mutator)))
+    Error1(n.lb_mutator->LOC(), "the lower bound is not an integer.");
+  if (n.ub_mutator && !isa<ScalarIntegerType>(NodeType(*n.ub_mutator)))
+    Error1(n.ub_mutator->LOC(), "the upper bound is not an integer.");
 
   return true;
 }

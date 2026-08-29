@@ -116,8 +116,8 @@ ValueItem TypeInference::BuildRangePredicate(AST::LoopRange& n) {
 
   auto ub_addend = sbe::nu(0);
   auto lb_addend = sbe::nu(0);
-  if (n.ubound) ub_addend = BuildPredicate(this, n.ubound);
-  if (n.lbound) lb_addend = BuildPredicate(this, n.lbound);
+  if (n.ub_mutator) ub_addend = BuildPredicate(this, n.ub_mutator);
+  if (n.lb_mutator) lb_addend = BuildPredicate(this, n.lb_mutator);
   ub += ub_addend;
   lb += lb_addend;
   assert(IsValidValueItem(lb));
