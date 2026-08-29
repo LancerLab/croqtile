@@ -1764,12 +1764,14 @@ bool HIPCodeGen::Visit(AST::ForeachBlock& n) {
       assert(IsActualBoundedIntegerType(iv_ty));
       auto iv_bty = cast<BoundedType>(iv_ty);
       IndStream() << "for (" << SSMName(iv_name, IsHost()) << " = "
-                  << (rng->lbound ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
-                                  : "0")
+                  << (rng->lb_mutator
+                          ? ("(" + ExprSTR(rng->lb_mutator, IsHost()) + ")")
+                          : "0")
                   << "; " << SSMName(iv_name, IsHost()) << " < "
                   << UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()))
-                  << (rng->ubound ? (" + " + ExprSTR(rng->ubound, IsHost()))
-                                  : "")
+                  << (rng->ub_mutator
+                          ? (" + " + ExprSTR(rng->ub_mutator, IsHost()))
+                          : "")
                   << "; ++" << SSMName(iv_name, IsHost()) << ") {\n";
       IncrIndent();
     }

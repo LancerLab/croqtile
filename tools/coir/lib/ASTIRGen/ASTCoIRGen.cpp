@@ -1339,8 +1339,8 @@ bool hasEarlyExit(AST::Node* node) {
 int64_t ASTCoIRGen::resolveRangeBound(AST::LoopRange* lr) {
   // Keep unresolved bounds (e.g. `foreach y in X`) distinct from concrete 1.
   int64_t bound = mlir::ShapedType::kDynamic;
-  if (lr->ubound) {
-    if (auto* expr = dyn_cast<AST::Expr>(lr->ubound.get()))
+  if (lr->ub_mutator) {
+    if (auto* expr = dyn_cast<AST::Expr>(lr->ub_mutator.get()))
       if (expr->Opts().HasVal()) bound = EvalToInt(expr->Opts().GetVal());
   }
   if (bound <= 1) {
@@ -1434,8 +1434,8 @@ mlir::Value ASTCoIRGen::resolveRangeUBValue(AST::LoopRange* lr, int64_t bound) {
     }
     // The explicit ubound (`foreach x(:N:)` offset), if any.
     mlir::Value uboundVal;
-    if (lr->ubound) {
-      if (auto* expr = dyn_cast<AST::Expr>(lr->ubound.get())) {
+    if (lr->ub_mutator) {
+      if (auto* expr = dyn_cast<AST::Expr>(lr->ub_mutator.get())) {
         if (expr->Opts().HasVal()) {
           auto& vi = expr->Opts().GetVal();
           if (vi && !vi->IsNumeric()) {
@@ -1445,7 +1445,7 @@ mlir::Value ASTCoIRGen::resolveRangeUBValue(AST::LoopRange* lr, int64_t bound) {
         }
       }
       if (!uboundVal) {
-        uboundVal = EmitExpr(*lr->ubound);
+        uboundVal = EmitExpr(*lr->ub_mutator);
         if (uboundVal && !mlir::isa<mlir::IndexType>(uboundVal.getType()))
           uboundVal = builder.create<mlir::arith::IndexCastOp>(
               loc, mlir::IndexType::get(&IRContext()), uboundVal);
@@ -1605,8 +1605,8 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock& fb) {
            : builder.create<mlir::arith::ConstantIndexOp>(loc, bound);
 
     mlir::Value lbValue;
-    if (lr && lr->lbound) {
-      auto lbExpr = EmitExpr(*lr->lbound);
+    if (lr && lr->lb_mutator) {
+      auto lbExpr = EmitExpr(*lr->lb_mutator);
       if (lbExpr) {
         if (!mlir::isa<mlir::IndexType>(lbExpr.getType()))
           lbExpr =

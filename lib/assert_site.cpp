@@ -78,8 +78,8 @@ size_t AssertSite::EstimateLoopTripCount(AST::Node* n) const {
       if (IsActualBoundedIntegerType(sty)) {
         auto ub = GetSingleUpperBound(sty);
         auto lb = sbe::nu(0);
-        auto ub_addend_expr = dyn_cast<AST::Expr>(range->ubound);
-        auto lb_addend_expr = dyn_cast<AST::Expr>(range->lbound);
+        auto ub_addend_expr = dyn_cast<AST::Expr>(range->ub_mutator);
+        auto lb_addend_expr = dyn_cast<AST::Expr>(range->lb_mutator);
         auto ub_addend = sbe::nu(0);
         auto lb_addend = sbe::nu(0);
         if (ub_addend_expr && ub_addend_expr->Opts().HasVal())

@@ -3852,9 +3852,13 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   // iv: the iteration variable visible inside the foreach body.
   // Only set when the parser saw an explicit local name: foreach local=source.
   ptr<Identifier> iv;
+  // lb_mutator/ub_mutator: the bound mutators written in the source slice
+  // syntax `a(lb:ub:step)`, not the resolved range bounds. The actual bounds
+  // are derived during type/shape inference by applying these mutators to the
+  // range source variable's own bounds.
   // both will be normalized to Expr which ref to anon_x
-  ptr<Node> lbound = nullptr;
-  ptr<Node> ubound = nullptr;
+  ptr<Node> lb_mutator = nullptr;
+  ptr<Node> ub_mutator = nullptr;
   int step = GetInvalidStep();
   ValueItem scope_predicate = GetInvalidValueItem();
 
@@ -3862,12 +3866,13 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
       : Node(l), rv(i), iv(nullptr) {} // the cmpt_bounds are yet to be inferred
   LoopRange(const location& l, const ptr<Identifier>& i, const ptr<Node>& lb,
             const ptr<Node>& ub, int s = 1)
-      : Node(l), rv(i), iv(nullptr), lbound(lb), ubound(ub), step(s) {}
+      : Node(l), rv(i), iv(nullptr), lb_mutator(lb), ub_mutator(ub), step(s) {}
   // Constructor for explicit local name: foreach local=source(lb:ub[:step])
   LoopRange(const location& l, const ptr<Identifier>& local,
             const ptr<Identifier>& source, const ptr<Node>& lb,
             const ptr<Node>& ub, int s = 1)
-      : Node(l), rv(source), iv(local), lbound(lb), ubound(ub), step(s) {}
+      : Node(l), rv(source), iv(local), lb_mutator(lb), ub_mutator(ub),
+        step(s) {}
 
   // Range source variable (the within-declared bounded variable).
   const std::string GetRVName() const { return rv->name; }
@@ -3881,14 +3886,14 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   bool HasExplicitIV() const { return iv && iv.get() != rv.get(); }
 
   bool BoundIsMutated() const {
-    return (lbound != nullptr) || (ubound != nullptr);
+    return (lb_mutator != nullptr) || (ub_mutator != nullptr);
   }
 
   ptr<Node> CloneImpl() const override {
     auto cloned_rv = (!rv) ? nullptr : CloneP(rv);
     auto cloned_iv = (!iv) ? nullptr : CloneP(iv);
-    auto copied =
-        Make<LoopRange>(LOC(), cloned_rv, CloneP(lbound), CloneP(ubound), step);
+    auto copied = Make<LoopRange>(LOC(), cloned_rv, CloneP(lb_mutator),
+                                  CloneP(ub_mutator), step);
     copied->iv = cloned_iv;
     copied->scope_predicate = scope_predicate;
     return copied;
@@ -3901,11 +3906,11 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
     os << "\n" << prefix << "`- Iteration variables: " << GetIVName();
     if (HasExplicitIV()) os << " (source: " << GetRVName() << ")";
 
-    if (!lbound && !ubound && !IsValidStep(step)) return;
+    if (!lb_mutator && !ub_mutator && !IsValidStep(step)) return;
 
     os << "\n" << prefix << "`- Loop Control: (";
-    os << (lbound ? PSTR(lbound) : std::string("?")) << ":";
-    os << (ubound ? PSTR(ubound) : std::string("?")) << ":";
+    os << (lb_mutator ? PSTR(lb_mutator) : std::string("?")) << ":";
+    os << (ub_mutator ? PSTR(ub_mutator) : std::string("?")) << ":";
     os << (IsValidStep(step) ? std::to_string(step) : std::string("?")) << ")";
     if (IsValidValueItem(scope_predicate))
       os << "\n"

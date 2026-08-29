@@ -884,11 +884,11 @@ public:
       }
     };
 
-    handle_bounds([](auto lr) -> auto& { return lr->lbound; },
-                  [](auto lr, auto val) { lr->lbound = val; });
+    handle_bounds([](auto lr) -> auto& { return lr->lb_mutator; },
+                  [](auto lr, auto val) { lr->lb_mutator = val; });
 
-    handle_bounds([](auto lr) -> auto& { return lr->ubound; },
-                  [](auto lr, auto val) { lr->ubound = val; });
+    handle_bounds([](auto lr) -> auto& { return lr->ub_mutator; },
+                  [](auto lr, auto val) { lr->ub_mutator = val; });
 
     return true;
   }

@@ -359,13 +359,13 @@ void MockInterpreter::ExecForeach(AST::ForeachBlock& n) {
     RangeInfo ri;
     ri.iv_name = lr->GetIVName();
 
-    if (lr->lbound)
-      ri.lb = ExprEval(lr->lbound).AsInt();
+    if (lr->lb_mutator)
+      ri.lb = ExprEval(lr->lb_mutator).AsInt();
     else
       ri.lb = 0;
 
-    if (lr->ubound) {
-      ri.ub = ExprEval(lr->ubound).AsInt();
+    if (lr->ub_mutator) {
+      ri.ub = ExprEval(lr->ub_mutator).AsInt();
     } else {
       ri.ub = 0;
       auto iv_ty = lr->GetIV()->GetType();
