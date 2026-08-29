@@ -41,6 +41,18 @@ enum class AssertionEmitPosition {
   IN_BLOCK,
 };
 
+inline const std::string STR(const UsageType& ut) {
+  switch (ut) {
+  case UsageType::UnClassified: return "unclassified";
+  case UsageType::ShapeCompatibility: return "shape-compat";
+  case UsageType::ElementAccess: return "elem-access";
+  case UsageType::LoopBound: return "loop-bound";
+  case UsageType::HardwareConstraint: return "hw-constraint";
+  }
+  choreo_unreachable("unsupported usage type.");
+  return "";
+}
+
 enum class AssertionCost {
   NONE,
   ENTRY,
@@ -67,6 +79,16 @@ enum class AssessOutcome {
   RUNTIME,      ///< Cannot evaluate -- runtime assertion emitted.
   UNKNOWN,      ///< Warning-only policy retained an unresolved predicate.
 };
+
+inline const std::string STR(const AssessOutcome& o) {
+  switch (o) {
+  case AssessOutcome::STATIC_TRUE: return "static-true";
+  case AssessOutcome::STATIC_FALSE: return "static-false";
+  case AssessOutcome::RUNTIME: return "runtime";
+  case AssessOutcome::UNKNOWN: return "unknown";
+  }
+  return "?";
+}
 
 /// Information dependence of an assessment's predicate (RQ4 capability-gap
 /// analysis): what class of information the discharge relies on.
@@ -188,6 +210,16 @@ public:
   const std::vector<Assertion>& GetAssertions() const { return assertions; }
   const std::vector<AssessmentEntry>& GetAssessmentLog() const {
     return assessment_log;
+  }
+
+  /// Record an obligation that was assessed/materialized outside the Assess()
+  /// path (e.g. parameter shape-consistency checks emitted at codegen) so the
+  /// safety ledger remains complete. Does not affect stats aggregation, which
+  /// has already replayed the log by codegen time.
+  void RecordExternalObligation(const std::string& msg, const location& l,
+                                AssessOutcome outcome, UsageType uty,
+                                AssessDependence dep) {
+    LogAssessment(msg, l, outcome, uty, dep);
   }
 
   std::vector<Assertion> GetAssertions(AssessType aty) const {
