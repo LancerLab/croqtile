@@ -83,26 +83,6 @@ Value Value::MakePointer(std::shared_ptr<Allocation> a, BaseType bt,
   return val;
 }
 
-Value Value::MakeFuture(std::shared_future<void> f, const std::string& src,
-                        const std::string& dst, size_t bytes) {
-  Value val;
-  val.kind = Future;
-  val.base_type = BaseType::BOOL;
-  val.future_info = std::make_shared<FutureInfo>();
-  val.future_info->handle = std::move(f);
-  val.future_info->src_name = src;
-  val.future_info->dst_name = dst;
-  val.future_info->bytes = bytes;
-  return val;
-}
-
-Value Value::MakeString(const std::string& s) {
-  Value val;
-  val.kind = String;
-  val.str_val = s;
-  return val;
-}
-
 int64_t Value::AsInt() const {
   switch (base_type) {
   case BaseType::S8: return (int8_t)scalar.i64;
@@ -170,22 +150,7 @@ bool Value::AsBool() const {
 }
 
 std::string Value::ToString() const {
-  if (kind == String) return str_val;
   std::ostringstream oss;
-  if (kind == Future) {
-    if (future_info && future_info->handle.valid()) {
-      bool ready = future_info->IsReady();
-      oss << "<future: " << (ready ? "completed" : "pending");
-      if (!future_info->src_name.empty())
-        oss << " " << future_info->src_name << " -> "
-            << future_info->dst_name;
-      if (future_info->bytes > 0) oss << ", " << future_info->bytes << "B";
-      oss << ">";
-    } else {
-      oss << "<future: completed>";
-    }
-    return oss.str();
-  }
   if (kind == Pointer) {
     oss << "<" << STR(alloc->storage) << " " << STR(base_type) << "[";
     for (size_t i = 0; i < alloc->shape.size(); ++i) {
@@ -353,10 +318,7 @@ Value Value::ReadFromAlloc(size_t byte_offset, BaseType ty) const {
 
 // MockMemory implementation
 
-MockMemory::MockMemory()
-    : alloc_mutex_(std::make_unique<std::mutex>()) {
-  scopes.emplace_back();
-}
+MockMemory::MockMemory() { scopes.emplace_back(); }
 
 void MockMemory::EnterScope() { scopes.emplace_back(); }
 
@@ -396,7 +358,6 @@ bool MockMemory::Exists(const std::string& name) const {
 std::shared_ptr<Allocation>
 MockMemory::Allocate(BaseType elem_type, const std::vector<size_t>& shape,
                      Storage storage) {
-  std::lock_guard<std::mutex> lock(*alloc_mutex_);
   auto alloc = std::make_shared<Allocation>();
   alloc->elem_type = elem_type;
   alloc->shape = shape;
@@ -406,21 +367,6 @@ MockMemory::Allocate(BaseType elem_type, const std::vector<size_t>& shape,
   for (auto s : shape) total *= s;
   alloc->data.resize(total * alloc->ElemSize(), 0);
   return alloc;
-}
-
-MockMemory MockMemory::Fork() const {
-  MockMemory child;
-  child.scopes = scopes;
-  child.thread_stack_ = thread_stack_;
-  return child;
-}
-
-void MockMemory::PushThread(const std::string& pv_name, int64_t index) {
-  thread_stack_.push_back({pv_name, index});
-}
-
-void MockMemory::PopThread() {
-  if (!thread_stack_.empty()) thread_stack_.pop_back();
 }
 
 } // namespace Mock

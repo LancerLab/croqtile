@@ -5,7 +5,6 @@
 #include "visitor.hpp"
 
 #include <functional>
-#include <mutex>
 
 namespace Choreo {
 namespace Mock {
@@ -49,18 +48,10 @@ private:
   void ExecCall(AST::Call& n);
   void ExecReturn(AST::Return& n);
   void ExecDMA(AST::DMA& n);
-  void ExecWait(AST::Wait& n);
-  void ExecRotate(AST::Rotate& n);
-  void ExecInThreads(AST::InThreadsBlock& n);
-  void ExecMMA(AST::MMA& n);
-  void ExecApply(AST::ApplyBlock& n);
-  void ExecFragReduce(AST::FragReduce& n);
-  void ExecFragTransfer(AST::FragTransfer& n);
 
   Value EvalBinaryOp(Opcode op, const Value& lhs, const Value& rhs);
   Value EvalUnaryOp(Opcode op, const Value& operand);
 
-  bool IsKnownBIF(const std::string& name) const;
   Value CallBIF(const std::string& name, const std::vector<Value>& args,
                 const AST::Call& node);
 
@@ -73,17 +64,11 @@ private:
 
   Value CastValue(const Value& v, BaseType target_type) const;
 
-  void ExecParallelByBody(AST::ParallelBy& n, int64_t i, int64_t bound,
-                          const std::string& pv_name, bool has_sub,
-                          const std::vector<std::string>& sub_names,
-                          const std::vector<int64_t>& sub_bounds);
-
   MockMemory mem;
   ControlFlow cf;
   std::map<std::string, AST::ChoreoFunction*> functions;
   Debugger* debugger_ = nullptr;
   bool quit_requested_ = false;
-  std::mutex* print_mutex_ = nullptr;
 };
 
 } // namespace Mock

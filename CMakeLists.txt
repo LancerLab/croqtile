@@ -1,9 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
 
-if(POLICY CMP0116)
-  cmake_policy(SET CMP0116 OLD)
-endif()
-
 # Read version from VERSION.txt
 file(READ "${CMAKE_SOURCE_DIR}/VERSION.txt" VERSION_FROM_FILE)
 string(STRIP "${VERSION_FROM_FILE}" VERSION_FROM_FILE)
@@ -56,10 +52,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Find threads package (not needed for Emscripten)
-if(NOT EMSCRIPTEN)
-  find_package(Threads REQUIRED)
-endif()
+# Find threads package
+find_package(Threads REQUIRED)
 
 # use ccache if exists
 find_program(CCACHE_PROGRAM ccache)
@@ -81,13 +75,6 @@ endif()
 # Cascading selection + validation
 # ============================
 
-if(EMSCRIPTEN)
-  set(ENABLE_CUDA OFF CACHE BOOL "" FORCE)
-  set(ENABLE_CUTE OFF CACHE BOOL "" FORCE)
-  set(ENABLE_HIP OFF CACHE BOOL "" FORCE)
-  set(CHOREO_DEFAULT_TARGET "mock" CACHE STRING "" FORCE)
-endif()
-
 # Track if user explicitly set via -D before we create cache entries
 set(_enable_cuda_user_set FALSE)
 set(_enable_cute_user_set FALSE)
@@ -105,153 +92,12 @@ option(ENABLE_CUDA "Enable CUDA support" ON)
 option(ENABLE_CUTE "Enable CUTE/CUTLASS support (requires CUDA)" ON)
 option(CHOREO_FAST_COMPILE_DEFAULT "Default --fast-compile to ON for faster nvcc builds" OFF)
 
-# ============================
-# Project selection (semicolon-separated list, like LLVM_ENABLE_PROJECTS)
-# Available: choreo, coir, co-mock, co-web, co-py
-# ============================
-set(CROQ_PROJECT "choreo;coir" CACHE STRING
-  "Semicolon-separated list of projects to build (choreo;coir;co-mock;co-web;co-py)")
-
-list(FIND CROQ_PROJECT "choreo" _idx)
-if(_idx GREATER_EQUAL 0)
-  set(CHOREO_BUILD_CHOREO ON)
-else()
-  set(CHOREO_BUILD_CHOREO OFF)
-endif()
-
-list(FIND CROQ_PROJECT "coir" _idx)
-if(_idx GREATER_EQUAL 0)
-  set(CHOREO_BUILD_COIR ON)
-else()
-  set(CHOREO_BUILD_COIR OFF)
-endif()
-
-list(FIND CROQ_PROJECT "co-mock" _idx)
-if(_idx GREATER_EQUAL 0)
-  set(CHOREO_BUILD_CO_MOCK ON)
-else()
-  set(CHOREO_BUILD_CO_MOCK OFF)
-endif()
-
-list(FIND CROQ_PROJECT "co-web" _idx)
-if(_idx GREATER_EQUAL 0)
-  set(CHOREO_BUILD_CO_WEB ON)
-else()
-  set(CHOREO_BUILD_CO_WEB OFF)
-endif()
-
-list(FIND CROQ_PROJECT "co-py" _idx)
-if(_idx GREATER_EQUAL 0)
-  set(CHOREO_BUILD_CO_PY ON)
-else()
-  set(CHOREO_BUILD_CO_PY OFF)
-endif()
-
-# ============================
-# Target selection (semicolon-separated list)
-# "all" builds every backend under lib/Target/.
-# Directory names (gpu, cpu, amdgpu, hetero, ...) and aliases defined in
-# each backend's target.aliases file are accepted. Unknown names are
-# silently ignored.
-# ============================
-set(CROQ_TARGET "all" CACHE STRING
-  "Semicolon-separated list of target backends to build (default: all)")
-
-# Resolve CROQ_TARGET to directory-level backend names.
-# Each backend directory under lib/Target/ may contain a target.aliases file
-# listing additional user-facing names (one per line), e.g. "cute" -> GPU.
-# This is auto-discovered so no internal names leak into root CMakeLists.txt.
-function(_croq_resolve_targets INPUT_LIST OUT_VAR)
-  # Discover all backend directories
-  file(GLOB _all_backends
-    RELATIVE "${CMAKE_SOURCE_DIR}/lib/Target"
-    "${CMAKE_SOURCE_DIR}/lib/Target/*/CMakeLists.txt")
-  set(_backend_dirs "")
-  foreach(_b ${_all_backends})
-    get_filename_component(_dir "${_b}" DIRECTORY)
-    list(APPEND _backend_dirs "${_dir}")
-  endforeach()
-
-  # Build alias -> directory mapping
-  set(_alias_map "")
-  foreach(_dir ${_backend_dirs})
-    string(TOLOWER "${_dir}" _dir_lower)
-    list(APPEND _alias_map "${_dir_lower}=${_dir}")
-    set(_alias_file "${CMAKE_SOURCE_DIR}/lib/Target/${_dir}/target.aliases")
-    if(EXISTS "${_alias_file}")
-      file(STRINGS "${_alias_file}" _aliases)
-      foreach(_a ${_aliases})
-        string(STRIP "${_a}" _a)
-        if(_a AND NOT _a MATCHES "^#")
-          string(TOLOWER "${_a}" _a_lower)
-          list(APPEND _alias_map "${_a_lower}=${_dir}")
-        endif()
-      endforeach()
-    endif()
-  endforeach()
-
-  set(_resolved "")
-  foreach(_t ${INPUT_LIST})
-    string(TOLOWER "${_t}" _t)
-    if(_t STREQUAL "all")
-      set(_resolved "${_backend_dirs}")
-      break()
-    endif()
-    set(_found FALSE)
-    foreach(_entry ${_alias_map})
-      string(REGEX MATCH "^([^=]+)=(.*)" _ "${_entry}")
-      if("${CMAKE_MATCH_1}" STREQUAL "${_t}")
-        list(APPEND _resolved "${CMAKE_MATCH_2}")
-        set(_found TRUE)
-        break()
-      endif()
-    endforeach()
-    if(NOT _found)
-      message(STATUS "CROQ_TARGET: unknown target '${_t}', ignoring.")
-    endif()
-  endforeach()
-  list(REMOVE_DUPLICATES _resolved)
-  set(${OUT_VAR} "${_resolved}" PARENT_SCOPE)
-endfunction()
-
-_croq_resolve_targets("${CROQ_TARGET}" CROQ_ENABLED_TARGETS)
-message(STATUS "CROQ_TARGET = ${CROQ_TARGET}")
-message(STATUS "Enabled targets: ${CROQ_ENABLED_TARGETS}")
-
-# Per-target booleans (CROQ_TARGET_<UPPER>) for use in toolchain gating.
-# Discovered from lib/Target/ directories so no internal names appear here.
-file(GLOB _all_target_cmakelists
-  RELATIVE "${CMAKE_SOURCE_DIR}/lib/Target"
-  "${CMAKE_SOURCE_DIR}/lib/Target/*/CMakeLists.txt")
-foreach(_f ${_all_target_cmakelists})
-  get_filename_component(_d "${_f}" DIRECTORY)
-  string(TOUPPER "${_d}" _d_upper)
-  set(CROQ_TARGET_${_d_upper} OFF)
-endforeach()
-foreach(_backend ${CROQ_ENABLED_TARGETS})
-  string(TOUPPER "${_backend}" _backend_upper)
-  set(CROQ_TARGET_${_backend_upper} ON)
-endforeach()
-
 # Allow users to provide preferred defaults (empty by default)
 #set(DEFAULT_CUDA_HOME "${CMAKE_SOURCE_DIR}/extern/portable_cuda" CACHE PATH "Optional default CUDA path (used if CLI and ENV are invalid)")
 set(DEFAULT_CUDA_HOME "/usr/local/cuda" CACHE PATH "Optional default CUDA path (used if CLI and ENV are invalid)")
 
-# Skip CUDA/CUTE detection entirely when GPU target is not enabled
-if(NOT CROQ_TARGET_GPU)
-  set(ENABLE_CUDA OFF CACHE BOOL "Enable CUDA support" FORCE)
-  set(ENABLE_CUTE OFF CACHE BOOL "Enable CUTE/CUTLASS support" FORCE)
-endif()
-
-# Skip HIP/ROCm detection when AMDGPU target is not enabled
-if(NOT CROQ_TARGET_AMDGPU)
-  set(ENABLE_HIP OFF CACHE BOOL "Enable HIP/ROCm support" FORCE)
-endif()
-
 # Find CUDA package to get version info
-if(NOT EMSCRIPTEN AND CROQ_TARGET_GPU)
-  find_package(CUDAToolkit QUIET)
-endif()
+find_package(CUDAToolkit)
 
 if(CUDAToolkit_FOUND)
   set(_cuda_with_cute4_support TRUE)
@@ -357,10 +203,13 @@ endif()
 # ============================
 set(_cute_candidates "")
 if(NOT "${CUTE_HOME}" STREQUAL "")
+  # 1) CLI cache variable
   set(_cute_candidates "${CUTE_HOME}")
 elseif(DEFINED ENV{CUTE_HOME} AND NOT "$ENV{CUTE_HOME}" STREQUAL "")
+  # 2) Environment variable
   set(_cute_candidates "$ENV{CUTE_HOME}")
 elseif(NOT "${DEFAULT_CUTE_HOME}" STREQUAL "")
+  # 3) Optional/default
   set(_cute_candidates "${DEFAULT_CUTE_HOME}")
 endif()
 
@@ -374,7 +223,9 @@ if(NOT "${_cute_candidates}" STREQUAL "")
   endif()
 endif()
 
+# Enforce CUDA dependency + cascade outcome
 if(ENABLE_CUTE)
+  # If user wants CUTE, CUDA must be valid
   if(NOT ENABLE_CUDA OR NOT _cuda_root_valid)
     if(_enable_cute_user_set)
       message(FATAL_ERROR
@@ -385,16 +236,44 @@ if(ENABLE_CUTE)
       set(ENABLE_CUTE OFF CACHE BOOL "Enable CUTE support" FORCE)
     endif()
   elseif(NOT _cute_root_valid)
-    if(NOT _cuda_with_cute4_support)
-      message(STATUS "CUDA version too low for CUTE 4. Auto-disabling ENABLE_CUTE.")
-      set(ENABLE_CUTE OFF CACHE BOOL "Enable CUTE/CUTLASS support" FORCE)
+    if(_enable_cute_user_set)
+      message(FATAL_ERROR
+        "ENABLE_CUTE=ON but no valid CUTE/CUTLASS found.\n"
+        "Tried (in order):\n  -DCUTE_HOME='${CUTE_HOME}'\n  ENV{CUTE_HOME}='$ENV{CUTE_HOME}'\n"
+        "  DEFAULT_CUTE_HOME='${DEFAULT_CUTE_HOME}'.")
+    elseif(NOT _cuda_with_cute4_support)
+      message(STATUS "CUDA version is low. Auto-disabling ENABLE_CUTE.")
+      set(ENABLE_CUTE OFF CACHE BOOL "Enable CUTE/CUTLASS support (requires CUDA)" FORCE)
     else()
-      include(${CMAKE_SOURCE_DIR}/cmake/CutlassBootstrap.cmake)
-      if(NOT _cute_root_valid)
-        message(STATUS "CUTLASS not available. Auto-disabling ENABLE_CUTE.")
-        set(ENABLE_CUTE OFF CACHE BOOL "Enable CUTE/CUTLASS support" FORCE)
+      # CUTE enabled by default but no CUTLASS found: fetch the pinned
+      # version automatically (one-time, network required). Only the
+      # default path is auto-fetched; an explicit -DCUTE_HOME/ENV always
+      # wins or fails loudly.
+      message(STATUS
+        "No CUTE/CUTLASS found in the cascade; fetching NVIDIA/cutlass "
+        "v4.2.1 into ${CMAKE_SOURCE_DIR}/extern/cutlass ...")
+      include(FetchContent)
+      FetchContent_Declare(cutlass_auto
+        GIT_REPOSITORY https://github.com/NVIDIA/cutlass.git
+        GIT_TAG v4.2.1
+        GIT_SHALLOW TRUE
+        SOURCE_DIR "${CMAKE_SOURCE_DIR}/extern/cutlass"
+        UPDATE_DISCONNECTED TRUE)
+      FetchContent_Populate(cutlass_auto)
+      _looks_like_valid_cute("${CMAKE_SOURCE_DIR}/extern/cutlass" _ok)
+      if(_ok)
+        set(_cute_root "${CMAKE_SOURCE_DIR}/extern/cutlass")
+        set(_cute_root_valid TRUE)
+      else()
+        message(STATUS "CUTLASS fetch failed. Auto-disabling ENABLE_CUTE.")
+        set(ENABLE_CUTE OFF CACHE BOOL "Enable CUTE/CUTLASS support (requires CUDA)" FORCE)
       endif()
     endif()
+  endif()
+
+  # If user provided an invalid CUTE_HOME but CUTE is OFF, warn:
+  if(NOT _cute_root_valid AND (NOT "${CUTE_HOME}" STREQUAL "" OR DEFINED ENV{CUTE_HOME}))
+    message(STATUS "CUTE is OFF; ignoring invalid CUTE_HOME candidates.")
   endif()
 endif()
 
@@ -404,15 +283,11 @@ if(ENABLE_CUTE)
 endif()
 
 # ============================
-# HIP/ROCm: cascade & validate (only when AMDGPU target enabled)
+# HIP/ROCm: cascade & validate
 # ============================
 option(ENABLE_HIP "Enable HIP/ROCm support for AMD GPUs" ON)
 
 set(DEFAULT_ROCM_HOME "/opt/rocm" CACHE PATH "Optional default ROCm path")
-
-if(NOT CROQ_TARGET_AMDGPU)
-  set(ENABLE_HIP OFF CACHE BOOL "" FORCE)
-endif()
 
 function(_looks_like_valid_rocm ROOT OUT_VALID)
   set(ok FALSE)
@@ -474,14 +349,7 @@ set(BUILD_DIR ${CMAKE_BINARY_DIR}/build)
 set(TOOLCHAIN_DIR "${CMAKE_SOURCE_DIR}/extern")
 
 # Flex and Bison: find in toolchain/system, or auto-build from source
-if(NOT EMSCRIPTEN)
-  include(${CMAKE_SOURCE_DIR}/cmake/FlexBisonBootstrap.cmake)
-else()
-  include(${CMAKE_SOURCE_DIR}/cmake/EmscriptenBootstrap.cmake)
-endif()
-
-# GoogleTest: auto-download source for standalone tests
-include(${CMAKE_SOURCE_DIR}/cmake/GTestBootstrap.cmake)
+include(${CMAKE_SOURCE_DIR}/cmake/FlexBisonBootstrap.cmake)
 
 # CUDA_HOME as a cache variable with environment fallback
 if(DEFINED ENV{CUDA_HOME})
@@ -490,26 +358,7 @@ else()
   set(CUDA_HOME "/usr/local/cuda" CACHE PATH "Path to CUDA installation")
 endif()
 
-add_compile_options(-Wall -Wextra)
-
-if(EMSCRIPTEN)
-  # Choreo is developed against GCC; suppress Clang-specific pedantic warnings
-  # that do not indicate actual bugs when cross-compiling to WASM.
-  add_compile_options(
-    -Wno-delete-non-virtual-dtor
-    -Wno-unused-private-field
-    -Wno-constant-conversion
-    -Wno-overloaded-virtual
-    -Wno-unused-lambda-capture
-    -Wno-inconsistent-missing-override
-    -Wno-mismatched-tags
-    -Wno-tautological-constant-out-of-range-compare
-    -Wno-unused-but-set-variable
-    -Wno-unused-function
-    -Wno-parentheses
-    "-Wno-#warnings"
-  )
-endif()
+add_compile_options(-Wall -Wextra -g)
 
 option(PUBLIC_PACKAGE "Build for Public Release Package")
 
@@ -537,17 +386,18 @@ add_subdirectory(lib)
 # additional tools (co-mock, etc.)
 add_subdirectory(tools)
 
-# FileCheck: must run after add_subdirectory(tools) so that LLVMBootstrap
-# (included by CoIR) has already downloaded LLVM when CoIR is enabled.
-include(${CMAKE_SOURCE_DIR}/cmake/FileCheckBootstrap.cmake)
-
-if(NOT EMSCRIPTEN)
+# preprocessor executable
+add_executable(copp tools/copp/choreo_preprocess.cpp)
+# choreo compiler executable
+add_executable(choreo tools/choreo/choreo_main.cpp)
 
 set(EXTERN_LIBS
   stdc++fs
 )
 
+# Add CUDA runtime library if CUDA is enabled
 if(ENABLE_CUDA)
+  # Try to find libcudart in standard CUDA locations
   find_library(CUDART_LIB cudart HINTS ${_cuda_root}/lib64 ${_cuda_root}/targets/x86_64-linux/lib)
   if(CUDART_LIB)
     list(APPEND EXTERN_LIBS ${CUDART_LIB})
@@ -556,6 +406,7 @@ if(ENABLE_CUDA)
   endif()
 endif()
 
+# Add HIP runtime library if HIP is enabled
 if(ENABLE_HIP)
   find_library(AMDHIP64_LIB amdhip64 HINTS ${_rocm_root}/lib ${_rocm_root}/lib64)
   if(AMDHIP64_LIB)
@@ -565,29 +416,29 @@ if(ENABLE_HIP)
   endif()
 endif()
 
-if(CHOREO_BUILD_CHOREO)
-  add_executable(copp tools/copp/choreo_preprocess.cpp)
-  add_executable(choreo tools/choreo/choreo_main.cpp)
+# Link the library to the executable
+target_link_libraries(choreo PRIVATE
+  parse
+  core
+  codegen
+  support
+  pp
+  -Wl,--whole-archive targets -Wl,--no-whole-archive
+  ${EXTERN_LIBS}
+  Threads::Threads
+)
 
-  add_dependencies(choreo parser_deps)
-  add_dependencies(copp parser_deps)
+target_link_libraries(copp PRIVATE
+  parse
+  core
+  codegen
+  support
+  pp
+  -Wl,--whole-archive targets -Wl,--no-whole-archive
+  ${EXTERN_LIBS}
+  Threads::Threads
+)
 
-  target_link_libraries(choreo PRIVATE
-    parse core codegen support pp
-    -Wl,--whole-archive targets -Wl,--no-whole-archive
-    ${EXTERN_LIBS} Threads::Threads
-  )
-
-  target_link_libraries(copp PRIVATE
-    parse core codegen support pp
-    -Wl,--whole-archive targets -Wl,--no-whole-archive
-    ${EXTERN_LIBS} Threads::Threads
-  )
-endif()
-
-endif() # NOT EMSCRIPTEN
-
-if(NOT EMSCRIPTEN AND CHOREO_BUILD_CHOREO)
 # ============================
 # Choreo SDK library
 # ============================
@@ -618,8 +469,10 @@ target_include_directories(choreo-dev PUBLIC
 set_target_properties(choreo-dev PROPERTIES
   EXCLUDE_FROM_ALL TRUE
   OUTPUT_NAME choreo-dev
+  POSITION_INDEPENDENT_CODE ON
 )
 
+# Check if VERSION.txt exists
 if(NOT EXISTS "${CMAKE_SOURCE_DIR}/VERSION.txt")
   message(FATAL_ERROR "VERSION.txt not found!")
 endif()
@@ -644,6 +497,7 @@ if(CHOREO_BUILD_CO_MOCK)
   )
 endif()
 
+# SDK headers
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/lib/
   DESTINATION include/choreo
   COMPONENT sdk_headers
@@ -672,6 +526,7 @@ install(TARGETS choreo-dev ARCHIVE
   COMPONENT libraries
 )
 
+# SDK CMake config for find_package(Choreo)
 include(CMakePackageConfigHelpers)
 set(CHOREO_INSTALL_INCLUDEDIR include)
 set(CHOREO_INSTALL_LIBDIR lib)
@@ -698,19 +553,34 @@ install(
 )
 
 # --- CPack setup ---
+#set(CPACK_COMPONENTS_ALL sdk_headers libraries rt_headers executables)
+
+# Read the version from VERSION.txt
 file(READ "${CMAKE_SOURCE_DIR}/VERSION.txt" CPACK_PACKAGE_VERSION)
+# Strip any leading/trailing whitespace or newlines
 string(STRIP "${CPACK_PACKAGE_VERSION}" CPACK_PACKAGE_VERSION)
 
+# Common metadata
 set(CPACK_PACKAGE_NAME "choreo")
 set(CPACK_PACKAGE_VENDOR "Choreo Developers")
 set(CPACK_PACKAGE_CONTACT "https://github.com/tbd/choreo/issues")
 set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+
+# Where final artifacts go
 set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}/package")
+
+# Install prefix inside packages
 set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+
+# Use your install() rules as the source; component-aware packaging
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
+
+# You can leave CPACK_GENERATOR empty here and pass -G on the command,
+# or pick defaults now:
 set(CPACK_GENERATOR "DEB;TGZ;ZIP")
 
+# Generate the standard CPackConfig.cmake now
 include(CPack)
 
 configure_file(${CMAKE_SOURCE_DIR}/cmake/CPackCompiler.cmake.in
@@ -719,6 +589,7 @@ configure_file(${CMAKE_SOURCE_DIR}/cmake/CPackCompiler.cmake.in
 configure_file(${CMAKE_SOURCE_DIR}/cmake/CPackSDK.cmake.in
                ${CMAKE_BINARY_DIR}/CPackSDK.cmake @ONLY)
 
+# Set standalone packaging mode if CMake variable STANDALONE=ON
 option(STANDALONE "Build standalone package (contains extern)" OFF)
 if(STANDALONE)
   set(CHOREO_STANDALONE_PACKAGE ON)
@@ -736,6 +607,7 @@ if(CHOREO_STANDALONE_PACKAGE)
   install(DIRECTORY ${CMAKE_SOURCE_DIR}/extern/shared/ DESTINATION extern/shared USE_SOURCE_PERMISSIONS)
 endif()
 
+# Choreo Compiler Package: runtime headers + binaries
 add_custom_target(package-compiler
   DEPENDS choreo copp
   COMMAND ${CMAKE_CPACK_COMMAND}
@@ -744,6 +616,7 @@ add_custom_target(package-compiler
   COMMENT "Building standalone compiler package"
 )
 
+# SDK Package: headers + static lib
 add_custom_target(package-sdk
   DEPENDS choreo-dev
   COMMAND ${CMAKE_CPACK_COMMAND}
@@ -751,5 +624,3 @@ add_custom_target(package-sdk
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
   COMMENT "Building SDK package (headers + static lib)"
 )
-
-endif() # NOT EMSCRIPTEN AND CHOREO_BUILD_CHOREO

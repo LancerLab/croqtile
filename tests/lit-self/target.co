@@ -1,3 +1,0 @@
-// Two RUN lines with different -t targets.
-// RUN: choreo -t app1 %s -o /dev/null
-// RUN: choreo -t app2 %s -o /dev/null

@@ -255,7 +255,8 @@ void DMAPlan::ResolveDMADecision(const AST::DMA& n,
       }
     }
 
-    // TMA shape-mismatch: auto-enable zfill when source != dest.
+    // TMA shape-mismatch / zfill diagnostics.
+    // Account for .transp permutation when comparing shapes.
     Shape tma_effective_from = f_ca_shape;
     if (n.operation == ".transp") {
       auto tc = cast<TransposeConfig>(n.GetConfig())->dim_values;
@@ -266,32 +267,18 @@ void DMAPlan::ResolveDMADecision(const AST::DMA& n,
     const bool tma_mismatch =
         tma_is_pad ? false
                    : StaticShapeMismatch(tma_effective_from, t_ca_shape);
+    const bool tma_explicit_zfill = n.IsOOBZeroFill();
 
-    if (tma_mismatch) { dec.is_zfill = true; }
-
-    // Warn about S2G TMA with padded shared memory source.  TMA reads shared
-    // memory contiguously (no stride support in hardware).  If the source
-    // buffer has padding (outer stride > inner dimension), the TMA will read
-    // incorrect data, producing wrong results silently.
-    if (dec.direction == DMADirection::S2G && f_ca_shape.Rank() >= 2) {
-      auto inner_dim = f_ca_shape.ValueAt(f_ca_shape.Rank() - 1);
-      auto outer_stride = dec.from_strides.at(0);
-      if (VIIsInt(inner_dim) && VIIsInt(outer_stride)) {
-        auto inner_val = *VIInt(inner_dim);
-        auto stride_val = *VIInt(outer_stride);
-        if (stride_val > inner_val) {
-          Warning(n.LOC(),
-                  "tma.copy S2G: source shared memory has padded stride (" +
-                      std::to_string(stride_val) + " > " +
-                      std::to_string(inner_val) +
-                      "). TMA hardware reads shared memory contiguously "
-                      "and cannot skip padding. This will produce "
-                      "incorrect results. Remove shared memory padding "
-                      "for the TMA source buffer.");
-        }
-      }
+    if (tma_mismatch && !tma_explicit_zfill) {
+      Warning(n.LOC(),
+              "TMA source and destination tiles have different shapes; "
+              "consider adding .zfill to avoid out-of-bounds access.");
+      dec.is_zfill = true;
+    } else if (tma_explicit_zfill && !tma_mismatch) {
+      Warning(n.LOC(),
+              "TMA .zfill is redundant because source and destination tiles "
+              "have the same shape.");
     }
-
     return;
   }
 
@@ -775,14 +762,23 @@ static TiledCopySearchResult SearchTiledConfig(size_t box_m, size_t box_n,
 
 // ---------------------------------------------------------------------------
 // dma prediction rules to avoid oob:
-// When source and dest shapes differ, compiler auto-enables zfill (zero-fill
-// out-of-bounds positions). When shapes match, compiler adds auto-mask to
-// avoid oob. These two rules are exclusive. The .zfill modifier is accepted
-// but deprecated -- the compiler always does the right thing automatically.
+// 1. user should set zfill for dma with
+// different shape from and to, if user forget to set this zfill, gives warning
+// and compiler auto-set implicit zfill active , if user set zfill but from and
+// to are same, compiler should also gives waning to let user know this zfill is
+// useless.
+// 2. When no zfill are set(include explicit zfill and implicit zfill,
+// equal to "from == to"). compiler should add auto-mask to avoid oob, like get
+// a sub box [TM, TK] from [M, K] the guard masking should be [min(TM,
+// M-OFFSET_M, K-OFFSET_K)]. These two rules are exclusive. This means
+// choreo(our compiler) auto-avoid oob if no explicit/implicit zfill are used.
+// This rules let user easily write safe and flexible dma.
 void DMAPlan::ResolvePrediction(const AST::DMA& n, DMALoweringDecision& dec,
                                 TiledCopyParams& param) const {
   auto from_ca = dyn_cast<AST::ChunkAt>(n.GetFrom().get());
   assert(from_ca && "ResolvePrediction requires a source ChunkAt");
+
+  const bool explicit_zfill = n.IsOOBZeroFill();
 
   // For .transp, permute source shape before comparison so that
   // from[M,N] transposed as <1,0> correctly matches to[N,M].
@@ -797,8 +793,22 @@ void DMAPlan::ResolvePrediction(const AST::DMA& n, DMALoweringDecision& dec,
   const bool is_pad = (n.operation == ".pad");
   const bool shape_mismatch =
       StaticShapeMismatch(effective_from, dec.to_ca_shape);
+  const bool implicit_zfill = shape_mismatch && !explicit_zfill;
 
-  dec.is_zfill = shape_mismatch && !is_pad;
+  // Suppress shape-mismatch warning for .pad -- padding inherently produces
+  // different source/destination shapes; cooperative_fill handles pad values.
+  if (implicit_zfill && !is_pad) {
+    Warning(n.LOC(),
+            "DMA source and destination tiles have different shapes; "
+            "implicitly enabling zfill to avoid out-of-bounds access.");
+  } else if (explicit_zfill && !shape_mismatch && !is_pad) {
+    Warning(n.LOC(),
+            "DMA zfill is redundant because source and destination tiles "
+            "have the same shape; falling back to guard masking only.");
+  }
+
+  dec.is_zfill = explicit_zfill || implicit_zfill;
+  if (explicit_zfill && !shape_mismatch) dec.is_zfill = false;
 
   // For G2S the guard protects reads from the source (global) side.
   // For S2G the guard protects writes to the destination (global) side.
@@ -842,19 +852,6 @@ void DMAPlan::ResolvePrediction(const AST::DMA& n, DMALoweringDecision& dec,
     if (n.operation == ".pad") dec.is_zfill = false;
 
     if (pred_matches_box(pred_inner)) {
-      // For S2G, even when dest bounds match the box, the source may have
-      // a dynamic subspan smaller than the box that requires predication.
-      if (guard_on_dest) {
-        auto from_vals = ShapeToValueList(dec.from_ca_shape);
-        auto proj_from = ProjectPredDims(from_vals);
-        if (!pred_matches_box(proj_from)) {
-          param.need_pred = true;
-          param.prediction = proj_from;
-          dec.has_pred = true;
-          dec.is_zfill = false;
-          return;
-        }
-      }
       param.need_pred = false;
       param.prediction.clear();
       dec.has_pred = false;
@@ -878,37 +875,6 @@ void DMAPlan::ResolvePrediction(const AST::DMA& n, DMALoweringDecision& dec,
     }
   }
 
-  // For .pad, full_tiles based on outer_bounds (parent shape) is misleading
-  // when the box was ceiled beyond the actual source extent (from_ca_shape).
-  // The tiled copy source tensor uses the box shape, so if box > source data,
-  // predication is required to avoid copying uninitialized memory.
-  if (full_tiles && is_pad) {
-    for (size_t i = 0; i < 2 && i < pred_inner.size(); ++i) {
-      auto inner_val = VIInt(pred_inner[i]);
-      auto box_val = VIInt(param.box_shape[i]);
-      if (inner_val && box_val && *inner_val < *box_val) {
-        full_tiles = false;
-        break;
-      }
-    }
-  }
-
-  // For S2G, when the source (shared) has a dynamic subspan smaller than
-  // the box, we must predicate on the source bounds even though we normally
-  // guard on the destination side.
-  if (full_tiles && guard_on_dest) {
-    auto from_shape = ShapeToValueList(dec.from_ca_shape);
-    auto proj_from = ProjectPredDims(from_shape);
-    for (size_t i = 0; i < 2 && i < proj_from.size(); ++i) {
-      auto from_v = VIInt(proj_from[i]);
-      auto box_v = VIInt(param.box_shape[i]);
-      if (!from_v || (box_v && from_v && *from_v < *box_v)) {
-        full_tiles = false;
-        break;
-      }
-    }
-  }
-
   if (full_tiles) {
     param.need_pred = false;
     param.prediction.clear();
@@ -919,31 +885,6 @@ void DMAPlan::ResolvePrediction(const AST::DMA& n, DMALoweringDecision& dec,
   ValueList prediction = {
       BuildPrediction(pred_outer[0], pred_offsets[0], param.box_shape[0]),
       BuildPrediction(pred_outer[1], pred_offsets[1], param.box_shape[1])};
-
-  // For .pad, the prediction from outer_bounds may equal the box (because
-  // outer = parent buffer which is >= box), but the actual data extent
-  // (pred_inner = from_ca_shape) is smaller.  Override the prediction with
-  // the source data extent to ensure predication limits copies to valid data.
-  if (is_pad) {
-    for (size_t i = 0; i < 2 && i < pred_inner.size(); ++i) {
-      auto inner_v = VIInt(pred_inner[i]);
-      auto box_v = VIInt(param.box_shape[i]);
-      if (inner_v && box_v && *inner_v < *box_v) prediction[i] = pred_inner[i];
-    }
-  }
-
-  // For S2G, override prediction with source bounds when source is smaller.
-  if (guard_on_dest) {
-    auto from_vals = ShapeToValueList(dec.from_ca_shape);
-    auto proj_from = ProjectPredDims(from_vals);
-    for (size_t i = 0; i < 2 && i < proj_from.size(); ++i) {
-      auto from_v = VIInt(proj_from[i]);
-      auto box_v = VIInt(param.box_shape[i]);
-      if ((!from_v || !box_v || *from_v < *box_v) && i < prediction.size()) {
-        prediction[i] = proj_from[i];
-      }
-    }
-  }
 
   if (pred_matches_box(prediction)) {
     param.need_pred = false;

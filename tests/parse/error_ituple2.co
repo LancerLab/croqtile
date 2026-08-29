@@ -1,9 +1,0 @@
-// RUN: not choreo %s 2>&1 | FileCheck %s
-
-__co__ auto illegal_ituple() {
-  ituple it;   // ituple must be initialized
-}
-
-// CHECK: error: an ituple must be initialized.
-// CHECK-NOT: error:
-

@@ -1,9 +1,6 @@
 #include "earlysema.hpp"
-#include "target_registry.hpp"
 #include "target_utils.hpp"
 #include "types.hpp"
-#include <cstdlib>
-#include <limits>
 
 // Note: Early semantics lacks shape details. Therefore, any semantic analysis,
 // type inference, etc. related to shapes, are pulled off.
@@ -29,27 +26,6 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     pl_depths.push_back(pl_depth);
     inthreads_levels.push_back(0);
     assert(inthreads_levels.size() == (unsigned)pl_depth + 1);
-    if (pb->HasLaunchBounds()) {
-      auto& lb_args = pb->GetLaunchBoundsArgs();
-      for (size_t i = 0; i < lb_args->Count(); ++i) {
-        auto node = lb_args->ValueAt(i);
-        AST::Identifier* id = nullptr;
-        if (auto id_ptr = dyn_cast<AST::Identifier>(node))
-          id = id_ptr.get();
-        else if (auto expr = dyn_cast<AST::Expr>(node))
-          if (auto id_ptr2 = dyn_cast<AST::Identifier>(expr->GetR()))
-            id = id_ptr2.get();
-        if (id && (id->name == "_" || id->name == "auto")) {
-          lb_args->SetValueAt(
-              i, AST::Make<AST::Expr>(
-                     id->LOC(), AST::Make<AST::IntLiteral>(id->LOC(), 0)));
-        }
-      }
-    }
-    // Cooperative validation has been moved to SemaCheck
-    // (lib/semacheck.cpp), which runs after normalization.  At that point
-    // the parallel level has been fully inferred, so the check can
-    // accurately determine whether the annotation makes sense.
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     ++inthreads_levels[pl_depth];
     if (inthreads_levels[pl_depth] > 1)
@@ -65,8 +41,12 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     if (call->template_args) {
       in_template_param = true; // enter template param visit
     }
-  } else if (isa<AST::ApplyBlock>(&n)) {
-    // iterators are defined in VisitorWithScope::BeforeVisit
+  } else if (auto fa = dyn_cast<AST::FragApply>(&n)) {
+    for (auto& p : fa->params) {
+      auto scoped_p = SSTab().ScopedName(p);
+      if (!SSTab().IsDeclared(scoped_p))
+        SSTab().DefineSymbol(scoped_p, MakeIntegerType());
+    }
   } else if (auto ft = dyn_cast<AST::FragTransfer>(&n)) {
     for (auto& p : ft->params) {
       auto scoped_p = SSTab().ScopedName(p);
@@ -692,14 +672,9 @@ bool EarlySemantics::Visit(AST::Expr& n) {
 
 bool EarlySemantics::Visit(AST::CastExpr& n) {
   TraceEachVisit(n);
-  if (!n.IsExplicit()) {
-    // Implicit casts may already exist when re-analyzing a cloned AST
-    // (e.g. in-process device compilation of offload functions).
-    // Accept them if type info is already set.
-    if (n.GetType()) return true;
+  if (!n.IsExplicit())
     choreo_unreachable("implicit AST::CastExpr should not appear at "
                        "EarlySemantics.");
-  }
 
   // Foreign casts (__cast<"type">(expr)) bypass type validation; the type
   // string is opaque and will be emitted verbatim by codegen.
@@ -786,6 +761,25 @@ bool EarlySemantics::Visit(AST::AttributeExpr& n) {
     if (vec_len && vec_len->Val() <= 0 && !IsUnKnownInteger(vec_len->Val()))
       Error1(vec_len->LOC(),
              "the vector length of `vectorize` should be a positive integer");
+  } else if (n.AttrName() == "automap") {
+    Warning(n.LOC(), "'automap' is deprecated; use 'frag.apply' instead. "
+                     "'automap' will be removed in a future release.");
+    if (n.AttrValueCount() > 1)
+      Error1(n.LOC(), "suffix expression 'automap' accepts at most one "
+                      "parallel variable argument.");
+    if (n.AttrValueCount() == 1) {
+      auto pv = AST::GetIdentifier(n.AttrValueAt(0));
+      if (!pv)
+        Error1(n.AttrValueAt(0)->LOC(),
+               "the attribute value of `automap` should be a parallel variable "
+               "identifier.");
+      else if (!SSTab().IsDeclared(pv->name))
+        Error1(pv->LOC(), "the parallel variable '" + pv->name +
+                              "' is not declared in the current scope.");
+      else if (!pb_map.count(InScopeName(pv->name)))
+        Error1(pv->LOC(), "automap variable '" + pv->name +
+                              "' must be a parallel-by variable.");
+    }
   }
   return true;
 }
@@ -1502,62 +1496,6 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
     Error1(n.LOC(), "the 'device' parallel-by level must be the outermost "
                     "parallel scope.");
 
-  if (n.HasDeviceTarget()) {
-    if (n.GetLevel() != ParallelLevel::DEVICE)
-      Error1(n.LOC(), "device target annotation is only valid on 'device' "
-                      "parallel level.");
-    auto dev_target = TargetRegistry::CreateByDeviceName(n.DeviceTargetName());
-    if (!dev_target)
-      Error1(
-          n.LOC(), "unknown device target '" + n.DeviceTargetName() +
-                       "'; available targets: " +
-                       [&] {
-                         std::string s;
-                         for (auto& ti : TargetRegistry::List()) {
-                           auto t = TargetRegistry::Create(ti.name);
-                           if (!s.empty()) s += ", ";
-                           s += t->DeviceName();
-                         }
-                         return s;
-                       }() +
-                       ".");
-    else if (!CCtx().GetDeviceTarget(n.DeviceTargetName()))
-      CCtx().AddDeviceTarget(n.DeviceTargetName(), std::move(dev_target));
-    if (!n.IsAsync())
-      Error1(n.LOC(),
-             "device(" + n.DeviceTargetName() + ") block must be async.");
-  }
-
-  if (n.HasLaunchBounds()) {
-    if (CCtx().TargetName() != "cute" && CCtx().TargetName() != "hip")
-      Warning(n.LOC(),
-              "[[launch_bounds]] is ignored for non-GPU targets (cute, hip).");
-    auto& lb_args = n.GetLaunchBoundsArgs();
-    auto argc = lb_args->Count();
-    if (argc < 1 || argc > 3)
-      Error1(n.LOC(),
-             "[[launch_bounds]] expects 1 to 3 integer arguments, but got " +
-                 std::to_string(argc) + ".");
-    for (size_t i = 0; i < argc; ++i) {
-      auto aty = NodeType(*lb_args->ValueAt(i));
-      if (!isa<ScalarIntegerType>(aty))
-        Error1(lb_args->ValueAt(i)->LOC(),
-               "[[launch_bounds]] argument must be an integer but got '" +
-                   PSTR(aty) + "'.");
-    }
-  }
-
-  if (n.HasMaxnreg()) {
-    if (CCtx().TargetName() != "cute" && CCtx().TargetName() != "hip")
-      Warning(n.LOC(),
-              "[[maxnreg]] is ignored for non-GPU targets (cute, hip).");
-    auto aty = NodeType(*n.GetMaxnregArg());
-    if (!isa<ScalarIntegerType>(aty))
-      Error1(n.GetMaxnregArg()->LOC(),
-             "[[maxnreg]] argument must be an integer but got '" + PSTR(aty) +
-                 "'.");
-  }
-
   if (pl_depth > 1 && n.IsAsync())
     Error1(n.LOC(), "inner parallel-by level can not be asynchronous.");
 
@@ -1937,7 +1875,7 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   if (isa<AST::ChunkAt>(n.from) && isa<AST::ChunkAt>(n.to))
     if (cast<AST::ChunkAt>(n.from)->HasTilingOperation() &&
         cast<AST::ChunkAt>(n.to)->HasTilingOperation() &&
-        !CCtx().HasFeature(ChoreoFeature::DSDMA, CCtx().GetArch())) {
+        (CCtx().HasFeature(ChoreoFeature::DSDMA))) {
       Error1(n.LOC(),
              "slice and deslice in single DMA statement is not supported yet.");
     }
@@ -2065,11 +2003,6 @@ bool EarlySemantics::Visit(AST::DMA& n) {
 }
 
 bool EarlySemantics::Visit(AST::MMA& n) {
-  if (!CCtx().TargetSupportMMA()) {
-    Error1(n.LOC(), "mma is not supported by the target: " +
-                        std::string(CCtx().TargetName()) + ".");
-    return true;
-  }
   auto old_ec = error_count;
   auto& op = *n.GetOperation();
   switch (op.Tag()) {
@@ -2079,32 +2012,26 @@ bool EarlySemantics::Visit(AST::MMA& n) {
     if (op.FillingIsDecl()) {
       // `mc[1] = mma.fill 0;` is invalid.
       assert(!AST::FragIsArrayElem(op.FillingTo()));
-      // If the symbol already exists in a parent scope within the same
-      // parallel context, this is a re-fill, not a new declaration.
-      if (!SSTab().DeclaredInScope(fill_sym) &&
-          SSTab().DeclaredInSameParallelContext(fill_sym)) {
-        op.SetFillingIsDecl(false);
+      auto fill_bt = op.FillingType();
+      if (op.FillingArrayDims()) {
+        auto arr_type = cast<ArrayType>(op.FillingArrayDims()->GetType());
+        ReportErrorWhenViolateODR(
+            n.LOC(), fill_sym, __FILE__, __LINE__,
+            MakeRankedSpannedArrayType(2, arr_type->dims, fill_bt));
       } else {
-        auto fill_bt = op.FillingType();
-        if (op.FillingArrayDims()) {
-          auto arr_type = cast<ArrayType>(op.FillingArrayDims()->GetType());
-          ReportErrorWhenViolateODR(
-              n.LOC(), fill_sym, __FILE__, __LINE__,
-              MakeRankedSpannedArrayType(2, arr_type->dims, fill_bt));
-        } else {
-          ReportErrorWhenViolateODR(n.LOC(), fill_sym, __FILE__, __LINE__,
-                                    MakeRankedSpannedType(2, fill_bt));
-        }
-        ReportErrorWhenViolateODR(n.LOC(), fill_sym + ".span", __FILE__,
-                                  __LINE__, MakeRankedMDSpanType(2));
-        if (!isa<ScalarType>(op.FillingValue()->GetType()))
-          Error1(n.LOC(), "Expect a scalar value for MMA fill.");
+        ReportErrorWhenViolateODR(n.LOC(), fill_sym, __FILE__, __LINE__,
+                                  MakeRankedSpannedType(2, fill_bt));
       }
+      ReportErrorWhenViolateODR(n.LOC(), fill_sym + ".span", __FILE__, __LINE__,
+                                MakeRankedMDSpanType(2));
+      if (!isa<ScalarType>(op.FillingValue()->GetType()))
+        Error1(n.LOC(), "Expect a scalar value for MMA fill.");
     } else {
       ReportErrorWhenUseBeforeDefine(n.LOC(), fill_sym);
     }
   } break;
-  case AST::MMAOperation::Load: {
+  case AST::MMAOperation::Load:
+  case AST::MMAOperation::LoadS: {
     std::string fut_sym = AST::FragName(op.GetFuture());
     assert(!AST::FragIsArrayElem(op.GetFuture()) &&
            "For now, frag with indices is only supported for mc.");
@@ -2122,18 +2049,6 @@ bool EarlySemantics::Visit(AST::MMA& n) {
       Error1(n.LOC(), "Expected a spanned buffer for MMA loadR source.");
     std::string dst_sym = AST::FragName(op.LoadTo());
     ReportErrorWhenUseBeforeDefine(n.LOC(), dst_sym);
-  } break;
-  case AST::MMAOperation::Desc: {
-    auto sty = GetSpannedType(op.DescFrom()->GetType());
-    if (!sty) Error1(n.LOC(), "Expected a spanned buffer for MMA desc.");
-    std::string operand_sym = AST::FragName(op.DescTo());
-    ReportErrorWhenViolateODR(
-        n.LOC(), operand_sym, __FILE__, __LINE__,
-        sty ? cast<SpannedType>(sty->Clone())
-            : MakeUnRankedSpannedType(BaseType::UNKSCALAR, Storage::SHARED));
-    if (sty)
-      ReportErrorWhenViolateODR(n.LOC(), operand_sym + ".span", __FILE__,
-                                __LINE__, sty->GetMDSpanType()->Clone());
   } break;
   case AST::MMAOperation::Exec: {
     std::string op0_sym = AST::FragName(op.ExecOperand(0));
@@ -2195,8 +2110,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
 
   auto rank = sty->GetShape().Rank();
 
-  for (size_t op_idx = 0; op_idx < n.AllOperations().size(); ++op_idx) {
-    auto op = n.AllOperations()[op_idx];
+  for (auto op : n.AllOperations()) {
     op->accept(*this);
 
     if (auto rop = dyn_cast<AST::SOP::Reshape>(op)) {
@@ -2215,33 +2129,7 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
     }
 
     if (isa<AST::SOP::Squeeze>(op)) {
-      // Best-effort rank estimation: count subspan dims that are not
-      // literal 1 so that downstream DMA/data-access checks see the
-      // squeezed rank before ShapeInference runs.
-      ptr<AST::MultiValues> src_dims = nullptr;
-      for (int j = (int)op_idx - 1; j >= 0; --j) {
-        if (auto sbs = dyn_cast<AST::SOP::SubSpan>(n.OpAt(j))) {
-          src_dims = sbs->subspan;
-          break;
-        }
-        if (auto rsp = dyn_cast<AST::SOP::Reshape>(n.OpAt(j))) {
-          src_dims = rsp->GetNewSpan();
-          break;
-        }
-        if (auto vw = dyn_cast<AST::SOP::View>(n.OpAt(j))) {
-          src_dims = vw->subspan;
-          break;
-        }
-      }
-      if (src_dims) {
-        size_t squeezed = 0;
-        for (auto& v : src_dims->AllValues()) {
-          auto il = GetIntLiteral(v);
-          if (il && il->Val() == 1) continue;
-          ++squeezed;
-        }
-        if (squeezed > 0) rank = squeezed;
-      }
+      // .sqz rank is resolved in ShapeInference
       continue;
     }
 
@@ -2370,9 +2258,6 @@ bool EarlySemantics::Visit(AST::Call& n) {
 
   size_t ec = error_count;
 
-  // Promote croq:: namespaced calls to BIF status
-  if (!n.IsBIF() && n.function->name.rfind("croq::", 0) == 0) { n.SetBIF(); }
-
   if ((pl_depth == 0) && !n.IsBIF()) {
     Error1(n.LOC(),
            "unable to call kernel function outside the parallel-by block(s).");
@@ -2383,28 +2268,6 @@ bool EarlySemantics::Visit(AST::Call& n) {
     if (n.template_args)
       Error1(n.LOC(), "the built-in functions are not function templates.");
     const auto func_name = n.function->name;
-
-    // Namespace-based target validation for croq:: qualified BIFs
-    if (func_name.rfind("croq::cuda::", 0) == 0) {
-      if (CCtx().TargetName() != "cute")
-        Warning(n.LOC(), "'" + func_name +
-                             "' is a CUDA intrinsic and is ignored for "
-                             "target '" +
-                             CCtx().TargetName() + "'.");
-    } else if (func_name.rfind("croq::hip::", 0) == 0) {
-      if (CCtx().TargetName() != "hip")
-        Warning(n.LOC(), "'" + func_name +
-                             "' is a HIP intrinsic and is ignored for "
-                             "target '" +
-                             CCtx().TargetName() + "'.");
-    } else if (func_name.rfind("croq::gpu::", 0) == 0) {
-      if (CCtx().TargetName() != "cute" && CCtx().TargetName() != "hip")
-        Warning(n.LOC(), "'" + func_name +
-                             "' is a GPU intrinsic and is ignored for "
-                             "target '" +
-                             CCtx().TargetName() + "'.");
-    }
-
     if (func_name == "assert") {
       auto pty = NodeType(*n.arguments->ValueAt(0));
       if (!isa<BooleanType>(pty))
@@ -2412,22 +2275,42 @@ bool EarlySemantics::Visit(AST::Call& n) {
       auto sty = NodeType(*n.arguments->ValueAt(1));
       if (!isa<StringType>(sty))
         Error1(n.LOC(), "expect a string but got '" + PSTR(sty) + "'.");
-    } else if (func_name == "croq::cuda::setreg_inc" ||
-               func_name == "croq::cuda::setreg_dec") {
+    } else if (func_name == "setreg" || func_name == "setreg.inc" ||
+               func_name == "setreg.dec") {
+      if (CCtx().TargetName() != "cute") {
+        Error1(n.LOC(), "setreg is only supported for the cute target.");
+      }
       if (pl_depth == 0) {
-        Error1(n.LOC(), "'" + func_name +
-                            "' can only be used inside parallel-by blocks.");
+        Error1(n.LOC(), "setreg can only be used inside parallel-by blocks.");
       }
       if (n.arguments->Count() != 1) {
-        Error1(n.LOC(), "'" + func_name +
-                            "' expects exactly one integer argument, but got " +
-                            std::to_string(n.arguments->Count()) + ".");
+        Error1(n.LOC(),
+               "setreg expects exactly one integer argument, but got " +
+                   std::to_string(n.arguments->Count()) + ".");
       } else {
         auto aty = NodeType(*n.arguments->ValueAt(0));
         if (!isa<ScalarIntegerType>(aty))
-          Error1(n.LOC(), "'" + func_name +
-                              "' expects an integer argument but got '" +
+          Error1(n.LOC(), "setreg expects an integer argument but got '" +
                               PSTR(aty) + "'.");
+      }
+    } else if (func_name == "launch_bounds") {
+      if (CCtx().TargetName() != "cute") {
+        Error1(n.LOC(), "launch_bounds is only supported for the cute target.");
+      }
+      if (pl_depth == 0) {
+        Error1(n.LOC(),
+               "launch_bounds can only be used inside parallel-by blocks.");
+      }
+      if (n.arguments->Count() != 1) {
+        Error1(n.LOC(),
+               "launch_bounds expects exactly one integer argument, but got " +
+                   std::to_string(n.arguments->Count()) + ".");
+      } else {
+        auto aty = NodeType(*n.arguments->ValueAt(0));
+        if (!isa<ScalarIntegerType>(aty))
+          Error1(n.LOC(),
+                 "launch_bounds expects an integer argument but got '" +
+                     PSTR(aty) + "'.");
       }
     } else if (func_name == "print" || func_name == "println") {
       auto Printable = [](ptr<Type> ty) -> bool {
@@ -2522,28 +2405,6 @@ bool EarlySemantics::Visit(AST::Call& n) {
                        " but got '" + PSTR(arg_ty) + "'.");
         }
       }
-    } else if (func_name == "__bar_arrive" || func_name == "__bar_sync") {
-      if (n.arguments->Count() != 2) {
-        Error1(n.LOC(), "'" + func_name +
-                            "' expects 2 arguments (barrier_id, thread_count)"
-                            " but got " +
-                            std::to_string(n.arguments->Count()) + ".");
-      } else {
-        auto id_arg = dyn_cast<AST::Expr>(n.arguments->ValueAt(0));
-        if (id_arg && id_arg->Opts().HasVal()) {
-          auto id_val = VIInt(id_arg->Opts().GetVal());
-          if (id_val && id_val.value() == 15)
-            Warning(n.LOC(),
-                    "barrier_id 15 is reserved for internal warpspec sync.");
-        }
-        auto cnt_arg = dyn_cast<AST::Expr>(n.arguments->ValueAt(1));
-        if (cnt_arg && cnt_arg->Opts().HasVal()) {
-          auto cnt_val = VIInt(cnt_arg->Opts().GetVal());
-          if (cnt_val && cnt_val.value() % 32 != 0)
-            Warning(n.LOC(),
-                    "thread_count should be a multiple of 32 (warp size).");
-        }
-      }
     } else if (n.IsLibCall()) {
       auto& tgt = CCtx().GetTarget();
       if (!tgt.IsLibCallSupported(func_name))
@@ -2571,63 +2432,16 @@ bool EarlySemantics::Visit(AST::Call& n) {
 
   if (resolve_fns && !n.IsBIF()) {
     auto function_name = n.function->name;
-    auto MatchQuality = [](const ptr<Type>& arg_ty,
-                           const ptr<DeviceDataType>& param_ty) {
-      if (!arg_ty || !param_ty) return 0;
-      auto param_bt = param_ty->GetDataType();
-      if (param_bt == BaseType::UNKNOWN) return 1;
-
-      if (auto scalar_ty = dyn_cast<ScalarType>(arg_ty);
-          scalar_ty && !param_ty->is_pointer) {
-        auto arg_bt = scalar_ty->GetBaseType();
-        if (arg_bt == param_bt) return 4; // exact scalar match
-        if (IsValuePreservingCast(arg_bt, param_bt)) return 3;
-        if (IsReinterpretiveCast(arg_bt, param_bt)) return 2;
-      }
-
-      if (auto spanned_ty = dyn_cast<SpannedType>(arg_ty); spanned_ty) {
-        if (param_ty->is_pointer) {
-          auto elem_bt = spanned_ty->ElementType();
-          if (param_bt == BaseType::VOID) return 1; // void* fallback
-          if (elem_bt == param_bt) return 4;        // exact element match
-          if (IsValuePreservingCast(elem_bt, param_bt)) return 3;
-          if (IsReinterpretiveCast(elem_bt, param_bt)) return 2;
-        }
-      }
-
-      // integer-like bounded expressions are weaker than exact scalar matches.
-      if (arg_ty->GetBaseType() == BaseType::BOUNDED_INT ||
-          (arg_ty->GetBaseType() == BaseType::BOUNDED_ITUPLE &&
-           arg_ty->Dims() == 1)) {
-        if (IsIntegerType(param_bt)) return 2;
-      }
-
-      if (arg_ty->GetBaseType() == param_bt) return 4;
-      return 1; // compatible but weak match
-    };
 
     ptr<AST::DeviceFunctionDecl> matched_function = nullptr;
     ptr<AST::DeviceFunctionDecl> candidate_function = nullptr;
-    ptr<AST::DeviceFunctionDecl> best_mismatch_candidate = nullptr;
+    std::vector<ptr<DeviceDataType>> real_param_types;
     ptr<DeviceDataType> real_ret_type = nullptr;
-    int best_match_score = std::numeric_limits<int>::min();
-    int best_mismatch_score = std::numeric_limits<int>::min();
-    bool has_template_mismatch = false;
     std::string mismatch_msg;
-
-    auto record_mismatch = [&](const ptr<AST::DeviceFunctionDecl>& candidate,
-                               int score, const std::string& msg) {
-      if (!candidate) return;
-      if (!best_mismatch_candidate || score > best_mismatch_score) {
-        best_mismatch_candidate = candidate;
-        best_mismatch_score = score;
-        mismatch_msg = msg;
-      }
-    };
-
     for (auto& f : device_functions) {
       if (f->name != n.function->name) continue;
       candidate_function = f;
+      mismatch_msg = "";
       std::unordered_map<std::string, BaseType> template_param_map;
 
       size_t param_count_uninitized = 0;
@@ -2640,15 +2454,12 @@ bool EarlySemantics::Visit(AST::Call& n) {
 
       if (!(candidate_function->param_types.size() >= n.arguments->Count() &&
             n.arguments->Count() >= param_count_uninitized)) {
-        auto score =
-            -std::abs((int)n.arguments->Count() - (int)param_count_uninitized);
-        record_mismatch(candidate_function, score,
-                        "the function '" + function_name + "' requires " +
-                            std::to_string(param_count_uninitized) +
-                            " parameters, but " +
-                            std::to_string(n.arguments->Count()) +
-                            " arguments are "
-                            "provided.");
+        mismatch_msg = "the function '" + function_name + "' requires " +
+                       std::to_string(param_count_uninitized) +
+                       " parameters, but " +
+                       std::to_string(n.arguments->Count()) +
+                       " arguments are "
+                       "provided.";
         continue;
       }
       // check the template arguments
@@ -2657,17 +2468,6 @@ bool EarlySemantics::Visit(AST::Call& n) {
 
       if (candidate_function->IsTemplated() && n.template_args) {
         auto templ_params = candidate_function->template_params;
-        size_t provided_count = n.template_args->Count();
-        // Keep current permissive behavior for missing template arguments
-        // (historical compatibility), but reject explicit over-supply.
-        if (provided_count > templ_params.size()) {
-          has_template_mismatch = true;
-          record_mismatch(
-              candidate_function, 0,
-              "unmatched template arguments of the device function '" +
-                  n.function->name + "'.");
-          continue;
-        }
         // note:the number of template arguments may not equal the number of
         // template parameters, since there may be some template parameters with
         // default values
@@ -2687,13 +2487,11 @@ bool EarlySemantics::Visit(AST::Call& n) {
               using BT = BaseType;
               if (!(IsIntegralType(lhs) || lhs == BT::BOUNDED_INT ||
                     lhs == BT::INDEX)) {
-                return false;
+                choreo_unreachable(
+                    "Unexpected base type for device type match: " + STR(lhs));
               }
               auto rhs = DSTR2BT(str);
               if (rhs == BaseType::UNKNOWN) { return false; }
-              if ((lhs == BT::BOUNDED_INT || lhs == BT::INDEX) &&
-                  IsIntegralType(rhs))
-                return true;
               return IsValuePreservingCast(lhs, rhs) ||
                      IsReinterpretiveCast(lhs, rhs);
             };
@@ -2723,19 +2521,13 @@ bool EarlySemantics::Visit(AST::Call& n) {
           }
         }
       }
-      if (!template_match) {
-        has_template_mismatch = true;
-        record_mismatch(
-            candidate_function, 0,
-            "unmatched template arguments of the device function '" +
-                n.function->name + "'.");
-        continue;
-      }
+      if (!template_match)
+        Warning(n.LOC(), "unmatched template arguments of the device "
+                         "function '" +
+                             n.function->name + "'.");
 
       // check the argument types
       bool arg_match = true;
-      int current_match_score = 0;
-      std::vector<ptr<DeviceDataType>> current_param_types;
       for (size_t param_idx = 0; param_idx < n.arguments->Count();
            ++param_idx) {
         auto arg_ty = NodeType(*n.arguments->ValueAt(param_idx));
@@ -2745,69 +2537,33 @@ bool EarlySemantics::Visit(AST::Call& n) {
         // update param type with template arguments
         if (template_param_map.find(param_name) != template_param_map.end())
           real_param_type->SetDataType(template_param_map[param_name]);
-        current_param_types.push_back(real_param_type);
+        real_param_types.push_back(real_param_type);
         // We allow the argument type promoted to parameter type, which means
         // IsValuePreservingCast(arg_ty, param_ty) should return true. For
         // example, a float argument can be passed to a double parameter. Other
         // type cast is not allowed.
         if (!real_param_type->ApprxEqual(*arg_ty)) {
           arg_match = false;
-          record_mismatch(candidate_function, current_match_score,
-                          "the type of " + std::to_string(param_idx + 1) +
-                              "th argument '" + PSTR(arg_ty) +
-                              "' is not compatible with the parameter type '" +
-                              PSTR(real_param_type) + "'.");
+          mismatch_msg = "the type of " + std::to_string(param_idx + 1) +
+                         "th argument '" + PSTR(arg_ty) +
+                         "' is not compatible with the parameter type '" +
+                         PSTR(real_param_type) + "'.";
           break;
         }
-
-        // Address-space compatibility for spanned arguments (same policy as
-        // semacheck), but enforced early to improve overload selection.
-        if (auto spanned_ty = dyn_cast<SpannedType>(arg_ty)) {
-          auto m_ty = spanned_ty->GetStorage();
-          std::string attr = real_param_type->attr;
-          if ((attr.find("__private__") != std::string::npos) ||
-              (attr.find("__attribute__((address_space(5)))") !=
-               std::string::npos)) {
-            if (m_ty != Storage::LOCAL) {
-              arg_match = false;
-              record_mismatch(candidate_function, current_match_score,
-                              "the type of " + std::to_string(param_idx + 1) +
-                                  "th argument '" + PSTR(arg_ty) +
-                                  "' is not local.");
-              break;
-            }
-          } else if ((attr.find("__shared__") != std::string::npos) ||
-                     (attr.find("__attribute__((shared))") !=
-                      std::string::npos)) {
-            if (m_ty != Storage::SHARED) {
-              arg_match = false;
-              record_mismatch(candidate_function, current_match_score,
-                              "the type of " + std::to_string(param_idx + 1) +
-                                  "th argument '" + PSTR(arg_ty) +
-                                  "' is not shared.");
-              break;
-            }
-          }
-        }
-
-        current_match_score += MatchQuality(arg_ty, real_param_type);
       }
       // if all arguments match, we will use this function
       if (arg_match) {
-        if (!matched_function || current_match_score > best_match_score) {
-          matched_function =
-              dyn_cast<AST::DeviceFunctionDecl>(candidate_function->Clone());
-          matched_function->param_types = std::move(current_param_types);
-          real_ret_type =
-              dyn_cast<DeviceDataType>(matched_function->ret_type->Clone());
-          best_match_score = current_match_score;
+        matched_function =
+            dyn_cast<AST::DeviceFunctionDecl>(candidate_function->Clone());
+        matched_function->param_types = real_param_types;
+        real_ret_type =
+            dyn_cast<DeviceDataType>(matched_function->ret_type->Clone());
 
-          if (template_param_map.find(real_ret_type->PlainName()) !=
-              template_param_map.end()) {
-            real_ret_type->SetDataType(
-                template_param_map[real_ret_type->PlainName()]);
-            matched_function->ret_type = real_ret_type;
-          }
+        if (template_param_map.find(real_ret_type->PlainName()) !=
+            template_param_map.end()) {
+          real_ret_type->SetDataType(
+              template_param_map[real_ret_type->PlainName()]);
+          matched_function->ret_type = real_ret_type;
         }
       }
     } // for each device function
@@ -2815,18 +2571,13 @@ bool EarlySemantics::Visit(AST::Call& n) {
     // if no matched function, we will report a warning
     // and suggest the candidate function.
     if (!matched_function) {
-      if (has_template_mismatch)
-        Warning(n.LOC(), "unmatched template arguments of the device "
-                         "function '" +
-                             n.function->name + "'.");
       Warning(n.LOC(),
               "unable to find a device function '" + function_name + "'.");
-      if (best_mismatch_candidate)
-        Warning(
-            best_mismatch_candidate->LOC(),
-            "candidate function '" + best_mismatch_candidate->name + "' with " +
-                std::to_string(best_mismatch_candidate->param_types.size()) +
-                " parameters is found, but " + mismatch_msg);
+      if (candidate_function)
+        Warning(candidate_function->LOC(),
+                "candidate function '" + candidate_function->name + "' with " +
+                    std::to_string(candidate_function->param_types.size()) +
+                    " parameters is found, but " + mismatch_msg);
     } else {
       n.device_functions.push_back(matched_function);
       if (real_ret_type) {
@@ -2877,9 +2628,6 @@ bool EarlySemantics::Visit(AST::Synchronize& n) {
     return true;
   }
 
-  Warning(n.LOC(), "'sync.<storage>' is deprecated; use 'sync.barrier' "
-                   "or 'sync.fence' for explicit synchronization.");
-
   switch (n.Resource()) {
   case Storage::GLOBAL:
   case Storage::SHARED:
@@ -2905,11 +2653,14 @@ bool EarlySemantics::Visit(AST::Rotate& n) {
       return false;
     }
 
-    // Previously disallowed rotate/swap for futures targeting a buffer chunk.
-    // The runtime swap() correctly exchanges all future fields (ctx, event,
-    // data, status), and private codegen does not depend on to_kind after
-    // rotate. Allowing this enables NM-like pipelines where futures target
-    // explicit sub-buffers via .view().from().
+    // Avoid to swap a 'chunkat' target where no explicit buffer symbol is
+    // associated.
+    if (FCtx(fname).GetFutureBufferInfo()[InScopeName(cname)].to_kind ==
+        DOK_CHUNK) {
+      Error1(n.LOC(), "rotate/swap a 'future' referring a buffer chunk has not "
+                      "been supported yet.");
+      return false;
+    }
 
     if (index < 1) continue;
     lty = NodeType(*n.ValueAt(index - 1));
@@ -3050,30 +2801,8 @@ bool EarlySemantics::Visit(AST::LoopRange& n) {
 bool EarlySemantics::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
 
-  // Check for duplicate local names across all ranges in this foreach.
-  std::unordered_set<std::string> local_names_seen;
-
   for (auto& i : n.GetRanges()) {
-    auto rng = dyn_cast<AST::LoopRange>(i);
-
-    // Validate explicit local name (the iteration variable "c" in c=b(...)).
-    if (rng->HasExplicitIV()) {
-      auto lid = rng->GetIV();
-      if (lid->name == "_")
-        Error1(lid->LOC(), "_ is not allowed as a local iteration variable.");
-
-      // Reject duplicate local names within the same foreach range list.
-      if (!local_names_seen.insert(lid->name).second) {
-        Error1(lid->LOC(), "local iteration variable '" + lid->name +
-                               "' is already used in this foreach.");
-      }
-
-      // Register the iteration variable in the foreach scope so that any
-      // redefinition inside the body is caught as an ODR violation.
-      ReportErrorWhenViolateODR(lid->LOC(), lid->name, __FILE__, __LINE__);
-    }
-
-    if (auto id = rng->GetRV()) {
+    if (auto id = dyn_cast<AST::LoopRange>(i)->iv) {
       if (id->name == "_") {
         Error1(id->LOC(), "_ is not allowed as an iteration variable.");
         continue;
@@ -3171,6 +2900,7 @@ bool EarlySemantics::Visit(AST::CppSourceCode& n) {
 
 bool EarlySemantics::ParseTemplateParams(
     std::string input, std::vector<DeviceTemplateParam>& template_params) {
+
   auto trim = [](const std::string& str) {
     size_t first = str.find_first_not_of(" \t");
     size_t last = str.find_last_not_of(" \t");
@@ -3178,125 +2908,59 @@ bool EarlySemantics::ParseTemplateParams(
                ? ""
                : str.substr(first, last - first + 1);
   };
-  auto is_ident_char = [](char c) {
-    return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
-  };
-
   std::regex re(R"(template\s*<(.*)>)");
   std::smatch match;
-  if (!std::regex_search(input, match, re) || match.size() < 2) return false;
-
-  std::string inner = match[1].str();
+  if (!std::regex_search(input, match, re) || match.size() < 2) {
+    return false;
+  }
   std::vector<std::string> params;
+  std::string inner = match[1].str();
 
   std::string current;
-  int angle_depth = 0;
-  int paren_depth = 0;
-  int bracket_depth = 0;
-  int brace_depth = 0;
+  int depth = 0;
   for (char c : inner) {
-    if (c == '<')
-      angle_depth++;
-    else if (c == '>')
-      angle_depth--;
-    else if (c == '(')
-      paren_depth++;
-    else if (c == ')')
-      paren_depth--;
-    else if (c == '[')
-      bracket_depth++;
-    else if (c == ']')
-      bracket_depth--;
-    else if (c == '{')
-      brace_depth++;
-    else if (c == '}')
-      brace_depth--;
-
-    if (c == ',' && angle_depth == 0 && paren_depth == 0 &&
-        bracket_depth == 0 && brace_depth == 0) {
+    if (c == '<') {
+      depth++;
+      current += c;
+    } else if (c == '>') {
+      depth--;
+      current += c;
+    } else if (c == ',' && depth == 0) {
       params.push_back(trim(current));
       current.clear();
-      continue;
+    } else {
+      current += c;
     }
-    current += c;
   }
 
-  if (!current.empty()) params.push_back(trim(current));
-  if (params.empty()) return false;
-
+  if (!current.empty()) { params.push_back(trim(current)); }
+  if (params.empty()) {
+    return false; // No valid template parameters found
+  }
   for (auto param : params) {
-    param = trim(param);
     DeviceTemplateParam tp;
-    if (param.empty()) {
-      template_params.push_back(tp);
-      continue;
-    }
-
-    std::string param_head = param;
-    std::string default_value;
-    int dep = 0;
-    size_t eq_pos = std::string::npos;
-    for (size_t i = 0; i < param.size(); ++i) {
-      auto c = param[i];
-      if (c == '<')
-        dep++;
-      else if (c == '>')
-        dep--;
-      else if (c == '=' && dep == 0) {
-        eq_pos = i;
-        break;
+    std::regex type_re(R"((\w+)\s*(\w+)\s*(=\s*([^,>]+))?)");
+    std::smatch type_match;
+    if (std::regex_match(param, type_match, type_re)) {
+      auto type_name = type_match[1].str();
+      auto param_name = type_match[2].str();
+      auto default_value = type_match[4].str();
+      if (type_name.empty() || param_name.empty()) {
+        template_params.push_back(tp);
+        continue;
       }
-    }
-    if (eq_pos != std::string::npos) {
-      param_head = trim(param.substr(0, eq_pos));
-      default_value = trim(param.substr(eq_pos + 1));
-    }
-
-    if (param_head.rfind("typename", 0) == 0 ||
-        param_head.rfind("class", 0) == 0) {
-      // e.g. "typename T", "class T"
-      size_t pos = param_head.find_first_of(" \t");
-      std::string tail =
-          (pos == std::string::npos) ? "" : trim(param_head.substr(pos + 1));
-      if (!tail.empty() && tail.rfind("...", 0) == 0)
-        tail = trim(tail.substr(3));
-      tp.kind = DeviceTemplateParam::TYPE;
-      tp.type_name =
-          (param_head.rfind("typename", 0) == 0) ? "typename" : "class";
-      tp.param_name = tail;
-      tp.default_value = default_value;
-      if (tp.param_name.empty()) tp.kind = DeviceTemplateParam::UNKNOWN;
-      template_params.push_back(tp);
-      continue;
-    }
-
-    // value parameter: split head into "<type> <name>"
-    size_t end = param_head.size();
-    while (end > 0 &&
-           std::isspace(static_cast<unsigned char>(param_head[end - 1])))
-      --end;
-    if (end == 0) {
-      template_params.push_back(tp);
-      continue;
-    }
-
-    size_t name_end = end;
-    size_t name_begin = name_end;
-    while (name_begin > 0 && is_ident_char(param_head[name_begin - 1]))
-      --name_begin;
-
-    std::string name =
-        trim(param_head.substr(name_begin, name_end - name_begin));
-    std::string type = trim(param_head.substr(0, name_begin));
-    if (!name.empty() && !type.empty()) {
-      tp.kind = DeviceTemplateParam::VALUE;
-      tp.param_name = name;
-      tp.type_name = type;
+      if (type_name == "typename" || type_name == "class") {
+        tp.kind = DeviceTemplateParam::TYPE; // This is a type parameter
+      } else {
+        tp.kind = DeviceTemplateParam::VALUE; // This is a value parameter
+      }
+      tp.param_name = param_name;
+      tp.type_name = type_name;
       tp.default_value = default_value;
     }
     template_params.push_back(tp);
   }
-  return !template_params.empty();
+  return true;
 }
 
 bool EarlySemantics::Visit(AST::DeviceFunctionDecl& n) {

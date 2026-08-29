@@ -1,7 +1,0 @@
-[submodule "extern/cutlass"]
-	path = extern/cutlass
-	url = https://github.com/NVIDIA/cutlass.git
-	branch = v4.2.1
-[submodule "extern/gtest"]
-	path = extern/gtest
-	url = https://github.com/google/googletest.git

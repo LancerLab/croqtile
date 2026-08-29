@@ -4,7 +4,6 @@
 #include <deque>
 #include <filesystem>
 #include <iostream>
-#include <set>
 #include <sstream>
 #include <thread>
 #include <unordered_set>
@@ -53,11 +52,11 @@ inline const char* NameBaseType(BaseType bt) {
   case BaseType::F6_E2M3: return "choreo::f6_e2m3";
   case BaseType::F6_E3M2: return "choreo::f6_e3m2";
   case BaseType::F4_E2M1: return "choreo::f4_e2m1";
-  case BaseType::U64: return "uint64_t";
+  case BaseType::U64: return "unsigned long long";
   case BaseType::U32: return "unsigned int";
   case BaseType::U16: return "unsigned short";
   case BaseType::U8: return "unsigned char";
-  case BaseType::S64: return "int64_t";
+  case BaseType::S64: return "long long";
   case BaseType::S32: return "int";
   case BaseType::S16: return "short";
   case BaseType::S8: return "signed char";
@@ -129,7 +128,7 @@ public:
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::DMA&) override;
   bool Visit(AST::MMA&) override;
-  bool Visit(AST::ApplyBlock&) override;
+  bool Visit(AST::FragApply&) override;
   bool Visit(AST::FragTransfer&) override;
   bool Visit(AST::FragReduce&) override;
   bool Visit(AST::Wait&) override;
@@ -139,8 +138,6 @@ public:
   bool Visit(AST::Yield&) override;
   bool Visit(AST::Rotate&) override;
   bool Visit(AST::Synchronize&) override;
-  bool Visit(AST::Barrier&) override;
-  bool Visit(AST::Fence&) override;
   bool Visit(AST::Call&) override;
   bool Visit(AST::NamedVariableDecl&) override;
   bool Visit(AST::CppSourceCode& n) override;
@@ -187,7 +184,6 @@ private:
   LineDirectiveState device_line_state;
 
   std::map<std::string, std::string> claimed_futs;
-  std::set<std::string> tma_futures_;
   std::vector<std::string> pld_checklist = {};
 
   size_t future_count_ = 0;
@@ -200,8 +196,6 @@ private:
   // collisions when nested scopes declare variables with the same short name.
   std::unordered_map<std::string, int> emitted_device_names_;
   std::vector<std::unordered_map<std::string, int>> emitted_names_stack_;
-  std::vector<std::unordered_map<std::string, std::string>>
-      known_val_str_stack_;
   std::string UniqueDeviceName(const std::string& name) {
     auto it = emitted_device_names_.find(name);
     if (it == emitted_device_names_.end()) {
@@ -212,16 +206,11 @@ private:
   }
   void PushEmittedNames() {
     emitted_names_stack_.push_back(emitted_device_names_);
-    known_val_str_stack_.push_back(known_val_str_to_var_);
   }
   void PopEmittedNames() {
     if (!emitted_names_stack_.empty()) {
       emitted_device_names_ = emitted_names_stack_.back();
       emitted_names_stack_.pop_back();
-    }
-    if (!known_val_str_stack_.empty()) {
-      known_val_str_to_var_ = known_val_str_stack_.back();
-      known_val_str_stack_.pop_back();
     }
   }
 
@@ -235,13 +224,9 @@ private:
   static const std::string vid_pfx;
   // block dim enforcement level, default to thread level
   ParallelLevel bdim_level = ParallelLevel::THREAD;
-  std::stack<bool>
-      cooperative_stack_; // track cooperative flag per parallel block
   size_t current_thread_count = 0;
   std::string current_thread_count_expr;
   std::string stream_name; // deprecated: kept for ABI, no longer populated
-  bool extern_smem; // true: has dynamic smem, decl `extern __shared__ ...`
-  ValueItem shared_spm_size = sbe::nu(0);
   int tma_count = 0;
   int tma_future_count = 0;
   bool cluster_defers_launch = false;
@@ -252,36 +237,27 @@ private:
   std::string pending_wgmma_acc_sym;
   bool has_explicit_mma_wait = false;
   bool wgmma_arrive_state_declared = false;
+  bool pending_sala_consumer_barrier_ = false;
+  int sala_consumer_barrier_threads_ = 0;
   std::set<std::string> cluster_trigger_events_;
   std::set<std::string> event_arrive_tx_events_;
-  std::set<std::string> tma_bound_event_triggers_;
-  std::set<std::string> empty_event_names_;
-  std::set<std::string> waited_events_;
   std::vector<std::string> pending_barrier_inits_;
-  std::vector<std::string> pending_tma_prefetch_names_;
-  // Stack of innermost foreach loop induction variable names (__iv_xxx).
-  // Used to derive inline phase formulas for mbarrier waits.
-  std::vector<std::string> foreach_iv_stack_;
   bool in_named_var_decl_ = false;
   bool has_analyzed_warpspec = false;
   bool warpspec_wgmma_arrived = false;
+  int wgmma_foreach_depth = 0;
   AST::InThreadsBlock* current_inthreads = nullptr;
+  static bool SubtreeContainsWGMMAExec(AST::Node* n,
+                                       bool stop_at_foreach = false);
 
   bool in_register_direct_automap_ = false;
   bool vec4_automap_skip_ = false;
+  bool causal_split_active_ = false;
   std::string reg_loop_var_;
   std::map<std::string, std::string> automap_frag_reg_expr_;
   std::map<std::string, std::string> frag_apply_iv_map_;
-  std::set<AST::Node*> apply_row_hoisted_stmts_;
-  bool apply_has_main_loop_ = true;
-  // Maps scoped IV name -> preferred upper-bound C++ expression.
-  // Populated in Visit(WithIn) when the range source is a declared variable.
   std::map<std::string, std::string> iv_upper_bound_expr_;
 
-  // Maps normalized ValueSTR output -> declared C++ variable name.
-  // Populated when an `auto var = expr;` declaration is emitted.
-  // OpValueSTR checks this to reuse the name instead of re-expanding
-  // complex subexpressions (e.g. kv_tiles inside kv_bound's ternary).
   std::unordered_map<std::string, std::string> known_val_str_to_var_;
 
   AutomapStrategy AnalyzeAutomap(const AST::ForeachBlock& n);
@@ -312,8 +288,6 @@ private:
   std::vector<std::optional<HoistedScaleAccumInfo>> hoisted_scale_accum_scopes;
   std::vector<std::vector<ExplicitScaleAccumInfo>> explicit_scale_accum_scopes;
   std::unordered_map<std::string, ptr<AST::ChunkAt>> live_chunk_aliases;
-  std::unordered_set<std::string> explicit_mma_descs_;
-  std::unordered_set<std::string> explicit_mma_loads_;
   std::unordered_map<std::string, SwizMode> shared_buf_swiz_;
 
   struct TMAInnerSplit {
@@ -330,7 +304,6 @@ private:
 
 private:
   void FlushBarrierInits();
-  std::string InlinePhaseExpr(int stages, bool is_fill) const;
   void EmitFixedHostHead();
   void EmitFixedDeviceHead();
   void EmitFastCompileCache(std::ostream& os, const std::string& precomp_cu);
@@ -441,7 +414,6 @@ private:
     host_param_count = 0; // reset the count of host parameter
     symbolic_dimensions.clear();
     claimed_futs.clear();
-    tma_futures_.clear();
     async_subbyte_futures.clear();
     future_count_ = 0;
     dma_count_ = 0;
@@ -455,18 +427,16 @@ private:
     has_pending_wgmma_finalize = false;
     has_explicit_mma_wait = false;
     wgmma_arrive_state_declared = false;
+    wgmma_foreach_depth = 0;
+    set_cuda_func_attribute_max_dynamic_shared_memory_size = false;
     hoisted_scale_decl_scopes.clear();
     active_hoisted_scale_decls.clear();
     hoisted_scale_accum_scopes.clear();
     live_chunk_aliases.clear();
-    explicit_mma_descs_.clear();
-    explicit_mma_loads_.clear();
     shared_buf_swiz_.clear();
     tma_inner_splits_.clear();
     frag_chunk_rs_aliases_.clear();
     cluster_trigger_events_.clear();
-    event_arrive_tx_events_.clear();
-    tma_bound_event_triggers_.clear();
     pending_barrier_inits_.clear();
     in_named_var_decl_ = false;
     emitted_device_names_.clear();
@@ -618,8 +588,7 @@ private:
   GetDMABufferExpr(const std::string& sym,
                    const ptr<AST::MultiValues> subscription,
                    const ptr<Type>& sym_ty) const;
-  void EmitGroupX4Sync(std::ostringstream& os, const std::string& indent,
-                       int thread_count = 0) const;
+  void EmitGroupX4Sync(std::ostringstream& os, const std::string& indent) const;
   std::optional<HoistedScaleAccumInfo> AnalyzeHoistableScaledWGMMAAccum(
       const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs) const;
   bool CollectHoistableScaledWGMMAAccum(
@@ -672,7 +641,7 @@ private:
   ResolveAutomapThreadExpr(const ptr<AST::AttributeExpr>& automap_attr) const;
 
   bool IsWarpSpecActive() const {
-    return has_analyzed_warpspec ||
+    return CCtx().UseWarpSpec() || has_analyzed_warpspec ||
            cgi.GetFunctionTrait(fname).has_warpspec_pattern;
   }
 
@@ -680,6 +649,24 @@ private:
     return IsWarpSpecActive() && current_inthreads &&
            current_inthreads->HasActiveThreads() &&
            current_inthreads->inthreads_level == ParallelLevel::GROUPx4;
+  }
+
+  std::map<std::string, std::string> anon_decl_exprs_;
+
+  std::vector<int64_t> CurrentWarpGroupIndices() const {
+    if (!current_inthreads || !current_inthreads->HasActiveThreads() ||
+        !current_inthreads->HasScopeThreadMask())
+      return {};
+
+    auto& mask = current_inthreads->GetScopeThreadMask();
+    std::vector<int64_t> consumer_wgs;
+    for (size_t i = 0; i < mask.size(); i += 128)
+      for (size_t j = i; j < std::min(i + 128, mask.size()); ++j)
+        if (mask[j]) {
+          consumer_wgs.push_back(i / 128);
+          break;
+        }
+    return consumer_wgs;
   }
 
   bool ScopeAlreadySingleThreadForLevel(ParallelLevel level) const {
@@ -700,42 +687,6 @@ private:
       if (count > 1) return false;
     }
     return true;
-  }
-
-  int64_t CurrentWarpGroupCount() const {
-    return CurrentWarpGroupIndices().size();
-  }
-
-  std::vector<int64_t> CurrentWarpGroupIndices() const {
-    if (!current_inthreads || !current_inthreads->HasActiveThreads() ||
-        !current_inthreads->HasScopeThreadMask())
-      return {};
-
-    auto& mask = current_inthreads->GetScopeThreadMask();
-    std::vector<int64_t> consumer_wgs;
-    for (size_t i = 0; i < mask.size(); i += 128)
-      for (size_t j = i; j < std::min(i + 128, mask.size()); ++j)
-        if (mask[j]) {
-          consumer_wgs.push_back(i / 128);
-          break;
-        }
-    return consumer_wgs;
-  }
-
-  int64_t CurrentScopeThreadsCount() const {
-    return CurrentScopeThreadIndices().size();
-  }
-
-  std::vector<int64_t> CurrentScopeThreadIndices() const {
-    if (!current_inthreads || !current_inthreads->HasActiveThreads() ||
-        !current_inthreads->HasScopeThreadMask())
-      return {};
-
-    auto& mask = current_inthreads->GetScopeThreadMask();
-    std::vector<int64_t> thread_indices;
-    for (size_t i = 0; i < mask.size(); ++i)
-      if (mask[i]) thread_indices.push_back(i);
-    return thread_indices;
   }
 
   // In warpspec mode, use wg_barrier.sync() instead of __syncthreads()

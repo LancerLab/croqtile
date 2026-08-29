@@ -46,30 +46,6 @@ namespace Choreo {
 
 } // %code requires
 
-%code requires {
-#include "types.hpp"
-
-struct PLAnnotation {
-  Choreo::ParallelLevel level;
-  std::string device_target;
-  bool cooperative = false;
-  PLAnnotation() : level(Choreo::ParallelLevel::NONE) {}
-  PLAnnotation(Choreo::ParallelLevel l) : level(l) {}
-  PLAnnotation(Choreo::ParallelLevel l, const std::string& dt)
-      : level(l), device_target(dt) {}
-  PLAnnotation(Choreo::ParallelLevel l, const std::string& dt, bool c)
-      : level(l), device_target(dt), cooperative(c) {}
-};
-
-namespace Choreo { namespace AST { struct MultiValues; struct Expr; } }
-
-struct PBAttributes {
-  std::shared_ptr<Choreo::AST::MultiValues> launch_bounds;
-  std::shared_ptr<Choreo::AST::Expr> maxnreg;
-};
-
-} // %code requires
-
 // inject into Parser class
 %code provides {
 } // %code provide
@@ -213,20 +189,16 @@ extern int yylex();
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
 %token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
-%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST EVICT_FIRST EVICT_LAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC DOTWG BARRIER FENCE CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG
-
-%token DLBRAKT
+%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC DOTWG CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN SETREG SETREG_INC SETREG_DEC LAUNCHBOUNDS
 // MMA related builtin operations
-%token <std::string> MMA FILL LOAD DESC STORE ROW COLUMN SCALE MASK MMAWAIT
-%token <std::string> UNROLL
+%token <std::string> MMA FILL LOAD LOADR LOADS STORE ROW COLUMN COMMIT SCALE MASK MMAWAIT
+%token <std::string> UNROLL CAUSAL_SPLIT
 %token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXP2F EXPM1 FABS FMAF FRCP_RN FLOOR GELU ISFINITE FMAX FMIN ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA TOCAST
 %token <std::string> ATOMIC_ADD ATOMIC_SUB ATOMIC_EXCH ATOMIC_MIN ATOMIC_MAX ATOMIC_AND ATOMIC_OR ATOMIC_XOR ATOMIC_CAS
-%token <std::string> BAR_ARRIVE BAR_SYNC
 %token <std::string> LIB_CALL
-%token <std::string> FRAG
-%token <std::string> APPLY REDUCE_MAX_STMT REDUCE_SUM_STMT COPY_STMT
+%token <std::string> FRAG FRAGMENT AUTOMAP FRAG_APPLY REDUCE_MAX REDUCE_SUM
 // control related
-%token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH RET WHERE WHILE BREAK CONTINUE YIELD COOPERATIVE
+%token <std::string> INTHDS IF ELSE PARA BY WITH IN FOREACH RET WHERE WHILE BREAK CONTINUE YIELD
 %token <std::string> VECTORIZE
 
 // non-terminals
@@ -247,10 +219,9 @@ extern int yylex();
 %nterm <AST::ptr<Choreo::DeviceDataType>> device_type device_base_type device_complex_type device_param device_nested_type_list device_nested_type
 %nterm <AST::ptr<AST::Memory>> storage_qual
 %nterm <AST::ptr<AST::IntLiteral>> num_expr
-%nterm <AST::ptr<AST::Call>> call_stmt
-%nterm <PBAttributes> pb_attribute
+%nterm <AST::ptr<AST::Call>> call_stmt setreg_stmt launch_bounds_stmt
 %nterm <AST::DMAAsync> tdma_async
-%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block apply_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt mma_stmt frag_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
+%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt mma_stmt frag_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls named_fragment_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims step_list opt_step_list opt_stride_list at_list opt_at_list opt_from_list
 %nterm <std::pair<AST::ptr<AST::MultiValues>, AST::ptr<AST::MultiValues>>> shape_stride
@@ -274,16 +245,15 @@ extern int yylex();
 %nterm <AST::ptr<AST::ParallelBy>> paraby_block parabys paraby
 %nterm <AST::ptr<AST::Return>> return_stmt
 %nterm <AST::ptr<AST::Synchronize>> sync_stmt
-%nterm <std::vector<int>> int_list
-%nterm <AST::ptr<AST::Barrier>> barrier_stmt
-%nterm <AST::ptr<AST::Fence>> fence_stmt
 %nterm <std::vector<ptr<AST::SpannedOperation>>> spanned_ops
+%nterm <std::vector<std::string>> frag_lambda_params
+%nterm <std::vector<int>> int_list
 %nterm <ptr<AST::SpannedOperation>> spanned_op
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr subdata_expr
 %nterm <AST::ptr<AST::Select>> select_expr
 %nterm <AST::MMAOperation::ExecMethod> mma_exec_method
 %nterm <Choreo::Storage> param_storage
-%nterm <PLAnnotation> note_pl
+%nterm <Choreo::ParallelLevel> note_pl
 
 // resolving the ambiguity of dangling ELSE
 %nonassoc IF_PREC
@@ -351,10 +321,6 @@ device_base_type
     | S16 { $$ = MakeDeviceDataType("short", $1); }
     | INT { $$ = MakeDeviceDataType("int", $1); }
     | S64 { $$ = MakeDeviceDataType("long long", $1); }
-    | U8 { $$ = MakeDeviceDataType("unsigned char", BaseType::U8); }
-    | U16 { $$ = MakeDeviceDataType("unsigned short", BaseType::U16); }
-    | U32 { $$ = MakeDeviceDataType("unsigned int", BaseType::U32); }
-    | U64 { $$ = MakeDeviceDataType("unsigned long long", BaseType::U64); }
     | SIGNED S8 { $$ = MakeDeviceDataType($1 + " char", BaseType::S8); }
     | SIGNED S16 { $$ = MakeDeviceDataType($1 + " short", BaseType::S16); }
     | SIGNED INT { $$ = MakeDeviceDataType($1 + " int", BaseType::S32); }
@@ -386,10 +352,10 @@ device_nested_type
 device_nested_type_list
     : %empty { $$ = MakeDeviceDataType("", BaseType::UNKNOWN); }
     | device_nested_type_list COMMA device_complex_type {
-        auto type_str = $1->GetTypeStr() + ", " + $3->GetTypeStr();
-        $1->SetTypeStr(type_str);
-        $1->SetDataType(BaseType::UNKNOWN);
-        $$ = $1;
+        auto type_str = $3->GetTypeStr() + ", " + $3->GetTypeStr();
+        $3->SetTypeStr(type_str);
+        $3->SetDataType(BaseType::UNKNOWN);
+        $$ = $3;
       }
     | device_type { $$ = $1; }
     ;
@@ -752,11 +718,11 @@ statement
     | wait_stmt    SEMCOL        { $$ = $1; }
     | trigger_stmt SEMCOL        { $$ = $1; }
     | call_stmt    SEMCOL        { $$ = $1; }
+    | setreg_stmt  SEMCOL        { $$ = $1; }
+    | launch_bounds_stmt SEMCOL  { $$ = $1; }
     | swap_stmt    SEMCOL        { $$ = $1; }
     | return_stmt  SEMCOL        { $$ = $1; }
     | sync_stmt    SEMCOL        { $$ = $1; }
-    | barrier_stmt SEMCOL   { $$ = $1; }
-    | fence_stmt SEMCOL     { $$ = $1; }
     | inlcpp_stmt  SEMCOL        { $$ = $1; }
     | break_stmt   SEMCOL        { $$ = $1; }
     | continue_stmt  SEMCOL      { $$ = $1; }
@@ -767,7 +733,6 @@ statement
     | while_block                { $$ = $1; }
     | if_else_block              { $$ = $1; }
     | foreach_block              { $$ = $1; }
-    | apply_block               { $$ = $1; }
     ;
 
 sync_stmt
@@ -776,21 +741,6 @@ sync_stmt
       }
     | SYNC DOTWG int_list {
         $$ = AST::Make<AST::Synchronize>(@1, $3);
-      }
-    ;
-
-barrier_stmt
-    : SYNC DOT BARRIER COL PBLEVEL {
-        $$ = AST::Make<AST::Barrier>(@1, $5);
-      }
-    ;
-
-fence_stmt
-    : SYNC DOT FENCE COL PBLEVEL {
-        $$ = AST::Make<AST::Fence>(@1, $5);
-      }
-    | SYNC DOT FENCE COL PBLEVEL LT STORAGE GT {
-        $$ = AST::Make<AST::Fence>(@1, $5, $7);
       }
     ;
 
@@ -809,49 +759,30 @@ stmts_block
     ;
 
 opt_stream_bind
-    : LT IDENTIFIER GT {
-        $$ = AST::Make<AST::Expr>(@2,
-               AST::Make<AST::Identifier>(@2, $2));
-      }
+    : LPAREN s_expr RPAREN { $$ = $2; }
     | %empty { $$ = nullptr; }
     ;
 
-pb_attribute
-    : pb_attribute DLBRAKT LAUNCHBOUNDS LPAREN g_value_list RPAREN RBRAKT RBRAKT {
-        $$ = $1;
-        $$.launch_bounds = $5;
-      }
-    | pb_attribute DLBRAKT MAXNREG LPAREN s_expr RPAREN RBRAKT RBRAKT {
-        $$ = $1;
-        $$.maxnreg = $5;
-      }
-    | %empty { $$ = PBAttributes{}; }
-    ;
-
 paraby_block
-    : pb_attribute PARA sync_type opt_stream_bind {
+    : PARA sync_type opt_stream_bind {
         paraby_symbols.clear();
       } parabys stmts_block {
-        $6->SetAsync($3);
-        if ($4) $6->SetStream($4);
+        $5->SetAsync($2);
+        if ($3) $5->SetStream($3);
         // attach statement to the inner-most pb
-        auto pb = $6;
+        auto pb = $5;
         while (!pb->stmts->None() && isa<AST::ParallelBy>(pb->stmts->SubAt(0)))
           pb = cast<AST::ParallelBy>(pb->stmts->SubAt(0));
         assert(pb->stmts->None() && "expect no statement.");
-        pb->stmts = $7;
-        if ($1.launch_bounds) $6->SetLaunchBoundsArgs($1.launch_bounds);
-        if ($1.maxnreg) $6->SetMaxnregArg($1.maxnreg);
-        $$ = $6;
+        pb->stmts = $6;
+        $$ = $5;
       }
     ;
 
 parabys
     : parabys COMMA paraby note_pl {
-        $3->SetLevel($4.level);
-        if (!$4.device_target.empty())
-          $3->SetDeviceTargetName($4.device_target);
-        $3->SetCooperative($4.cooperative);
+        // add the paraby as the first stmt of inner-most parallel-by
+        $3->SetLevel($4);
         auto pb = $1;
         while (!pb->stmts->None() && isa<AST::ParallelBy>(pb->stmts->SubAt(0)))
           pb = cast<AST::ParallelBy>(pb->stmts->SubAt(0));
@@ -859,10 +790,7 @@ parabys
         $$ = $1;
       }
     | paraby note_pl {
-        $1->SetLevel($2.level);
-        if (!$2.device_target.empty())
-          $1->SetDeviceTargetName($2.device_target);
-        $1->SetCooperative($2.cooperative);
+        $1->SetLevel($2);
         $$ = $1;
       }
     ; /* do not allow empty paraby */
@@ -1096,7 +1024,7 @@ event_decl
     ;
 
 named_fragment_decls
-    : FRAG mdspan_as_type spanned_decls {
+    : FRAGMENT mdspan_as_type spanned_decls {
         auto mem = AST::Make<AST::Memory>(loc, Storage::REG);
         for (auto item : $3->AllSubs()) {
           auto decl = cast<AST::NamedVariableDecl>(item);
@@ -1375,25 +1303,8 @@ spanas_spanned_decl
 */
 
 note_pl
-    : COL PBLEVEL { $$ = PLAnnotation($2); }
-    | COL PBLEVEL LPAREN IDENTIFIER RPAREN {
-        if ($2 != ParallelLevel::DEVICE) {
-          Parser::error(@2, "parameterized level annotation is only valid for 'device'.");
-          YYERROR;
-        }
-        $$ = PLAnnotation($2, $4);
-      }
-    | COL PBLEVEL LT COOPERATIVE GT {
-        $$ = PLAnnotation($2, "", true);
-      }
-    | COL PBLEVEL LPAREN IDENTIFIER RPAREN LT COOPERATIVE GT {
-        if ($2 != ParallelLevel::DEVICE) {
-          Parser::error(@2, "parameterized level annotation is only valid for 'device'.");
-          YYERROR;
-        }
-        $$ = PLAnnotation($2, $4, true);
-      }
-    | %empty { $$ = PLAnnotation(); }
+    : COL PBLEVEL { $$ = $2; }
+    | %empty { $$ = ParallelLevel::NONE; }
     ;
 
 storage_qual
@@ -1760,14 +1671,12 @@ if_else_block
         $$ = AST::Make<AST::IfElseBlock>(@1, $3, $5, nullptr);
       }
     | IF LPAREN call_stmt RPAREN stmts_block %prec IF_PREC {
-        $3->SetExpr();
         $$ = AST::Make<AST::IfElseBlock>(@1, MakeExpr($3), $5, nullptr);
       }
     | IF LPAREN s_expr RPAREN stmts_block ELSE stmts_block {
         $$ = AST::Make<AST::IfElseBlock>(@1, $3, $5, $7);
       }
     | IF LPAREN call_stmt RPAREN stmts_block ELSE stmts_block {
-        $3->SetExpr();
         $$ = AST::Make<AST::IfElseBlock>(@1, MakeExpr($3), $5, $7);
       }
     | ELSE {
@@ -1840,19 +1749,6 @@ foreach_block
       }
     ;
 
-apply_block
-    : APPLY LBRACE with_matchers RBRACE IN IDENTIFIER FNSPAN stmts_block {
-        // apply {i, j} in frag.span { ... }
-        std::vector<std::string> params;
-        for (auto wm : $3->AllValues()) {
-          auto id = cast<AST::Identifier>(wm);
-          params.push_back(id->name);
-        }
-        auto span_id = AST::Make<AST::Expr>(@6, AST::Make<AST::Identifier>(@6, $6));
-        $$ = AST::Make<AST::ApplyBlock>(@1, span_id, std::move(params), $8);
-      }
-    ;
-
 range_exprs
     : range_exprs COMMA range_expr  {
         $1->Append($3);
@@ -1880,27 +1776,7 @@ bound_expr
     ;
 
 range_expr
-    /* explicit local name: foreach c=b, foreach c=b(lb:ub), foreach c=b(lb:ub:step) */
-    : IDENTIFIER ASSIGN IDENTIFIER {
-        $$ = AST::Make<AST::LoopRange>(@1,
-               AST::Make<AST::Identifier>(@1, $1),
-               AST::Make<AST::Identifier>(@3, $3),
-               nullptr, nullptr);
-      }
-    | IDENTIFIER ASSIGN IDENTIFIER LPAREN bound_expr COL bound_expr RPAREN {
-        $$ = AST::Make<AST::LoopRange>(@1,
-               AST::Make<AST::Identifier>(@1, $1),
-               AST::Make<AST::Identifier>(@3, $3),
-               $5, $7);
-      }
-    | IDENTIFIER ASSIGN IDENTIFIER LPAREN bound_expr COL bound_expr COL index_or_none RPAREN {
-        $$ = AST::Make<AST::LoopRange>(@1,
-               AST::Make<AST::Identifier>(@1, $1),
-               AST::Make<AST::Identifier>(@3, $3),
-               $5, $7, $9);
-      }
-    /* existing forms (sugar: iv == range_var) */
-    | IDENTIFIER { $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1)); }
+    : IDENTIFIER { $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1)); }
     | IDENTIFIER LPAREN bound_expr COL bound_expr RPAREN {
         $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1), $3, $5);
       }
@@ -2184,6 +2060,7 @@ mma_exec_operand_expr
 
 mma_stmt
     : IDENTIFIER ASSIGN MMA FILL s_expr {
+        // decl
         auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
         auto op = AST::Make<AST::MMAOperation>(fexpr, $5, true);
         symtab.AddSymbol($1, MakeUnknownType());
@@ -2206,6 +2083,7 @@ mma_stmt
         $$ = AST::Make<AST::MMA>(@1, op);
       }
     | IDENTIFIER ASSIGN MMA FILL DOT fundamental_type s_expr {
+        // decl
         auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
         auto op = AST::Make<AST::MMAOperation>(fexpr, $7, true, $6);
         symtab.AddSymbol($1, MakeUnknownType());
@@ -2221,37 +2099,36 @@ mma_stmt
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | IDENTIFIER ASSIGN MMA LOAD DOT FRAG sync_type chunkat_expr {
-        // mma.load.frag is the explicit spelling of the existing
-        // memory-to-register fragment load. Keep the AST identical to
-        // mma.load so all current passes and targets share its semantics.
-        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
-        auto op = AST::Make<AST::MMAOperation>($8, fexpr, $7);
-        symtab.AddSymbol($1, MakeUnknownType());
-        $$ = AST::Make<AST::MMA>(@1, op);
-      }
     | IDENTIFIER ASSIGN MMA LOAD SWIZZLE swiz_mode sync_type chunkat_expr {
         auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
         auto op = AST::Make<AST::MMAOperation>($8, fexpr, $7, $6, true);
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | IDENTIFIER ASSIGN MMA LOAD DOT FRAG SWIZZLE swiz_mode sync_type chunkat_expr {
+    | IDENTIFIER ASSIGN MMA LOADR sync_type chunkat_expr {
         auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
-        auto op = AST::Make<AST::MMAOperation>($10, fexpr, $9, $8, true);
+        auto op = AST::Make<AST::MMAOperation>(AST::MMAOperation::LoadRTag{}, $6, fexpr, $5);
         symtab.AddSymbol($1, MakeUnknownType());
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | MMA LOAD chunkat_expr COMMA frag_expr {
+    | MMA LOADR chunkat_expr COMMA frag_expr {
         auto op = AST::Make<AST::MMAOperation>(AST::MMAOperation::LoadRTag{}, $3, $5, false);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
-    | IDENTIFIER ASSIGN MMA DESC chunkat_expr {
-        auto operand = AST::Make<AST::Expr>(
-            @1, AST::Make<AST::Identifier>(@1, $1));
-        auto op = AST::Make<AST::MMAOperation>(
-            AST::MMAOperation::DescTag{}, $5, operand);
+    | IDENTIFIER ASSIGN MMA LOADS sync_type chunkat_expr {
+        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
+        auto op = AST::Make<AST::MMAOperation>(AST::MMAOperation::LoadSTag{}, $6, fexpr, $5);
         symtab.AddSymbol($1, MakeUnknownType());
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
+    | IDENTIFIER ASSIGN MMA LOADS SWIZZLE swiz_mode sync_type chunkat_expr {
+        auto fexpr = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1));
+        auto op = AST::Make<AST::MMAOperation>(AST::MMAOperation::LoadSTag{}, $8, fexpr, $7, $6, true);
+        symtab.AddSymbol($1, MakeUnknownType());
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
+    | MMA LOADS chunkat_expr COMMA frag_expr {
+        auto op = AST::Make<AST::MMAOperation>(AST::MMAOperation::LoadSTag{}, $3, $5, false);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
     | MMA mma_exec_method frag_expr COMMA mma_exec_operand_expr COMMA mma_exec_operand_expr {
@@ -2286,6 +2163,10 @@ mma_stmt
         auto op = AST::Make<AST::MMAOperation>($4, $6, false, $8, nullptr);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
+    | MMA COMMIT {
+      auto op = AST::Make<AST::MMAOperation>();
+      $$ = AST::Make<AST::MMA>(@1, op);
+    }
     | MMA MMAWAIT LT NUM GT {
       if ($4 < 0 || $4 > 7) {
         error(@4, "mma.wait depth must be in range [0, 7]");
@@ -2309,21 +2190,65 @@ mma_exec_method
     ;
 
 frag_stmt
-    : REDUCE_MAX_STMT LPAREN frag_expr COMMA frag_expr COMMA integer_value RPAREN {
-        $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::MAX, $5, $3, $7);
+    : FRAG FRAG_APPLY frag_expr COMMA LBRAKT RBRAKT LPAREN frag_lambda_params RPAREN {
+        for (auto& p : $8)
+          if (!symtab.Exists(p)) symtab.AddSymbol(p, MakeIntegerType());
+      } LBRACE RET s_expr SEMCOL RBRACE {
+        $$ = AST::Make<AST::FragApply>(@1, $3, std::move($8), $13);
       }
-    | REDUCE_SUM_STMT LPAREN frag_expr COMMA frag_expr COMMA integer_value RPAREN {
-        $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::SUM, $5, $3, $7);
+    | FRAG STORE frag_expr COMMA frag_expr {
+        $$ = AST::Make<AST::FragTransfer>(@1, AST::FragTransferKind::STORE, $3, $5);
       }
-    | COPY_STMT LPAREN frag_expr COMMA frag_expr RPAREN {
+    | FRAG STORE frag_expr COMMA frag_expr COMMA LBRAKT RBRAKT LPAREN frag_lambda_params RPAREN {
+        for (auto& p : $10)
+          if (!symtab.Exists(p)) symtab.AddSymbol(p, MakeIntegerType());
+      } LBRACE RET s_expr SEMCOL RBRACE {
+        $$ = AST::Make<AST::FragTransfer>(@1, AST::FragTransferKind::STORE, $3, $5, std::move($10), $15);
+      }
+    | FRAG LOAD frag_expr COMMA frag_expr {
+        $$ = AST::Make<AST::FragTransfer>(@1, AST::FragTransferKind::LOAD, $3, $5);
+      }
+    | FRAG LOAD frag_expr COMMA frag_expr COMMA LBRAKT RBRAKT LPAREN frag_lambda_params RPAREN {
+        for (auto& p : $10)
+          if (!symtab.Exists(p)) symtab.AddSymbol(p, MakeIntegerType());
+      } LBRACE RET s_expr SEMCOL RBRACE {
+        $$ = AST::Make<AST::FragTransfer>(@1, AST::FragTransferKind::LOAD, $3, $5, std::move($10), $15);
+      }
+    | FRAG COPY frag_expr COMMA frag_expr {
         $$ = AST::Make<AST::FragTransfer>(@1, AST::FragTransferKind::COPY, $3, $5);
+      }
+    | FRAG COPY frag_expr COMMA frag_expr COMMA LBRAKT RBRAKT LPAREN frag_lambda_params RPAREN {
+        for (auto& p : $10)
+          if (!symtab.Exists(p)) symtab.AddSymbol(p, MakeIntegerType());
+      } LBRACE RET s_expr SEMCOL RBRACE {
+        $$ = AST::Make<AST::FragTransfer>(@1, AST::FragTransferKind::COPY, $3, $5, std::move($10), $15);
+      }
+    | FRAG REDUCE_MAX frag_expr COMMA frag_expr COMMA integer_value {
+        $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::MAX, $3, $5, $7);
+      }
+    | FRAG REDUCE_SUM frag_expr COMMA frag_expr COMMA integer_value {
+        $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::SUM, $3, $5, $7);
       }
     ;
 
+frag_lambda_params
+    : IDENTIFIER {
+        $$ = std::vector<std::string>{$1};
+      }
+    | frag_lambda_params COMMA IDENTIFIER {
+        $1.push_back($3);
+        $$ = std::move($1);
+      }
+    ;
 
 int_list
-    : NUM { $$ = std::vector<int>{$1}; }
-    | int_list COMMA NUM { $1.push_back($3); $$ = std::move($1); }
+    : NUM {
+        $$ = std::vector<int>{$1};
+      }
+    | int_list COMMA NUM {
+        $1.push_back($3);
+        $$ = std::move($1);
+      }
     ;
 
 data_element
@@ -2625,6 +2550,21 @@ suffix_expr
         auto mv = AST::Make<AST::MultiValues>(@1, ", ");
         $$ = AST::Make<AST::AttributeExpr>(@1, $1, mv);
     }
+    | AUTOMAP LPAREN IDENTIFIER RPAREN {
+        auto mv = AST::Make<AST::MultiValues>(@1, ", ");
+        mv->Append(AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@3, $3)));
+        $$ = AST::Make<AST::AttributeExpr>(@1, $1, mv);
+    }
+    | AUTOMAP {
+        auto mv = AST::Make<AST::MultiValues>(@1, ", ");
+        $$ = AST::Make<AST::AttributeExpr>(@1, $1, mv);
+    }
+    | CAUSAL_SPLIT LPAREN s_expr COMMA s_expr RPAREN {
+        auto mv = AST::Make<AST::MultiValues>(@1, ", ");
+        mv->Append($3);
+        mv->Append($5);
+        $$ = AST::Make<AST::AttributeExpr>(@1, $1, mv);
+    }
   ;
 
 call_expr
@@ -2728,16 +2668,41 @@ call_stmt
         $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), $3,
                                   AST::Call::BIF | AST::Call::ATOMIC);
       }
-    | BAR_ARRIVE LPAREN value_list RPAREN {
-        $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), $3,
-                                  AST::Call::BIF);
+    ;
+
+setreg_stmt
+    : SETREG s_expr {
+        auto args = AST::Make<AST::MultiValues>(@1, ", ");
+        args->Append($2);
+        $$ = AST::Make<AST::Call>(
+            @1, AST::Make<AST::Identifier>(@1, "setreg"), args,
+            AST::Call::BIF | AST::Call::ANNO);
       }
-    | BAR_SYNC LPAREN value_list RPAREN {
-        $$ = AST::Make<AST::Call>(@1, AST::Make<AST::Identifier>(@1, $1), $3,
-                                  AST::Call::BIF);
+    | SETREG_INC s_expr {
+        auto args = AST::Make<AST::MultiValues>(@1, ", ");
+        args->Append($2);
+        $$ = AST::Make<AST::Call>(
+            @1, AST::Make<AST::Identifier>(@1, "setreg.inc"), args,
+            AST::Call::BIF | AST::Call::ANNO);
+      }
+    | SETREG_DEC s_expr {
+        auto args = AST::Make<AST::MultiValues>(@1, ", ");
+        args->Append($2);
+        $$ = AST::Make<AST::Call>(
+            @1, AST::Make<AST::Identifier>(@1, "setreg.dec"), args,
+            AST::Call::BIF | AST::Call::ANNO);
       }
     ;
 
+launch_bounds_stmt
+  : LAUNCHBOUNDS LPAREN s_expr RPAREN {
+    auto args = AST::Make<AST::MultiValues>(@1, ", ");
+    args->Append($3);
+    $$ = AST::Make<AST::Call>(
+      @1, AST::Make<AST::Identifier>(@1, $1), args,
+      AST::Call::BIF | AST::Call::ANNO);
+    }
+  ;
 
 swap_stmt
     : SWAP LPAREN id_list RPAREN {

@@ -102,25 +102,6 @@ bool FragmentLayoutPass::Visit(AST::NamedVariableDecl& n) {
 bool FragmentLayoutPass::Visit(AST::MMA& n) {
   auto& op = *n.operation;
 
-  if (op.IsKind(AST::MMAOperation::Load)) {
-    auto scoped = InScopeName(AST::FragName(op.LoadTo()));
-    auto sty = GetSpannedType(GetSymbolType(AST::FragName(op.LoadTo())));
-    if (sty) {
-      FragmentUsage usage;
-      usage.scoped_name = scoped;
-      usage.element_type = sty->ElementType();
-      usage.scope_thread_count = EffectiveThreadCount();
-      usage.scope_thread_count_expr = EffectiveThreadCountExpr();
-      auto& shape = sty->GetShape();
-      if (shape.IsValid()) {
-        for (size_t d = 0; d < shape.Rank(); ++d) {
-          if (auto v = VIInt(shape.ValueAt(d))) usage.shape.push_back(*v);
-        }
-      }
-      usages_[scoped] = std::move(usage);
-    }
-  }
-
   if (op.IsKind(AST::MMAOperation::Exec)) {
     // ExecOperand order: 0=C(acc), 1=A, 2=B (matches GPUAdaptor convention).
     auto c_sym = InScopeName(AST::FragName(op.ExecOperand(0)));
@@ -192,62 +173,11 @@ void FragmentLayoutPass::CollectBodyRefs(const ptr<AST::Node>& node,
   }
 }
 
-bool FragmentLayoutPass::Visit(AST::ApplyBlock& n) {
-  auto span_scoped = InScopeNameForRef(n.SpanFragmentName());
-  std::vector<std::string> body_frags;
-
-  // Walk the multi-statement body collecting all fragment .at() accesses.
-  auto CollectFromBody = [&](auto&& self, const ptr<AST::Node>& node) -> void {
-    if (!node) return;
-    if (auto da = dyn_cast<AST::DataAccess>(node)) {
-      if (da->AccessElement()) {
-        auto sc = InScopeNameForRef(da->data->name);
-        if (usages_.count(sc)) body_frags.push_back(sc);
-      }
-      return;
-    }
-    if (auto mn = dyn_cast<AST::MultiNodes>(node)) {
-      for (auto& child : mn->values) self(self, child);
-      return;
-    }
-    if (auto asgn = dyn_cast<AST::Assignment>(node)) {
-      if (asgn->da) self(self, asgn->da);
-      if (asgn->value) self(self, asgn->value);
-      return;
-    }
-    if (auto ie = dyn_cast<AST::IfElseBlock>(node)) {
-      if (ie->pred) self(self, ie->pred);
-      if (ie->stmts) self(self, ie->stmts);
-      if (ie->else_stmts) self(self, ie->else_stmts);
-      return;
-    }
-    if (auto expr = dyn_cast<AST::Expr>(node)) {
-      if (expr->GetL()) self(self, expr->GetL());
-      if (expr->GetR()) self(self, expr->GetR());
-      if (expr->GetC()) self(self, expr->GetC());
-      return;
-    }
-    if (auto call = dyn_cast<AST::Call>(node)) {
-      if (call->arguments)
-        for (auto& a : call->arguments->AllValues()) self(self, a);
-      return;
-    }
-    if (auto cast_expr = dyn_cast<AST::CastExpr>(node)) {
-      if (cast_expr->GetR()) self(self, cast_expr->GetR());
-      return;
-    }
-  };
-  CollectFromBody(CollectFromBody, n.body);
-
-  // Register each body fragment as referencing the span fragment.
-  // This enables layout propagation: e.g., a 1D fragment accessed inside
-  // an apply over a 2D MMA accumulator gets REPLICATED_1D layout.
-  for (auto& frag : body_frags) {
-    if (frag == span_scoped) continue;
-    auto& refs = apply_refs_[frag];
-    refs.push_back(span_scoped);
-  }
-
+bool FragmentLayoutPass::Visit(AST::FragApply& n) {
+  auto target_scoped = InScopeName(n.TargetName());
+  std::vector<std::string> refs;
+  CollectBodyRefs(n.body, refs);
+  if (!refs.empty()) apply_refs_[target_scoped] = std::move(refs);
   return true;
 }
 

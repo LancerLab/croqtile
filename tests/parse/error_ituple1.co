@@ -1,8 +1,0 @@
-// RUN: not choreo %s 2>&1 | FileCheck %s
-
-__co__ auto illegal_ituple() {
-  ituple it: {7, 8};  // ituple must be init by "="
-}
-
-// CHECK: error: must use '=' to initialize an ituple.
-// CHECK-NOT: error:

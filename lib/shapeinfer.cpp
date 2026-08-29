@@ -97,10 +97,6 @@ bool ShapeInference::BeforeVisitImpl(AST::Node& n) {
     vn.EnterScope();
     ast_vn.EnterScope();
     gen_values = false; // disable valno on range expressions
-  } else if (auto ab = dyn_cast<AST::ApplyBlock>(&n)) {
-    vn.EnterScope();
-    ast_vn.EnterScope();
-    for (auto& p : ab->iterators) GenValNum(SSTab().InScopeName(p));
   } else if (auto* b = dyn_cast<AST::MultiDimSpans>(&n)) {
     if (b->ref_name != "") {
       if (auto n = SSTab().NameInScopeOrNull(b->ref_name))
@@ -150,7 +146,7 @@ bool ShapeInference::AfterVisitImpl(AST::Node& n) {
     vn.LeaveScope();
     ast_vn.LeaveScope();
   } else if (isa<AST::ForeachBlock>(&n) || isa<AST::InThreadsBlock>(&n) ||
-             isa<AST::IfElseBlock>(&n) || isa<AST::ApplyBlock>(&n)) {
+             isa<AST::IfElseBlock>(&n)) {
     vn.LeaveScope();
     ast_vn.LeaveScope();
   } else if (isa<AST::MultiDimSpans>(&n) || isa<AST::IntTuple>(&n)) {
@@ -338,24 +334,6 @@ bool ShapeInference::Visit(AST::Expr& n) {
     if (!IsValidValueList(vl)) return false;
     return true;
   };
-  // SizeOf: the node type is Integer (set by typeinfer), so
-  // NodeValNoKind returns VNK_VALUE rather than VNK_MDSPAN, but we
-  // still need the element count recorded as the "size" for codegen.
-  // Compute it from the operand's type shape, matching GetSign().
-  if (n.op == Op::SizeOf) {
-    if (auto rhsTy = NodeType(*n.GetR())) {
-      auto shape = GetShape(rhsTy);
-      if (shape.IsValid()) {
-        auto sz = shape.ElementCountValue();
-        if (sz && IsValidValueItem(sz)) {
-          n.Opts().SetSize(sz);
-          VST_DEBUG(dbgs() << " |-<exprsize> <" << PSTR(nty) << "> " << STR(n)
-                           << ": " << STR(sz) << "\n");
-        }
-      }
-    }
-  }
-
   // decide the optimized values
   switch (NodeValNoKind(n)) {
   case VNKind::VNK_VALUE: {
@@ -398,23 +376,6 @@ bool ShapeInference::Visit(AST::Expr& n) {
     n.Opts().SetSize(sz);
     VST_DEBUG(dbgs() << " |-<exprsize> <" << PSTR(nty) << "> " << STR(n) << ": "
                      << STR(sz) << "\n");
-    // For DataOf/MDataOf, also set the data pointer value.
-    // The .data / .mdata symbol is already registered in the symbol table
-    // by earlysema/typeinfer; look up its value number from the operand
-    // identifier and store it in Opts so ASTCoIRGen can materialize it.
-    if (n.op == Op::DataOf || n.op == Op::MDataOf) {
-      if (auto* id = dyn_cast<AST::Identifier>(n.GetR().get())) {
-        std::string suffix = (n.op == Op::DataOf) ? ".data" : ".mdata";
-        auto scoped_name = SSTab().InScopeName(id->name + suffix);
-        auto data_vn = vn.GetOrGenValueNumberFromSignature(s_sn(scoped_name));
-        auto data_vi = vn.GenValueItemFromValueNumber(data_vn);
-        if (data_vi) {
-          n.Opts().SetVal(data_vi);
-          VST_DEBUG(dbgs() << " |-<exprval-data> <" << PSTR(nty) << "> "
-                           << STR(n) << ": " << STR(data_vi) << "\n");
-        }
-      }
-    }
   } break;
   default: choreo_unreachable("unsupported valno kind.");
   }
@@ -1286,7 +1247,8 @@ bool ShapeInference::Visit(AST::MMA& n) {
                        ".span"); // valno is yet invalid
     }
   } break;
-  case AST::MMAOperation::Load: {
+  case AST::MMAOperation::Load:
+  case AST::MMAOperation::LoadS: {
     std::string load_to_sym = AST::FragName(op.LoadTo());
     auto fty = cast<SpannedType>(op.LoadFrom()->GetType());
     auto f_span = load_to_sym + ".span";
@@ -1300,19 +1262,6 @@ bool ShapeInference::Visit(AST::MMA& n) {
   } break;
   case AST::MMAOperation::LoadR: {
     // LoadR loads from shared into an existing fragment; no new symbol created
-  } break;
-  case AST::MMAOperation::Desc: {
-    std::string operand_sym = AST::FragName(op.DescTo());
-    auto source_ty = GetSpannedType(op.DescFrom()->GetType());
-    assert(source_ty && "expect a spanned type for mma.desc source");
-    auto operand_span = operand_sym + ".span";
-    SymbolAliasNum(SSTab().ScopedName(operand_span), cur_vn);
-    // A descriptor preserves the shared view's shape, strides, and storage;
-    // it does not materialize a dense register fragment.
-    auto operand_ty = cast<SpannedType>(source_ty->Clone());
-    DefineASymbol(operand_sym, operand_ty);
-    DefineASymbol(operand_span, operand_ty->GetMDSpanType()->Clone());
-    SetNodeType(n, operand_ty);
   } break;
   case AST::MMAOperation::Exec: {
     std::string op0_sym = AST::FragName(op.ExecOperand(0)); // mc
@@ -1893,7 +1842,6 @@ bool ShapeInference::Visit(AST::Call& n) {
         return sbe::sel(pred, lv, rv)->Normalize();
       };
       auto get_item = [&](AST::Node& arg, VNKind kind) -> ValueItem {
-        if (!HasValNo(arg, kind)) return GetInvalidValueItem();
         auto valno = GetValNo(arg, kind);
         if (!valno.IsValid()) return GetInvalidValueItem();
         return vn.GenValueItemFromValueNumber(valno);
@@ -2107,11 +2055,11 @@ bool ShapeInference::Visit(AST::ForeachBlock& n) {
 
   for (auto r : n.GetRanges()) {
     auto rng = cast<AST::LoopRange>(r);
-    auto valno = GetValNo(*rng->GetRV(), VNKind::VNK_UBOUND);
+    auto valno = GetValNo(*rng->IV(), VNKind::VNK_UBOUND);
     auto vl = vn.GenValueListFromValueNumber(valno);
     if (IsValidValueList(vl) && !IsComputable(vl))
-      Error1(rng->GetRV()->LOC(), "The upper bound(s) of '" + rng->GetRVName() +
-                                      "' can not be evaluated.");
+      Error1(rng->IV()->LOC(), "The upper bound(s) of '" + rng->IVName() +
+                                   "' can not be evaluated.");
   }
 
   // invalidate any current value generated
@@ -2277,13 +2225,9 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
   if (isa<AST::StringLiteral>(n)) return false;
   if (isa<AST::DataAccess>(n)) return false;
   if (auto call = dyn_cast<AST::Call>(n)) {
-    if (!(call->IsExpr() && call->IsArith() && call->arguments &&
-          call->arguments->Count() == 2 &&
-          (call->function->name == "__min" || call->function->name == "__max")))
-      return false;
-    for (auto& arg : call->arguments->AllValues())
-      if (!CanBeValueNumbered(arg.get())) return false;
-    return true;
+    return call->IsExpr() && call->IsArith() && call->arguments &&
+           call->arguments->Count() == 2 &&
+           (call->function->name == "__min" || call->function->name == "__max");
   }
   if (isa<AST::DataType>(n)) return false;
   auto nty = NodeType(*n);
@@ -2520,19 +2464,6 @@ ShapeInference::SignBounded(const AST::Node& n) {
           choreo_unreachable("operation is not permitted.");
       } else
         choreo_unreachable("operation is not supported for bounded variables.");
-    } else if (e->IsTernary() && e->op == Op::Select) {
-      if (auto cond = CSign(GetSign(*e->GetC()))) {
-        if (cond->GetBool())
-          ub_sign = GetSign(*e->GetL(), VNKind::VNK_UBOUND);
-        else
-          ub_sign = GetSign(*e->GetR(), VNKind::VNK_UBOUND);
-      } else {
-        auto signature = o_sn(Op::Select);
-        signature->Append(GetSign(*e->GetC()));
-        signature->Append(GetSign(*e->GetL(), VNKind::VNK_UBOUND));
-        signature->Append(GetSign(*e->GetR(), VNKind::VNK_UBOUND));
-        ub_sign = vn.Simplify(signature);
-      }
     } else
       choreo_unreachable("unexpected expression for bounded variables.");
   } else

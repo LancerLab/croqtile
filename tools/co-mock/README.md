@@ -33,7 +33,6 @@ co-mock [options] <input.co>
 |--------------------|------------------------------------------|
 | `-e, --dump-ast`   | Dump the AST after semantic analysis     |
 | `-i, --interactive`| Start in interactive debugger mode       |
-| `-s, --script <f>` | Run debugger commands from script file   |
 | `-h, --help`       | Show help message                        |
 
 ### Run a program
@@ -50,16 +49,6 @@ co-mock -i test.co
 
 This drops you into a pdb-style debugger that stops before the first
 statement:
-
-### Script mode
-
-```bash
-co-mock -s commands.txt test.co
-```
-
-Script mode feeds debugger commands from a file. When the script is
-exhausted, execution continues to completion. This enables automated
-debugger testing:
 
 ```
 co-mock debugger -- type 'h' for help
@@ -82,8 +71,6 @@ Debugging: test.co
 | `b <line>`          | Set a breakpoint at a source line                 |
 | `d <line>`          | Delete a breakpoint (`d` alone clears all)        |
 | `info`              | Show all variables in all active scopes           |
-| `info futures`      | Show async DMA future status (pending/completed) |
-| `info mem`          | Show memory allocations with sizes                |
 | `info break`        | Show all breakpoints                              |
 | `q`, `quit`         | Exit the debugger                                 |
 | `<Enter>`           | Repeat the last step action                       |
@@ -140,17 +127,11 @@ c[2] = 33
 
 The interpreter supports:
 - Scalar and array variables with full type system
-- `parallel p by N` blocks with threaded execution
-- Nested `parallel-by` with correct thread-to-index mapping
-- `.at(idx)` element access returning scalar values
+- `parallel p by N` blocks (sequential iteration)
 - `foreach` loops, `while` loops, `if-else` blocks
 - `break`, `continue`, and `return` control flow
-- Synchronous and asynchronous DMA with real `std::async` futures
-- `wait()` blocking on async DMA futures
-- `rotate()` for circular variable swapping
-- `InThreadsBlock` predicate-guarded execution
-- Built-in functions (`println`, `print`, `assert`, `alignup`, `aligndown`,
-  `sqrt`, `sin`, `cos`, `tan`, `exp`, `log`, `pow`, and more)
+- Synchronous DMA copy operations
+- Built-in functions (`println`, `print`, `assert`, math functions)
 - 2D array indexing
 
 ## Tests

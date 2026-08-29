@@ -1,3 +1,0 @@
-// Two RUN lines: %choreo placeholder vs. bare cocc.
-// RUN: %choreo -t mock %s -o /dev/null
-// RUN: cocc -t mock %s -o /dev/null

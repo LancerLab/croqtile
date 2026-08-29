@@ -2,12 +2,11 @@
 #define __CHOREO_TARGET_UTILS_HPP__
 
 #include "types.hpp"
+#include <mutex>
 
 namespace Choreo {
 
-// Parallel level <-> depth mapping for the active target + arch.
-// Built when the compilation target is configured; invalidated on target/arch
-// change.
+// parallel level <-> parallel depth mapping
 class PlDepthMap {
 private:
   std::unordered_map<int, ParallelLevel> to_levels;
@@ -39,7 +38,10 @@ public:
   ParallelLevel MaxLevel() const { return max_level; }
   int MaxDepth() const { return max_depth; }
 
+public:
   static const PlDepthMap& Get();
+  static std::once_flag init_flag;
+  static std::unique_ptr<PlDepthMap> instance;
 };
 
 inline int TargetDepth(ParallelLevel pl) {
@@ -91,12 +93,7 @@ inline ParallelLevel operator--(ParallelLevel& pl) {
 
 inline int operator-(ParallelLevel lhs, ParallelLevel rhs) {
   auto& pld = PlDepthMap::Get();
-  if (pld.HasLevel(lhs) && pld.HasLevel(rhs))
-    return pld.ToDepth(lhs) - pld.ToDepth(rhs);
-  // At least one level is not in the target's parallel level map.
-  // Fall back to the raw enum ordinal comparison, which follows the
-  // same inner-to-outer ordering as the depth map.
-  return static_cast<int>(rhs) - static_cast<int>(lhs);
+  return pld.ToDepth(lhs) - pld.ToDepth(rhs);
 }
 
 // MMA related static limitation
@@ -635,11 +632,7 @@ inline int InferFixedWGMMAAtomK(const MMAConfig& config) {
   if (candidate_ks.empty() && config.sparsity == MMALimit::SPARSE)
     collect(MMALimit::DENSE);
 
-  if (candidate_ks.empty()) return 0;
-  if (candidate_ks.size() == 1) return *candidate_ks.begin();
-  // Multiple valid atom-K values exist (e.g., both k=16 and k=32 for FP8).
-  // Return the largest valid candidate to maximize throughput per iteration.
-  return *candidate_ks.rbegin();
+  return candidate_ks.size() == 1 ? *candidate_ks.begin() : 0;
 }
 
 inline size_t GetThreadGroupSize(const MMAConfig& config) {

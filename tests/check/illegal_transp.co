@@ -1,9 +1,0 @@
-// RUN: not choreo %s 2>&1 | FileCheck %s 
-
-__co__ void illegal_transp(s32 [2, 16] src) {
-  // the error is reported when TypeCheck
-  s32[4, 8] dst0;
-  dma.transp<1, 0> src => dst0;
-}
-
-// CHECK: error: Type inconsistent between DMA 'from'(s32 mdspan<2> [2, 16]) with transpose: dims{1, 0} and 'to'(global s32 mdspan<2> [4, 8]) at the 1st dim.

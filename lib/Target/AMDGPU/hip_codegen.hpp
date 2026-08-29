@@ -5,13 +5,11 @@
 #include <sstream>
 #include <stack>
 
-#include "assess.hpp"
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "codegen_utils.hpp"
 #include "hip_dma_plan.hpp"
 #include "operator_info.hpp"
-#include "options.hpp"
 #include "types.hpp"
 
 using namespace Choreo;
@@ -25,11 +23,11 @@ inline const char* HIPNameBaseType(BaseType bt) {
   case BaseType::F32: return "float";
   case BaseType::F16: return "__half";
   case BaseType::BF16: return "hip_bfloat16";
-  case BaseType::U64: return "uint64_t";
+  case BaseType::U64: return "unsigned long long";
   case BaseType::U32: return "unsigned int";
   case BaseType::U16: return "unsigned short";
   case BaseType::U8: return "unsigned char";
-  case BaseType::S64: return "int64_t";
+  case BaseType::S64: return "long long";
   case BaseType::S32: return "int";
   case BaseType::S16: return "short";
   case BaseType::S8: return "signed char";
@@ -91,8 +89,6 @@ public:
   bool Visit(AST::Yield&) override;
   bool Visit(AST::Rotate&) override;
   bool Visit(AST::Synchronize&) override;
-  bool Visit(AST::Barrier&) override;
-  bool Visit(AST::Fence&) override;
   bool Visit(AST::Call&) override;
   bool Visit(AST::NamedVariableDecl&) override;
   bool Visit(AST::NamedTypeDecl&) override;
@@ -110,27 +106,11 @@ private:
   std::string d_indent;
 
   std::stack<ParallelLevel> levels;
-  std::stack<bool>
-      cooperative_stack_; // track cooperative flag per parallel block
   ParallelLevel Level() const { return levels.top(); }
   bool IsParallel() const { return levels.size() > 2; }
-  bool NeedLevelPred() const {
-    return IsParallel() && (Level() != ParallelLevel::THREAD);
-  }
-
-  std::unordered_map<std::string, int> emitted_device_names_;
-  std::string UniqueDeviceName(const std::string& name) {
-    auto it = emitted_device_names_.find(name);
-    if (it == emitted_device_names_.end()) {
-      emitted_device_names_[name] = 0;
-      return name;
-    }
-    return name + "__" + std::to_string(++it->second);
-  }
 
   int parallel_idx = -1;
   AST::ParallelBy* cur_pb = nullptr;
-  ParallelLevel bdim_level = ParallelLevel::THREAD;
 
   size_t host_param_count = 0;
   ptr<FunctionType> fty = nullptr;
@@ -148,7 +128,6 @@ private:
   std::ostringstream return_stream;
 
   std::set<std::string> global_buffers;
-  std::vector<std::string> event_global_buffers;
   bool emit_call = true;
   std::vector<std::string> code_segments;
 
@@ -191,21 +170,6 @@ private:
   }
 
   bool NeedDeviceFunc() const { return cgi.HasParallelBy(fname); }
-
-  void EmitHostRuntimeCheck();
-
-  bool EnableLineDirective() const { return CCtx().GenDebugInfo(); }
-  bool ShouldEmitLineDirective(AST::Node& n) const;
-  void EmitLineDirective(AST::Node& n);
-  void ResetLineDirectiveState();
-  LineDirectiveState host_line_state;
-  LineDirectiveState device_line_state;
-
-  std::unordered_map<AST::Node*, std::vector<Assertion>> pre_site_assertions;
-  std::unordered_map<AST::Node*, std::vector<Assertion>> post_site_assertions;
-  void BuildSiteAssertionMap();
-  void EmitPreSiteAssertions(AST::Node& n);
-  void EmitPostSiteAssertions(AST::Node& n);
 
   const std::string ExprSTR(AST::ptr<AST::Node>, bool is_host = true) const;
   const std::string OpExprSTR(AST::ptr<AST::Node>, const std::string&, bool,
@@ -253,13 +217,6 @@ private:
     void_return = false;
     emit_call = true;
     parallel_idx = -1;
-    bdim_level = ParallelLevel::THREAD;
-    emitted_device_names_.clear();
-    global_buffers.clear();
-    event_global_buffers.clear();
-    ResetLineDirectiveState();
-    pre_site_assertions.clear();
-    post_site_assertions.clear();
   }
 
   bool IsChoreoInput(const std::string& sname) {

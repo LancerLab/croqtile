@@ -27,9 +27,6 @@ static int scope = 0;
 static int device_param_paren_scope = 0;
 static int device_param_brace_scope = 0;
 static int device_template_scope = 0;
-static int device_template_paren_scope = 0;
-static int device_template_brace_scope = 0;
-static int device_template_bracket_scope = 0;
 
 extern Choreo::location loc;
 extern Choreo::Option<bool> analyze_device_functions;
@@ -63,7 +60,7 @@ static bool accumulate_expr_buffer = false;
 
 %}
 
-%x CO_FUNC DEVICE_FUNC KERNEL REAL_KERNEL MDSPAN_SUGER RAW_STRING TEMPLATE PB_ATTR
+%x CO_FUNC DEVICE_FUNC KERNEL REAL_KERNEL MDSPAN_SUGER RAW_STRING TEMPLATE
 
 id          [a-zA-Z_][a-zA-Z0-9_]*
 num         (0|[1-9][0-9]*)[uU]?[lL]{0,2}
@@ -161,9 +158,6 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
                 }
   "template"  { device_template_buffer = "";
                 device_template_scope = 0;
-                device_template_paren_scope = 0;
-                device_template_brace_scope = 0;
-                device_template_bracket_scope = 0;
                 if (analyze_device_functions) {
                   BEGIN(TEMPLATE);
                   device_template_buffer += yytext;
@@ -187,30 +181,14 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   \n+         {}
   "//".*      {}
   {comments}  {}
-  "("         { device_template_paren_scope++; device_template_buffer += yytext; }
-  ")"         { if (device_template_paren_scope > 0) device_template_paren_scope--;
-                device_template_buffer += yytext; }
-  "{"         { device_template_brace_scope++; device_template_buffer += yytext; }
-  "}"         { if (device_template_brace_scope > 0) device_template_brace_scope--;
-                device_template_buffer += yytext; }
-  "["         { device_template_bracket_scope++; device_template_buffer += yytext; }
-  "]"         { if (device_template_bracket_scope > 0) device_template_bracket_scope--;
-                device_template_buffer += yytext; }
   "<"         { if (device_template_scope < 0)
                   Choreo::Scanner::Error(loc, "unmatched '<' in device template declaration.");
-                if (device_template_paren_scope == 0 &&
-                    device_template_brace_scope == 0 &&
-                    device_template_bracket_scope == 0)
-                  device_template_scope++;
+                device_template_scope++;
                 device_template_buffer += yytext;
               }
-  ">"         { if (device_template_paren_scope == 0 &&
-                    device_template_brace_scope == 0 &&
-                    device_template_bracket_scope == 0) {
-                  if (device_template_scope <= 0)
-                    Choreo::Scanner::Error(loc, "unmatched '>' in device template declaration.");
-                  device_template_scope--;
-                }
+  ">"         { if (device_template_scope <= 0)
+                  Choreo::Scanner::Error(loc, "unmatched '>' in device template declaration.");
+                device_template_scope--;
                 device_template_buffer += yytext;
                 if (device_template_scope == 0)
                   BEGIN(REAL_KERNEL);
@@ -285,22 +263,6 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "short"     { if (accumulate_buffer(yytext, token_type::S16)) return make_device_symbol(); }
   "int"       { if (accumulate_buffer(yytext, token_type::INT)) return make_device_symbol(); }
   "long long" { if (accumulate_buffer(yytext, token_type::S64)) return make_device_symbol(); }
-  "s64"       { if (accumulate_buffer(yytext, token_type::S64)) return make_device_symbol(); }
-  "s32"       { if (accumulate_buffer(yytext, token_type::INT)) return make_device_symbol(); }
-  "s16"       { if (accumulate_buffer(yytext, token_type::S16)) return make_device_symbol(); }
-  "s8"        { if (accumulate_buffer(yytext, token_type::S8)) return make_device_symbol(); }
-  "u64"       { if (accumulate_buffer(yytext, token_type::U64)) return make_device_symbol(); }
-  "u32"       { if (accumulate_buffer(yytext, token_type::U32)) return make_device_symbol(); }
-  "u16"       { if (accumulate_buffer(yytext, token_type::U16)) return make_device_symbol(); }
-  "u8"        { if (accumulate_buffer(yytext, token_type::U8)) return make_device_symbol(); }
-  "int64_t"   { if (accumulate_buffer(yytext, token_type::S64)) return make_device_symbol(); }
-  "int32_t"   { if (accumulate_buffer(yytext, token_type::INT)) return make_device_symbol(); }
-  "int16_t"   { if (accumulate_buffer(yytext, token_type::S16)) return make_device_symbol(); }
-  "int8_t"    { if (accumulate_buffer(yytext, token_type::S8)) return make_device_symbol(); }
-  "uint64_t"  { if (accumulate_buffer(yytext, token_type::U64)) return make_device_symbol(); }
-  "uint32_t"  { if (accumulate_buffer(yytext, token_type::U32)) return make_device_symbol(); }
-  "uint16_t"  { if (accumulate_buffer(yytext, token_type::U16)) return make_device_symbol(); }
-  "uint8_t"   { if (accumulate_buffer(yytext, token_type::U8)) return make_device_symbol(); }
   "float"     { if (accumulate_buffer(yytext, token_type::F32)) return make_device_symbol(); }
   "double"    { if (accumulate_buffer(yytext, token_type::F64)) return make_device_symbol(); }
   "const"     { if (accumulate_buffer(yytext, token_type::CONST)) return make_device_symbol(); }
@@ -336,13 +298,6 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   /* Other tokens reset to CO_FUNC */
   [ \t\n]   ; /* Ignore whitespace */
   .         { BEGIN(CO_FUNC); yyless(0); } /* Rewind and reprocess in NORMAL */
-}
-
-<PB_ATTR>{
-  "launch_bounds" { BEGIN(CO_FUNC); return Choreo::Parser::make_LAUNCHBOUNDS(yytext, loc); }
-  "maxnreg"    { BEGIN(CO_FUNC); return Choreo::Parser::make_MAXNREG(yytext, loc); }
-  [ \t\n]    ; /* Ignore whitespace */
-  .          { BEGIN(CO_FUNC); yyless(0); }
 }
 
 <RAW_STRING>{
@@ -466,6 +421,7 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "stream"   return Choreo::Parser::make_STREAM(yytext, loc);
   "event"    return Choreo::Parser::make_EVENT(yytext, loc);
   "frag"     return Choreo::Parser::make_FRAG(yytext, loc);
+  "fragment" return Choreo::Parser::make_FRAGMENT(yytext, loc);
   "print"    return Choreo::Parser::make_PRINT(yytext, loc);
   "println"  return Choreo::Parser::make_PRINTLN(yytext, loc);
   "__acos"     return Choreo::Parser::make_ACOS(yytext, loc);
@@ -510,8 +466,6 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "__atomic_or"   return Choreo::Parser::make_ATOMIC_OR(yytext, loc);
   "__atomic_xor"  return Choreo::Parser::make_ATOMIC_XOR(yytext, loc);
   "__atomic_cas"  return Choreo::Parser::make_ATOMIC_CAS(yytext, loc);
-  "__bar_arrive" return Choreo::Parser::make_BAR_ARRIVE(yytext, loc);
-  "__bar_sync"   return Choreo::Parser::make_BAR_SYNC(yytext, loc);
   "__to"       return Choreo::Parser::make_TOCAST(yytext, loc);
   "__lib_"{id}   return Choreo::Parser::make_LIB_CALL(yytext, loc);
   "local"    return Choreo::Parser::make_STORAGE(Storage::LOCAL, loc);
@@ -598,19 +552,21 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "rotate"   return Choreo::Parser::make_ROTATE(yytext, loc);
   "mma"      return Choreo::Parser::make_MMA(yytext, loc);
   ".fill"    return Choreo::Parser::make_FILL(yytext, loc);
+  ".loadR"   return Choreo::Parser::make_LOADR(yytext, loc);
+  ".loadS"   return Choreo::Parser::make_LOADS(yytext, loc);
   ".load"    return Choreo::Parser::make_LOAD(yytext, loc);
-  ".desc"    return Choreo::Parser::make_DESC(yytext, loc);
   ".store"   return Choreo::Parser::make_STORE(yytext, loc);
   ".row"     return Choreo::Parser::make_ROW(yytext, loc);
   ".col"     return Choreo::Parser::make_COLUMN(yytext, loc);
   ".scale"   return Choreo::Parser::make_SCALE(yytext, loc);
   ".mask"    return Choreo::Parser::make_MASK(yytext, loc);
+  ".commit"  return Choreo::Parser::make_COMMIT(yytext, loc);
   ".wait"    return Choreo::Parser::make_MMAWAIT(yytext, loc);
+  ".apply"   return Choreo::Parser::make_FRAG_APPLY(yytext, loc);
+  ".reduce_max" return Choreo::Parser::make_REDUCE_MAX(yytext, loc);
+  ".reduce_sum" return Choreo::Parser::make_REDUCE_SUM(yytext, loc);
   "assert"   return Choreo::Parser::make_ASSERT(yytext,loc);
   "sync"     return Choreo::Parser::make_SYNC(yytext, loc);
-  "barrier"  return Choreo::Parser::make_BARRIER(yytext, loc);
-  "fence"    return Choreo::Parser::make_FENCE(yytext, loc);
-  "cooperative" return Choreo::Parser::make_COOPERATIVE(yytext, loc);
   "trigger"  return Choreo::Parser::make_TRIGGER(yytext, loc);
   "if"       return Choreo::Parser::make_IF(yytext, loc);
   "else"     return Choreo::Parser::make_ELSE(yytext, loc);
@@ -620,18 +576,20 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "with"     return Choreo::Parser::make_WITH(yytext, loc);
   "in"       return Choreo::Parser::make_IN(yytext, loc);
   "foreach"  return Choreo::Parser::make_FOREACH(yytext, loc);
-  "apply"    return Choreo::Parser::make_APPLY(yytext, loc);
-  "reduce_max" return Choreo::Parser::make_REDUCE_MAX_STMT(yytext, loc);
-  "reduce_sum" return Choreo::Parser::make_REDUCE_SUM_STMT(yytext, loc);
-  "copy"     return Choreo::Parser::make_COPY_STMT(yytext, loc);
   "wait"     return Choreo::Parser::make_WAIT(yytext, loc);
   "call"     return Choreo::Parser::make_CALL(yytext, loc);
+  "setreg.inc" return Choreo::Parser::make_SETREG_INC(yytext, loc);
+  "setreg.dec" return Choreo::Parser::make_SETREG_DEC(yytext, loc);
+  "setreg"   return Choreo::Parser::make_SETREG(yytext, loc);
+  "launch_bounds" return Choreo::Parser::make_LAUNCHBOUNDS(yytext, loc);
   "select"   return Choreo::Parser::make_SELECT(yytext, loc);
   "return"   return Choreo::Parser::make_RET(yytext, loc);
   "where"    return Choreo::Parser::make_WHERE(yytext, loc);
   "while"    return Choreo::Parser::make_WHILE(yytext, loc);
   "break"    return Choreo::Parser::make_BREAK(yytext, loc);
   "vectorize" return Choreo::Parser::make_VECTORIZE(yytext, loc);
+  "automap"  return Choreo::Parser::make_AUTOMAP(yytext, loc);
+  "causal_split" return Choreo::Parser::make_CAUSAL_SPLIT(yytext, loc);
   "unroll"   return Choreo::Parser::make_UNROLL(yytext, loc);
   "continue" return Choreo::Parser::make_CONTINUE(yytext, loc);
   "yield"    return Choreo::Parser::make_YIELD(yytext, loc);
@@ -673,7 +631,6 @@ device_attr (__device__|__co_device__|__attribute__\(\(device\)\))
   "#%"       return Choreo::Parser::make_UBPECET (loc);
   "("        return Choreo::Parser::make_LPAREN (loc);
   ")"        return Choreo::Parser::make_RPAREN (loc);
-  "[["       { BEGIN(PB_ATTR); return Choreo::Parser::make_DLBRAKT(loc); }
   "["        return Choreo::Parser::make_LBRAKT (loc);
   "]"        { if (double_bracket) {
                  BEGIN(MDSPAN_SUGER);
@@ -779,25 +736,13 @@ typename Choreo::BaseType STR2BT(std::string s) {
   if (s == "void") return Choreo::BaseType::VOID;
   if (s == "float") return Choreo::BaseType::F32;
   if (s == "double") return Choreo::BaseType::F64;
-  if (s == "long long" || s == "s64" || s == "int64_t")
-    return Choreo::BaseType::S64;
-  if (s == "int" || s == "s32" || s == "int32_t")
-    return Choreo::BaseType::S32;
-  if (s == "short" || s == "s16" || s == "int16_t")
-    return Choreo::BaseType::S16;
-  if (s == "char" || s == "s8" || s == "int8_t")
-    return Choreo::BaseType::S8;
-  if (s == "unsigned long long" || s == "u64" || s == "uint64_t")
-    return Choreo::BaseType::U64;
-  if (s == "unsigned int" || s == "u32" || s == "uint32_t")
-    return Choreo::BaseType::U32;
-  if (s == "unsigned short" || s == "u16" || s == "uint16_t")
-    return Choreo::BaseType::U16;
-  if (s == "unsigned char" || s == "u8" || s == "uint8_t")
-    return Choreo::BaseType::U8;
+  if (s == "long long") return Choreo::BaseType::S64;
+  if (s == "int") return Choreo::BaseType::S32;
+  if (s == "short") return Choreo::BaseType::S16;
+  if (s == "char") return Choreo::BaseType::S8;
   if (s == "bool") return Choreo::BaseType::BOOL;
 
-  return Choreo::BaseType::UNKNOWN;
+  return Choreo::BaseType::UNKNOWN; // default to void
 }
 
 Choreo::Parser::symbol_type make_device_symbol() {
@@ -817,3 +762,4 @@ bool Choreo::Scanner::debug = false;
 bool Choreo::Scanner::keep_comments = true;
 bool Choreo::Scanner::loc_update = true;
 void Choreo::Scanner::Debug(std::string s) { if (debug) dbgs() << "[scanner] " << s << std::endl; }
+

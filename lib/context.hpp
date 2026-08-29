@@ -5,7 +5,6 @@
 
 #include "assess.hpp"
 #include "fragment_layout.hpp"
-#include "io.hpp"
 #include "loc.hpp"
 #include "symvals.hpp"
 #include "target.hpp"
@@ -25,21 +24,12 @@ namespace AST {
 struct Node;
 }
 
-class PlDepthMap;
-
 enum class OutputKind {
   PreProcessedCode,
   TargetSourceCode,
-  // Hetero offload: emit a standalone translation unit for the offload .o.
-  // Includes the device kernel (ds) and the target launch entry (hs) that
-  // defines __hetero_<device>_... (alloc, dispatch, sync). Does NOT include
-  // hetero orchestration host code or main() -- those are in the hetero host
-  // .o.
-  DeviceSourceOnly,
   TargetModule,
   TargetAssembly,
   TargetExecutable,
-  TargetLibrary,
   ShellScript,
 };
 
@@ -53,7 +43,6 @@ inline bool RequiresE2ECompilation(OutputKind ok) {
   case OutputKind::TargetModule:
   case OutputKind::TargetAssembly:
   case OutputKind::TargetExecutable:
-  case OutputKind::TargetLibrary:
   case OutputKind::ShellScript: return true;
   default: break;
   }
@@ -64,11 +53,9 @@ inline static const std::string STR(OutputKind ok) {
   switch (ok) {
   case OutputKind::PreProcessedCode: return "PreProcessedCode";
   case OutputKind::TargetSourceCode: return "TargetSourceCode";
-  case OutputKind::DeviceSourceOnly: return "DeviceSourceOnly";
   case OutputKind::TargetModule: return "TargetModule";
   case OutputKind::TargetAssembly: return "TargetAssembly";
   case OutputKind::TargetExecutable: return "TargetExecutable";
-  case OutputKind::TargetLibrary: return "TargetLibrary";
   case OutputKind::ShellScript: return "ShellScript";
   default: choreo_unreachable("Unsupported output kind.");
   }
@@ -204,7 +191,7 @@ struct RuntimeCheckEntry {
   std::map<std::string, std::string> notes;
 };
 
-enum class MMAType { WMMA, CTMMA, WGMMA, EFMMA, UKERNEL };
+enum class MMAType { WMMA, CTMMA, WGMMA, EFMMA };
 
 struct FragmentLayoutInfo {
   size_t regs_per_thread = 0;
@@ -265,10 +252,20 @@ private:
   std::map<std::string, ptr<StaticMemReuseInfo>> static_mr_infos;
 
   bool has_device_parallel = false;
+  bool sala_consumer_barrier_ = false;
+  int sala_consumer_barrier_threads_ = 0;
 
 public:
   bool HasDeviceParallel() const { return has_device_parallel; }
   void SetHasDeviceParallel(bool v) { has_device_parallel = v; }
+  bool NeedSALAConsumerBarrier() const { return sala_consumer_barrier_; }
+  int SALAConsumerBarrierThreads() const {
+    return sala_consumer_barrier_threads_;
+  }
+  void SetSALAConsumerBarrier(int num_threads) {
+    sala_consumer_barrier_ = true;
+    sala_consumer_barrier_threads_ = num_threads;
+  }
   FutureBufferInfo& GetFutureBufferInfo() { return fbi; }
   OptimizedValues& GetSymbolValues(const std::string& sym) {
     return sym_values[sym];
@@ -300,10 +297,6 @@ public:
   ptr<DynMemReuseInfo> GetDynMemReuseInfo(const std::string& dev_func) const {
     if (!dyn_mr_infos.count(dev_func)) return nullptr;
     return dyn_mr_infos.at(dev_func);
-  }
-  const std::map<std::string, ptr<DynMemReuseInfo>>&
-  GetAllDynMemReuseInfos() const {
-    return dyn_mr_infos;
   }
   ptr<DynMemReuseInfo> SetDynMemReuseInfo(const std::string& dev_func) {
     if (dyn_mr_infos.count(dev_func)) return dyn_mr_infos.at(dev_func);
@@ -348,13 +341,6 @@ public:
       choreo_unreachable("expect the fragament name is scoped.");
     if (!frag_mma_type.count(scoped_frag_name)) return false;
     return frag_mma_type.at(scoped_frag_name) == MMAType::WGMMA;
-  }
-
-  bool FragIsUKERNEL(const std::string& scoped_frag_name) const {
-    if (!PrefixedWith(scoped_frag_name, "::"))
-      choreo_unreachable("expect the fragament name is scoped.");
-    if (!frag_mma_type.count(scoped_frag_name)) return false;
-    return frag_mma_type.at(scoped_frag_name) == MMAType::UKERNEL;
   }
 
   void SetFragMMAType(const std::string& scoped_frag_name, MMAType mma_ty) {
@@ -463,10 +449,6 @@ struct AssessmentStats {
   size_t hw_constraint_runtime = 0;
 };
 
-/// Print the assessment/assertion statistics section to stderr.
-/// Used by both the AST pipeline and the CoIR pipeline (CoCC).
-void PrintAssessmentStats(const AssessmentStats& s);
-
 class SymbolTable;
 // per-compilation context
 class CompilationContext {
@@ -476,19 +458,10 @@ private:
   VectorizerStats vectorizer_stats; // accumulated across all functions
   MemReuseStats mem_reuse_stats;    // accumulated across all functions
   std::unique_ptr<Target> compile_target = nullptr;
-  std::map<std::string, std::unique_ptr<Target>> device_targets;
   std::vector<ArchId> archs;
-  bool is_sim_arch = false;
   std::vector<FeatureToggle> features;
   OutputKind out_kind = OutputKind::TargetExecutable;
   int8_t opt_level = -1; // undecided
-
-  // PlDepthMap is built when the compilation target or arch is configured,
-  // and invalidated whenever either changes. PlDepthMap::Get() accesses this.
-  friend class PlDepthMap;
-  struct PlDepthMapHolder;
-  std::shared_ptr<PlDepthMapHolder> pl_depth_map_;
-  void InvalidatePlDepthMap() { pl_depth_map_ = nullptr; }
 
 private:
   // compiler configurations
@@ -509,8 +482,11 @@ private:
   bool trace_vn = false;            // trace the value numbering
   bool trace_vectorize = false;     // trace the masking
   bool show_source_loc = true;    // show source code location when error, etc.
+  bool liveness = false;          // analyze the liveness of the program
   bool mem_reuse = false;         // reuse the memory of the program
   bool sala = true;               // signal-aware liveness analysis
+  bool auto_barrier_ = false;     // auto-insert barriers (legacy)
+  bool simplify_fp_valno = false; // simplify the floating point value number
   bool verify = false;            // verify visitors for legality
   bool gen_debug_info = false;    // generate source-level debug information
   bool target_debug_info = false; // pass debug flags to target compilation
@@ -530,54 +506,28 @@ private:
       AssertionCost::ENTRY; // Runtime check assertion level
   bool disable_cuda_runtime_env_check =
       false;                 // Do not emit cuda runtime env check.
-  bool device_only = false;  // Suppress user main() in generated code
-                             // (set by --lib / --suppress-main).
+  bool use_warpspec = false; // Enable warp-specialized synchronization for
+                             // shared event/full-empty pipelines.
+  bool hoist_wgmma_arrive = false; // Hoist warpgroup_arrive before unrolled
+                                   // foreach with WGMMA exec but no commit.
+  bool single_thread_producer =
+      true; // In warpspec mode, use a single producer thread
+            // for producer inthreads; otherwise guard
+            // producer TMA/event ops individually.
+  // Skip wg_barrier.sync() before shared-to-global TMA copies when set via CLI.
+  bool skip_epilogue_group_sync = false;
   bool fast_compile = false; // Use precompiled CuTe runtime for faster nvcc
                              // compilation via separate compilation + linking.
   bool use_fast_math = true; // Pass --use_fast_math to nvcc for faster
                              // transcendentals (exp/div) in generated code.
   bool use_target_lib = false; // Lower __lib_* builtins to target library calls
                                // (e.g. native hardware library calls).
-  bool use_dte_pool = false;   // Reuse a persistent DTE pool for anonymous
-                               // and named DMAs to prevent resource exhaustion.
   std::string debug_file_dir;  // directory for compiler debug artifacts
   std::string api_mode = "cffi"; // API mode for generated code
   DebugLinePathMode debug_line_path_mode = DebugLinePathMode::WorkspaceRelative;
 
 private:
   std::shared_ptr<SymbolTable> sym_tab = nullptr; // global symbol table
-  ptr<AST::Node> pre_sema_root_;
-
-public:
-  bool NeedPreSemaClone() const {
-    return compile_target && compile_target->Name() == "hetero";
-  }
-  void SavePreSemaRoot(AST::Node& r);
-  ptr<AST::Node> GetPreSemaRoot() const { return pre_sema_root_; }
-
-  // Captures mutable target-compilation state so that device offload
-  // pipelines can run in isolation and then restore the parent state.
-  // Grouping these together enables future thread-based target compilation.
-  struct TargetCompilationState {
-    std::unique_ptr<Target> target;
-    std::vector<ArchId> archs;
-    OutputKind output_kind = OutputKind::TargetExecutable;
-    std::shared_ptr<SymbolTable> sym_tab;
-    unsigned anonymous_count = 0;
-    unsigned anon_pb_count = 0;
-    // CodeGenInfo held opaquely; managed by Save/Restore implementation.
-    struct CGIHolder;
-    std::unique_ptr<CGIHolder> cgi_holder;
-    // PlDepthMap snapshot.
-    std::shared_ptr<PlDepthMapHolder> pl_depth_map;
-    TargetCompilationState();
-    ~TargetCompilationState();
-    TargetCompilationState(TargetCompilationState&&) noexcept;
-    TargetCompilationState& operator=(TargetCompilationState&&) noexcept;
-  };
-
-  TargetCompilationState SaveTargetState();
-  void RestoreTargetState(TargetCompilationState&& state);
 
 private:
   std::unordered_map<std::string, std::string> cl_macros; // defined macros
@@ -606,44 +556,16 @@ public:
   const FunctionContext& GetFunctionContext(const std::string fname) const {
     return function_contexts.at(fname);
   }
-  const std::map<std::string, FunctionContext>& GetAllFunctionContexts() const {
-    return function_contexts;
-  }
 
   const Target& GetTarget() const { return *compile_target; }
   Target& GetTarget() { return *compile_target; }
-  bool HasTarget() const { return compile_target != nullptr; }
   bool SetTarget(std::unique_ptr<Target>&& ct) {
     if (ct == nullptr) return false;
     compile_target = std::move(ct);
-    InvalidatePlDepthMap();
     return true;
   }
 
-  std::unique_ptr<Target> SwapTarget(std::unique_ptr<Target>&& ct) {
-    auto old = std::move(compile_target);
-    compile_target = std::move(ct);
-    InvalidatePlDepthMap();
-    return old;
-  }
-
   const std::string TargetName() const { return compile_target->Name(); }
-
-  bool HasDeviceTargets() const { return !device_targets.empty(); }
-
-  void AddDeviceTarget(const std::string& device_name,
-                       std::unique_ptr<Target>&& t) {
-    device_targets[device_name] = std::move(t);
-  }
-
-  const Target* GetDeviceTarget(const std::string& device_name) const {
-    auto it = device_targets.find(device_name);
-    return it != device_targets.end() ? it->second.get() : nullptr;
-  }
-
-  const std::map<std::string, std::unique_ptr<Target>>& DeviceTargets() const {
-    return device_targets;
-  }
 #if 0
   // useful for MPI
   std::string GetSubTarget() const { return compile_sub_target; }
@@ -651,7 +573,6 @@ public:
 #endif
 
   bool IsArchSet() const { return !archs.empty(); }
-  bool IsSimArch() const { return is_sim_arch; }
   const std::vector<ArchId> GetArchs() const {
     if (archs.size() == 0) return {GetTarget().DefaultArch()};
     return archs;
@@ -662,34 +583,11 @@ public:
       choreo_unreachable("unexpected multiple architecture.");
     return archs[0];
   }
-  void ClearArchs() {
-    archs.clear();
-    InvalidatePlDepthMap();
-  }
-  void SetArchs(const std::vector<ArchId>& a) {
-    archs = a;
-    InvalidatePlDepthMap();
-  }
   void AddArch(const ArchId& arch) {
-    ArchId resolved = arch;
-    // Handle sim- prefix: strip it, validate the base arch,
-    // and flag that the script should set simulator env vars.
-    if (resolved.compare(0, 4, "sim-") == 0) {
-      resolved = resolved.substr(4);
-      is_sim_arch = true;
-    }
-    if (arch == "native") {
-      resolved = GetTarget().ResolveNativeArch();
-      if (resolved.empty())
-        choreo_unreachable("-arch=native is not supported by target '" +
-                           GetTarget().Name() + "'.");
-      errs() << "note: -arch=native resolved to '" << resolved << "'\n";
-    }
-    if (!GetTarget().IsArchSupported(resolved))
-      choreo_unreachable("-arch=" + resolved + " is not supported by target '" +
+    if (!GetTarget().IsArchSupported(arch))
+      choreo_unreachable("-arch=" + arch + " is not supported by target '" +
                          GetTarget().Name() + "'.");
-    archs.push_back(resolved);
-    InvalidatePlDepthMap();
+    archs.push_back(arch);
   }
 
   int GetOptimizationLevel() const {
@@ -758,8 +656,10 @@ public:
   bool CrossCompile() const { return cross_compile; }
   bool TraceValueNumbers() const { return trace_vn; }
   bool TraceVectorize() const { return trace_vectorize; }
+  bool LivenessAnalysis() const { return liveness; }
   bool MemReuse() const { return mem_reuse; }
   bool SALA() const { return sala; }
+  bool SimplifyFpValno() const { return simplify_fp_valno; }
   bool VerifyVisitors() const { return verify; }
   bool GenDebugInfo() const { return gen_debug_info; }
   bool TargetDebugInfo() const { return target_debug_info; }
@@ -790,11 +690,13 @@ public:
   bool DisableCudaRuntimeEnvCheck() const {
     return disable_cuda_runtime_env_check;
   }
-  bool DeviceOnly() const { return device_only; }
+  bool UseWarpSpec() const { return use_warpspec; }
+  bool HoistWGMMAArrive() const { return hoist_wgmma_arrive; }
+  bool SingleThreadProducer() const { return single_thread_producer; }
+  bool SkipEpilogueGroupSync() const { return skip_epilogue_group_sync; }
   bool FastCompile() const { return fast_compile; }
   bool UseFastMath() const { return use_fast_math; }
   bool UseTargetLib() const { return use_target_lib; }
-  bool UseDtePool() const { return use_dte_pool; }
   const std::string& GetDebugFileDir() const { return debug_file_dir; }
   void SetDebugFileDir(const std::string& dir) { debug_file_dir = dir; }
   const std::string& GetApiMode() const { return api_mode; }
@@ -816,8 +718,12 @@ public:
   void SetCrossCompile(bool value) { cross_compile = value; }
   void SetTraceValueNumbers(bool value) { trace_vn = value; }
   void SetTraceVectorize(bool value) { trace_vectorize = value; }
+  void SetLivenessAnalysis(bool value) { liveness = value; }
   void SetMemReuse(bool value) { mem_reuse = value; }
   void SetSALA(bool value) { sala = value; }
+  bool AutoBarrier() const { return auto_barrier_; }
+  void SetAutoBarrier(bool value) { auto_barrier_ = value; }
+  void SetSimplifyFpValno(bool value) { simplify_fp_valno = value; }
   void SetVerifyVisitors(bool value) { verify = value; }
   void SetGenDebugInfo(bool value) { gen_debug_info = value; }
   void SetTargetDebugInfo(bool value) { target_debug_info = value; }
@@ -831,11 +737,15 @@ public:
   void SetMaxLocalMemCapacityPerThread(size_t sz) {
     max_local_mem_capacity = sz;
   }
-  void SetDeviceOnly(bool value) { device_only = value; }
+  void SetUseWarpSpec(bool value) { use_warpspec = value; }
+  void SetHoistWGMMAArrive(bool value) { hoist_wgmma_arrive = value; }
+  void SetSingleThreadProducer(bool value) { single_thread_producer = value; }
+  void SetSkipEpilogueGroupSync(bool value) {
+    skip_epilogue_group_sync = value;
+  }
   void SetFastCompile(bool value) { fast_compile = value; }
   void SetUseFastMath(bool value) { use_fast_math = value; }
   void SetUseTargetLib(bool value) { use_target_lib = value; }
-  void SetUseDtePool(bool value) { use_dte_pool = value; }
   void SetSharedMemAlignment(size_t value) { shared_mem_alignment = value; }
   void SetInhibitWarning(bool value) { inhibit_warning = value; }
   void SetWarningAsError(bool value) { warning_as_error = value; }
@@ -912,9 +822,6 @@ public:
   }
   bool TargetSupportMMA() const {
     return HasFeature(ChoreoFeature::MMA, GetArch());
-  }
-  bool TargetSupportMMAUKernel() const {
-    return HasFeature(ChoreoFeature::MMA_UKERNEL, GetArch());
   }
   bool TargetSupportWGMMA() const {
     return HasFeature(ChoreoFeature::WGMMA, GetArch());

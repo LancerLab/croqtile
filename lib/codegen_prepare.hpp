@@ -512,11 +512,6 @@ public:
         }
         tma_desc.SetInThreadsBlock(in_thr_block);
         tma_desc.SetEventManaged(n.HasEvent());
-        if (n.HasEvent()) {
-          auto ev_name = ExtractEventName(*n.Event());
-          if (!ev_name.empty())
-            cgi.GetFunctionTrait(fname).RecordTMAFillEvent(ev_name);
-        }
         tma_descs.at(block_pb).push_back(tma_desc);
       } else
         choreo_unreachable(
@@ -530,15 +525,7 @@ public:
   bool Visit(AST::Trigger& n) override {
     for (auto& f : n.GetEvents()) {
       auto name = ExtractEventName(*f);
-      if (!name.empty()) {
-        RecordEventRef(name, n.LOC());
-        if (!in_thr_block_stack.empty()) {
-          auto* it = in_thr_block_stack.top();
-          if (it->HasScopeThreadMask())
-            cgi.GetFunctionTrait(fname).RecordEventTriggerUsage(
-                name, it->GetScopeThreadMask());
-        }
-      }
+      if (!name.empty()) RecordEventRef(name, n.LOC());
     }
     return true;
   }
@@ -587,7 +574,7 @@ public:
     case AST::MMAOperation::Fill: break;
     case AST::MMAOperation::Load: break;
     case AST::MMAOperation::LoadR: break;
-    case AST::MMAOperation::Desc: break;
+    case AST::MMAOperation::LoadS: break;
     case AST::MMAOperation::Exec: {
       auto& a_sym = AST::FragName(op.ExecOperand(1));
       auto& b_sym = AST::FragName(op.ExecOperand(2));

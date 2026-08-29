@@ -1,6 +1,5 @@
 #include "semacheck.hpp"
 #include "interval.hpp"
-#include "target_utils.hpp"
 #include "types.hpp"
 
 using namespace Choreo;
@@ -220,8 +219,8 @@ static int64_t GetForeachStaticExtent(const AST::ForeachBlock& fe) {
   auto& ranges = fe.GetRanges();
   if (ranges.empty()) return -1;
   auto rng = dyn_cast<AST::LoopRange>(ranges.front());
-  if (!rng || !rng->GetRV()) return -1;
-  auto iv_ty = dyn_cast<BoundedType>(rng->GetRV()->GetType());
+  if (!rng || !rng->IV()) return -1;
+  auto iv_ty = dyn_cast<BoundedType>(rng->IV()->GetType());
   if (!iv_ty) return -1;
   auto ub = iv_ty->GetUpperBound();
   if (!ub || !ub->IsNumeric()) return -1;
@@ -232,57 +231,10 @@ static ValueItem GetForeachDynamicExtent(const AST::ForeachBlock& fe) {
   auto& ranges = fe.GetRanges();
   if (ranges.empty()) return nullptr;
   auto rng = dyn_cast<AST::LoopRange>(ranges.front());
-  if (!rng || !rng->GetRV()) return nullptr;
-  auto iv_ty = dyn_cast<BoundedType>(rng->GetRV()->GetType());
+  if (!rng || !rng->IV()) return nullptr;
+  auto iv_ty = dyn_cast<BoundedType>(rng->IV()->GetType());
   if (!iv_ty) return nullptr;
   return iv_ty->GetUpperBound();
-}
-
-// Count MMA Exec operations in the direct body of a foreach (not nested
-// foreachs) that precede the given mma.wait node.  Each Exec on a distinct
-// accumulator generates a warpgroup_commit_batch(), so the maximum number of
-// batches in flight per iteration equals the number of Exec ops.
-static int CountMMAExecsInBody(const ptr<AST::Node>& node,
-                               const AST::Node* stop_at = nullptr,
-                               bool* found_stop = nullptr) {
-  if (!node) return 0;
-  int count = 0;
-  bool dummy = false;
-  if (!found_stop) found_stop = &dummy;
-
-  auto walk = [&](auto&& self, const ptr<AST::Node>& n) -> void {
-    if (!n || *found_stop) return;
-    if (stop_at && n.get() == stop_at) {
-      *found_stop = true;
-      return;
-    }
-    if (auto mma = dyn_cast<AST::MMA>(n)) {
-      if (auto op = mma->GetOperation()) {
-        if (op->Tag() == AST::MMAOperation::Exec) count++;
-      }
-      return;
-    }
-    if (dyn_cast<AST::ForeachBlock>(n)) return;
-    if (auto mn = dyn_cast<AST::MultiNodes>(n)) {
-      for (auto& item : mn->values) {
-        self(self, item);
-        if (*found_stop) return;
-      }
-      return;
-    }
-    if (auto ie = dyn_cast<AST::IfElseBlock>(n)) {
-      self(self, ie->GetBody());
-      if (*found_stop) return;
-      if (ie->HasElse()) self(self, ie->GetElseBody());
-      return;
-    }
-    if (auto block = dyn_cast<AST::Block>(n)) {
-      self(self, block->GetBody());
-      return;
-    }
-  };
-  walk(walk, node);
-  return count;
 }
 
 bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
@@ -290,8 +242,6 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
     pending_async.clear();
     waited_async.clear();
     scope_pred_stack.clear();
-    parallel_level_stack.clear();
-    cooperative_stack.clear();
     shared_tensor_producers.clear();
   }
   if (auto block = dyn_cast<AST::PredBlock>(&n))
@@ -307,31 +257,6 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
                             ") exceeds the loop extent (" +
                             std::to_string(extent) + ").");
     }
-  } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
-    parallel_level_stack.push_back(pb->GetLevel());
-    cooperative_stack.push_back(pb->IsCooperative());
-
-    // Cooperative annotation is validated after normalization (PB
-    // level has been fully inferred).  Warn when the level is not
-    // BLOCK (the compiler inferred the level, not the user).  Warn
-    // when the target does not support cooperative launches.
-    if (pb->IsCooperative()) {
-      if (pb->GetLevel() != ParallelLevel::BLOCK) {
-        Warning(pb->LOC(),
-                "'cooperative' annotation is only valid on block-level "
-                "parallel-by; ignoring.");
-        pb->SetCooperative(false);
-        cooperative_stack.back() = false;
-      } else if (CCtx().HasTarget() &&
-                 !CCtx().GetTarget().SupportsCooperativeLaunch(
-                     CCtx().GetArch())) {
-        Warning(pb->LOC(), "cooperative launch is not supported by target '" +
-                               CCtx().GetTarget().Name() + "' on arch '" +
-                               CCtx().GetArch() + "'; ignoring.");
-        pb->SetCooperative(false);
-        cooperative_stack.back() = false;
-      }
-    }
   }
   return true;
 }
@@ -340,10 +265,6 @@ bool SemaChecker::AfterVisitImpl(AST::Node& n) {
   if (isa<AST::PredBlock>(&n) || isa<AST::ForeachBlock>(&n))
     scope_pred_stack.pop_back();
   if (isa<AST::ForeachBlock>(&n)) foreach_stack.pop_back();
-  if (isa<AST::ParallelBy>(&n)) {
-    parallel_level_stack.pop_back();
-    cooperative_stack.pop_back();
-  }
 
   if (isa<AST::ChoreoFunction>(&n)) {
     for (auto n : waited_async) pending_async.erase(n);
@@ -715,137 +636,48 @@ bool SemaChecker::VisitNode(AST::ParallelBy& n) {
       // not the parallel variable itself.  The SubPV has BoundedType, so
       // CreateAssessment would escalate to USE_SITE - bypass it and force
       // ENTRY.
-      FCtx(fname).GetAssessor(*this).Assess(
-          AssessPolicy::Error, asrt, message, UsageType::LoopBound,
-          AssessType::ENTRY, loc, spv.get(), &n);
+      FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, asrt, message,
+                                            UsageType::LoopBound,
+                                            AssessType::ENTRY, loc, spv.get());
       ++index;
     }
   }
 
   int setreg_count = 0;
+  int launch_bounds_count = 0;
   if (auto body = n.GetBody()) {
     for (const auto& stmt : body->values) {
       auto call = dyn_cast<AST::Call>(stmt);
       if (!call || !call->IsBIF()) continue;
-      if (call->function->name == "croq::cuda::setreg_inc" ||
-          call->function->name == "croq::cuda::setreg_dec") {
+      if (call->function->name == "setreg" ||
+          call->function->name == "setreg.inc" ||
+          call->function->name == "setreg.dec") {
         setreg_count++;
+      } else if (call->function->name == "launch_bounds") {
+        launch_bounds_count++;
       }
     }
   }
 
   if (setreg_count > 0 && n.GetLevel() != ParallelLevel::BLOCK) {
     Error1(n.LOC(),
-           "croq::cuda::setreg_inc/dec is only allowed in parallel-by blocks "
-           "lowered to CUDA kernels (level : block).");
+           "setreg is only allowed in parallel-by blocks lowered to CUDA "
+           "kernels (level : block).");
   }
-
-  if (n.HasLaunchBounds()) {
-    if (n.GetLevel() != ParallelLevel::BLOCK)
-      Error1(n.LOC(),
-             "[[launch_bounds]] is only valid on block-level parallel-by.");
-    auto& lb_args = n.GetLaunchBoundsArgs();
-    for (size_t i = 0; i < lb_args->Count(); ++i) {
-      auto arg = dyn_cast<AST::Expr>(lb_args->ValueAt(i));
-      if (!arg || !arg->Opts().HasVal() || !arg->Opts().GetVal()->IsNumeric()) {
-        Error1(lb_args->ValueAt(i)->LOC(),
-               "[[launch_bounds]] argument must be a compile-time "
-               "integer constant.");
-      } else if (auto val = VIInt(arg->Opts().GetVal());
-                 !val || val.value() < 0) {
-        Error1(lb_args->ValueAt(i)->LOC(),
-               "[[launch_bounds]] argument must be a non-negative integer.");
-      } else if (i > 0 && val && val.value() == 0) {
-        Error1(lb_args->ValueAt(i)->LOC(),
-               "[[launch_bounds]] minBlocks/maxCluster must be positive "
-               "(use 0 only for maxThreadsPerBlock to auto-compute).");
-      }
-    }
+  if (setreg_count > 1) {
+    Error1(n.LOC(), "multiple setreg directives are not allowed in the same "
+                    "parallel-by block.");
   }
-
-  if (n.HasMaxnreg()) {
-    if (n.GetLevel() != ParallelLevel::BLOCK)
-      Error1(n.LOC(), "[[maxnreg]] is only valid on block-level parallel-by.");
-    auto arg = n.GetMaxnregArg();
-    if (!arg->Opts().HasVal() || !arg->Opts().GetVal()->IsNumeric()) {
-      Error1(arg->LOC(),
-             "[[maxnreg]] argument must be a compile-time integer constant.");
-    } else if (auto val = VIInt(arg->Opts().GetVal());
-               !val || val.value() <= 0) {
-      Error1(arg->LOC(), "[[maxnreg]] argument must be a positive integer.");
-    }
+  if (launch_bounds_count > 0 && n.GetLevel() != ParallelLevel::BLOCK) {
+    Error1(
+        n.LOC(),
+        "launch_bounds is only allowed in parallel-by blocks lowered to CUDA "
+        "kernels (level : block).");
   }
-
-  return true;
-}
-
-// Check if `inner` level is a valid nested scope under `outer` level
-// (e.g., THREAD under BLOCK is valid, BLOCK under GROUP is not).
-// PlDepthMap assigns depth 0 to the outermost level; deeper scopes have
-// higher depth values.  `inner` is valid under `outer` when `inner` is at
-// a depth >= `outer` (i.e., as deep or deeper).
-inline bool LevelWithin(ParallelLevel outer, ParallelLevel inner) {
-  return (outer - inner) <= 0;
-}
-
-// Map fence visibility level to the minimum parallel level that can contain it
-static ParallelLevel FenceMinLevel(ParallelLevel visibility) {
-  return visibility;
-}
-
-bool SemaChecker::VisitNode(AST::Barrier& n) {
-  // sync.barrier : device requires a cooperative enclosing parallel : block
-  if (n.GetLevel() == ParallelLevel::DEVICE) {
-    bool found_cooperative_block = false;
-    for (size_t i = cooperative_stack.size(); i > 0; --i) {
-      if (parallel_level_stack[i - 1] == ParallelLevel::BLOCK &&
-          cooperative_stack[i - 1]) {
-        found_cooperative_block = true;
-        break;
-      }
-    }
-    if (!found_cooperative_block) {
-      Error1(n.LOC(), "sync.barrier : device requires an enclosing 'parallel : "
-                      "block <cooperative>' scope.");
-    }
-  }
-
-  // Validate barrier level does not exceed enclosing parallel level
-  if (!parallel_level_stack.empty()) {
-    auto enc_level = parallel_level_stack.back();
-    if (!LevelWithin(enc_level, n.GetLevel())) {
-      Warning(n.LOC(), "sync.barrier : " + STR(n.GetLevel()) +
-                           " inside a parallel : " + STR(enc_level) +
-                           " scope; the barrier may have no effect.");
-    }
-  }
-
-  return true;
-}
-
-bool SemaChecker::VisitNode(AST::Fence& n) {
-  // Validate that the target supports this fence visibility.
-  if (CCtx().HasTarget() && !CCtx().GetTarget().IsFenceSupported(
-                                CCtx().GetArch(), n.GetVisibility())) {
-    Error1(n.LOC(), "sync.fence : " + STR(n.GetVisibility()) +
-                        " is not supported by target '" +
-                        CCtx().GetTarget().Name() + "' on arch '" +
-                        CCtx().GetArch() +
-                        "'; there is no direct hardware equivalent.");
-    return false;
-  }
-
-  // Validate fence visibility is appropriate for the enclosing parallel level
-  if (!parallel_level_stack.empty()) {
-    auto enc_level = parallel_level_stack.back();
-    auto min_level = FenceMinLevel(n.GetVisibility());
-    if (!LevelWithin(enc_level, min_level)) {
-      Warning(
-          n.LOC(),
-          "sync.fence : " + STR(n.GetVisibility()) +
-              " inside a parallel : " + STR(enc_level) +
-              " scope; the fence scope exceeds the enclosing parallel level.");
-    }
+  if (launch_bounds_count > 1) {
+    Error1(n.LOC(),
+           "multiple launch_bounds directives are not allowed in the same "
+           "parallel-by block.");
   }
 
   return true;
@@ -1032,7 +864,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
                        ") with " + PSTR(tc) + " and 'to'(" + PSTR(tty) +
                        ") at the " + Ordinal(i + 1) + " dim.";
         CreateAssessment(eq, message, n.from->LOC(), n.from,
-                         UsageType::ShapeCompatibility, &n);
+                         UsageType::ShapeCompatibility);
       }
     }
   } else if (n.operation == ".pad") {
@@ -1087,7 +919,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
                    STR(f_shape.ElementCountValue()) + " > " +
                    STR(t_shape.ElementCountValue()) + ")";
     CreateAssessment(asrt, message, n.LOC(), n.from,
-                     UsageType::ShapeCompatibility, &n);
+                     UsageType::ShapeCompatibility);
 
     bool emit_error = true;
     std::string msg;
@@ -1145,6 +977,13 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     if (emit_error && !smaller_source_dma) {
       Error1(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                           ") and 'to'(" + PSTR(tty) + ").");
+    } else if (smaller_source_dma && !n.IsOOBZeroFill()) {
+      Warning(n.LOC(),
+              "DMA 'from' shape is smaller than 'to'; add '.zfill' to make "
+              "the tail-fill behavior explicit.");
+    } else if (!n.IsOOBZeroFill() && !supported_conditional_dma) {
+      Warning(n.LOC(),
+              "Dimensions could be inconsistent between DMA" + msg + ").");
     }
   }
 
@@ -1232,8 +1071,8 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
   switch (op.Tag()) {
   case AST::MMAOperation::Fill: break;
   case AST::MMAOperation::LoadR: break;
-  case AST::MMAOperation::Desc: break;
-  case AST::MMAOperation::Load: {
+  case AST::MMAOperation::Load:
+  case AST::MMAOperation::LoadS: {
     // Keep explicit mma.load swizzles consistent with the DMA/TMA that fills
     // the referenced shared-memory tensor.
     auto load_from = op.LoadFrom();
@@ -1460,27 +1299,20 @@ bool SemaChecker::VisitNode(AST::MMA& n) {
     int depth = op.WaitDepth();
     if (depth > 0 && !foreach_stack.empty()) {
       auto* fe = foreach_stack.back();
-      int execs_per_iter = CountMMAExecsInBody(fe->GetBody(), &n);
-      if (execs_per_iter < 1) execs_per_iter = 1;
       int64_t extent = GetForeachStaticExtent(*fe);
-      if (extent > 0 && depth >= extent * execs_per_iter) {
+      if (extent > 0 && depth >= extent) {
         Error1(n.LOC(), "mma.wait<" + std::to_string(depth) +
                             "> depth must be less than the enclosing loop "
                             "extent (" +
-                            std::to_string(extent) +
-                            ") * commits per iteration (" +
-                            std::to_string(execs_per_iter) + ").");
+                            std::to_string(extent) + ").");
       } else if (extent < 0) {
         auto ub = GetForeachDynamicExtent(*fe);
         if (ub) {
-          auto limit = (execs_per_iter > 1) ? ub * sbe::nu(execs_per_iter) : ub;
-          auto cond = sbe::oc_lt(sbe::nu(depth), limit);
+          auto cond = sbe::oc_lt(sbe::nu(depth), ub);
           FCtx(fname).GetAssessor(*this).Assess(
               AssessPolicy::Error, cond,
               "mma.wait<" + std::to_string(depth) +
-                  "> depth must be less than the enclosing loop extent"
-                  " * commits per iteration (" +
-                  std::to_string(execs_per_iter) + ").",
+                  "> depth must be less than the enclosing loop extent.",
               UsageType::ShapeCompatibility, AssessType::ENTRY, n.LOC(), &n);
         }
       }
@@ -1679,30 +1511,51 @@ bool SemaChecker::VisitNode(AST::Call& n) {
           Error1(n.LOC(), "choreo assertion abort: " + msg);
         }
       }
-    } else if (func_name == "croq::cuda::setreg_inc" ||
-               func_name == "croq::cuda::setreg_dec") {
+    } else if (func_name == "setreg" || func_name == "setreg.inc" ||
+               func_name == "setreg.dec") {
       if (n.arguments->Count() != 1) {
-        Error1(n.LOC(), "'" + func_name + "' expects exactly one argument.");
+        Error1(n.LOC(), "setreg expects exactly one argument.");
       } else {
         auto arg = dyn_cast<AST::Expr>(n.arguments->ValueAt(0));
         if (!arg) {
-          Error1(n.LOC(),
-                 "'" + func_name + "' expects an integer expression argument.");
+          Error1(n.LOC(), "setreg expects an integer expression argument.");
         } else {
           auto aty = NodeType(*arg);
           if (!isa<ScalarIntegerType>(aty)) {
-            Error1(n.LOC(), "'" + func_name +
-                                "' expects an integer argument but got '" +
+            Error1(n.LOC(), "setreg expects an integer argument but got '" +
                                 PSTR(aty) + "'.");
           } else if (!arg->Opts().HasVal() ||
                      !arg->Opts().GetVal()->IsNumeric()) {
             Error1(n.LOC(),
-                   "'" + func_name +
-                       "' argument must be a compile-time integer constant.");
+                   "setreg argument must be a compile-time integer constant.");
           } else if (auto reg_limit = VIInt(arg->Opts().GetVal());
                      !reg_limit || reg_limit.value() <= 0) {
+            Error1(n.LOC(), "setreg argument must be a positive integer.");
+          }
+        }
+      }
+    } else if (func_name == "launch_bounds") {
+      if (n.arguments->Count() != 1) {
+        Error1(n.LOC(), "launch_bounds expects exactly one argument.");
+      } else {
+        auto arg = dyn_cast<AST::Expr>(n.arguments->ValueAt(0));
+        if (!arg) {
+          Error1(n.LOC(),
+                 "launch_bounds expects an integer expression argument.");
+        } else {
+          auto aty = NodeType(*arg);
+          if (!isa<ScalarIntegerType>(aty)) {
             Error1(n.LOC(),
-                   "'" + func_name + "' argument must be a positive integer.");
+                   "launch_bounds expects an integer argument but got '" +
+                       PSTR(aty) + "'.");
+          } else if (!arg->Opts().HasVal() ||
+                     !arg->Opts().GetVal()->IsNumeric()) {
+            Error1(n.LOC(), "launch_bounds argument must be a compile-time "
+                            "integer constant.");
+          } else if (auto min_blocks = VIInt(arg->Opts().GetVal());
+                     !min_blocks || min_blocks.value() <= 0) {
+            Error1(n.LOC(),
+                   "launch_bounds argument must be a positive integer.");
           }
         }
       }

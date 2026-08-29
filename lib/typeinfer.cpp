@@ -96,9 +96,9 @@ ValueItem BuildPredicate(TypeInference* ti, const ptr<AST::Node>& n) {
 } // namespace
 
 ValueItem TypeInference::BuildRangePredicate(AST::LoopRange& n) {
-  auto iv = sbe::sym(InScopeName(n.GetRVName()));
+  auto iv = sbe::sym(InScopeName(n.IVName()));
 
-  auto iv_ty = GetSymbolType(n.LOC(), n.GetRVName());
+  auto iv_ty = GetSymbolType(n.LOC(), n.IVName());
   assert(isa<BoundedType>(iv_ty));
 
   if (!IsActualBoundedIntegerType(iv_ty)) {
@@ -188,8 +188,8 @@ bool TypeInference::AfterVisitImpl(AST::Node& n) {
   } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
     for (auto& rn : fb->GetRanges()) {
       auto range = cast<AST::LoopRange>(rn);
-      auto sym_ty = GetSymbolType(n.LOC(), range->GetRVName());
-      SetNodeType(*range->GetRV(), sym_ty);
+      auto sym_ty = GetSymbolType(n.LOC(), range->IVName());
+      SetNodeType(*range->iv, sym_ty);
     }
   }
 
@@ -1070,7 +1070,8 @@ bool TypeInference::Visit(AST::MMA& n) {
       }
     }
   } break;
-  case AST::MMAOperation::Load: {
+  case AST::MMAOperation::Load:
+  case AST::MMAOperation::LoadS: {
     std::string fut_sym = AST::FragName(op.GetFuture());
     AssignSymbolWithType(n.LOC(), fut_sym, n.GetType()->Clone());
     auto sty = GetSpannedType(n.GetType());
@@ -1087,23 +1088,6 @@ bool TypeInference::Visit(AST::MMA& n) {
     }
   } break;
   case AST::MMAOperation::LoadR: break;
-  case AST::MMAOperation::Desc: {
-    std::string operand_sym = AST::FragName(op.DescTo());
-    auto operand_ty = GetSpannedType(n.GetType());
-    assert(operand_ty && operand_ty->GetStorage() == Storage::SHARED &&
-           "expect mma.desc to infer a shared span");
-    AssignSymbolWithType(n.LOC(), operand_sym, operand_ty->Clone());
-    AssignSymbolWithType(n.LOC(), operand_sym + ".span",
-                         operand_ty->GetMDSpanType()->Clone());
-    if (CCtx().ShowInferredTypes()) {
-      dbgs() << color::out(color::kBoldMagenta)
-             << "Descriptor: " << color::out(color::kReset)
-             << InScopeName(operand_sym) << color::out(color::kDim)
-             << ", Type: " << color::out(color::kReset)
-             << color::colorizeType(PSTR(operand_ty), color::stdoutHasColor())
-             << "\n";
-    }
-  } break;
   case AST::MMAOperation::Exec: {
     const auto& acc = op.ExecOperand(0);
     std::string acc_sym = AST::FragName(acc);

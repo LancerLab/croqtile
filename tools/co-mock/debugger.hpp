@@ -3,7 +3,6 @@
 
 #include "mock_memory.hpp"
 #include <functional>
-#include <iostream>
 #include <set>
 #include <string>
 
@@ -27,11 +26,6 @@ public:
   bool IsActive() const { return active_; }
   void SetActive(bool v) { active_ = v; }
 
-  void SetInputStream(std::istream* is) { input_ = is; }
-
-  void EnterBlock() { ++current_depth_; }
-  void LeaveBlock() { --current_depth_; }
-
 private:
   enum StopReason { Step, Next, Breakpoint, Initial };
   enum Mode { Run, StepInto, StepOver };
@@ -44,8 +38,6 @@ private:
   void CmdList(AST::Node& stmt, int context_lines = 5);
   void CmdPrint(const std::string& var_name);
   void CmdInfo();
-  void CmdInfoFutures();
-  void CmdInfoMem();
   void CmdBreak(const std::string& arg);
   void CmdDelete(const std::string& arg);
   void CmdBreakpoints();
@@ -60,7 +52,6 @@ private:
   int step_depth_ = 0;
   int current_depth_ = 0;
   std::set<int> breakpoints_;
-  std::istream* input_ = &std::cin;
 };
 
 } // namespace Mock

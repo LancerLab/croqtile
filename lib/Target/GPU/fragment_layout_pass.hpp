@@ -41,7 +41,7 @@ struct FragmentLayoutPass : public CodeGenerator {
   bool Visit(AST::MMA& n) override;
   bool Visit(AST::FragReduce& n) override;
   bool Visit(AST::FragTransfer& n) override;
-  bool Visit(AST::ApplyBlock& n) override;
+  bool Visit(AST::FragApply& n) override;
 
 private:
   // Track parallel scope thread count during traversal.

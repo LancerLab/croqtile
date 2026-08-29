@@ -1,0 +1,66 @@
+// Synthetic Tawa-style cooperative warp-specialized GEMM.
+// WG0 = producer (TMA), WG1+WG2 = cooperative consumers (WGMMA).
+//
+// Tawa's cooperative mode: two consumer warp groups jointly compute
+// the same tile, pooling registers for larger tile sizes.
+// This is the multi-consumer case analogous to CUTLASS Cooperative.
+//
+// Without SALA's named barrier analysis, pipe_a/pipe_b and out_c0/out_c1
+// cannot overlap because consumers in different warp groups may be
+// in different pipeline phases.
+//
+// With SALA + named barrier: overlap is safe because all consumers
+// are synchronized at the mainloop-epilogue boundary.
+//
+// Pipeline: D=2 (aref size), 128x128 tile, cooperative 2-WG consumer
+
+module attributes {"num-warps" = 12 : i32} {
+  tt.func public @tawa_gemm_cooperative(%arg0: !tt.ptr<f16>, %arg1: !tt.ptr<f16>, %arg2: !tt.ptr<f16>) {
+    // Pipeline buffers (shared by both consumer WGs via aref)
+    %pipe_a = ttg.local_alloc : () -> !ttg.memdesc<2x128x64xf16>
+    %pipe_b = ttg.local_alloc : () -> !ttg.memdesc<2x64x128xf16>
+
+    // Epilogue output buffers (one per consumer WG for cooperative store)
+    %out_c0 = ttg.local_alloc : () -> !ttg.memdesc<64x128xf16>
+    %out_c1 = ttg.local_alloc : () -> !ttg.memdesc<64x128xf16>
+
+    // WG0: Producer loop
+    scf.for %k = %c0 to %K step %c1 {
+      %slot_a = ttg.memdesc_index %pipe_a[%k_mod_2]
+      ttg.async_copy_global_to_local %arg0, %slot_a
+      ttg.async_commit_group
+
+      %slot_b = ttg.memdesc_index %pipe_b[%k_mod_2]
+      ttg.async_copy_global_to_local %arg1, %slot_b
+      ttg.async_commit_group
+
+      // WG1+WG2: cooperative consumers wait + compute
+      ttg.async_wait {num = 0 : i32}
+
+      %slot_a_r = ttg.memdesc_index %pipe_a[%k_mod_2_r]
+      %slot_b_r = ttg.memdesc_index %pipe_b[%k_mod_2_r]
+      ttng.warp_group_dot %slot_a_r, %slot_b_r
+
+      scf.yield
+    }
+
+    // Mainloop tail + named barrier sync (all consumers synchronized)
+    ttg.async_wait {num = 0 : i32}
+
+    // WG1: Epilogue half-tile store to out_c0
+    ttg.local_store %acc_wg1, %out_c0
+    ttg.async_copy_local_to_global %out_c0
+
+    // WG2: Epilogue half-tile store to out_c1
+    ttg.local_store %acc_wg2, %out_c1
+    ttg.async_copy_local_to_global %out_c1
+
+    // Cleanup
+    ttg.local_dealloc %pipe_a
+    ttg.local_dealloc %pipe_b
+    ttg.local_dealloc %out_c0
+    ttg.local_dealloc %out_c1
+
+    tt.return
+  }
+}

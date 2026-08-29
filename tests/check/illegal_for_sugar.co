@@ -1,8 +1,0 @@
-// RUN: not choreo %s 2>&1 | FileCheck %s
-
-__co__ auto illegal_foreach(f32 [3, ?, 18] a, s16 [?, 4] b) {
-  foreach {x,y} in a.span {}
-}
-
-// CHECK: error: un-matched with-matcher-count(2) and mdspan rank(3).
-// CHECK: Totally 1 errors have been detected.

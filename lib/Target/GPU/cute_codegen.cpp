@@ -20,9 +20,13 @@
 #include "dma_plan.hpp"
 #include "operator_info.hpp"
 
-// __CHOREO_CUDA_DIR__ and __CHOREO_CUTE_DIR__ are set by CMake when
-// ENABLE_CUDA / ENABLE_CUTE are ON.  Code below uses #ifdef guards
-// to degrade gracefully when they are absent.
+#ifndef __CHOREO_CUDA_DIR__
+  #warning "missing macro definition of __CHOREO_CUDA_DIR__"
+#endif // __CHOREO_CUDA_DIR__
+
+#ifndef __CHOREO_CUTE_DIR__
+  #warning "missing macro definition of __CHOREO_CUTE_DIR__"
+#endif // __CHOREO_CUTE_DIR__
 
 // #define USING_OP_INFO
 
@@ -42,18 +46,6 @@ static std::string StripOuterParens(const std::string& s) {
     if (depth == 0) return s;
   }
   return s.substr(1, s.size() - 2);
-}
-
-// Zero is exactly representable by every MMA accumulator type. Treat a
-// literal zero fill as an intentional conversion so the generic narrowing
-// diagnostics do not report a precision loss that cannot occur.
-static bool IsNumericZeroLiteral(const AST::ptr<AST::Node>& n) {
-  auto value = AST::Ref(n);
-  if (auto integer = dyn_cast<AST::IntLiteral>(value))
-    return integer->Val() == 0;
-  if (auto floating = dyn_cast<AST::FloatLiteral>(value))
-    return std::visit([](auto v) { return v == 0; }, floating->value);
-  return false;
 }
 
 // TMA_Swizzle enum and cuda_stringify helper for code generation
@@ -82,7 +74,11 @@ extern Option<bool> verbose;
 extern Option<bool> use_pic;
 extern Option<bool> use_fast_math;
 extern Option<bool> tma_cluster_aware;
+extern Option<bool> ptx_barrier;
 extern Option<bool> use_stmatrix;
+extern Option<bool> hoist_offset;
+extern Option<bool> hoist_scale;
+extern Option<bool> event_arrive_tx;
 
 namespace Choreo {
 extern Option<bool> sim_sparse;
@@ -105,12 +101,8 @@ inline const char* CudaDeviceMemory(Storage st) {
 
 inline std::string CudaParamStorage(Storage st) {
   switch (st) {
-  case Storage::GLOBAL: return "";
   case Storage::SHARED: return "__shared__";
-  case Storage::LOCAL: return "";
-  default:
-    choreo_unreachable("unsupported parameter storage: " + STR(st));
-    return "";
+  default: return "";
   }
   return "";
 }
@@ -376,7 +368,42 @@ size_t GetWGMMAKAxis(const MMAInfo& ssmi) {
 
 const AST::MMAOperation*
 CuteCodeGen::FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const {
-  (void)n;
+  if (!n) return nullptr;
+  if (!hoist_scale) return nullptr;
+
+  if (auto mma = dyn_cast<AST::MMA>(n)) {
+    auto op = mma->GetOperation();
+    if (!op || op->Tag() != AST::MMAOperation::Exec || !op->HasScale())
+      return nullptr;
+    auto c_sym = AST::FragName(op->ExecOperand(0));
+    auto scoped_c_sym = InScopeName(c_sym);
+    if (FCtx(fname).FragHasMMAType(scoped_c_sym) &&
+        FCtx(fname).FragIsWGMMA(scoped_c_sym))
+      return op.get();
+    return nullptr;
+  }
+
+  if (auto mn = dyn_cast<AST::MultiNodes>(n)) {
+    for (auto& item : mn->values)
+      if (auto* op = FindFirstScaledWGMMAExec(item)) return op;
+    return nullptr;
+  }
+
+  if (auto if_else = dyn_cast<AST::IfElseBlock>(n)) {
+    if (if_else->GetThenBody())
+      if (auto* op = FindFirstScaledWGMMAExec(if_else->GetThenBody()))
+        return op;
+    if (if_else->GetElseBody())
+      if (auto* op = FindFirstScaledWGMMAExec(if_else->GetElseBody()))
+        return op;
+    return nullptr;
+  }
+
+  if (auto block = dyn_cast<AST::Block>(n)) {
+    return block->GetBody() ? FindFirstScaledWGMMAExec(block->GetBody())
+                            : nullptr;
+  }
+
   return nullptr;
 }
 
@@ -442,19 +469,14 @@ CuteCodeGen::GetDMABufferExpr(const std::string& sym,
 }
 
 void CuteCodeGen::EmitGroupX4Sync(std::ostringstream& os,
-                                  const std::string& indent,
-                                  int thread_count) const {
-  int tc =
-      thread_count > 0
-          ? thread_count
-          : (CurrentScopeThreadsCount() > 0 ? CurrentScopeThreadsCount() : 128);
-  os << indent << "choreo::named_barrier_sync(" << std::to_string(tc)
-     << ", 15);\n";
+                                  const std::string& indent) const {
+  os << indent << "asm volatile(\"bar.sync 15, 128;\\n\" ::: \"memory\");\n";
 }
 
 void CuteCodeGen::EmitWGMMAFinalize(std::ostringstream& os,
                                     const std::string& indent,
                                     bool force_wait) {
+  if (wgmma_foreach_depth > 0) return;
   os << indent << "warpgroup_commit_batch();\n";
   if (!has_explicit_mma_wait || force_wait)
     os << indent << "warpgroup_wait<0>();\n";
@@ -463,29 +485,182 @@ void CuteCodeGen::EmitWGMMAFinalize(std::ostringstream& os,
        << ");\n";
   has_pending_wgmma_finalize = false;
   pending_wgmma_acc_sym.clear();
-  if (!has_explicit_mma_wait || force_wait) warpspec_wgmma_arrived = false;
+  warpspec_wgmma_arrived = false;
+}
+
+bool CuteCodeGen::SubtreeContainsWGMMAExec(AST::Node* n,
+                                           bool stop_at_foreach) {
+  if (!n) return false;
+  if (auto mma = dyn_cast<AST::MMA>(n)) {
+    auto op = mma->GetOperation();
+    return op && op->Tag() == AST::MMAOperation::Exec;
+  }
+  if (stop_at_foreach && isa<AST::ForeachBlock>(n)) return false;
+  if (auto blk = dyn_cast<AST::Block>(n)) {
+    if (auto body = blk->GetBody()) {
+      for (auto& sub : body->AllSubs())
+        if (SubtreeContainsWGMMAExec(sub.get(), stop_at_foreach)) return true;
+    }
+  }
+  if (auto mn = dyn_cast<AST::MultiNodes>(n)) {
+    for (auto& sub : mn->AllSubs())
+      if (SubtreeContainsWGMMAExec(sub.get(), stop_at_foreach)) return true;
+  }
+  return false;
 }
 
 std::optional<CuteCodeGen::HoistedScaleAccumInfo>
 CuteCodeGen::AnalyzeHoistableScaledWGMMAAccum(
     const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs) const {
-  (void)n;
-  (void)loop_refs;
-  return std::nullopt;
+  HoistedScaleAccumInfo info;
+  if (!hoist_scale) return std::nullopt;
+  bool saw_scaled_exec = false;
+  if (!CollectHoistableScaledWGMMAAccum(n, loop_refs, info, saw_scaled_exec) ||
+      !saw_scaled_exec)
+    return std::nullopt;
+  return info;
 }
 
 bool CuteCodeGen::CollectHoistableScaledWGMMAAccum(
     const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs,
     HoistedScaleAccumInfo& info, bool& saw_scaled_exec) const {
-  (void)n;
-  (void)loop_refs;
-  (void)info;
-  (void)saw_scaled_exec;
+  if (!n) return true;
+  if (!hoist_scale) return true;
+
+  if (auto mma = dyn_cast<AST::MMA>(n)) {
+    auto op = mma->GetOperation();
+    if (!op) return true;
+
+    if (op->Tag() == AST::MMAOperation::Store) {
+      auto store_frag = AST::FragName(op->StoreFrom());
+      if (saw_scaled_exec && store_frag == info.frag_sym) return false;
+      return true;
+    }
+
+    if (op->Tag() != AST::MMAOperation::Exec || !op->HasScale()) return true;
+
+    auto c_sym = AST::FragName(op->ExecOperand(0));
+    auto scoped_c_sym = InScopeName(c_sym);
+    if (!FCtx(fname).FragHasMMAType(scoped_c_sym) ||
+        !FCtx(fname).FragIsWGMMA(scoped_c_sym))
+      return true;
+
+    auto scale_a_expr = ExprSTR(op->ScaleA(), false);
+    auto scale_b_expr = ExprSTR(op->ScaleB(), false);
+    for (const auto& loop_ref : loop_refs) {
+      if ((!loop_ref.empty() &&
+           scale_a_expr.find(loop_ref) != std::string::npos) ||
+          (!loop_ref.empty() &&
+           scale_b_expr.find(loop_ref) != std::string::npos))
+        return false;
+    }
+
+    auto& ssmi_c = cgi.GetSymbolMMA(scoped_c_sym);
+    auto acc_ty = NameBaseType(ssmi_c.ty);
+    auto scale_a_strides = GenStrides(op->ScaleA());
+    auto scale_a_sty = GetSpannedType(NodeType(*op->ScaleA()));
+    auto scale_a_shape = scale_a_sty->GetShape();
+    bool scale_a_transposed = VIIsInt(scale_a_shape.ValueAt(0)) &&
+                              *VIInt(scale_a_shape.ValueAt(0)) == 1;
+    std::string scale_a_ld = scale_a_transposed
+                                 ? ValueSTR(scale_a_strides.back())
+                                 : ValueSTR(scale_a_strides.front());
+    auto scale_a_name = c_sym + "_scale_a_ptr";
+    auto scale_a_valid_rows_name = c_sym + "_scale_a_valid_rows";
+    auto scale_b_name = c_sym + "_scale_b_val";
+    auto scale_frag_name = c_sym + "_scale_frag";
+    auto frag_expr = ExprSTR(op->ExecOperand(0), false);
+    auto scale_a_valid_rows_expr = GenScaleValidRowsExpr(op->ScaleA());
+    int scale_a_static_rows = GetScaleStaticRows(op->ScaleA());
+    std::string dim_n = STR(ssmi_c.shape.at(1));
+
+    auto acc_dtype = ssmi_c.ty;
+    ValueItem frag_len = ssmi_c.shape[1] / sbe::nu(2);
+    if (ssmi_c.ty == BaseType::F16) {
+      acc_dtype = BaseType::U32;
+      frag_len = frag_len / sbe::nu(2);
+    }
+    auto reg_num = VIInt(frag_len);
+    if (!reg_num)
+      choreo_unreachable("expect scaled WGMMA frag length to be numeric");
+
+    if (!saw_scaled_exec) {
+      info.frag_sym = c_sym;
+      info.frag_expr = frag_expr;
+      info.scale_frag_name = scale_frag_name;
+      info.scale_a_name = scale_a_name;
+      info.scale_a_valid_rows_name = scale_a_valid_rows_name;
+      info.scale_b_name = scale_b_name;
+      info.scale_a_expr = scale_a_expr;
+      info.scale_a_valid_rows_expr = scale_a_valid_rows_expr;
+      info.scale_b_expr = scale_b_expr;
+      info.scale_a_ld = scale_a_ld;
+      info.acc_ty = acc_ty;
+      info.scale_frag_ty = NameBaseType(acc_dtype);
+      info.dim_n = dim_n;
+      info.scale_a_static_rows = scale_a_static_rows;
+      info.reg_num_d = (size_t)*reg_num;
+      saw_scaled_exec = true;
+      return true;
+    }
+
+    return info.frag_sym == c_sym && info.frag_expr == frag_expr &&
+           info.scale_a_expr == scale_a_expr &&
+           info.scale_a_valid_rows_expr == scale_a_valid_rows_expr &&
+           info.scale_a_static_rows == scale_a_static_rows &&
+           info.scale_b_expr == scale_b_expr && info.scale_a_ld == scale_a_ld &&
+           info.acc_ty == acc_ty && info.dim_n == dim_n &&
+           info.reg_num_d == (size_t)*reg_num;
+  }
+
+  if (auto fb = dyn_cast<AST::ForeachBlock>(n)) {
+    return !fb->GetBody() ||
+           CollectHoistableScaledWGMMAAccum(fb->GetBody(), loop_refs, info,
+                                            saw_scaled_exec);
+  }
+
+  if (auto mn = dyn_cast<AST::MultiNodes>(n)) {
+    for (auto& item : mn->values)
+      if (!CollectHoistableScaledWGMMAAccum(item, loop_refs, info,
+                                            saw_scaled_exec))
+        return false;
+    return true;
+  }
+
+  if (auto if_else = dyn_cast<AST::IfElseBlock>(n)) {
+    if (if_else->GetThenBody() &&
+        !CollectHoistableScaledWGMMAAccum(if_else->GetThenBody(), loop_refs,
+                                          info, saw_scaled_exec))
+      return false;
+    if (if_else->GetElseBody() &&
+        !CollectHoistableScaledWGMMAAccum(if_else->GetElseBody(), loop_refs,
+                                          info, saw_scaled_exec))
+      return false;
+    return true;
+  }
+
+  if (auto block = dyn_cast<AST::Block>(n)) {
+    return !block->GetBody() ||
+           CollectHoistableScaledWGMMAAccum(block->GetBody(), loop_refs, info,
+                                            saw_scaled_exec);
+  }
+
+  if (auto with_block = dyn_cast<AST::WithBlock>(n)) {
+    return !with_block->GetBody() ||
+           CollectHoistableScaledWGMMAAccum(with_block->GetBody(), loop_refs,
+                                            info, saw_scaled_exec);
+  }
+
   return true;
 }
 
 const CuteCodeGen::HoistedScaleAccumInfo*
 CuteCodeGen::CurrentHoistedScaleAccum() const {
+  if (!hoist_scale) return nullptr;
+  for (auto it = hoisted_scale_accum_scopes.rbegin();
+       it != hoisted_scale_accum_scopes.rend(); ++it) {
+    if (it->has_value()) return &it->value();
+  }
   return nullptr;
 }
 
@@ -901,7 +1076,6 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
     ssm.EnterScope();
     ssm.MapDeviceSymbolIfNotExist("::__choreo_no_tiling__", "0");
     levels.push(ParallelLevel::NONE);
-    cooperative_stack_.push(false);
   } else if (isa<AST::ChoreoFunction>(&n)) {
     ResetChoreoFunctionStates();
     has_explicit_mma_wait = AST::ContainsMMAWait(n);
@@ -911,10 +1085,8 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
     fty = cast<FunctionType>(GetSymbolType(fname));
     ssm.EnterScope();
     levels.push(ParallelLevel::SEQ);
-    cooperative_stack_.push(false);
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.push(pb->GetLevel());
-    cooperative_stack_.push(pb->IsCooperative());
     // only on device-side
     bool is_deferred_block = !pb->IsOuter() &&
                              pb->GetLevel() == ParallelLevel::BLOCK &&
@@ -939,307 +1111,6 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
     IncrIndent();
   } else if (isa<AST::ForeachBlock>(&n)) {
     IndStream() << "// foreach: " << n.LOC() << "\n";
-  } else if (auto ab = dyn_cast<AST::ApplyBlock>(&n)) {
-    if (!IsHost()) {
-      if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent, true);
-
-      auto target_name = ab->SpanFragmentName();
-      auto scoped = InScopeNameForRef(target_name);
-
-      if (FCtx(fname).HasFragmentLayout(scoped)) {
-        auto& fl = FCtx(fname).GetFragmentLayout(scoped);
-        auto sym = UnScopedName(SSMName(scoped, false));
-        size_t regs = fl.regs_per_thread;
-
-        std::string tid_expr;
-        if (bdim_level == ParallelLevel::GROUPx4)
-          tid_expr = "(threadIdx.x % 128)";
-        else if (!current_thread_count_expr.empty())
-          tid_expr = "__choreo_vtid_x";
-        else
-          tid_expr = "threadIdx.x";
-
-        reg_loop_var_ = "__r";
-        in_register_direct_automap_ = true;
-        automap_frag_reg_expr_.clear();
-        automap_frag_reg_expr_[scoped] = sym + "[" + reg_loop_var_ + "]";
-
-        // Build overrides for all fragment accesses in the body.
-        auto BuildOverrides = [&](auto&& self,
-                                  const ptr<AST::Node>& node) -> void {
-          if (!node) return;
-          if (auto nvd = dyn_cast<AST::NamedVariableDecl>(node)) {
-            if (nvd->init_expr) self(self, nvd->init_expr);
-            return;
-          }
-          if (auto da = dyn_cast<AST::DataAccess>(node)) {
-            if (da->AccessElement()) {
-              auto sc = InScopeNameForRef(da->data->name);
-              if (FCtx(fname).HasFragmentLayout(sc)) {
-                auto s = UnScopedName(SSMName(sc, false));
-                auto& other_fl = FCtx(fname).GetFragmentLayout(sc);
-                if (other_fl.IsCompatible(fl)) {
-                  automap_frag_reg_expr_[sc] = s + "[" + reg_loop_var_ + "]";
-                } else if (other_fl.logical_cols <= 1 && fl.logical_cols > 1 &&
-                           fl.IsMMAAnchored()) {
-                  automap_frag_reg_expr_[sc] =
-                      s + "[" + fl.RowFromRegIndex(reg_loop_var_) + "]";
-                }
-              }
-            }
-            return;
-          }
-          if (auto mn = dyn_cast<AST::MultiNodes>(node)) {
-            for (auto& child : mn->values) self(self, child);
-            return;
-          }
-          if (auto asgn = dyn_cast<AST::Assignment>(node)) {
-            if (asgn->da) self(self, asgn->da);
-            if (asgn->value) self(self, asgn->value);
-            return;
-          }
-          if (auto ie = dyn_cast<AST::IfElseBlock>(node)) {
-            if (ie->pred) self(self, ie->pred);
-            if (ie->stmts) self(self, ie->stmts);
-            if (ie->else_stmts) self(self, ie->else_stmts);
-            return;
-          }
-          if (auto expr = dyn_cast<AST::Expr>(node)) {
-            if (expr->GetL()) self(self, expr->GetL());
-            if (expr->GetR()) self(self, expr->GetR());
-            if (expr->GetC()) self(self, expr->GetC());
-            return;
-          }
-          if (auto call = dyn_cast<AST::Call>(node)) {
-            for (auto& arg : call->GetArguments()) self(self, arg);
-            return;
-          }
-          if (auto cast_expr = dyn_cast<AST::CastExpr>(node)) {
-            if (cast_expr->GetR()) self(self, cast_expr->GetR());
-            return;
-          }
-        };
-        BuildOverrides(BuildOverrides, ab->body);
-
-        // Detect which iterators need __frag_iv_X variables.
-        // Iterators in fragment .at() are resolved by register-direct mapping
-        // and don't need explicit variables. But iterators in non-fragment
-        // .at() (global/shared memory) need __frag_iv_X for coordinate
-        // computation.
-        std::set<std::string> used_iters;
-        auto FindUsedIters = [&](auto&& self, const ptr<AST::Node>& node,
-                                 bool in_at_index) -> void {
-          if (!node) return;
-          if (auto expr = dyn_cast<AST::Expr>(node)) {
-            if (auto sym = expr->GetSymbol()) {
-              if (!in_at_index)
-                for (auto& p : ab->iterators)
-                  if (sym->name == p) used_iters.insert(p);
-            }
-            if (expr->GetL()) self(self, expr->GetL(), in_at_index);
-            if (expr->GetR()) self(self, expr->GetR(), in_at_index);
-            if (expr->GetC()) self(self, expr->GetC(), in_at_index);
-            return;
-          }
-          if (auto mn = dyn_cast<AST::MultiNodes>(node)) {
-            for (auto& child : mn->values) self(self, child, in_at_index);
-            return;
-          }
-          if (auto asgn = dyn_cast<AST::Assignment>(node)) {
-            if (asgn->da) self(self, asgn->da, in_at_index);
-            if (asgn->value) self(self, asgn->value, in_at_index);
-            return;
-          }
-          if (auto ie = dyn_cast<AST::IfElseBlock>(node)) {
-            if (ie->pred) self(self, ie->pred, false);
-            if (ie->stmts) self(self, ie->stmts, in_at_index);
-            if (ie->else_stmts) self(self, ie->else_stmts, in_at_index);
-            return;
-          }
-          if (auto nvd = dyn_cast<AST::NamedVariableDecl>(node)) {
-            if (nvd->init_expr) self(self, nvd->init_expr, in_at_index);
-            return;
-          }
-          if (auto da = dyn_cast<AST::DataAccess>(node)) {
-            if (da->AccessElement()) {
-              auto sc = InScopeNameForRef(da->data->name);
-              bool is_frag = FCtx(fname).HasFragmentLayout(sc);
-              for (auto& idx : da->GetIndices()) self(self, idx, is_frag);
-            }
-            return;
-          }
-          if (auto call = dyn_cast<AST::Call>(node)) {
-            for (auto& arg : call->GetArguments()) self(self, arg, in_at_index);
-            return;
-          }
-          if (auto cast_expr = dyn_cast<AST::CastExpr>(node)) {
-            if (cast_expr->GetR()) self(self, cast_expr->GetR(), in_at_index);
-            return;
-          }
-        };
-        FindUsedIters(FindUsedIters, ab->body, false);
-
-        // Set up iterator variable mappings (only for used iterators).
-        for (auto& p : ab->iterators) {
-          frag_apply_iv_map_[p] = "__frag_iv_" + p;
-        }
-
-        // Row-hoisting: classify each top-level body statement.
-        // A statement is "row-only" if it exclusively accesses 1D fragments.
-        apply_row_hoisted_stmts_.clear();
-        std::vector<AST::Node*> row_only_stmts;
-        auto IsRowOnly = [&](const ptr<AST::Node>& stmt) -> bool {
-          bool has_2d = false;
-          auto Check = [&](auto&& self, const ptr<AST::Node>& node) -> void {
-            if (!node) return;
-            if (auto nvd = dyn_cast<AST::NamedVariableDecl>(node)) {
-              if (nvd->init_expr) self(self, nvd->init_expr);
-              return;
-            }
-            if (auto da = dyn_cast<AST::DataAccess>(node)) {
-              if (da->AccessElement()) {
-                auto sc = InScopeNameForRef(da->data->name);
-                if (FCtx(fname).HasFragmentLayout(sc)) {
-                  auto& ffl = FCtx(fname).GetFragmentLayout(sc);
-                  if (ffl.IsCompatible(fl)) has_2d = true;
-                }
-              }
-              return;
-            }
-            if (auto mn = dyn_cast<AST::MultiNodes>(node)) {
-              for (auto& c : mn->values) self(self, c);
-              return;
-            }
-            if (auto a = dyn_cast<AST::Assignment>(node)) {
-              if (a->da) self(self, a->da);
-              if (a->value) self(self, a->value);
-              return;
-            }
-            if (auto ie = dyn_cast<AST::IfElseBlock>(node)) {
-              if (ie->pred) self(self, ie->pred);
-              if (ie->stmts) self(self, ie->stmts);
-              if (ie->else_stmts) self(self, ie->else_stmts);
-              return;
-            }
-            if (auto e = dyn_cast<AST::Expr>(node)) {
-              if (e->GetL()) self(self, e->GetL());
-              if (e->GetR()) self(self, e->GetR());
-              if (e->GetC()) self(self, e->GetC());
-              return;
-            }
-            if (auto c = dyn_cast<AST::Call>(node)) {
-              for (auto& arg : c->GetArguments()) self(self, arg);
-              return;
-            }
-            if (auto ce = dyn_cast<AST::CastExpr>(node)) {
-              if (ce->GetR()) self(self, ce->GetR());
-              return;
-            }
-          };
-          Check(Check, stmt);
-          return !has_2d;
-        };
-
-        if (auto body_mn = dyn_cast<AST::MultiNodes>(ab->body)) {
-          for (auto& child : body_mn->values) {
-            if (IsRowOnly(child)) {
-              row_only_stmts.push_back(child.get());
-              apply_row_hoisted_stmts_.insert(child.get());
-            }
-          }
-        }
-
-        // Emit the apply block opening.
-        IndStream() << "{ // apply " << target_name << "\n";
-        IncrIndent();
-
-        // Emit row-hoisted statements in a small row loop.
-        if (!row_only_stmts.empty()) {
-          size_t rows = fl.rows_per_thread;
-          std::string row_var = "__row";
-
-          // Save current register-direct state and set up row-only context.
-          auto saved_reg_loop = reg_loop_var_;
-          auto saved_overrides = automap_frag_reg_expr_;
-
-          reg_loop_var_ = row_var;
-          automap_frag_reg_expr_.clear();
-          // Map all 1D fragments to direct row-indexed access: sym[__row].
-          for (auto& [sc, expr] : saved_overrides) {
-            if (!FCtx(fname).HasFragmentLayout(sc)) continue;
-            auto& ffl = FCtx(fname).GetFragmentLayout(sc);
-            if (ffl.logical_cols <= 1) {
-              auto s = UnScopedName(SSMName(sc, false));
-              automap_frag_reg_expr_[sc] = s + "[" + row_var + "]";
-            }
-          }
-
-          IndStream() << "#pragma unroll\n";
-          IndStream() << "for (int " << row_var << " = 0; " << row_var << " < "
-                      << rows << "; ++" << row_var << ") {\n";
-          IncrIndent();
-
-          // Emit each row-only statement directly.
-          for (auto* stmt : row_only_stmts) {
-            if (auto asgn = dynamic_cast<AST::Assignment*>(stmt)) {
-              if (asgn->AssignToDataElement()) {
-                auto lhs = ExprSTR(asgn->da, false);
-                auto rhs = ExprSTR(asgn->value, false);
-                IndStream() << lhs << " = " << rhs << ";\n";
-              }
-            }
-          }
-
-          DecrIndent();
-          IndStream() << "}\n";
-
-          // Now mark them to be skipped during main loop traversal.
-          for (auto* stmt : row_only_stmts)
-            apply_row_hoisted_stmts_.insert(stmt);
-
-          // Restore register-direct state for main loop.
-          reg_loop_var_ = saved_reg_loop;
-          automap_frag_reg_expr_ = saved_overrides;
-        }
-
-        // Emit the main register loop (for full/2D statements).
-        bool has_full_stmts = false;
-        if (auto body_mn = dyn_cast<AST::MultiNodes>(ab->body)) {
-          for (auto& child : body_mn->values)
-            if (!apply_row_hoisted_stmts_.count(child.get())) {
-              has_full_stmts = true;
-              break;
-            }
-        } else {
-          has_full_stmts = true;
-        }
-
-        apply_has_main_loop_ = has_full_stmts;
-        if (has_full_stmts) {
-          for (size_t pi = 0; pi < ab->iterators.size(); ++pi)
-            if (used_iters.count(ab->iterators[pi]))
-              ds << d_indent << "int __frag_iv_" << ab->iterators[pi]
-                 << " = 0;\n";
-
-          IndStream() << "#pragma unroll\n";
-          IndStream() << "for (int " << reg_loop_var_ << " = 0; "
-                      << reg_loop_var_ << " < " << regs << "; ++"
-                      << reg_loop_var_ << ") {\n";
-          IncrIndent();
-
-          for (size_t pi = 0; pi < ab->iterators.size(); ++pi) {
-            if (!used_iters.count(ab->iterators[pi])) continue;
-            std::string iv_var = "__frag_iv_" + ab->iterators[pi];
-            if (ab->iterators.size() == 1 || pi == 0)
-              ds << d_indent << iv_var << " = "
-                 << fl.LogicalRowFromReg(reg_loop_var_, tid_expr) << ";\n";
-            else
-              ds << d_indent << iv_var << " = "
-                 << fl.LogicalColFromReg(reg_loop_var_, tid_expr) << ";\n";
-          }
-        }
-      }
-    }
   }
   if (isa<AST::NamedVariableDecl>(&n)) in_named_var_decl_ = true;
 
@@ -1279,8 +1150,7 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     ssm.LeaveScope();
 
     switch (CCtx().GetOutputKind()) {
-    case OutputKind::TargetSourceCode:
-    case OutputKind::DeviceSourceOnly: EmitSource(); break;
+    case OutputKind::TargetSourceCode: EmitSource(); break;
     case OutputKind::TargetModule: {
       if (!CompileWithScript("--compile-module")) {
         error_count++;
@@ -1290,13 +1160,6 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     }
     case OutputKind::TargetExecutable: {
       if (!CompileWithScript("--compile-link")) {
-        error_count++;
-        return false;
-      }
-      break;
-    }
-    case OutputKind::TargetLibrary: {
-      if (!CompileWithScript("--lib")) {
         error_count++;
         return false;
       }
@@ -1322,7 +1185,6 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     tma_future_count = 0;
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.pop();
-    cooperative_stack_.pop();
     // only on device-side
     bool is_deferred_block = !pb->IsOuter() &&
                              pb->GetLevel() == ParallelLevel::BLOCK &&
@@ -1374,20 +1236,46 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
         IndStream() << "} // automap\n";
       }
     } else {
-      const auto& ranges = fb->GetRangeNodes();
-      for (int j = ranges->Count() - 1; j >= 0; --j) {
-        auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
-        auto cname = rng->GetIVName();
+      bool closing_causal_split =
+          causal_split_active_ && AST::HasCausalSplitHint(*fb);
+      if (closing_causal_split) {
+        auto rng = cast<AST::LoopRange>(
+            fb->GetRangeNodes()->ValueAt(0));
+        auto cname = rng->IVName();
         auto ivs = within_map.at(InScopeName(cname));
-        for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
-          DecrIndent();
-          IndStream() << "} // " << UnScopedName(*iv_itr) << "\n";
-          IndStream() << ssm.DeviceName(*iv_itr) << " = 0;\n"; // must reset
+        auto iv_name = ivs.front();
+        DecrIndent();
+        IndStream() << "} // causal inner\n";
+        IndStream() << ssm.DeviceName(iv_name) << " = 0;\n";
+        DecrIndent();
+        IndStream() << "} // causal_phase\n";
+        causal_split_active_ = false;
+      } else {
+        const auto& ranges = fb->GetRangeNodes();
+        for (int j = ranges->Count() - 1; j >= 0; --j) {
+          auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
+          auto cname = rng->IVName();
+          auto ivs = within_map.at(InScopeName(cname));
+          for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
+            DecrIndent();
+            IndStream() << "} // " << UnScopedName(*iv_itr) << "\n";
+            IndStream() << ssm.DeviceName(*iv_itr) << " = 0;\n"; // must reset
+          }
         }
       }
     }
-    if (!IsHost() && has_pending_wgmma_finalize && !IsWarpSpecActive())
+    bool was_wgmma_batch = !IsHost() && wgmma_foreach_depth > 0 &&
+                           fb->GetBody() &&
+                           SubtreeContainsWGMMAExec(fb->GetBody().get(), true);
+    if (was_wgmma_batch) {
+      ds << d_indent << "warpgroup_commit_batch();\n";
+      ds << d_indent << "warpgroup_wait<0>();\n";
+      wgmma_foreach_depth--;
+      has_pending_wgmma_finalize = false;
+      warpspec_wgmma_arrived = false;
+    } else if (!IsHost() && has_pending_wgmma_finalize && !IsWarpSpecActive()) {
       EmitWGMMAFinalize(ds, d_indent);
+    }
     if (hoisted_scale_accum_info.has_value()) {
       const auto& info = hoisted_scale_accum_info.value();
       EmitScaleAccumCall(info.acc_ty, info.dim_n, info.frag_expr,
@@ -1404,7 +1292,6 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     }
     if (!explicit_scale_accum_scopes.empty())
       explicit_scale_accum_scopes.pop_back();
-    if (!foreach_iv_stack_.empty()) foreach_iv_stack_.pop_back();
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     DecrDeviceIndent();
     if (!it->stmts->None()) {
@@ -1412,6 +1299,7 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
       if (!it->async && it->outer) ds << "\n" << d_indent << "__syncthreads();";
       ds << " // end inthreads\n";
     }
+    pending_sala_consumer_barrier_ = false;
     current_inthreads = nullptr;
     PopEmittedNames();
   } else if (auto ie = dyn_cast<AST::IfElseBlock>(&n)) {
@@ -1702,34 +1590,12 @@ const ValueList CuteCodeGen::GenStrides(const ptr<AST::ChunkAt>& ca,
 
 void CuteCodeGen::FlushBarrierInits() {
   if (pending_barrier_inits_.empty()) return;
-  if (!pending_tma_prefetch_names_.empty()) {
-    this->ds << d_indent << "if (threadIdx.x == 0) {\n";
-    for (auto& name : pending_tma_prefetch_names_) {
-      this->ds << d_indent << "  cute::prefetch_tma_descriptor(&" << name
-               << ");\n";
-    }
-    this->ds << d_indent << "}\n";
-    pending_tma_prefetch_names_.clear();
-  }
-  this->ds << d_indent << "if (threadIdx.x == 0) {\n";
+  this->ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
   for (auto& init_line : pending_barrier_inits_) this->ds << init_line;
+  this->ds << d_indent << "  cde::fence_proxy_async_shared_cta();\n";
   this->ds << d_indent << "}\n";
-  this->ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
   this->ds << d_indent << "__syncthreads();\n";
   pending_barrier_inits_.clear();
-}
-
-std::string CuteCodeGen::InlinePhaseExpr(int stages, bool is_fill) const {
-  if (foreach_iv_stack_.empty()) return is_fill ? "0" : "1";
-  const auto& iv = foreach_iv_stack_.back();
-  std::string base;
-  if (stages == 2)
-    base = "((" + iv + " & 3) >> 1)";
-  else if (stages == 1)
-    base = "(" + iv + " & 1)";
-  else
-    base = "((" + iv + " / " + std::to_string(stages) + ") & 1)";
-  return is_fill ? base : ("(" + base + " ^ 1)");
 }
 
 void CuteCodeGen::EmitFixedHostHead() {
@@ -1743,9 +1609,7 @@ void CuteCodeGen::EmitFixedHostHead() {
 #include <string>
 #include <vector>
 
-#include "cutlass/arch/barrier.h"
 #include "cutlass/cutlass.h"
-#include <cutlass/arch/reg_reconfig.h>
 )";
 
   oss << R"(
@@ -1773,8 +1637,6 @@ static __device__ __attribute__((noinline)) void __choreo_cuda_debug_point__() {
   if (cgi.HasTMA()) oss << "namespace cde = cuda::device::experimental;\n";
   oss << "#include <cooperative_groups.h>";
   oss << "\nusing namespace choreo;\n";
-  if (cgi.HasTMA())
-    oss << "using Barrier = cutlass::arch::ClusterTransactionBarrier;\n";
   code_segments.push_back(oss.str()); // reset the host code
 }
 void CuteCodeGen::EmitFixedDeviceHead() {}
@@ -1816,6 +1678,10 @@ CuteCodeGen::resolvePrepackedU32Meta(const std::string& ref_sym,
           }
         }
       }
+    }
+    if (!info.use_packed_u32) {
+      info.device_name = ref_sym;
+      info.use_packed_u32 = true;
     }
   }
 
@@ -2149,7 +2015,6 @@ bool CuteCodeGen::Visit(AST::ChoreoFunction& n) {
 
   has_pending_wgmma_finalize = false;
   warpspec_wgmma_arrived = false;
-  pending_tma_prefetch_names_.clear();
 
   DecrHostIndent();
   hs << "}\n\n";
@@ -2205,26 +2070,6 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
     } else {
       live_chunk_aliases.erase(sym);
       live_chunk_aliases.erase(sname);
-    }
-
-    // Propagate swizzle for ElemOf-based declarations (e.g., `ma = arr[idx]`).
-    auto decl_sty = GetSpannedType(NodeType(n));
-    if (decl_sty && decl_sty->GetStorage() == Storage::SHARED && n.init_expr) {
-      auto rhs_expr = dyn_cast<AST::Expr>(n.init_expr.get());
-      if (rhs_expr && rhs_expr->GetOp() == Op::ElemOf) {
-        auto base_sym_node = AST::GetArrayBaseSymbol(*rhs_expr);
-        if (base_sym_node) {
-          auto base_name = base_sym_node->name;
-          auto base_scoped = InScopeName(base_name);
-          auto sit = shared_buf_swiz_.find(base_scoped);
-          if (sit == shared_buf_swiz_.end())
-            sit = shared_buf_swiz_.find(base_name);
-          if (sit != shared_buf_swiz_.end()) {
-            shared_buf_swiz_[sym] = sit->second;
-            shared_buf_swiz_[sname] = sit->second;
-          }
-        }
-      }
     }
   }
 
@@ -2672,37 +2517,79 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       assert(!IsHost());
       bool is_cluster_event = cluster_trigger_events_.count(n.name_str) > 0;
 
-      // All shared events use Cutlass ClusterTransactionBarrier
-      auto& ft = cgi.GetFunctionTrait(fname);
-      bool is_fill_event = ft.IsTMAFillEvent(n.name_str);
+      if (is_cluster_event) {
+        ds << d_indent << "__shared__ __align__(8) uint64_t " << eaname;
+        ety->PrintAsCArray(ds);
+        ds << "; // shared event mbarrier (cluster-scope)\n";
+        ds << d_indent << "int " << eaname << "__phase";
+        ety->PrintAsCArray(ds);
+        ds << ";\n";
+      } else {
+        ds << d_indent << "__shared__ cuda::barrier<cuda::thread_scope_block> "
+           << eaname;
+        ety->PrintAsCArray(ds);
+        ds << "; // shared event barrier\n";
+      }
 
-      ds << d_indent << "__shared__ __align__(16) uint64_t " << eaname
-         << "__mem";
-      ety->PrintAsCArray(ds);
-      ds << "; // raw mbarrier storage\n";
-      ds << d_indent << "Barrier* " << eaname
-         << " = reinterpret_cast<Barrier*>(" << eaname << "__mem);\n";
-
-      if (!is_fill_event) empty_event_names_.insert(n.name_str);
-
-      auto compute_init_count = [&]() -> std::string {
+      if (IsWarpSpecActive()) {
         auto event_tc = ety->event->GetThreadCount();
-        if (event_tc > 0) return std::to_string(event_tc);
-        if (is_fill_event) return "1";
-        if (is_cluster_event)
-          return "(blockDim.x / 128 - 1) * choreo::tma_cluster_dim()";
-        auto tp = ft.GetEventTriggerParticipation(n.name_str);
-        if (tp > 0) return std::to_string(tp);
-        return IsWarpSpecActive() ? "(blockDim.x - 128)" : "blockDim.x";
-      };
-      std::string init_count = compute_init_count();
+        auto& ft = cgi.GetFunctionTrait(fname);
+        auto auto_init = [&](int64_t explicit_tc,
+                             const std::string& ev) -> std::string {
+          if (explicit_tc > 0) return std::to_string(explicit_tc);
+          auto ep = ft.GetEventParticipation(ev);
+          if (ep > 0) return std::to_string(ep);
+          return "(blockDim.x - 128) + 1";
+        };
+        std::string event_init_count = auto_init(event_tc, n.name_str);
+
+        {
+          std::ostringstream oss;
+          if (is_cluster_event) {
+            GenerateSubscriptions(
+                oss, "  " + d_indent + "choreo::tma_mbarrier_init(&" + eaname,
+                ", (blockDim.x / 128 - 1) * choreo::tma_cluster_dim());\n",
+                ety->Dimensions());
+          } else {
+            GenerateSubscriptions(oss, "  " + d_indent + "init(&" + eaname,
+                                  ", " + event_init_count + ");\n",
+                                  ety->Dimensions());
+          }
+          pending_barrier_inits_.push_back(oss.str());
+        }
+        if (is_cluster_event) {
+          GenerateSubscriptions(ds, d_indent + eaname + "__phase", " = 0;\n",
+                                ety->Dimensions());
+        }
+        ssm.MapDeviceSymbol(InScopeName(n.name_str), eaname);
+        break;
+      }
 
       {
+        auto event_tc = ety->event->GetThreadCount();
+        std::string init_count;
+        if (event_tc > 0) {
+          init_count = std::to_string(event_tc);
+        } else {
+          auto ep =
+              cgi.GetFunctionTrait(fname).GetEventParticipation(n.name_str);
+          init_count = ep > 0 ? std::to_string(ep) : "(blockDim.x - 128) + 1";
+        }
         std::ostringstream oss;
-        GenerateSubscriptions(oss, "  " + d_indent + eaname,
-                              ".init(" + init_count + ");\n",
-                              ety->Dimensions());
+        if (is_cluster_event) {
+          GenerateSubscriptions(
+              oss, "  " + d_indent + "choreo::tma_mbarrier_init(&" + eaname,
+              ", (blockDim.x / 128 - 1) * choreo::tma_cluster_dim());\n",
+              ety->Dimensions());
+        } else {
+          GenerateSubscriptions(oss, "  " + d_indent + "init(&" + eaname,
+                                ", " + init_count + ");\n", ety->Dimensions());
+        }
         pending_barrier_inits_.push_back(oss.str());
+      }
+      if (is_cluster_event) {
+        GenerateSubscriptions(ds, d_indent + eaname + "__phase", " = 0;\n",
+                              ety->Dimensions());
       }
       ssm.MapDeviceSymbol(InScopeName(n.name_str), eaname);
     } break;
@@ -2718,7 +2605,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       ds << d_indent << EmitSync(ety->GetStorage()) << ";\n";
       ssm.MapDeviceSymbol(InScopeName(n.name_str), eaname);
     } break;
-    default: choreo_unreachable("unsupported storage for event array"); break;
+    default: break;
     }
   } else if (auto ety = dyn_cast<EventType>(nty)) {
     auto ename = UniqueDeviceName(n.name_str);
@@ -2738,30 +2625,28 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
     } break;
     case Storage::SHARED: {
       assert(!IsHost());
-      auto& ft = cgi.GetFunctionTrait(fname);
-      bool is_fill = ft.IsTMAFillEvent(n.name_str);
-
-      ds << d_indent << "__shared__ __align__(16) uint64_t " << ename
-         << "__mem; // raw mbarrier storage\n";
-      ds << d_indent << "Barrier& " << ename
-         << " = *reinterpret_cast<Barrier*>(&" << ename << "__mem);\n";
-
-      if (!is_fill) empty_event_names_.insert(n.name_str);
-
+      ds << d_indent << "__shared__ cuda::barrier<cuda::thread_scope_block> "
+         << ename << "; // shared event barrier\n";
       {
         auto etc = ety->GetThreadCount();
         std::string ic;
-        if (etc > 0) {
+        if (etc > 0)
           ic = std::to_string(etc);
-        } else if (is_fill) {
-          ic = "1";
-        } else {
-          auto tp = ft.GetEventTriggerParticipation(n.name_str);
-          ic = tp > 0 ? std::to_string(tp) : "(blockDim.x - 128)";
+        else if (event_arrive_tx && !IsWarpSpecActive())
+          ic = "blockDim.x";
+        else {
+          auto ep =
+              cgi.GetFunctionTrait(fname).GetEventParticipation(n.name_str);
+          ic = ep > 0 ? std::to_string(ep) : "(blockDim.x - 128) + 1";
         }
         std::ostringstream oss;
-        oss << d_indent << "  " << ename << ".init(" << ic << ");\n";
+        oss << d_indent << "  init(&" << ename << ", " << ic << ");\n";
         pending_barrier_inits_.push_back(oss.str());
+      }
+      if (event_arrive_tx) {
+        ds << d_indent
+           << "cuda::barrier<cuda::thread_scope_block>::arrival_token " << ename
+           << "__tok;\n";
       }
       ssm.MapDeviceSymbol(InScopeName(n.name_str), ename);
     } break;
@@ -2774,7 +2659,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       ds << d_indent << EmitSync(ety->GetStorage()) << ";\n";
       ssm.MapDeviceSymbol(InScopeName(n.name_str), ename);
     } break;
-    default: choreo_unreachable("unsupported storage for event"); break;
+    default: break;
     }
   }
 
@@ -2812,13 +2697,9 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         // can match it as a substring inside larger expressions.
         if (FCtx(fname).HasSymbolValues(scoped)) {
           auto& svs = FCtx(fname).GetSymbolValues(scoped);
-          if (svs.HasVal()) {
-            auto stripped = StripOuterParens(ValueSTR(svs.GetVal()));
-            bool is_simple_literal =
-                !stripped.empty() &&
-                stripped.find_first_not_of("0123456789-") == std::string::npos;
-            if (!is_simple_literal) known_val_str_to_var_[stripped] = sym;
-          }
+          if (svs.HasVal())
+            known_val_str_to_var_[StripOuterParens(ValueSTR(svs.GetVal()))] =
+                sym;
         }
       }
     }
@@ -2847,12 +2728,8 @@ bool CuteCodeGen::Visit(AST::NamedTypeDecl& n) {
                     << ValueSTR(mty->GetShape().ValueAt(0)) << ";\n";
         if (!IsHost()) {
           ssm.MapDeviceSymbol(sname, sym);
-          auto stripped =
-              StripOuterParens(ValueSTR(mty->GetShape().ValueAt(0)));
-          bool is_simple_literal =
-              !stripped.empty() &&
-              stripped.find_first_not_of("0123456789-") == std::string::npos;
-          if (!is_simple_literal) known_val_str_to_var_[stripped] = sym;
+          known_val_str_to_var_[StripOuterParens(
+              ValueSTR(mty->GetShape().ValueAt(0)))] = sym;
         }
       }
       return true;
@@ -2873,7 +2750,6 @@ bool CuteCodeGen::Visit(AST::NamedTypeDecl& n) {
 bool CuteCodeGen::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
   if (vec4_automap_skip_) return true;
-  if (apply_row_hoisted_stmts_.count(&n)) return true;
 
   auto extract_chunk_alias =
       [](const ptr<AST::Node>& node) -> ptr<AST::ChunkAt> {
@@ -2944,28 +2820,6 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
     } else {
       live_chunk_aliases.erase(name);
       live_chunk_aliases.erase(scoped_name);
-    }
-
-    // Propagate swizzle for ElemOf-based aliases (e.g., `ma =
-    // lhs_load_s[stage]`). When the RHS is an array element access into a
-    // swizzled shared buffer, record the swizzle for the alias name so direct
-    // WGMMA can find it.
-    if (sty && sty->GetStorage() == Storage::SHARED) {
-      auto rhs_expr = dyn_cast<AST::Expr>(n.value.get());
-      if (rhs_expr && rhs_expr->GetOp() == Op::ElemOf) {
-        auto base_sym = AST::GetArrayBaseSymbol(*rhs_expr);
-        if (base_sym) {
-          auto base_name = base_sym->name;
-          auto base_scoped = InScopeName(base_name);
-          auto sit = shared_buf_swiz_.find(base_scoped);
-          if (sit == shared_buf_swiz_.end())
-            sit = shared_buf_swiz_.find(base_name);
-          if (sit != shared_buf_swiz_.end()) {
-            shared_buf_swiz_[name] = sit->second;
-            shared_buf_swiz_[scoped_name] = sit->second;
-          }
-        }
-      }
     }
   }
 
@@ -3080,7 +2934,9 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
       }
     } else
       ds << d_indent;
-    ds << ExprSTR(n.value, false) << ";\n";
+    std::string anon_val = ExprSTR(n.value, false);
+    ds << anon_val << ";\n";
+    if (anon_bounded) anon_decl_exprs_[n.GetName()] = anon_val;
     return true;
   }
 
@@ -3097,15 +2953,10 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
         if (anon_scalar) ds << "[[maybe_unused]] ";
         ds << "auto " << n.GetName() << " = ";
       }
-      std::string val_str = ExprSTR(n.value, false);
-      ds << val_str << ";\n";
-      if (n.IsDecl() && !IsHost()) {
-        auto stripped = StripOuterParens(val_str);
-        bool is_simple_literal =
-            !stripped.empty() &&
-            stripped.find_first_not_of("0123456789-") == std::string::npos;
-        if (!is_simple_literal) known_val_str_to_var_[stripped] = n.GetName();
-      }
+      std::string anon_val = ExprSTR(n.value, false);
+      ds << anon_val << ";\n";
+      if (anon_scalar && n.IsDecl())
+        anon_decl_exprs_[n.GetName()] = anon_val;
     }
     return true;
   }
@@ -3234,7 +3085,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   // only do the whole codegen when accessing the outer parallel-by
   if (emit_launch) {
     tma_future_count = 0;
-    set_cuda_func_attribute_max_dynamic_shared_memory_size = false; // reset
+
     auto required_shared_align = [&]() -> size_t {
       size_t alignment = CCtx().GetMemoryAlignmentByte(Storage::SHARED);
       auto collect = [&](auto&& self, const ptr<AST::Node>& node) -> void {
@@ -3264,7 +3115,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       return alignment;
     }();
 
-    shared_spm_size = sbe::nu(0);
+    ValueItem cur_spm_size = sbe::nu(0);
     ValueItem ring_start = sbe::nu(0);
     ValueItem ring_size = sbe::nu(0);
 
@@ -3296,7 +3147,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     if (cgi.HasAsyncDMA(fname)) {
       ring_size = group_count * sbe::nu(8);
       // add the size of the future ring (see choreo.h)
-      shared_spm_size += ring_size;
+      cur_spm_size += ring_size;
     }
 
     /*
@@ -3311,7 +3162,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     auto EmitCudaFuncAttributeMaxDynamicSharedMemorySize = [&]() -> void {
       hs << h_indent << "cudaFuncSetAttribute(" << device_fn
          << ", cudaFuncAttributeMaxDynamicSharedMemorySize, "
-         << ValueSTR(shared_spm_size) << " + (" << required_shared_align
+         << ValueSTR(cur_spm_size) << " + (" << required_shared_align
          << " - 1));\n";
       set_cuda_func_attribute_max_dynamic_shared_memory_size = true;
     };
@@ -3323,7 +3174,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       assert(mri);
       auto code_spm_end =
           sbe::sym(mri->infos[Storage::SHARED].spm_size)->Normalize();
-      shared_spm_size += code_spm_end;
+      cur_spm_size += code_spm_end;
       ring_start = code_spm_end;
 
       EmitCudaFuncAttributeMaxDynamicSharedMemorySize();
@@ -3340,95 +3191,70 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
         mri = FCtx(fname).GetStaticMemReuseInfo(parent);
       }
       if (mri) {
-        // 48KB is the largest capacity that static shared memory supports.
+        // 48KB is the default static shared memory limit. Use dynamic
+        // allocation when usage reaches or exceeds it.
         if (mri->infos[Storage::SHARED].spm_size >= 48 * 1024) {
           auto code_spm_end = sbe::nu(mri->infos[Storage::SHARED].spm_size);
-          shared_spm_size += code_spm_end;
+          cur_spm_size += code_spm_end;
           ring_start = code_spm_end;
           EmitCudaFuncAttributeMaxDynamicSharedMemorySize();
           Note(
               n.LOC(),
               "In the current kernel `" + device_fn +
                   "`, cudaFuncAttributeMaxDynamicSharedMemorySize is set to `" +
-                  ValueSTR(shared_spm_size) + "` bytes, " +
+                  ValueSTR(cur_spm_size) + "` bytes, " +
                   "cause shared memory usage" +
                   " has exceeded the default limit 48KB.");
         }
       }
     }
 
-    // Collect kernel argument references for both cooperative and
-    // non-cooperative launch paths.
-    std::vector<std::string> kernel_arg_refs;
-    {
-      for (auto& item : GetDeviceFuncIns(updating_cgi)) {
-        auto sname = item.name;
-        if (isa<SpannedType>(item.type)) sname += "__device";
-        if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(sname))) continue;
-        if (ssm.HasHostName(sname))
-          kernel_arg_refs.push_back(ssm.HostName(sname));
-        else
-          kernel_arg_refs.push_back(UnScopedName(ssm.DeviceName(sname)));
-      }
-      for (auto item : symbolic_dimensions)
-        kernel_arg_refs.push_back(UnScopedName(item.first));
-      if (const auto& mri = FCtx(fname).GetDynMemReuseInfo(SSTab().ScopeName()))
-        for (const auto& [sto, ie] : mri->infos)
-          for (size_t idx = 0; idx < ie.offset_args.size(); ++idx)
-            kernel_arg_refs.push_back(ie.offsets_name + "[" +
-                                      std::to_string(idx) + "]");
-      // TMA descriptors
-      for (auto desc : cgi.GetTMADesc(&n))
-        kernel_arg_refs.push_back(desc.GetName() + "_tensor_map");
-      if (!ring_start->IsNumeric())
-        kernel_arg_refs.push_back(ValueSTR(ring_start));
+    hs << h_indent << device_fn << "<<<__" << fname << "_gdims" << parallel_idx
+       << ", __" << fname << "_bdims" << parallel_idx;
+
+    bool explicit_smem = false;
+    if (!sbe::ceq(cur_spm_size, sbe::nu(0))) {
+      // TODO: conservative padding. To be optimized.
+      hs << ", " << ValueSTR(cur_spm_size) << " + (" << required_shared_align
+         << " - 1)";
+      explicit_smem = true;
     }
-
-    std::string smem_str;
-    if (!sbe::ceq(shared_spm_size, sbe::nu(0)))
-      smem_str = ValueSTR(shared_spm_size) + " + (" +
-                 std::to_string(required_shared_align) + " - 1)";
-    else
-      smem_str = "0";
-
     std::string effective_stream;
     if (n.HasStream()) effective_stream = STR(n.StreamExpr());
-    std::string stream_str = effective_stream != "" ? effective_stream : "0";
 
-    if (n.IsCooperative()) {
-      // Use cudaLaunchCooperativeKernel (works across all CUDA versions).
-      hs << h_indent << "void* __" << fname << "_coop_args[] = {";
-      for (size_t j = 0; j < kernel_arg_refs.size(); ++j) {
-        hs << (j == 0 ? "" : ", ");
-        hs << "(void*)&" << kernel_arg_refs[j];
-      }
-      hs << "};\n";
-      hs << h_indent << "choreo::abend_true(cudaLaunchCooperativeKernel("
-         << "(const void*)" << device_fn << ", __" << fname << "_gdims"
-         << parallel_idx << ", __" << fname << "_bdims" << parallel_idx
-         << ", __" << fname << "_coop_args, " << smem_str << ", " << stream_str
-         << "));\n";
-    } else {
-      hs << h_indent << device_fn << "<<<__" << fname << "_gdims"
-         << parallel_idx << ", __" << fname << "_bdims" << parallel_idx;
-
-      bool explicit_smem = false;
-      if (!sbe::ceq(shared_spm_size, sbe::nu(0))) {
-        hs << ", " << smem_str;
-        explicit_smem = true;
-      }
-      if (effective_stream != "") {
-        if (!explicit_smem) hs << ", 0";
-        hs << ", " << effective_stream;
-      }
-      hs << ">>>(";
-
-      for (size_t j = 0; j < kernel_arg_refs.size(); ++j) {
-        hs << (j == 0 ? "" : ", ");
-        hs << kernel_arg_refs[j];
-      }
-      hs << ");\n";
+    if (effective_stream != "") {
+      if (!explicit_smem) hs << ", 0";
+      hs << ", " << effective_stream;
     }
+    hs << ">>>(";
+
+    size_t i = 0;
+    for (auto& item : GetDeviceFuncIns(updating_cgi)) {
+      auto sname = item.name;
+      if (isa<SpannedType>(item.type)) sname += "__device";
+      if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(sname))) continue;
+      hs << ((i++ == 0) ? "" : ", ");
+      if (ssm.HasHostName(sname))
+        hs << ssm.HostName(sname);
+      else
+        hs << UnScopedName(ssm.DeviceName(sname));
+    }
+    for (auto item : symbolic_dimensions) {
+      hs << ((i++ > 0) ? ", " : "");
+      hs << UnScopedName(item.first);
+    }
+    if (const auto& mri = FCtx(fname).GetDynMemReuseInfo(SSTab().ScopeName()))
+      for (const auto& [sto, ie] : mri->infos)
+        for (size_t idx = 0; idx < ie.offset_args.size(); ++idx)
+          hs << ((i++ > 0) ? ", " : "") << ie.offsets_name << "[" << idx << "]";
+
+    // tma configurations
+    for (auto desc : cgi.GetTMADesc(&n))
+      hs << ", " << desc.GetName() + "_tensor_map";
+
+    if (!ring_start->IsNumeric()) hs << ", " << ValueSTR(ring_start);
+
+    hs << ");\n";
 
     if (!n.IsAsync()) {
       if (effective_stream != "")
@@ -3453,13 +3279,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     EmitDeviceFuncDecl(ds, &n, ring_start);
     ds << " {\n";
     IncrDeviceIndent();
-    if (n.HasMaxnreg() && CCtx().ArchNum() >= 90) {
-      auto reg_limit = VIInt(n.GetMaxnregArg()->Opts().GetVal());
-      if (reg_limit && reg_limit.value() > 0)
-        ds << d_indent << "asm volatile(\"setmaxnreg.dec.sync.aligned.u32 "
-           << reg_limit.value() << ";\");\n";
-    }
-    if (!(sbe::ceq(shared_spm_size, sbe::nu(0)) &&
+    if (!(sbe::ceq(cur_spm_size, sbe::nu(0)) &&
           sbe::ceq(ring_start, sbe::nu(0)))) {
       ds << d_indent << "extern __shared__ char " << device_fn
          << "__runtime_shared_buffer__raw[];\n";
@@ -3471,7 +3291,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
             "reinterpret_cast<char*>(aligned_up_ptr<"
          << required_shared_align << " * 8>(" << device_fn
          << "__runtime_shared_buffer__raw));\n";
-      if (!sbe::ceq(shared_spm_size, sbe::nu(0)) && cgi.HasAsyncDMA(fname)) {
+      if (!sbe::ceq(cur_spm_size, sbe::nu(0)) && cgi.HasAsyncDMA(fname)) {
         ds << d_indent << "auto " << device_fn
            << "__ring__ = reinterpret_cast<choreo::future_ring<6>*>("
            << device_fn << "__runtime_shared_buffer__ + " + ValueSTR(ring_start)
@@ -3522,8 +3342,6 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   }
   if (!tma_descs.empty()) {
     assert(n.GetLevel() == ParallelLevel::BLOCK);
-    for (TMADesc& desc : tma_descs)
-      pending_tma_prefetch_names_.push_back(desc.GetName() + "_tensor_map");
     int emitted_tma_init_idx = 0;
     for (TMADesc& desc : tma_descs) {
       auto cp_atom_name = GetCopyAtomName(true, emitted_tma_init_idx);
@@ -3531,29 +3349,68 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       auto f_sty = GetSpannedType(desc.GetFrom()->GetType());
       auto t_sty = GetSpannedType(desc.GetTo()->GetType());
       auto io_sty = (t_sty->GetStorage() == Storage::SHARED) ? t_sty : f_sty;
+      bool rank2_tma = io_sty->GetShape().Rank() == 2;
+      bool has_cluster = !cgi.GetFunctionLaunches(fname).empty() &&
+                         cgi.GetFunctionLaunches(fname)[0].HasCluster();
+      bool use_ptx_barrier_for_desc =
+          (tma_cluster_aware || ptx_barrier || has_cluster) && rank2_tma;
       auto in_thr_block = desc.GetInThreadsBlock();
       auto inner_pb_level = desc.GetPBLevel();
 
       bool skip_load_tma_init_block = IsWarpSpecActive() && desc.IsLoad() &&
                                       in_thr_block &&
                                       inner_pb_level == ParallelLevel::GROUPx4;
-      // In warpspec mode, TMA uses event barriers (G2S) or direct
-      // commit/wait groups (S2G) -- no TMAAtom needed at all.
-      bool skip_warpspec_tma = IsWarpSpecActive() && !desc.IsLoad();
 
-      if (skip_load_tma_init_block || skip_warpspec_tma) { continue; }
+      if (skip_load_tma_init_block) { continue; }
+
+      if (event_arrive_tx && desc.IsEventManaged()) { continue; }
+
+      if (event_arrive_tx && desc.IsStore()) { continue; }
 
       emitted_tma_init_idx++;
 
-      ds << d_indent << "__shared__ __align__(8) uint64_t " << tma_barrier_name
-         << ";\n";
+      // TMA stores (S2G) still need a barrier/TMAAtom for proper
+      // synchronization with the consuming warpgroups.
+
+      if (use_ptx_barrier_for_desc) {
+        ds << d_indent << "__shared__ __align__(8) uint64_t "
+           << tma_barrier_name << ";\n";
+      } else {
+        ds << d_indent << "__shared__ cuda::barrier<cuda::thread_scope_block> "
+           << tma_barrier_name << ";\n";
+      }
       ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
-      ds << d_indent << "  choreo::tma_mbarrier_init(&" << tma_barrier_name
-         << ", 1);\n";
+      // if in_thr_block is specified, the number of threads is compitable with
+      // inner parallel-by the barrier. otherwise, all threads in the CTA will
+      // wait.
+
+      std::string threads_waited;
+      if (!in_thr_block) {
+        threads_waited = "blockDim.x";
+      } else if (inner_pb_level == ParallelLevel::GROUP) {
+        threads_waited = IsWarpSpecActive() ? "1" : "32";
+      } else if (inner_pb_level == ParallelLevel::GROUPx4) {
+        threads_waited = IsWarpSpecActive() ? "1" : "128";
+      }
+
+      if (use_ptx_barrier_for_desc) {
+        ds << d_indent << "  choreo::tma_mbarrier_init(&" << tma_barrier_name
+           << ", 1);\n";
+      } else {
+        ds << d_indent << "  init(&" << tma_barrier_name << ", "
+           << threads_waited << ");\n";
+        ds << d_indent << "  cde::fence_proxy_async_shared_cta();\n";
+      }
       ds << d_indent << "}\n";
       ds << d_indent << "__syncthreads();\n";
-      ds << d_indent << "TMAAtom " << cp_atom_name << "{&" << tma_barrier_name
-         << "};\n\n";
+      if (use_ptx_barrier_for_desc) {
+        ds << d_indent << "TMAAtom " << cp_atom_name << "{};\n";
+        ds << d_indent << cp_atom_name << ".EnablePTXMBarrier(&"
+           << tma_barrier_name << ");\n\n";
+      } else {
+        ds << d_indent << "TMAAtom " << cp_atom_name << "{&" << cp_atom_name
+           << "_barrier};\n\n";
+      }
     }
   }
   EmitDeviceVirtualIndices(&n);
@@ -3599,7 +3456,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         if (n.IsTMA()) {
           ds << d_indent << n.future << ".is_tma = true;\n";
           ds << d_indent << n.future << ".set_atom(&" << cp_atom_name << ");\n";
-          tma_futures_.insert(InScopeName(n.future));
         }
       }
       ssm.RemapDeviceSymbol(buf_name, n.future + ".data()");
@@ -3643,8 +3499,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (!is_tma && !future_only) return "";
     // Event-only TMAs use event barriers and don't need futures
     if (is_tma && !future_only && event_only) return "";
-    // Warpspec TMA never needs futures (events or direct commit/wait)
-    if (is_tma && !future_only && IsWarpSpecActive()) return "";
+    if (is_tma && !future_only && event_arrive_tx && dma_plan &&
+        dma_plan->direction == DMADirection::S2G)
+      return "";
     auto future_name = n.future;
 
     auto cp_atom_name =
@@ -3675,7 +3532,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (is_tma) {
       ds << d_indent << future_name << ".is_tma = true;\n";
       ds << d_indent << future_name << ".set_atom(&" << cp_atom_name << ");\n";
-      if (!n.future.empty()) tma_futures_.insert(InScopeName(n.future));
     } else if (is_async) {
       auto cp_atom_type = GetCopyAtomType(plan->atom, t_sty->ElementType());
       ds << d_indent << cp_atom_type << " " << cp_atom_name << "{};\n";
@@ -3821,11 +3677,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       // Skip outer tensor decls when batch_dims or dyn_box is set -- those
       // paths create their own sub-tensors with per-iteration offsets.
       const auto f_mds = GenTensorDecl(
-          RemoveSuffix(f_buf_name, ".data()"), f_buf.second,
-          f_sty->GetStorage(), f_sty->ElementType(), f_mds_shape, false,
-          f_mds_offset, ValueSTR(f_stride, false, true), {}, false);
+          RemoveSuffix(f_buf_name, ".data()"), f_buf_name, f_sty->GetStorage(),
+          f_sty->ElementType(), f_mds_shape, false, f_mds_offset,
+          ValueSTR(f_stride, false, true), {}, false);
       const auto t_mds =
-          GenTensorDecl(RemoveSuffix(t_buf_name, ".data()"), t_buf.second,
+          GenTensorDecl(RemoveSuffix(t_buf_name, ".data()"), t_buf_name,
                         t_sty->GetStorage(), t_sty->ElementType(), t_mds_shape,
                         false, t_mds_offset, ValueSTR(t_stride, false, true),
                         {}, use_wgmma_layout_t, swizzle_mode);
@@ -3855,7 +3711,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                                dma_plan->direction == DMADirection::S2G ||
                                dma_plan->direction == DMADirection::S2S;
       if (to_or_from_shared) {
-        ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+        ds << d_indent
+           << "if (threadIdx.x == 0 && threadIdx.y == 0 && "
+              "threadIdx.z == 0) {\n";
         ds << d_indent << "  choreo::naive_copy(" << src << ", " << dst
            << ");\n";
         ds << d_indent << "}\n";
@@ -4270,7 +4128,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
     if (t_sty->GetStorage() == Storage::SHARED &&
         swizzle_mode != SwizMode::NONE) {
-      if (has_future) shared_buf_swiz_[future_name] = swizzle_mode;
       shared_buf_swiz_[t_buf.first] = swizzle_mode;
       shared_buf_swiz_[InScopeName(t_sym)] = swizzle_mode;
     }
@@ -4298,7 +4155,6 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         t_buf_expr_with_offset =
             "(" + t_buf_expr + " + (" + t_mds_offset + "))";
       }
-      std::string t_buf_void_ptr = "(void*)(" + t_buf_expr_with_offset + ")";
 
       bool warpspec_only = InSpecWarp();
       if (warpspec_only && event_only) {
@@ -4338,7 +4194,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       // Coordinate order: [inner%swiz, outer, inner/swiz]
       bool tma_has_inner_split = false;
       if (tma_idx >= 0) {
-        auto split_it = tma_inner_splits_.find(tma_descs[tma_idx].GetName());
+        auto split_it =
+            tma_inner_splits_.find(tma_descs[tma_idx].GetName());
         if (split_it != tma_inner_splits_.end()) {
           tma_has_inner_split = true;
           auto se = sbe::nu((int64_t)split_it->second.swiz_elems);
@@ -4353,7 +4210,35 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       size_t effective_tma_rank =
           tma_has_inner_split ? t_shape.Rank() + 1 : t_shape.Rank();
 
+      std::vector<std::string> hoisted_rev_indices;
+      if (hoist_offset && !tma_has_inner_split && t_shape.Rank() == 2 &&
+          rev_indices.size() == 2) {
+        auto make_dim_name = [&](size_t dim_index) {
+          auto dim = f_sty->GetShape().ValueAt(f_sty->Dims() - 1 - dim_index);
+          auto dim_name = ToLower(UnScopedExpr(ValueSTR(dim)));
+          if (dim_name.empty())
+            return std::string("d") + std::to_string(dim_index);
+          bool valid = std::all_of(
+              dim_name.begin(), dim_name.end(),
+              [](unsigned char ch) { return std::isalnum(ch) || ch == '_'; });
+          if (!valid) return std::string("d") + std::to_string(dim_index);
+          return dim_name;
+        };
+
+        auto base_name = f_ca->data ? f_ca->data->name : std::string("src");
+        for (size_t idx = 0; idx < rev_indices.size(); ++idx) {
+          auto offset_name = base_name + "_" + make_dim_name(idx) + "_offset";
+          ds << d_indent << "const unsigned " << offset_name << " = "
+             << ValueSTR(rev_indices.at(idx)) << ";\n";
+          hoisted_rev_indices.push_back(offset_name);
+        }
+      }
       bool is_multicast_tma = n.IsMulticast() && n.IsTMA();
+      bool has_cluster = !cgi.GetFunctionLaunches(fname).empty() &&
+                         cgi.GetFunctionLaunches(fname)[0].HasCluster();
+      bool use_ptx_tma_sync = (tma_cluster_aware || ptx_barrier ||
+                               is_multicast_tma || has_cluster) &&
+                              effective_tma_rank == 2;
       bool emit_tma_single_guard =
           !ScopeAlreadySingleThreadForLevel(tma_sync_level);
       if (!warpspec_only)
@@ -4365,166 +4250,189 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       if (emit_tma_single_guard) {
         if (tma_sync_level == ParallelLevel::GROUP)
           ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
-        else if (tma_sync_level == ParallelLevel::GROUPx4 &&
-                 IsWarpSpecActive()) {
-          std::string wg_tid_zero = current_thread_count_expr.empty()
-                                        ? "(threadIdx.x % 128) == 0"
-                                        : "__choreo_vtid_x == 0";
-          ds << d_indent << "if (" << wg_tid_zero << ") {\n";
-        } else if (tma_sync_level == ParallelLevel::GROUPx4)
+        else if (tma_sync_level == ParallelLevel::GROUPx4)
           ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
         else
           ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
       }
 
-      // PTX mbarrier TMA path (unified for all ranks and cases)
-      // arrive_and_expect_tx MUST be emitted before the PTX TMA load.
-      std::string ptx_bar_expr;
-      if (event_only) {
-        ptx_bar_expr = "(uint64_t*)&(" + ExprSTR(n.Event(), IsHost()) + ")";
-        auto event_expr = ExprSTR(n.Event(), IsHost());
-        // Extract the event base name to detect multiple TMA loads
-        // sharing the same barrier event within one iteration.
-        std::string evt_base_name;
-        {
-          auto evt = n.Event();
-          auto* expr_evt = cast<AST::Expr>(evt.get());
-          if (expr_evt && expr_evt->op == Op::ElemOf) {
-            auto sym = AST::GetArrayBaseSymbol(*expr_evt);
-            if (sym) evt_base_name = sym->name;
-          } else if (expr_evt && expr_evt->GetSymbol()) {
-            evt_base_name = expr_evt->GetSymbol()->name;
-          }
-        }
-        bool already_arrived = !evt_base_name.empty() &&
-                               event_arrive_tx_events_.count(evt_base_name);
-        if (already_arrived) {
-          // A prior TMA load already called arrive_and_expect_tx on this
-          // barrier; only add expected bytes without an extra arrival.
-          ds << d_indent << tma_issue_prefix << event_expr
-             << ".expect_transaction(" << tma_tx_bytes_expr << ");\n";
+      if (use_ptx_tma_sync) {
+        std::string ptx_bar_expr;
+        if (event_only) {
+          ptx_bar_expr = "(uint64_t*)&(" + ExprSTR(n.Event(), IsHost()) + ")";
         } else {
-          ds << d_indent << tma_issue_prefix << event_expr
-             << ".arrive_and_expect_tx(" << tma_tx_bytes_expr << ");\n";
-          if (!evt_base_name.empty())
-            event_arrive_tx_events_.insert(evt_base_name);
+          ptx_bar_expr =
+              "((TMAAtom*)" + future_name + ".get_atom())->ptx_barrier()";
+          std::string expect_fn = "choreo::tma_mbarrier_expect_tx";
+          ds << d_indent << tma_issue_prefix << expect_fn << "(" << ptx_bar_expr
+             << ", " << tma_tx_bytes_expr << ");\n";
         }
-        // Mark this event's trigger as a no-op since arrive_and_expect_tx
-        // is already emitted before the PTX TMA load.
-        if (!evt_base_name.empty())
-          tma_bound_event_triggers_.insert(evt_base_name);
-      } else if (!future_name.empty()) {
-        ptx_bar_expr =
-            "((TMAAtom*)" + future_name + ".get_atom())->ptx_barrier()";
-        ds << d_indent << tma_issue_prefix << "choreo::tma_mbarrier_expect_tx("
-           << ptx_bar_expr << ", " << tma_tx_bytes_expr << ");\n";
+
+        auto coord0_expr = hoisted_rev_indices.empty()
+                               ? ValueSTR(rev_indices.at(0))
+                               : hoisted_rev_indices.at(0);
+        auto coord1_expr = hoisted_rev_indices.empty()
+                               ? ValueSTR(rev_indices.at(1))
+                               : hoisted_rev_indices.at(1);
+        if (is_multicast_tma) {
+          const auto& lcfg = cgi.GetFunctionLaunches(fname);
+          auto cluster_total = lcfg.empty() ? sbe::nu(1)
+                                            : lcfg[0].cluster_count.x *
+                                                  lcfg[0].cluster_count.y *
+                                                  lcfg[0].cluster_count.z;
+          ds << d_indent << tma_issue_prefix
+             << "if (choreo::tma_cluster_rank() == 0) {\n";
+          ds << d_indent << tma_issue_prefix << "  "
+             << "choreo::tma_load_2d_shared_cluster_global_mbarrier_multicast("
+                "(void*)"
+             << t_buf_expr_with_offset << ", (const void*)&" << *tname
+             << "_tensor_map, " << ptx_bar_expr << ", " << coord0_expr << ", "
+             << coord1_expr << ", "
+             << "static_cast<uint16_t>((1u << " << ValueSTR(cluster_total)
+             << ") - 1u)"
+             << ");\n";
+          ds << d_indent << tma_issue_prefix << "}\n";
+        } else if (tma_cluster_aware) {
+          ds << d_indent << tma_issue_prefix
+             << "choreo::tma_load_2d_shared_cluster_global_mbarrier((void*)"
+             << t_buf_expr_with_offset << ", (const void*)&" << *tname
+             << "_tensor_map, " << ptx_bar_expr << ", " << coord0_expr << ", "
+             << coord1_expr << ");\n";
+        } else {
+          ds << d_indent << tma_issue_prefix
+             << "choreo::tma_load_2d_shared_cta_global_mbarrier((void*)"
+             << t_buf_expr_with_offset << ", (const void*)&" << *tname
+             << "_tensor_map, " << ptx_bar_expr << ", " << coord0_expr << ", "
+             << coord1_expr << ");\n";
+        }
       } else {
         auto tma_atom_ref = GetCopyAtomName(true, tma_idx);
-        ptx_bar_expr = tma_atom_ref + ".ptx_barrier()";
-        ds << d_indent << tma_issue_prefix << "choreo::tma_mbarrier_expect_tx("
-           << ptx_bar_expr << ", " << tma_tx_bytes_expr << ");\n";
-      }
+        std::string tma_barrier_arg;
+        if (has_future)
+          tma_barrier_arg =
+              "((TMAAtom*)" + future_name + ".get_atom())->barrier()";
+        else if (event_only)
+          tma_barrier_arg = ExprSTR(n.Event(), IsHost());
+        else
+          tma_barrier_arg = tma_atom_ref + ".barrier()";
 
-      auto coord0_expr = ValueSTR(rev_indices.at(0));
-      auto coord1_expr = ValueSTR(rev_indices.at(1));
-
-      if (is_multicast_tma) {
-        const auto& lcfg = cgi.GetFunctionLaunches(fname);
-        auto cluster_total = lcfg.empty() ? sbe::nu(1)
-                                          : lcfg[0].cluster_count.x *
-                                                lcfg[0].cluster_count.y *
-                                                lcfg[0].cluster_count.z;
-        ds << d_indent << tma_issue_prefix
-           << "if (choreo::tma_cluster_rank() == 0) {\n";
-        ds << d_indent << tma_issue_prefix << "  "
-           << "choreo::tma_load_2d_shared_cluster_global_mbarrier_multicast("
-           << t_buf_void_ptr << ", (const void*)&" << *tname << "_tensor_map, "
-           << ptx_bar_expr << ", " << coord0_expr << ", " << coord1_expr << ", "
-           << "static_cast<uint16_t>((1u << " << ValueSTR(cluster_total)
-           << ") - 1u)"
-           << ");\n";
-        ds << d_indent << tma_issue_prefix << "}\n";
-      } else if (tma_cluster_aware) {
-        ds << d_indent << tma_issue_prefix
-           << "choreo::tma_load_2d_shared_cluster_global_mbarrier("
-           << t_buf_void_ptr << ", (const void*)&" << *tname << "_tensor_map, "
-           << ptx_bar_expr << ", " << coord0_expr << ", " << coord1_expr
-           << ");\n";
-      } else if (effective_tma_rank == 3) {
-        auto coord2_expr = ValueSTR(rev_indices.at(2));
-        ds << d_indent << tma_issue_prefix
-           << "choreo::tma_load_3d_shared_cta_global_mbarrier("
-           << t_buf_void_ptr << ", (const void*)&" << *tname << "_tensor_map, "
-           << ptx_bar_expr << ", " << coord0_expr << ", " << coord1_expr << ", "
-           << coord2_expr << ");\n";
-      } else {
-        ds << d_indent << tma_issue_prefix
-           << "choreo::tma_load_2d_shared_cta_global_mbarrier("
-           << t_buf_void_ptr << ", (const void*)&" << *tname << "_tensor_map, "
-           << ptx_bar_expr << ", " << coord0_expr << ", " << coord1_expr
-           << ");\n";
+        ds << d_indent << tma_issue_prefix << "cde::cp_async_bulk_tensor_"
+           << effective_tma_rank << "d_global_to_shared("
+           << t_buf_expr_with_offset << ", &" << *tname << "_tensor_map, "
+           << (hoisted_rev_indices.empty() ? ValueSTR(rev_indices)
+                                           : hoisted_rev_indices.at(0) + ", " +
+                                                 hoisted_rev_indices.at(1))
+           << ", " << tma_barrier_arg << ");\n";
+        if (has_future) {
+          ds << d_indent << tma_issue_prefix << "((TMAAtom*)" << future_name
+             << ".get_atom())->token() = "
+                "cuda::device::barrier_arrive_tx(((TMAAtom*)"
+             << future_name << ".get_atom())->barrier(), 1, "
+             << tma_tx_bytes_expr << ");\n";
+        } else if (!event_only) {
+          ds << d_indent << tma_issue_prefix << tma_atom_ref
+             << ".token() = "
+                "cuda::device::barrier_arrive_tx("
+             << tma_atom_ref << ".barrier(), 1, " << tma_tx_bytes_expr
+             << ");\n";
+        }
       }
-      if (emit_tma_single_guard) { ds << d_indent << "}\n"; }
+      if (emit_tma_single_guard) {
+        ds << d_indent << "}";
+        if ((has_future || !event_only) && !use_ptx_tma_sync) {
+          ds << " else {\n";
+          if (has_future) {
+            ds << d_indent << "  ((TMAAtom*)" << future_name
+               << ".get_atom())->token() = ((TMAAtom*)" << future_name
+               << ".get_atom())->barrier().arrive();\n";
+          } else {
+            auto tma_atom_ref = GetCopyAtomName(true, tma_idx);
+            ds << d_indent << "  " << tma_atom_ref
+               << ".token() = " << tma_atom_ref << ".barrier().arrive();\n";
+          }
+          ds << d_indent << "}\n";
+        } else
+          ds << "\n";
+      }
       recent_tma_tx_bytes.push_back(tma_tx_bytes_expr);
       if (recent_tma_tx_bytes.size() > 8) recent_tma_tx_bytes.pop_front();
 
       // For async tma.copy.async, trigger the future
       // For sync tma.copy, default behavior is immediate wait.
-      // In warpspec mode, defer this wait to event barrier protocol
+      // Under --use-warpspec, defer this wait to event barrier protocol
       // so producer-consumer pipelining remains asynchronous like ref kernels.
       if (fty->IsAsync()) {
         if (has_future) ds << d_indent << future_name << ".trigger();\n";
       } else {
+        // Synchronous tma.copy: wait immediately
         auto tma_atom_ref = GetCopyAtomName(true, tma_idx);
         if (has_future) {
-          ds << d_indent << "choreo::tma_mbarrier_wait_parity(((TMAAtom*)"
-             << future_name << ".get_atom())->ptx_barrier(), ((TMAAtom*)"
-             << future_name << ".get_atom())->ptx_phase_bit());\n";
-          ds << d_indent << "((TMAAtom*)" << future_name
-             << ".get_atom())->toggle_ptx_phase();\n";
+          if (use_ptx_tma_sync) {
+            ds << d_indent << "choreo::tma_mbarrier_wait_parity(((TMAAtom*)"
+               << future_name << ".get_atom())->ptx_barrier(), ((TMAAtom*)"
+               << future_name << ".get_atom())->ptx_phase_bit());\n";
+            ds << d_indent << "((TMAAtom*)" << future_name
+               << ".get_atom())->toggle_ptx_phase();\n";
+          } else {
+            ds << d_indent << "((TMAAtom*)" << future_name
+               << ".get_atom())->barrier().wait(std::move(((TMAAtom*)"
+               << future_name << ".get_atom())->token()));\n";
+          }
           ds << d_indent << future_name << ".set_nowait();\n\n";
         } else if (!event_only) {
-          ds << d_indent << "choreo::tma_mbarrier_wait_parity(" << tma_atom_ref
-             << ".ptx_barrier(), " << tma_atom_ref << ".ptx_phase_bit());\n";
-          ds << d_indent << tma_atom_ref << ".toggle_ptx_phase();\n";
+          if (use_ptx_tma_sync) {
+            ds << d_indent << "choreo::tma_mbarrier_wait_parity("
+               << tma_atom_ref << ".ptx_barrier(), " << tma_atom_ref
+               << ".ptx_phase_bit());\n";
+            ds << d_indent << tma_atom_ref << ".toggle_ptx_phase();\n";
+          } else {
+            ds << d_indent << tma_atom_ref << ".barrier().wait(std::move("
+               << tma_atom_ref << ".token()));\n";
+          }
         }
       }
     } else if ((tsto == Storage::GLOBAL || tsto == Storage::DEFAULT) &&
                fsto == Storage::SHARED) {
-
       ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
-      {
+
+      if (!CCtx().SkipEpilogueGroupSync()) {
         if (tma_sync_level == ParallelLevel::GROUP)
           ds << d_indent << "__syncwarp();\n";
-        else if (tma_sync_level == ParallelLevel::GROUPx4 ||
-                 NeedWarpSpecGroupX4SyncForCurrentScope()) {
-          int groupx4_sync_threads =
-              CurrentScopeThreadsCount() > 0 ? CurrentScopeThreadsCount() : 128;
-          EmitGroupX4Sync(ds, d_indent, groupx4_sync_threads);
-        } else
+        else if (tma_sync_level == ParallelLevel::GROUPx4)
+          EmitGroupX4Sync(ds, d_indent);
+        else if (NeedWarpSpecGroupX4SyncForCurrentScope())
+          EmitGroupX4Sync(ds, d_indent);
+        else
           ds << d_indent << "__syncthreads();\n";
       }
 
       if (tma_sync_level == ParallelLevel::GROUP) {
         ds << d_indent << "if (__CHOREO_GROUP_SINGLE__) {\n";
       } else if (tma_sync_level == ParallelLevel::GROUPx4) {
-        std::string wg_tid_zero = current_thread_count_expr.empty()
-                                      ? "(threadIdx.x % 128) == 0"
-                                      : "__choreo_vtid_x == 0";
+        // TMA S2G needs exactly 1 thread. When multiple warpgroups are
+        // active, restrict to the first active warpgroup's leader thread.
         if (InSpecWarp() && current_inthreads->ActiveWarpGroup() < 0) {
-          auto consumer_wgs = CurrentWarpGroupIndices();
-          int64_t first_wg = consumer_wgs.empty() ? 0 : consumer_wgs.front();
-          ds << d_indent << "if (" << wg_tid_zero
-             << " && __choreo_vg4id_x == " << first_wg << ") {\n";
+          auto& mask = current_inthreads->GetScopeThreadMask();
+          int64_t first_wg = 0;
+          for (size_t i = 0; i < mask.size(); i += 128)
+            for (size_t j = i; j < std::min(i + 128, mask.size()); ++j)
+              if (mask[j]) {
+                first_wg = i / 128;
+                goto found_s2g_wg;
+              }
+        found_s2g_wg:
+          ds << d_indent
+             << "if (__CHOREO_GROUPX4_SINGLE__ && __choreo_vg4id_x == "
+             << first_wg << ") {\n";
         } else {
-          ds << d_indent << "if (" << wg_tid_zero << ") {\n";
+          ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
         }
       } else {
         ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
       }
 
       {
-        auto s2g_indices_orig = Reverse(GenIndices(t_ca));
+        auto s2g_indices = Reverse(GenIndices(t_ca));
 
         if (tma_idx >= 0 && tma_descs[tma_idx].HasRootParam()) {
           const auto& def_ca = tma_descs[tma_idx].GetRootDefCA();
@@ -4537,16 +4445,17 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           auto total_elem = tile_elem_offset + def_elem_offset;
           auto inner_dim = t_sty->GetStrides().at(0);
 
-          assert(s2g_indices_orig.size() >= 2);
-          s2g_indices_orig.front() = total_elem % inner_dim;
-          s2g_indices_orig.back() = total_elem / inner_dim;
+          assert(s2g_indices.size() >= 2);
+          s2g_indices.front() = total_elem % inner_dim;
+          s2g_indices.back() = total_elem / inner_dim;
         }
 
         size_t s2g_rank = t_shape.Rank();
         bool has_split = false;
-        sbe::Operand split_se;
+        ValueItem split_se;
         if (tma_idx >= 0) {
-          auto s2g_it = tma_inner_splits_.find(tma_descs[tma_idx].GetName());
+          auto s2g_it =
+              tma_inner_splits_.find(tma_descs[tma_idx].GetName());
           if (s2g_it != tma_inner_splits_.end()) {
             has_split = true;
             split_se = sbe::nu((int64_t)s2g_it->second.swiz_elems);
@@ -4579,7 +4488,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
               if (auto v = VIInt(box.ValueAt(d))) box_elems *= *v;
           }
 
-          auto final_idx_base = make_s2g_indices(s2g_indices_orig);
+          auto final_idx_base = make_s2g_indices(s2g_indices);
 
           auto strReplaceAll = [](std::string s, const std::string& from,
                                   const std::string& to) {
@@ -4599,6 +4508,14 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                << num_consumers << "; ++__s2g_ci) {\n";
             ds << d_indent << "    auto __s2g_vg4id = __s2g_ci + " << first_wg
                << ";\n";
+            for (auto& [aname, aexpr] : anon_decl_exprs_) {
+              if (idx_str.find(aname) == std::string::npos) continue;
+              if (aexpr.find("__choreo_vg4id_x") == std::string::npos) continue;
+              std::string local_expr =
+                  strReplaceAll(aexpr, "__choreo_vg4id_x", "__s2g_vg4id");
+              ds << d_indent << "    auto " << aname << " = " << local_expr
+                 << ";\n";
+            }
 
             for (auto& [var, expr] : var_to_expr) {
               if (expr.find("__choreo_vg4id_x") != std::string::npos) {
@@ -4618,7 +4535,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                << ValueSTR(final_idx_base) << ", " << f_buf_expr << ");\n";
           }
         } else {
-          auto final_idx = make_s2g_indices(s2g_indices_orig);
+          auto final_idx = make_s2g_indices(s2g_indices);
           ds << d_indent << "  cde::cp_async_bulk_tensor_" << s2g_rank
              << "d_shared_to_global(&" << *tname << "_tensor_map, "
              << ValueSTR(final_idx) << ", " << f_buf_expr << ");\n";
@@ -4650,7 +4567,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
   if (op.Tag() == AST::MMAOperation::Wait) {
     int depth = op.WaitDepth();
     ds << d_indent << "warpgroup_wait<" << depth << ">();\n";
-    if (depth == 0) warpspec_wgmma_arrived = false;
     return true;
   }
 
@@ -4719,8 +4635,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       // if ubound is large, may lead to low performance
       std::string scalar_init_val =
           ExprCastSTR(op.FillingValue(), std::nullopt, ssmi.ty,
-                      GetBaseType(*op.FillingValue()->GetType()), false,
-                      IsNumericZeroLiteral(op.FillingValue()));
+                      GetBaseType(*op.FillingValue()->GetType()), false);
       std::string frag_iv_str = "__frag_init_val" + std::to_string(fill_cnt);
       if (use_uint32) {
         std::string temp = "__fiv_temp" + std::to_string(fill_cnt);
@@ -4752,13 +4667,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
       ++fill_cnt;
     } break;
-    case AST::MMAOperation::Desc: {
+    case AST::MMAOperation::LoadS:
+    case AST::MMAOperation::Load: {
       // Check if loading from a buffer whose shape may not evenly divide
       // the MMA fragment. Static shared buffers are always tile-sized, but
       // dynamic-shaped buffers (e.g., global or runtime-sized) may have
       // dimensions that don't divide evenly by the MMA atom shape.
-      if (ssmi.frag != MMAInfo::FRAG_E) {
-        auto ca = op.DescFrom();
+      {
+        auto ca = op.LoadFrom();
         auto parent_sym = ca->RefSymbol();
         auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
         switch (GetMmaLoadShapeWarningKind(ssmi, parent_ty)) {
@@ -4781,27 +4697,16 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       std::string elem_ty = NameBaseType(ssmi.ty);
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(sym));
       bool policy_is_sparse = mma_policy.find("SPARSE::") != std::string::npos;
-      if (ssmi.frag != MMAInfo::FRAG_A && ssmi.frag != MMAInfo::FRAG_B &&
-          !(policy_is_sparse && ssmi.frag == MMAInfo::FRAG_E)) {
-        Error1(n.LOC(), "mma.desc only supports WGMMA A/B and sparse metadata "
-                        "operands");
-        break;
-      }
-      auto desc_source_ty = GetSpannedType(op.DescFrom()->GetType());
-      if (ssmi.frag != MMAInfo::FRAG_E &&
-          (!desc_source_ty ||
-           desc_source_ty->GetStorage() != Storage::SHARED)) {
-        Error1(n.LOC(), "WGMMA A/B descriptors require shared memory");
-        break;
-      }
       if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_E) {
-        auto tile_addr = TileAddr(op.DescFrom(), false);
-        auto strides = GenStrides(op.DescFrom());
-        auto load_from_sty = dyn_cast<SpannedType>(op.DescFrom()->GetType());
+        auto tile_addr = TileAddr(op.LoadFrom(), false);
+        auto strides = GenStrides(op.LoadFrom());
+        auto load_from_sty = dyn_cast<SpannedType>(op.LoadFrom()->GetType());
         auto k_val = VIInt(ssmi.shape.at(2));
         bool policy_is_fp8 = mma_policy.find("E4M3") != std::string::npos ||
                              mma_policy.find("E5M2") != std::string::npos;
         bool fp8_sparse_k64 = policy_is_fp8 && k_val && *k_val == 64;
+        bool sparse_k32_16bit = !policy_is_fp8 && k_val && *k_val == 32;
+        bool sparse_k64_16bit = !policy_is_fp8 && k_val && *k_val == 64;
         bool prepack_single_col = false;
         if (load_from_sty && load_from_sty->Dims() >= 2) {
           if (auto meta_cols = VIInt(load_from_sty->GetShape().ValueAt(1)))
@@ -4811,40 +4716,48 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
         std::string row_stride = ValueSTR(strides.at(0));
         std::string col_stride = ValueSTR(strides.at(1));
+        ds << d_indent << meta_ty << " " << sym << " = 0;\n";
         // Detect host prepacked-u32 metadata and emit device-side indexing
         // that reads the host-provided prepacked u32 array directly. Fallback
         // to the existing byte-by-byte assembly when detection fails.
         // The --use-prepack / --use-prepack-v2 flags force this path.
         bool v2_mode = use_prepack_v2.GetValue();
-        std::string ref_sym = op.DescFrom()->RefSymbol();
+        std::string ref_sym = op.LoadFrom()->RefSymbol();
         auto prepackInfo =
             resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue() || v2_mode);
 
-        if (!prepackInfo.use_packed_u32) {
-          ds << d_indent << "auto " << sym
-             << " = wgmma_make_sparse_metadata_desc<" << STR(ssmi.shape.at(2))
-             << ", " << (policy_is_fp8 ? "true" : "false") << ">((uint8_t*)("
-             << ValueSTR(tile_addr) << "), " << row_stride << ", " << col_stride
-             << ");\n";
-          ssm.MapDeviceSymbol(InScopeName(sym), sym);
-          break;
-        }
-
-        ds << d_indent << meta_ty << " " << sym << " = 0;\n";
         ds << d_indent << "{\n";
         ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
+        if (!prepackInfo.use_packed_u32)
+          ds << d_indent << "  auto* __sp_meta_ptr = (uint8_t*)("
+             << ValueSTR(tile_addr) << ");\n";
         if (fp8_sparse_k64) {
-          if (v2_mode) {
+          if (prepackInfo.use_packed_u32 && v2_mode) {
             emitFp8PrepackedV2TileLoadSnippet(sym, prepackInfo.device_name,
                                               ValueSTR(tile_addr), row_stride,
                                               col_stride);
-          } else {
+          } else if (prepackInfo.use_packed_u32) {
             emitFp8PrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr),
                                                row_stride, col_stride);
+          } else {
+            ds << d_indent
+               << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << "
+                  "3) + ((__sp_tid >> 5) << 4);\n";
+            ds << d_indent
+               << "  int __sp_byte_col = ((__sp_tid >> 1) & 1) << 2;\n";
+            ds << d_indent << "  #pragma unroll\n";
+            ds << d_indent
+               << "  for (int byte_idx = 0; byte_idx < 4; ++byte_idx) {\n";
+            ds << d_indent << "    uint8_t packed = __sp_meta_ptr[__sp_row * ("
+               << row_stride << ") + (__sp_byte_col + byte_idx) * ("
+               << col_stride << ")];\n";
+            ds << d_indent << "    " << sym << " |= (static_cast<" << meta_ty
+               << ">(packed) << (8 * byte_idx));\n";
+            ds << d_indent << "  }\n";
           }
-        } else if (v2_mode) {
+        } else if (prepackInfo.use_packed_u32 && v2_mode) {
           if (prepack_single_col) {
-            auto tile_off = GenOffset(op.DescFrom());
+            auto tile_off = GenOffset(op.LoadFrom());
             emitPrepackedV2TileLoadSnippet(sym, prepackInfo.device_name,
                                            ValueSTR(tile_addr), row_stride,
                                            ValueSTR(tile_off));
@@ -4852,19 +4765,62 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             emitPrepackedV2Snippet(sym, prepackInfo.device_name,
                                    prepackInfo.device_name, row_stride,
                                    col_stride);
-        } else {
+        } else if (prepackInfo.use_packed_u32) {
           if (prepack_single_col)
             emitPrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr),
                                             row_stride);
           else
             emitPrepackedU32Snippet(sym, prepackInfo.device_name, row_stride,
                                     col_stride);
+        } else if (sparse_k32_16bit || sparse_k64_16bit) {
+          ds << d_indent
+             << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) & "
+                "7);\n";
+          ds << d_indent << "  int __sp_byte_col = ((__sp_tid & "
+             << (sparse_k32_16bit ? "1" : "3") << ") << 1);\n";
+          ds << d_indent << "  uint8_t __sp_b0 = __sp_meta_ptr[__sp_row * ("
+             << row_stride << ") + __sp_byte_col * (" << col_stride << ")];\n";
+          ds << d_indent << "  uint8_t __sp_b1 = __sp_meta_ptr[__sp_row * ("
+             << row_stride << ") + (__sp_byte_col + 1) * (" << col_stride
+             << ")];\n";
+          ds << d_indent
+             << "  uint8_t __sp_b2 = __sp_meta_ptr[(__sp_row + 8) * ("
+             << row_stride << ") + __sp_byte_col * (" << col_stride << ")];\n";
+          ds << d_indent
+             << "  uint8_t __sp_b3 = __sp_meta_ptr[(__sp_row + 8) * ("
+             << row_stride << ") + (__sp_byte_col + 1) * (" << col_stride
+             << ")];\n";
+          ds << d_indent << "  " << sym << " |= (static_cast<" << meta_ty
+             << ">(__sp_b0) << 0);\n";
+          ds << d_indent << "  " << sym << " |= (static_cast<" << meta_ty
+             << ">(__sp_b1) << 8);\n";
+          ds << d_indent << "  " << sym << " |= (static_cast<" << meta_ty
+             << ">(__sp_b2) << 16);\n";
+          ds << d_indent << "  " << sym << " |= (static_cast<" << meta_ty
+             << ">(__sp_b3) << 24);\n";
+        } else {
+          ds << d_indent << "  int __sp_lane = __sp_tid % 32;\n";
+          ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
+          ds << d_indent
+             << "  int __sp_row = __sp_warp * 16 + (__sp_lane / 4);\n";
+          ds << d_indent
+             << "  constexpr int __sp_meta_bytes = " << STR(ssmi.shape.at(2))
+             << " / 8;\n";
+          ds << d_indent << "  #pragma unroll\n";
+          ds << d_indent
+             << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; "
+                "++byte_idx) {\n";
+          ds << d_indent << "    uint8_t packed = __sp_meta_ptr[__sp_row * ("
+             << row_stride << ") + byte_idx * (" << col_stride << ")];\n";
+          ds << d_indent << "    " << sym << " |= (static_cast<" << meta_ty
+             << ">(packed) << (8 * byte_idx));\n";
+          ds << d_indent << "  }\n";
         }
         ds << d_indent << "}\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
         break;
       }
-      auto tile_addr = TileAddr(op.DescFrom(), false);
+      auto tile_addr = TileAddr(op.LoadFrom(), false);
       ds << d_indent << elem_ty << "* " << sym << "_smem_ptr = (" << elem_ty
          << "*)(" << ValueSTR(tile_addr) << ");\n";
       [[maybe_unused]] bool frag_is_fp8 =
@@ -4885,16 +4841,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           cute_major_order = "cute::SM90::GMMA::Major::K";
         }
       }
-      // Descriptor layout follows the shared-memory producer. Swizzle is a
-      // memory-layout property and is deliberately not part of mma.load.
-      auto swizzle_val = SwizMode::NONE;
-      auto src_sym = op.DescFrom()->RefSymbol();
-      auto sit = shared_buf_swiz_.find(src_sym);
-      if (sit == shared_buf_swiz_.end())
-        sit = shared_buf_swiz_.find(InScopeName(src_sym));
-      if (sit == shared_buf_swiz_.end())
-        sit = shared_buf_swiz_.find(UnScopedName(src_sym));
-      if (sit != shared_buf_swiz_.end()) swizzle_val = sit->second;
+      // Get swizzle value from MMA operation; infer from DMA if not explicit.
+      auto swizzle_val = op.GetSwizzleMode();
+      if (swizzle_val == SwizMode::NONE && !op.HasExplicitSwizzle()) {
+        auto src_sym = op.LoadFrom()->RefSymbol();
+        auto sit = shared_buf_swiz_.find(src_sym);
+        if (sit != shared_buf_swiz_.end()) swizzle_val = sit->second;
+      }
       std::string swizzle_enum;
       std::string sparse_layout_suffix;
       switch (swizzle_val) {
@@ -4949,7 +4902,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
            << "_smem_ptr);\n";
       }
       if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_A) {
-        std::string ref_sym = op.DescFrom()->RefSymbol();
+        std::string ref_sym = op.LoadFrom()->RefSymbol();
         if (!ref_sym.empty()) {
           auto mdata_sym_name = ref_sym + "_mdata";
           if (SSTab().IsDeclared(mdata_sym_name)) {
@@ -4967,172 +4920,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           }
         }
       }
-      explicit_mma_descs_.insert(sym);
-      explicit_mma_descs_.insert(InScopeName(sym));
       ssm.MapDeviceSymbol(InScopeName(sym), sym);
-    } break;
-    case AST::MMAOperation::Load: {
-      explicit_mma_loads_.insert(sym);
-      explicit_mma_loads_.insert(InScopeName(sym));
-      std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(sym));
-      bool policy_is_sparse = mma_policy.find("SPARSE::") != std::string::npos;
-      if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_E) {
-        auto tile_addr = TileAddr(op.LoadFrom(), false);
-        auto strides = GenStrides(op.LoadFrom());
-        auto load_from_sty = dyn_cast<SpannedType>(op.LoadFrom()->GetType());
-        auto k_val = VIInt(ssmi.shape.at(2));
-        bool policy_is_fp8 = mma_policy.find("E4M3") != std::string::npos ||
-                             mma_policy.find("E5M2") != std::string::npos;
-        bool fp8_sparse_k64 = policy_is_fp8 && k_val && *k_val == 64;
-        bool prepack_single_col = false;
-        if (load_from_sty && load_from_sty->Dims() >= 2) {
-          if (auto meta_cols = VIInt(load_from_sty->GetShape().ValueAt(1)))
-            prepack_single_col = (*meta_cols == 1);
-        }
-        bool meta_64 = k_val && *k_val > 32 && !fp8_sparse_k64;
-        std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
-        std::string row_stride = ValueSTR(strides.at(0));
-        std::string col_stride = ValueSTR(strides.at(1));
-        bool v2_mode = use_prepack_v2.GetValue();
-        std::string ref_sym = op.LoadFrom()->RefSymbol();
-        auto prepackInfo =
-            resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue() || v2_mode);
-
-        if (!prepackInfo.use_packed_u32) {
-          ds << d_indent << "auto " << sym
-             << " = wgmma_make_sparse_metadata_desc<" << STR(ssmi.shape.at(2))
-             << ", " << (policy_is_fp8 ? "true" : "false") << ">((uint8_t*)("
-             << ValueSTR(tile_addr) << "), " << row_stride << ", " << col_stride
-             << ");\n";
-          ssm.MapDeviceSymbol(InScopeName(sym), sym);
-          break;
-        }
-
-        ds << d_indent << meta_ty << " " << sym << " = 0;\n";
-        ds << d_indent << "{\n";
-        ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
-        if (fp8_sparse_k64) {
-          if (v2_mode) {
-            emitFp8PrepackedV2TileLoadSnippet(sym, prepackInfo.device_name,
-                                              ValueSTR(tile_addr), row_stride,
-                                              col_stride);
-          } else {
-            emitFp8PrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr),
-                                               row_stride, col_stride);
-          }
-        } else if (v2_mode) {
-          if (prepack_single_col) {
-            auto tile_off = GenOffset(op.LoadFrom());
-            emitPrepackedV2TileLoadSnippet(sym, prepackInfo.device_name,
-                                           ValueSTR(tile_addr), row_stride,
-                                           ValueSTR(tile_off));
-          } else {
-            emitPrepackedV2Snippet(sym, prepackInfo.device_name,
-                                   prepackInfo.device_name, row_stride,
-                                   col_stride);
-          }
-        } else {
-          if (prepack_single_col)
-            emitPrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr),
-                                            row_stride);
-          else
-            emitPrepackedU32Snippet(sym, prepackInfo.device_name, row_stride,
-                                    col_stride);
-        }
-        ds << d_indent << "}\n";
-        ssm.MapDeviceSymbol(InScopeName(sym), sym);
-        break;
-      }
-      if (ssmi.frag != MMAInfo::FRAG_A) {
-        Error1(n.LOC(),
-               "WGMMA mma.load only supports a register A operand; use "
-               "mma.desc for shared-memory A/B operands");
-        break;
-      }
-      auto ca = op.LoadFrom();
-      auto parent_sym = ca->RefSymbol();
-      auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
-      switch (GetMmaLoadShapeWarningKind(ssmi, parent_ty)) {
-      case MmaLoadShapeWarningKind::Dynamic:
-        Warning(n.LOC(), "mma.load source buffer '" + parent_sym +
-                             "' has dynamic shape; ensure its dimensions are "
-                             "divisible by the MMA atom shape to avoid "
-                             "out-of-bounds access.");
-        break;
-      case MmaLoadShapeWarningKind::Misaligned:
-        Warning(n.LOC(), "mma.load source buffer '" + parent_sym +
-                             "' has shape that does not evenly divide the MMA "
-                             "atom; this may cause out-of-bounds shared memory "
-                             "access.");
-        break;
-      case MmaLoadShapeWarningKind::None: break;
-      }
-      auto source_sty = GetSpannedType(ca->GetType());
-      if (!source_sty) {
-        Error1(n.LOC(), "failed to infer mma.load source type");
-        break;
-      }
-      auto source_tensor =
-          GenTensorDecl(RemoveSuffix(ca->RefSymbol(), ".data()"),
-                        ValueSTR(TileAddr(ca, false)), source_sty->GetStorage(),
-                        source_sty->ElementType(), ca->GetBlockShape(), false,
-                        "0", ValueSTR(GenStrides(ca), false, true));
-      ds << source_tensor.second;
-
-      auto scoped = InScopeName(sym);
-      if (!FCtx(fname).HasFragmentLayout(scoped)) {
-        Error1(n.LOC(), "missing fragment layout for WGMMA mma.load result");
-        break;
-      }
-      auto& layout = FCtx(fname).GetFragmentLayout(scoped);
-      if (layout.kind != LayoutKind::WGMMA_RS_A ||
-          layout.regs_per_thread == 0) {
-        Error1(n.LOC(), "mma.load result does not have a WGMMA RS A layout");
-        break;
-      }
-      SwizMode source_swizzle = SwizMode::NONE;
-      for (const auto& name : {ca->RefSymbol(), InScopeName(ca->RefSymbol()),
-                               UnScopedName(ca->RefSymbol())}) {
-        if (auto it = shared_buf_swiz_.find(name);
-            it != shared_buf_swiz_.end()) {
-          source_swizzle = it->second;
-          break;
-        }
-      }
-      ds << d_indent << NameBaseType(source_sty->ElementType()) << " " << sym
-         << "[" << layout.regs_per_thread << "];\n";
-      ds << d_indent << "{\n";
-      ds << d_indent << "  auto* __mma_load_src = reinterpret_cast<const "
-         << NameBaseType(source_sty->ElementType()) << "*>("
-         << source_tensor.first << ".data().get());\n";
-      ds << d_indent << "  int __mma_load_lane = threadIdx.x % 128;\n";
-      ds << d_indent << "  #pragma unroll\n";
-      ds << d_indent << "  for (int __mma_load_i = 0; __mma_load_i < "
-         << layout.regs_per_thread << "; ++__mma_load_i) {\n";
-      ds << d_indent << "    size_t __mma_load_logical = "
-         << "((__mma_load_lane / 4) % 8 + (__mma_load_lane / 32) * 16 + "
-            "((__mma_load_i / 2) % 2) * 8) * "
-         << layout.logical_cols
-         << " + (__mma_load_lane % 4) * 2 + "
-            "(__mma_load_i % 2) + (__mma_load_i / 4) * 8;\n";
-      if (source_swizzle != SwizMode::NONE) {
-        int swizzle_bits = source_swizzle == SwizMode::B32   ? 1
-                           : source_swizzle == SwizMode::B64 ? 2
-                                                             : 3;
-        size_t swizzle_mask = ((size_t{1} << swizzle_bits) - 1) << 7;
-        ds << d_indent << "    size_t __mma_load_byte = __mma_load_logical * "
-           << SizeOf(source_sty->ElementType()) << ";\n";
-        ds << d_indent << "    " << sym
-           << "[__mma_load_i] = __mma_load_src[(__mma_load_byte ^ "
-           << "((__mma_load_byte & " << swizzle_mask << ") >> 3)) / "
-           << SizeOf(source_sty->ElementType()) << "];\n";
-      } else {
-        ds << d_indent << "    " << sym
-           << "[__mma_load_i] = __mma_load_src[__mma_load_logical];\n";
-      }
-      ds << d_indent << "  }\n";
-      ds << d_indent << "}\n";
-      ssm.MapDeviceSymbol(scoped, sym);
     } break;
     case AST::MMAOperation::LoadR: {
       auto ca = op.LoadFrom();
@@ -5192,9 +4980,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto b_sym = AST::FragName(op.ExecOperand(2));
       has_pending_wgmma_finalize = true;
       pending_wgmma_acc_sym = ssm.DeviceName(c_sym);
-      ds << d_indent << "warpgroup_fence_operand(" << pending_wgmma_acc_sym
-         << ");\n";
-      if (!(bdim_level == ParallelLevel::GROUPx4 && warpspec_wgmma_arrived)) {
+      if (wgmma_foreach_depth == 0 &&
+          !(IsWarpSpecActive() && bdim_level == ParallelLevel::GROUPx4 &&
+            warpspec_wgmma_arrived)) {
+        ds << d_indent << "warpgroup_fence_operand(" << pending_wgmma_acc_sym
+           << ");\n";
         ds << d_indent << "warpgroup_arrive();\n";
         if (IsWarpSpecActive() && bdim_level == ParallelLevel::GROUPx4)
           warpspec_wgmma_arrived = true;
@@ -5215,31 +5005,85 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           auto k_val = VIInt(ssmi_a.shape.at(2));
           bool policy_is_fp8 = mma_policy.find("E4M3") != std::string::npos ||
                                mma_policy.find("E5M2") != std::string::npos;
+          bool fp8_sparse_k64 = policy_is_fp8 && k_val && *k_val == 64;
+          bool sparse_k32_16bit = !policy_is_fp8 && k_val && *k_val == 32;
+          bool sparse_k64_16bit = !policy_is_fp8 && k_val && *k_val == 64;
+          bool meta_64 = true;
+          if (k_val) meta_64 = (*k_val > 32) && !fp8_sparse_k64;
+          std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
+          ds << d_indent << meta_ty << " " << meta_var << " = 0;\n";
+          ds << d_indent << "{\n";
+          ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
           // Detect host prepacked-u32 metadata for the exec site
           bool v2_mode_exec = use_prepack_v2.GetValue();
           auto prepackInfo = resolvePrepackedU32Meta(
               a_sym, use_prepack.GetValue() || v2_mode_exec);
           if (!prepackInfo.use_packed_u32) {
-            ds << d_indent << "auto " << meta_var
-               << " = wgmma_make_sparse_metadata_desc<"
-               << STR(ssmi_a.shape.at(2)) << ", "
-               << (policy_is_fp8 ? "true" : "false") << ">(" << meta_ptr << ", "
-               << STR(ssmi_a.shape.at(2)) << " / 8, 1);\n";
+            ds << d_indent
+               << "  constexpr int __sp_K = " << STR(ssmi_a.shape.at(2))
+               << ";\n";
+            ds << d_indent << "  " << meta_ty << " __sp_meta = 0;\n";
+          } else if (v2_mode_exec) {
+            emitPrepackedV2Snippet(meta_var, prepackInfo.device_name,
+                                   prepackInfo.device_name, "128", "1");
           } else {
-            bool fp8_sparse_k64 = policy_is_fp8 && k_val && *k_val == 64;
-            bool meta_64 = k_val && *k_val > 32 && !fp8_sparse_k64;
-            std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
-            ds << d_indent << meta_ty << " " << meta_var << " = 0;\n";
-            ds << d_indent << "{\n";
-            ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
-            if (v2_mode_exec)
-              emitPrepackedV2Snippet(meta_var, prepackInfo.device_name,
-                                     prepackInfo.device_name, "128", "1");
-            else
-              emitPrepackedU32Snippet(meta_var, prepackInfo.device_name, "128",
-                                      "1");
-            ds << d_indent << "}\n";
+            emitPrepackedU32Snippet(meta_var, prepackInfo.device_name, "128",
+                                    "1");
           }
+          if (fp8_sparse_k64) {
+            ds << d_indent
+               << "  int __sp_row = ((__sp_tid >> 2) & 7) + ((__sp_tid & 1) << "
+                  "3) + ((__sp_tid >> 5) << 4);\n";
+            ds << d_indent
+               << "  int __sp_byte_col = ((__sp_tid >> 1) & 1) << 2;\n";
+            ds << d_indent << "  #pragma unroll\n";
+            ds << d_indent
+               << "  for (int byte_idx = 0; byte_idx < 4; ++byte_idx) {\n";
+            ds << d_indent << "    uint8_t packed = " << meta_ptr
+               << "[__sp_row * (__sp_K / 8) + (__sp_byte_col + byte_idx)];\n";
+            ds << d_indent << "    __sp_meta |= (static_cast<" << meta_ty
+               << ">(packed) << (8 * byte_idx));\n";
+            ds << d_indent << "  }\n";
+          } else if (sparse_k32_16bit || sparse_k64_16bit) {
+            ds << d_indent
+               << "  int __sp_row = ((__sp_tid >> 5) * 16) + ((__sp_tid >> 2) "
+                  "& 7);\n";
+            ds << d_indent << "  int __sp_byte_col = ((__sp_tid & "
+               << (sparse_k32_16bit ? "1" : "3") << ") << 1);\n";
+            ds << d_indent << "  uint8_t __sp_b0 = " << meta_ptr
+               << "[__sp_row * (__sp_K / 8) + __sp_byte_col];\n";
+            ds << d_indent << "  uint8_t __sp_b1 = " << meta_ptr
+               << "[__sp_row * (__sp_K / 8) + (__sp_byte_col + 1)];\n";
+            ds << d_indent << "  uint8_t __sp_b2 = " << meta_ptr
+               << "[(__sp_row + 8) * (__sp_K / 8) + __sp_byte_col];\n";
+            ds << d_indent << "  uint8_t __sp_b3 = " << meta_ptr
+               << "[(__sp_row + 8) * (__sp_K / 8) + (__sp_byte_col + 1)];\n";
+            ds << d_indent << "  __sp_meta |= (static_cast<" << meta_ty
+               << ">(__sp_b0) << 0);\n";
+            ds << d_indent << "  __sp_meta |= (static_cast<" << meta_ty
+               << ">(__sp_b1) << 8);\n";
+            ds << d_indent << "  __sp_meta |= (static_cast<" << meta_ty
+               << ">(__sp_b2) << 16);\n";
+            ds << d_indent << "  __sp_meta |= (static_cast<" << meta_ty
+               << ">(__sp_b3) << 24);\n";
+          } else {
+            ds << d_indent << "  int __sp_lane = __sp_tid % 32;\n";
+            ds << d_indent << "  int __sp_warp = __sp_tid / 32;\n";
+            ds << d_indent
+               << "  int __sp_row = __sp_warp * 16 + (__sp_lane / 4);\n";
+            ds << d_indent << "  constexpr int __sp_meta_bytes = __sp_K / 8;\n";
+            ds << d_indent << "  #pragma unroll\n";
+            ds << d_indent
+               << "  for (int byte_idx = 0; byte_idx < __sp_meta_bytes; "
+                  "++byte_idx) {\n";
+            ds << d_indent << "    uint8_t packed = " << meta_ptr
+               << "[__sp_row * __sp_meta_bytes + byte_idx];\n";
+            ds << d_indent << "    __sp_meta |= (static_cast<" << meta_ty
+               << ">(packed) << (8 * byte_idx));\n";
+            ds << d_indent << "  }\n";
+          }
+          ds << d_indent << "  " << meta_var << " = __sp_meta;\n";
+          ds << d_indent << "}\n";
         }
       }
       auto& ssmi_c = cgi.GetSymbolMMA(InScopeName(c_sym));
@@ -5284,7 +5128,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         bool supported = false;
         bool is_rs_direct = false;
         bool is_shared_direct = false;
-        bool use_sparse_fp8_a_desc = false;
         size_t k_iters = 1;
         size_t regs_per_step = 0;
         int lbo_override_bytes = 0;
@@ -5297,10 +5140,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         std::string shared_iter_ptr_var;
         std::string shared_iter_desc_var;
         std::string shared_major_order;
-        std::string shared_cute_major_order;
-        std::string shared_sparse_layout_atom;
-        std::string shared_mma_m;
-        std::string shared_mma_k;
         std::string shared_swizzle_enum;
         std::string shared_iter_elem_offset_expr;
         std::string error;
@@ -5345,11 +5184,16 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                                : nullptr;
         if (!ca && !sym && !elemof_base) return info;
 
-        if (sym) {
-          auto scoped = InScopeName(sym->name);
-          if (explicit_mma_descs_.count(sym->name) ||
-              explicit_mma_descs_.count(scoped))
-            return info;
+        if (policy_is_sparse) {
+          if (sym && !ca && !elemof_base) {
+            if (auto sym_sty = GetSpannedType(GetSymbolType(sym->name));
+                sym_sty && sym_sty->GetStorage() == Storage::REG)
+              return info;
+          }
+          info.is_direct = true;
+          info.error =
+              "direct sparse WGMMA operands still require explicit mma.load";
+          return info;
         }
 
         auto resolve_operand_spanned_type = [&]() -> ptr<SpannedType> {
@@ -5376,14 +5220,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           info.error = "WGMMA atom K must be a compile-time constant";
           return info;
         }
-        int storage_atom_k = *atom_k;
-        if (policy_is_sparse && operand_info.frag == MMAInfo::FRAG_A)
-          storage_atom_k /= 2;
-        if (storage_atom_k <= 0) {
-          info.is_direct = true;
-          info.error = "invalid sparse WGMMA storage K dimension";
-          return info;
-        }
 
         size_t k_axis = GetWGMMAKAxis(operand_info);
         auto shape = sty->GetShape();
@@ -5394,7 +5230,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         }
 
         auto full_k = VIInt(shape.ValueAt(k_axis));
-        if (!full_k || *full_k <= 0 || (*full_k % storage_atom_k) != 0) {
+        if (!full_k || *full_k <= 0 || (*full_k % *atom_k) != 0) {
           info.is_direct = true;
           info.error = "direct WGMMA operand K dimension must be a static "
                        "multiple of the atom K";
@@ -5406,23 +5242,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                : (elemof_base ? elemof_base->name : (sym ? sym->name : ""));
         auto source_scoped =
             source_sym.empty() ? source_sym : InScopeName(source_sym);
-
-        // If source_sym is an alias (assigned via `=` from a ChunkAt), resolve
-        // it through live_chunk_aliases to find the underlying root buffer.
-        // This propagates swizzle from TMA-loaded buffers to reference aliases.
-        if (!ca && !source_sym.empty() &&
-            shared_buf_swiz_.find(source_sym) == shared_buf_swiz_.end() &&
-            shared_buf_swiz_.find(source_scoped) == shared_buf_swiz_.end()) {
-          auto ait = live_chunk_aliases.find(source_sym);
-          if (ait == live_chunk_aliases.end())
-            ait = live_chunk_aliases.find(source_scoped);
-          if (ait != live_chunk_aliases.end()) {
-            ca = ait->second;
-            source_sym = ca->RefSymbol();
-            source_scoped =
-                source_sym.empty() ? source_sym : InScopeName(source_sym);
-          }
-        }
         bool is_chunk_rs_alias =
             !source_sym.empty() &&
             (frag_chunk_rs_aliases_.count(source_sym) > 0 ||
@@ -5452,7 +5271,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                 "unsupported fragment layout for direct RS WGMMA operand";
             return info;
           }
-          size_t num_chunks = fl.logical_cols / storage_atom_k;
+          size_t num_chunks = fl.logical_cols / *atom_k;
           if (num_chunks == 0 || (fl.regs_per_thread % num_chunks) != 0) {
             info.is_direct = true;
             info.error = "failed to derive register chunk layout for direct RS "
@@ -5461,7 +5280,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           }
           info.is_direct = true;
           info.is_rs_direct = true;
-          info.k_iters = static_cast<size_t>(*full_k / storage_atom_k);
+          info.k_iters = static_cast<size_t>(*full_k / *atom_k);
           info.regs_per_step = fl.regs_per_thread / num_chunks;
           info.rs_base_expr = source_sym;
           info.supported = true;
@@ -5542,45 +5361,25 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             else
               raw_base = ExprSTR(ca->data, false);
 
+            if (ca->NoOperation()) return raw_base;
+
             sbe::ExprSum phys;
-
-            if (ca->indices != nullptr) {
-              auto sym_ty = GetSymbolType(ca->data->name);
-              if (auto array_ty = dyn_cast<ArrayType>(sym_ty)) {
-                std::string array_idx;
-                auto subscriptions = ca->indices->AllValues();
-                const ValueList& array_sizes = array_ty->Dimensions();
-                for (size_t i = 0; i < subscriptions.size(); ++i) {
-                  if (array_idx.empty())
-                    array_idx = ExprSTR(subscriptions[i], false);
-                  else
-                    array_idx = "(" + array_idx + ")*" +
-                                ValueSTR(array_sizes[i]) + "+" +
-                                ExprSTR(subscriptions[i], false);
-                }
-                auto f_sty = GetSpannedType(sym_ty);
-                std::string elem_count =
-                    ValueSTR(f_sty->GetShape().ElementCountValue());
-                phys += sbe::sym("(" + array_idx + ")*(" + elem_count + ")");
-              }
-            }
-
-            if (ca->NoOperation() && ValueSTR(phys.Get()) == "0")
-              return raw_base;
-
             for (size_t i = 0; i < ca->OpCount(); ++i) {
               const auto& sop = ca->OpAt(i);
               if (isa<AST::SOP::Reshape>(sop)) continue;
-              if (!(isa<AST::SOP::Tiling>(sop) || isa<AST::SOP::TileAt>(sop) ||
+              if (!(isa<AST::SOP::Tiling>(sop) ||
+                    isa<AST::SOP::TileAt>(sop) ||
                     isa<AST::SOP::SubSpan>(sop)))
                 continue;
               auto idx = sop->GetIndices()->Opts();
               auto strd = sop->GetBlockStrides();
               auto blk = sop->GetBlockShape();
-              bool has_step = isa<AST::SOP::SubSpan>(sop) && sop->GetSteps();
+              bool has_step =
+                  isa<AST::SOP::SubSpan>(sop) && sop->GetSteps();
               for (size_t ith = 0; ith < idx.GetVals().size(); ++ith) {
-                ValueItem eff_strd =
-                    (ith == non_k_axis) ? sbe::nu(swiz_atom_cols) : strd[ith];
+                ValueItem eff_strd = (ith == non_k_axis)
+                                         ? sbe::nu(swiz_atom_cols)
+                                         : strd[ith];
                 if (has_step)
                   phys += idx.GetVals()[ith] * eff_strd;
                 else
@@ -5601,17 +5400,18 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         //             (col & (atom_cols-1)) +
         //             (col / atom_cols) * full_nonk * atom_cols
         //   MN-major: k_iter * atom_k * atom_cols
-        size_t local_k_iters = static_cast<size_t>(*full_k / storage_atom_k);
+        size_t local_k_iters = static_cast<size_t>(*full_k / *atom_k);
         auto iter_offset = [&]() -> std::string {
           if (swiz_atom_cols > 0 && local_k_iters > 1) {
             if (is_mn_major) {
-              int step = storage_atom_k * swiz_atom_cols;
+              int step = *atom_k * swiz_atom_cols;
               return "((" + iter_expr + ") * " + std::to_string(step) + ")";
             }
             // K-major: need the full non-K dimension of the parent tensor
             int full_nonk = 0;
             if (ca) {
-              auto parent_sty = GetSpannedType(GetSymbolType(ca->RefSymbol()));
+              auto parent_sty =
+                  GetSpannedType(GetSymbolType(ca->RefSymbol()));
               if (parent_sty) {
                 auto pv = VIInt(parent_sty->GetShape().ValueAt(non_k_axis));
                 if (pv) full_nonk = *pv;
@@ -5624,14 +5424,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             if (full_nonk > 0) {
               int col_group_elems = full_nonk * swiz_atom_cols;
               return "(((" + iter_expr + ") * " +
-                     std::to_string(storage_atom_k) + " & " +
-                     std::to_string(swiz_atom_cols - 1) + ") + ((" + iter_expr +
-                     ") * " + std::to_string(storage_atom_k) + " / " +
-                     std::to_string(swiz_atom_cols) + ") * " +
+                     std::to_string(*atom_k) + " & " +
+                     std::to_string(swiz_atom_cols - 1) + ") + ((" +
+                     iter_expr + ") * " + std::to_string(*atom_k) +
+                     " / " + std::to_string(swiz_atom_cols) + ") * " +
                      std::to_string(col_group_elems) + ")";
             }
           }
-          return "((" + iter_expr + ") * " + std::to_string(storage_atom_k) +
+          return "((" + iter_expr + ") * " + std::to_string(*atom_k) +
                  " * (" + stride_expr + "))";
         }();
 
@@ -5650,40 +5450,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
 
         info.is_direct = true;
         info.is_shared_direct = true;
-        info.k_iters = static_cast<size_t>(*full_k / storage_atom_k);
+        info.k_iters = static_cast<size_t>(*full_k / *atom_k);
         info.shared_elem_ty = elem_ty;
         info.shared_major_order = major_order_for(operand_info);
-        info.shared_cute_major_order =
-            info.shared_major_order == "WGMMA_MajorOrder::K_MAJOR"
-                ? "cute::SM90::GMMA::Major::K"
-                : "cute::SM90::GMMA::Major::MN";
         info.shared_swizzle_enum = swizzle_to_enum(swizzle);
         info.shared_ptr_expr =
             std::string("(") + elem_ty + "*)(" + phys_base_expr + ")";
         info.shared_iter_elem_offset_expr = iter_offset;
         info.lbo_override_bytes = lbo_override;
-        info.use_sparse_fp8_a_desc =
-            policy_is_sparse && operand_info.frag == MMAInfo::FRAG_A &&
-            (operand_info.ty == BaseType::F8_E4M3 ||
-             operand_info.ty == BaseType::F8_E5M2) &&
-            swizzle != SwizMode::B64 && swizzle != SwizMode::B128;
-        if (info.use_sparse_fp8_a_desc) {
-          std::string suffix;
-          switch (swizzle) {
-          case SwizMode::NONE: suffix = "INTER"; break;
-          case SwizMode::B32: suffix = "SW32"; break;
-          case SwizMode::B64: suffix = "SW64"; break;
-          case SwizMode::B128: suffix = "SW128"; break;
-          default: suffix = "INTER"; break;
-          }
-          info.shared_sparse_layout_atom =
-              (info.shared_major_order == "WGMMA_MajorOrder::K_MAJOR"
-                   ? "cute::SM90::GMMA::Layout_K_"
-                   : "cute::SM90::GMMA::Layout_MN_") +
-              suffix + "_SpAtom";
-          info.shared_mma_m = STR(operand_info.shape.at(0));
-          info.shared_mma_k = STR(operand_info.shape.at(2));
-        }
         {
           int desc_id = direct_wgmma_desc_cnt++;
           auto suffix = std::to_string(desc_id);
@@ -5711,20 +5485,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         return false;
       }
 
-      if (policy_is_sparse) {
-        auto metadata = op.ExecOperand(3);
-        auto metadata_sym = metadata ? metadata->GetSymbol() : nullptr;
-        auto metadata_name = metadata_sym ? metadata_sym->name : "";
-        if (metadata_name.empty() ||
-            (!explicit_mma_loads_.count(metadata_name) &&
-             !explicit_mma_loads_.count(InScopeName(metadata_name)))) {
-          Error1(n.LOC(),
-                 "sparse WGMMA metadata must be loaded into a register with "
-                 "mma.load before use");
-          return false;
-        }
-      }
-
       size_t wgmma_k_iters = 1;
       if (direct_a.is_direct) wgmma_k_iters = direct_a.k_iters;
       if (direct_b.is_direct)
@@ -5744,43 +5504,23 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         return false;
       }
 
-      auto emit_wgmma_desc_call = [&](std::ostream& os,
-                                      const DirectWGMMAOperandInfo& info,
-                                      const std::string& ptr_var) {
-        os << "wgmma_make_smem_desc<" << info.shared_major_order << ", "
-           << info.shared_swizzle_enum;
-        if (info.lbo_override_bytes > 0) os << ", " << info.lbo_override_bytes;
-        os << ">(" << ptr_var << ")";
-      };
-      auto emit_shared_desc = [&](const DirectWGMMAOperandInfo& info,
-                                  const std::string& ptr_var,
-                                  const std::string& desc_var) {
-        if (!info.use_sparse_fp8_a_desc) {
-          ds << d_indent << "uint64_t " << desc_var << " = ";
-          emit_wgmma_desc_call(ds, info, ptr_var);
-          ds << ";\n";
-          return;
-        }
-        ds << d_indent << "auto " << desc_var
-           << "_tensor = cute::make_tensor("
-              "cute::make_smem_ptr(cute::recast_ptr<cute::sparse_elem<2, "
-           << info.shared_elem_ty << ">>(" << ptr_var << ")), "
-           << "cute::tile_to_shape(" << info.shared_sparse_layout_atom << "<"
-           << info.shared_elem_ty << ", 2>{}, cute::make_shape(cute::Int<"
-           << info.shared_mma_m << ">{}, cute::Int<" << info.shared_mma_k
-           << ">{})));\n";
-        ds << d_indent << "auto " << desc_var
-           << "_obj = cute::SM90::GMMA::make_gmma_desc<"
-           << info.shared_cute_major_order << ">(" << desc_var << "_tensor);\n";
-        ds << d_indent << "uint64_t " << desc_var << " = " << desc_var
-           << "_obj.desc_;\n";
-      };
+      auto emit_wgmma_desc_call =
+          [&](std::ostream& os, const DirectWGMMAOperandInfo& info,
+              const std::string& ptr_var) {
+            os << "wgmma_make_smem_desc<" << info.shared_major_order << ", "
+               << info.shared_swizzle_enum;
+            if (info.lbo_override_bytes > 0)
+              os << ", " << info.lbo_override_bytes;
+            os << ">(" << ptr_var << ")";
+          };
       auto emit_shared_direct_setup = [&](DirectWGMMAOperandInfo& info) {
         if (!info.is_shared_direct) return;
         if (wgmma_k_iters > 1) return;
         ds << d_indent << "auto* " << info.shared_ptr_var << " = "
            << info.shared_ptr_expr << ";\n";
-        emit_shared_desc(info, info.shared_ptr_var, info.shared_desc_var);
+        ds << d_indent << "uint64_t " << info.shared_desc_var << " = ";
+        emit_wgmma_desc_call(ds, info, info.shared_ptr_var);
+        ds << ";\n";
       };
       auto emit_shared_direct_iter_update =
           [&](const DirectWGMMAOperandInfo& info) {
@@ -5788,8 +5528,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             ds << d_indent << "auto* " << info.shared_iter_ptr_var << " = ("
                << info.shared_elem_ty << "*)(" << info.shared_ptr_expr << " + "
                << info.shared_iter_elem_offset_expr << ");\n";
-            emit_shared_desc(info, info.shared_iter_ptr_var,
-                             info.shared_iter_desc_var);
+            ds << d_indent << "uint64_t " << info.shared_iter_desc_var
+               << " = ";
+            emit_wgmma_desc_call(ds, info, info.shared_iter_ptr_var);
+            ds << ";\n";
           };
       auto desc_expr_for = [&](const DirectWGMMAOperandInfo& info,
                                const std::string& fallback) {
@@ -5798,6 +5540,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           return info.shared_iter_desc_var;
         return info.desc_expr;
       };
+
       emit_shared_direct_setup(direct_a);
       emit_shared_direct_setup(direct_b);
 
@@ -5881,7 +5624,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         auto scale_a_valid_rows_name = c_sym + "_scale_a_valid_rows";
         auto scale_b_name = c_sym + "_scale_b_val";
         auto scale_a_valid_rows_expr = GenScaleValidRowsExpr(op.ScaleA());
-        if (!active_hoisted_scale_decls.count(scale_a_name)) {
+        if (!hoist_offset || !active_hoisted_scale_decls.count(scale_a_name)) {
           ds << d_indent << "float* " << scale_a_name << " = (float*)("
              << scale_a_expr << ");\n";
           ds << d_indent << "int " << scale_a_valid_rows_name << " = "
@@ -5936,6 +5679,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     } break;
     case AST::MMAOperation::Store: {
       if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent, true);
+      if (pending_sala_consumer_barrier_) {
+        ds << d_indent << "// SALA: named barrier syncing all consumer WGs\n";
+        ds << d_indent << "asm volatile(\"bar.sync 14, "
+           << sala_consumer_barrier_threads_ << ";\\n\" ::: \"memory\");\n";
+        pending_sala_consumer_barrier_ = false;
+      }
       auto ca = op.StoreTo();
       auto t_sym = ca->data->name;
       auto ty = GetSymbolType(t_sym);
@@ -6093,18 +5842,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         }
       }
 
+      if (need_m_mask)
+        assert(!use_stmatrix && !store_trans &&
+               "masked store only supports non-transpose store to "
+               "global memory. Support for more cases can be added if needed.");
+
       // --- Emit store ---
-      bool stmatrix_ok = use_stmatrix && f_sty->GetStorage() == Storage::SHARED;
-      if (stmatrix_ok) {
-        auto n_val = VIInt(ssmi.shape.at(1));
-        if (!n_val || *n_val % 8 != 0) stmatrix_ok = false;
-      }
-      if (stmatrix_ok && (need_m_mask || need_n_mask)) stmatrix_ok = false;
-      if (stmatrix_ok) {
-        bool is_f32_acc = (accum_type == BaseType::F32);
-        bool is_f32_dest = (f_sty->ElementType() == BaseType::F32);
-        if (is_f32_acc && is_f32_dest) stmatrix_ok = false;
-      }
+      bool stmatrix_ok =
+          use_stmatrix && f_sty->GetStorage() == Storage::SHARED;
       if (stmatrix_ok) {
         bool is_f32_acc = (accum_type == BaseType::F32);
         auto elem = f_sty->ElementType();
@@ -6289,6 +6034,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         choreo_unreachable("unexpect MMA frag");
       }
     } break;
+    case AST::MMAOperation::LoadR:
+    case AST::MMAOperation::LoadS:
+      Error1(n.LOC(), "mma.loadR/loadS are only supported for WGMMA/CuTe MMA.");
+      return false;
     case AST::MMAOperation::Exec: {
       ds << d_indent << "nvcuda::wmma::mma_sync("
          << ExprSTR(op.ExecOperand(0), false) << ", "
@@ -6368,8 +6117,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       // if ubound is large, may lead to low performance
       std::string scalar_init_val =
           ExprCastSTR(op.FillingValue(), std::nullopt, ssmi.ty,
-                      GetBaseType(*op.FillingValue()->GetType()), false,
-                      IsNumericZeroLiteral(op.FillingValue()));
+                      GetBaseType(*op.FillingValue()->GetType()), false);
       std::string frag_iv_str = "__frag_init_val" + std::to_string(fill_cnt);
       if (use_uint32) {
         std::string temp = "__fiv_temp" + std::to_string(fill_cnt);
@@ -6402,6 +6150,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
       ++fill_cnt;
     } break;
+    case AST::MMAOperation::LoadS:
     case AST::MMAOperation::Load: {
       auto ca = op.LoadFrom();
       auto f_sym = ca->data->name;
@@ -6807,6 +6556,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       } else {
         ds << d_indent << full_call_sync;
       }
+      if (f_sty->GetStorage() == Storage::SHARED) {
+        if (NeedWarpSpecGroupX4SyncForCurrentScope())
+          EmitGroupX4Sync(ds, d_indent);
+        else
+          ds << d_indent << "__syncthreads();\n";
+      }
     } break;
     default: break;
     }
@@ -6880,51 +6635,6 @@ bool CuteCodeGen::Visit(AST::Synchronize& n) {
   return true;
 }
 
-bool CuteCodeGen::Visit(AST::Barrier& n) {
-  TraceEachVisit(n);
-
-  switch (n.GetLevel()) {
-  case ParallelLevel::THREAD: ds << d_indent << "__syncwarp();\n"; break;
-  case ParallelLevel::GROUP: ds << d_indent << "__syncwarp();\n"; break;
-  case ParallelLevel::BLOCK:
-    // Cooperative grid sync requires cooperative launch; fallback to CTA sync.
-    if (!cooperative_stack_.empty() && cooperative_stack_.top()) {
-      ds << d_indent << "cooperative_groups::this_grid().sync();\n";
-    } else {
-      ds << d_indent << "__syncthreads();\n";
-    }
-    break;
-  default:
-    choreo_unreachable("unsupported barrier level: " + STR(n.GetLevel()) + ".");
-  }
-
-  return true;
-}
-
-bool CuteCodeGen::Visit(AST::Fence& n) {
-  TraceEachVisit(n);
-
-  // GPU fences always cover shared+global; visibility distinguishes the scope.
-  switch (n.GetVisibility()) {
-  case ParallelLevel::THREAD:
-  case ParallelLevel::GROUP:
-  case ParallelLevel::GROUPx4:
-    // Fence within CTA: shared + global memory.
-    ds << d_indent << "__threadfence_block();\n";
-    break;
-  case ParallelLevel::BLOCK:
-  case ParallelLevel::DEVICE:
-    // Fence device-wide: global memory.
-    ds << d_indent << "__threadfence();\n";
-    break;
-  default:
-    choreo_unreachable(
-        "unsupported fence visibility: " + STR(n.GetVisibility()) + ".");
-  }
-
-  return true;
-}
-
 bool CuteCodeGen::Visit(AST::Wait& n) {
   TraceEachVisit(n);
 
@@ -6978,8 +6688,7 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
       auto name = expr->GetSymbol()->name;
       bool is_block_shared = IsFutureBlockShared(InScopeName(name));
       bool is_cooperative = cooperatives.count(InScopeName(name));
-      bool is_tma = tma_futures_.count(InScopeName(name)) > 0;
-      bool single_thread_wait = is_block_shared && !is_cooperative && !is_tma;
+      bool single_thread_wait = is_block_shared && !is_cooperative;
       if (single_thread_wait) {
         ds << d_indent << LevelPred() << " {\n";
         IncrDeviceIndent();
@@ -7031,12 +6740,6 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
         EndEventCritical(guarded);
       } break;
       case Storage::SHARED: {
-        if (ScopeAlreadySingleThreadForLevel(bdim_level)) {
-          Error1(n.LOC(), "shared event wait (" + PSTR(t) +
-                              ") is inside a single-thread scope; "
-                              "mbarrier wait must not be predicated to a "
-                              "single thread.");
-        }
         std::string base_name;
         if (is_array_ref) {
           auto bid = AST::GetArrayBaseSymbol(*expr);
@@ -7045,7 +6748,6 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
           base_name = UnScopedName(expr->GetSymbol()->name);
         }
         bool is_cluster_event = cluster_trigger_events_.count(base_name) > 0;
-        waited_events_.insert(base_name);
 
         if (is_cluster_event) {
           ds << d_indent << "// wait event(mbarrier) " << PSTR(t)
@@ -7061,68 +6763,36 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
             ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
             IncrDeviceIndent();
           }
-          {
-            auto dims_cl = ety->Dimensions();
-            int stages_cl = 2;
-            if (!dims_cl.empty()) {
-              if (auto nv = dyn_cast<sbe::NumericValue>(dims_cl[0].get()))
-                stages_cl = static_cast<int>(nv->Value());
-            }
-            // Cluster-scoped events always have priming performed (never
-            // suppressed), so the phase after init+priming is already
-            // flipped.  Use is_fill=true to avoid the ^1 inversion that
-            // non-cluster empty events need (where priming is suppressed).
-            std::string phase_cl = InlinePhaseExpr(stages_cl, /*is_fill=*/true);
-            if (is_array_ref) {
-              std::string bar_expr = ExprSTR(t, false);
-              ds << d_indent << "choreo::tma_mbarrier_wait_parity((uint64_t*)&"
-                 << bar_expr << ", " << phase_cl << ");\n";
-            } else {
-              ds << d_indent << "choreo::tma_mbarrier_wait_parity((uint64_t*)&"
-                 << ExprSTR(t, false) << ", " << phase_cl << ");\n";
-            }
+          if (is_array_ref) {
+            std::string bar_expr = ExprSTR(t, false);
+            std::string phase_expr =
+                base_name + "__phase" + bar_expr.substr(base_name.size());
+            ds << d_indent << "choreo::tma_mbarrier_wait_parity(&" << bar_expr
+               << ", " << phase_expr << ");\n";
+            ds << d_indent << phase_expr << " ^= 1;\n";
+          } else {
+            GenerateSubscriptions(
+                ds,
+                d_indent + "choreo::tma_mbarrier_wait_parity(&" +
+                    ExprSTR(t, false),
+                ", " + base_name + "__phase);\n", ety->RemainderDimensions(0));
+            GenerateSubscriptions(ds, d_indent + base_name + "__phase",
+                                  " ^= 1;\n", ety->RemainderDimensions(0));
           }
           if (cluster_wait_guarded) {
             DecrDeviceIndent();
             ds << d_indent << "}\n";
           }
         } else {
-          ds << d_indent << "// wait event(raw mbarrier) " << PSTR(t) << "\n";
-          auto& ft = cgi.GetFunctionTrait(fname);
-          bool is_fill = ft.IsTMAFillEvent(base_name);
-          auto dims = ety->Dimensions();
-          int stages = 2;
-          if (!dims.empty()) {
-            if (auto nv = dyn_cast<sbe::NumericValue>(dims[0].get()))
-              stages = static_cast<int>(nv->Value());
-          }
-          std::string phase_expr = InlinePhaseExpr(stages, is_fill);
-          if (is_array_ref && !foreach_iv_stack_.empty()) {
-            auto subscript = cast<AST::Expr>(expr->GetR());
-            if (subscript && subscript->IsTernary() &&
-                subscript->op == Op::Select) {
-              const auto& iv = foreach_iv_stack_.back();
-              if (stages == 2) {
-                phase_expr = is_fill ? ("((" + iv + " == 0) ? 0 : (((" + iv +
-                                        " - 1) & 3) >> 1))")
-                                     : ("((" + iv + " == 0) ? 1 : ((((" + iv +
-                                        " - 1) & 3) >> 1) ^ 1))");
-              } else {
-                std::string s = std::to_string(stages);
-                std::string prev_base = "((" + iv + " - 1) / " + s + ") & 1";
-                phase_expr =
-                    is_fill ? ("((" + iv + " == 0) ? 0 : (" + prev_base + "))")
-                            : ("((" + iv + " == 0) ? 1 : ((" + prev_base +
-                               ") ^ 1))");
-              }
-            }
-          }
+          ds << d_indent << "// wait event(barrier) " << PSTR(t) << "\n";
           if (is_array_ref) {
-            std::string bar_expr = ExprSTR(t, false);
-            ds << d_indent << bar_expr << ".wait(" << phase_expr << ");\n";
+            ds << d_indent << ExprSTR(t, false) << ".wait(" << ExprSTR(t, false)
+               << ".arrive());\n";
           } else {
-            ds << d_indent << ExprSTR(t, false) << ".wait(" << phase_expr
-               << ");\n";
+            GenerateSubscriptions(ds,
+                                  d_indent + ExprSTR(t, false) + ".wait(" +
+                                      ExprSTR(t, false) + ".arrive())",
+                                  ";\n", ety->RemainderDimensions(0));
           }
         }
       } break;
@@ -7152,12 +6822,6 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
         EndEventCritical(guarded);
       } break;
       case Storage::SHARED: {
-        if (ScopeAlreadySingleThreadForLevel(bdim_level)) {
-          Error1(n.LOC(), "shared event wait (" + PSTR(t) +
-                              ") is inside a single-thread scope; "
-                              "mbarrier wait must not be predicated to a "
-                              "single thread.");
-        }
         std::string base_name;
         if (is_array_ref) {
           auto bid = AST::GetArrayBaseSymbol(*expr);
@@ -7166,7 +6830,6 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
           base_name = UnScopedName(expr->GetSymbol()->name);
         }
         bool is_cluster_event = cluster_trigger_events_.count(base_name) > 0;
-        waited_events_.insert(base_name);
 
         if (is_cluster_event) {
           bool cluster_wait_guarded =
@@ -7176,18 +6839,17 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
             ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
             IncrDeviceIndent();
           }
-          {
-            auto& ft_sc = cgi.GetFunctionTrait(fname);
-            bool is_fill_sc = ft_sc.IsTMAFillEvent(base_name);
-            std::string phase_sc = is_fill_sc ? InlinePhaseExpr(1, true) : "0";
-            if (is_array_ref) {
-              std::string bar_expr = ExprSTR(t, false);
-              ds << d_indent << "choreo::tma_mbarrier_wait_parity((uint64_t*)&"
-                 << bar_expr << ", " << phase_sc << ");\n";
-            } else {
-              ds << d_indent << "choreo::tma_mbarrier_wait_parity((uint64_t*)&"
-                 << ExprSTR(t, false) << ", " << phase_sc << ");\n";
-            }
+          if (is_array_ref) {
+            std::string bar_expr = ExprSTR(t, false);
+            std::string phase_expr =
+                base_name + "__phase" + bar_expr.substr(base_name.size());
+            ds << d_indent << "choreo::tma_mbarrier_wait_parity(&" << bar_expr
+               << ", " << phase_expr << ");\n";
+            ds << d_indent << phase_expr << " ^= 1;\n";
+          } else {
+            ds << d_indent << "choreo::tma_mbarrier_wait_parity(&"
+               << ExprSTR(t, false) << ", " << base_name << "__phase);\n";
+            ds << d_indent << base_name << "__phase ^= 1;\n";
           }
           if (cluster_wait_guarded) {
             DecrDeviceIndent();
@@ -7195,12 +6857,15 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
           }
         } else {
           auto bar_name = ExprSTR(t, false);
-          auto& ft_single = cgi.GetFunctionTrait(fname);
-          bool is_fill_single = ft_single.IsTMAFillEvent(base_name);
-          std::string phase_single =
-              is_fill_single ? InlinePhaseExpr(1, true) : "0";
-          ds << d_indent << bar_name << ".wait(" << phase_single
-             << "); // wait event(raw mbarrier)\n";
+          if (event_arrive_tx && event_arrive_tx_events_.count(bar_name) > 0) {
+            ds << d_indent << bar_name << ".wait(std::move(" << bar_name
+               << "__tok)); // wait event(barrier)\n";
+          } else {
+            bool guarded = BeginEventCritical();
+            ds << d_indent << bar_name << ".wait(" << bar_name
+               << ".arrive()); // wait event(barrier)\n";
+            EndEventCritical(guarded);
+          }
         }
       } break;
       default:
@@ -7320,19 +6985,12 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
         }
         case Storage::SHARED: {
           bool is_cluster_trigger = n.IsClusterScope();
-          std::string bar_base;
-          if (is_array_ref)
-            bar_base = AST::GetArrayBaseSymbol(*expr)->name;
-          else if (expr->GetSymbol())
-            bar_base = expr->GetSymbol()->name;
 
           ds << d_indent << "// trigger event(barrier) " << PSTR(f);
           if (is_cluster_trigger) ds << " [cluster-scope]";
           ds << "\n";
 
-          if (tma_bound_event_triggers_.count(bar_base)) {
-            recent_tma_tx_bytes.clear();
-          } else if (is_cluster_trigger) {
+          if (is_cluster_trigger) {
             ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
             IncrDeviceIndent();
             ds << d_indent
@@ -7340,14 +6998,12 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
                   "choreo::tma_cluster_dim(); ++__cta) {\n";
             IncrDeviceIndent();
             if (is_array_ref) {
-              ds << d_indent
-                 << "choreo::tma_mbarrier_arrive_cluster((uint64_t*)&"
+              ds << d_indent << "choreo::tma_mbarrier_arrive_cluster(&"
                  << ExprSTR(f, false) << ", __cta);\n";
             } else {
               GenerateSubscriptions(
                   ds,
-                  d_indent +
-                      "choreo::tma_mbarrier_arrive_cluster((uint64_t*)&" +
+                  d_indent + "choreo::tma_mbarrier_arrive_cluster(&" +
                       ExprSTR(f, false),
                   ", __cta);\n", ety->RemainderDimensions(0));
             }
@@ -7357,41 +7013,48 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
             ds << d_indent << "}\n";
           } else if (!recent_tma_tx_bytes.empty()) {
             auto tx_bytes_expr = SumRecentTMATxBytesExpr();
+            // In a multi-threaded warpspec scope where TMA is
+            // single-thread guarded, only the TMA-issuing thread
+            // reports expected bytes -- others arrive with 0 bytes.
             bool conditional_tx =
                 IsWarpSpecActive() &&
                 !ScopeAlreadySingleThreadForLevel(ParallelLevel::GROUPx4);
             if (is_array_ref) {
               if (conditional_tx) {
-                ds << d_indent << ExprSTR(f, false)
-                   << ".arrive_and_expect_tx(__CHOREO_GROUPX4_SINGLE__ ? "
+                ds << d_indent << "(void)cuda::device::barrier_arrive_tx("
+                   << ExprSTR(f, false) << ", 1, __CHOREO_GROUPX4_SINGLE__ ? "
                    << tx_bytes_expr << " : 0);\n";
+              } else if (IsWarpSpecActive()) {
+                ds << d_indent << "(void)cuda::device::barrier_arrive_tx("
+                   << ExprSTR(f, false) << ", 1, " << tx_bytes_expr << ");\n";
               } else {
-                ds << d_indent << ExprSTR(f, false) << ".arrive_and_expect_tx("
-                   << tx_bytes_expr << ");\n";
+                ds << d_indent << "(void)" << ExprSTR(f, false)
+                   << ".arrive();\n";
               }
             } else {
               if (conditional_tx) {
                 GenerateSubscriptions(
-                    ds, d_indent + ExprSTR(f, false),
-                    ".arrive_and_expect_tx(__CHOREO_GROUPX4_SINGLE__ ? " +
-                        tx_bytes_expr + " : 0);\n",
-                    ety->RemainderDimensions(0));
+                    ds,
+                    d_indent + "(void)cuda::device::barrier_arrive_tx(" +
+                        ExprSTR(f, false) +
+                        ", 1, __CHOREO_GROUPX4_SINGLE__ ? " + tx_bytes_expr +
+                        " : 0)",
+                    ";\n", ety->RemainderDimensions(0));
+              } else if (IsWarpSpecActive()) {
+                GenerateSubscriptions(
+                    ds,
+                    d_indent + "(void)cuda::device::barrier_arrive_tx(" +
+                        ExprSTR(f, false) + ", 1, " + tx_bytes_expr + ")",
+                    ";\n", ety->RemainderDimensions(0));
               } else {
-                GenerateSubscriptions(ds, d_indent + ExprSTR(f, false),
-                                      ".arrive_and_expect_tx(" + tx_bytes_expr +
-                                          ");\n",
-                                      ety->RemainderDimensions(0));
+                GenerateSubscriptions(
+                    ds, d_indent + "(void)" + ExprSTR(f, false), ".arrive();\n",
+                    ety->RemainderDimensions(0));
               }
             }
             recent_tma_tx_bytes.clear();
           } else {
-            bool suppress = IsWarpSpecActive() &&
-                            empty_event_names_.count(bar_base) &&
-                            waited_events_.empty();
-            if (suppress) {
-              ds << d_indent << "// (priming suppressed for " << PSTR(f)
-                 << " -- phase init=1 handles it)\n";
-            } else if (is_array_ref) {
+            if (is_array_ref) {
               ds << d_indent << "(void)" << ExprSTR(f, false) << ".arrive();\n";
             } else {
               GenerateSubscriptions(ds, d_indent + "(void)" + ExprSTR(f, false),
@@ -7435,51 +7098,50 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
         }
         case Storage::SHARED: {
           bool is_cluster_trigger = n.IsClusterScope();
-          std::string evt_bar_name;
-          if (expr->GetSymbol()) evt_bar_name = expr->GetSymbol()->name;
 
-          if (tma_bound_event_triggers_.count(evt_bar_name)) {
-            ds << d_indent << "// trigger event(barrier) " << PSTR(f)
-               << " (no-op: arrive_and_expect_tx at TMA load)\n";
-            recent_tma_tx_bytes.clear();
-          } else if (is_cluster_trigger) {
+          if (is_cluster_trigger) {
             ds << d_indent << "if (__CHOREO_GROUPX4_SINGLE__) {\n";
             IncrDeviceIndent();
             ds << d_indent
                << "for (uint32_t __cta = 0; __cta < "
                   "choreo::tma_cluster_dim(); ++__cta) {\n";
             IncrDeviceIndent();
-            ds << d_indent << "choreo::tma_mbarrier_arrive_cluster((uint64_t*)&"
+            ds << d_indent << "choreo::tma_mbarrier_arrive_cluster(&"
                << ExprSTR(f, false) << ", __cta);\n";
             DecrDeviceIndent();
             ds << d_indent << "}\n";
             DecrDeviceIndent();
             ds << d_indent << "}\n";
-          } else if (!recent_tma_tx_bytes.empty()) {
+          } else if (!recent_tma_tx_bytes.empty() && IsWarpSpecActive()) {
             auto tx_bytes_expr = SumRecentTMATxBytesExpr();
             bool conditional_tx =
-                IsWarpSpecActive() &&
                 !ScopeAlreadySingleThreadForLevel(ParallelLevel::GROUPx4);
             if (conditional_tx) {
-              ds << d_indent << ExprSTR(f, false)
-                 << ".arrive_and_expect_tx(__CHOREO_GROUPX4_SINGLE__ ? "
+              ds << d_indent << "(void)cuda::device::barrier_arrive_tx("
+                 << ExprSTR(f, false) << ", 1, __CHOREO_GROUPX4_SINGLE__ ? "
                  << tx_bytes_expr << " : 0); // trigger event(barrier)\n";
             } else {
-              ds << d_indent << ExprSTR(f, false) << ".arrive_and_expect_tx("
-                 << tx_bytes_expr << "); // trigger event(barrier)\n";
+              ds << d_indent << "(void)cuda::device::barrier_arrive_tx("
+                 << ExprSTR(f, false) << ", 1, " << tx_bytes_expr
+                 << "); // trigger event(barrier)\n";
             }
             recent_tma_tx_bytes.clear();
+          } else if (!recent_tma_tx_bytes.empty() && event_arrive_tx) {
+            auto tx_bytes_expr = SumRecentTMATxBytesExpr();
+            auto bar_name = ExprSTR(f, false);
+            ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+            ds << d_indent << "  " << bar_name << "__tok = "
+               << "cuda::device::barrier_arrive_tx(" << bar_name << ", 1, "
+               << tx_bytes_expr << ");\n";
+            ds << d_indent << "} else {\n";
+            ds << d_indent << "  " << bar_name << "__tok = " << bar_name
+               << ".arrive();\n";
+            ds << d_indent << "}\n";
+            event_arrive_tx_events_.insert(bar_name);
+            recent_tma_tx_bytes.clear();
           } else {
-            bool suppress = IsWarpSpecActive() &&
-                            empty_event_names_.count(evt_bar_name) &&
-                            waited_events_.empty();
-            if (suppress) {
-              ds << d_indent << "// (priming suppressed for " << PSTR(f)
-                 << " -- phase init=1 handles it)\n";
-            } else {
-              ds << d_indent << "(void)" << ExprSTR(f, false)
-                 << ".arrive(); // trigger event(barrier)\n";
-            }
+            ds << d_indent << "(void)" << ExprSTR(f, false)
+               << ".arrive(); // trigger event(barrier)\n";
           }
           break;
         }
@@ -7520,35 +7182,20 @@ bool CuteCodeGen::Visit(AST::Call& n) {
         os << indent << "}\n";
       }
       return true;
-    } else if (func_name == "croq::cuda::setreg_inc" ||
-               func_name == "croq::cuda::setreg_dec") {
+    } else if (func_name == "setreg" || func_name == "setreg.inc" ||
+               func_name == "setreg.dec") {
       if (IsHost()) return true;
       auto arg = cast<AST::Expr>(n.arguments->ValueAt(0));
       auto reg_limit = VIInt(arg->Opts().GetVal());
       if (!reg_limit || reg_limit.value() <= 0)
-        choreo_unreachable(
-            "croq::cuda::setreg_inc/dec expects a positive integer constant.");
+        choreo_unreachable("setreg expects a positive integer constant.");
       if (CCtx().ArchNum() >= 90) {
-        const char* dir =
-            (func_name == "croq::cuda::setreg_inc") ? "inc" : "dec";
+        const char* dir = (func_name == "setreg.inc") ? "inc" : "dec";
         os << indent << "asm volatile(\"setmaxnreg." << dir
            << ".sync.aligned.u32 " << reg_limit.value() << ";\");\n";
       }
       return true;
-    } else if (func_name == "__bar_arrive" || func_name == "__bar_sync") {
-      if (IsHost()) return true;
-      if (n.arguments->Count() != 2)
-        choreo_unreachable(func_name +
-                           " expects exactly 2 arguments (barrier_id, count).");
-      auto id_str = ExprSTR(n.GetArguments().at(0), false);
-      auto count_str = ExprSTR(n.GetArguments().at(1), false);
-      if (func_name == "__bar_arrive") {
-        os << indent << "asm volatile(\"bar.arrive %0, %1;\" :: \"r\"("
-           << id_str << "), \"r\"(" << count_str << ") : \"memory\");\n";
-      } else {
-        os << indent << "asm volatile(\"bar.sync %0, %1;\" :: \"r\"(" << id_str
-           << "), \"r\"(" << count_str << ") : \"memory\");\n";
-      }
+    } else if (func_name == "launch_bounds") {
       return true;
     } else if (func_name == "print" || func_name == "println") {
       if (n.CompileTimeEval()) return true;
@@ -7847,7 +7494,7 @@ AutomapStrategy CuteCodeGen::AnalyzeAutomap(const AST::ForeachBlock& n) {
   iv_names.reserve(num_ranges);
   for (size_t ri = 0; ri < num_ranges; ++ri) {
     auto rng = cast<AST::LoopRange>(ranges->ValueAt(ri));
-    iv_names.push_back(InScopeName(rng->GetIVName()));
+    iv_names.push_back(InScopeName(rng->IVName()));
   }
 
   struct FragAccess {
@@ -7996,20 +7643,11 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
   std::vector<std::string> loop_refs;
   for (auto& rn : n.GetRanges()) {
     auto rng = cast<AST::LoopRange>(rn);
-    auto cname = rng->GetIVName();
+    auto cname = rng->IVName();
     loop_refs.push_back(cname);
     loop_refs.push_back(std::string("__iv_") + cname);
     for (auto iv_name : within_map.at(InScopeName(cname)))
       loop_refs.push_back(SSMName(iv_name, false));
-  }
-
-  if (!IsHost() && !n.GetRanges().empty()) {
-    auto rng0 = cast<AST::LoopRange>(n.GetRanges()[0]);
-    auto ivs0 = within_map.at(InScopeName(rng0->GetIVName()));
-    if (!ivs0.empty())
-      foreach_iv_stack_.push_back(SSMName(ivs0.front(), false));
-    else
-      foreach_iv_stack_.push_back("__iv_" + rng0->GetIVName());
   }
 
   if (!IsHost() && n.GetBody()) {
@@ -8034,7 +7672,8 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
         }
       }
 
-      if (hoisted_scale_accum_scopes.back().has_value() && invariant_to_loop &&
+      if ((hoist_offset || hoisted_scale_accum_scopes.back().has_value()) &&
+          invariant_to_loop &&
           !active_hoisted_scale_decls.count(scale_a_name)) {
         ds << d_indent << "float* " << scale_a_name << " = (float*)("
            << scale_a_expr << ");\n";
@@ -8292,18 +7931,18 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
           size_t num_ranges = ranges->Count();
           if (num_ranges == 1) {
             auto rng = cast<AST::LoopRange>(ranges->ValueAt(0));
-            for (auto iv_name : within_map.at(InScopeName(rng->GetIVName())))
+            for (auto iv_name : within_map.at(InScopeName(rng->IVName())))
               ds << d_indent << ssm.DeviceName(iv_name) << " = "
                  << primary_layout->LogicalRowFromReg(reg_loop_var_, tid_expr)
                  << ";\n";
           } else if (num_ranges == 2) {
             auto rng0 = cast<AST::LoopRange>(ranges->ValueAt(0));
             auto rng1 = cast<AST::LoopRange>(ranges->ValueAt(1));
-            for (auto iv_name : within_map.at(InScopeName(rng0->GetIVName())))
+            for (auto iv_name : within_map.at(InScopeName(rng0->IVName())))
               ds << d_indent << ssm.DeviceName(iv_name) << " = "
                  << primary_layout->LogicalRowFromReg(reg_loop_var_, tid_expr)
                  << ";\n";
-            for (auto iv_name : within_map.at(InScopeName(rng1->GetIVName())))
+            for (auto iv_name : within_map.at(InScopeName(rng1->IVName())))
               ds << d_indent << ssm.DeviceName(iv_name) << " = "
                  << primary_layout->LogicalColFromReg(reg_loop_var_, tid_expr)
                  << ";\n";
@@ -8318,7 +7957,7 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
       bound_exprs.reserve(ranges->Count());
       for (size_t ri = 0; ri < ranges->Count(); ++ri) {
         auto rng = cast<AST::LoopRange>(ranges->ValueAt(ri));
-        auto iv_ty = GetSymbolType(rng->GetIVName());
+        auto iv_ty = GetSymbolType(rng->IVName());
         auto bit = cast<BoundedType>(iv_ty);
         std::string bound = UnScopedExpr(ValueSTR(bit->GetUpperBound()));
         bound_exprs.push_back(bound);
@@ -8346,16 +7985,58 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
       }
       for (size_t ri = 0; ri < ranges->Count(); ++ri) {
         auto rng = cast<AST::LoopRange>(ranges->ValueAt(ri));
-        for (auto iv_name : within_map.at(InScopeName(rng->GetIVName())))
+        for (auto iv_name : within_map.at(InScopeName(rng->IVName())))
           ds << d_indent << ssm.DeviceName(iv_name) << " = "
              << iv_value_exprs[ri] << ";\n";
       }
     }
   } else {
-    {
+    ptr<AST::AttributeExpr> causal_attr;
+    bool has_causal_split =
+        !IsHost() && AST::HasCausalSplitHint(n, causal_attr);
+
+    if (has_causal_split) {
+      auto row_off_expr =
+          ExprSTR(causal_attr->AttrValueAt(0), IsHost());
+      auto tile_sz_expr =
+          ExprSTR(causal_attr->AttrValueAt(1), IsHost());
+      auto& rn = *n.GetRanges().begin();
+      auto rng = cast<AST::LoopRange>(rn);
+      auto cname = rng->IVName();
+      auto ivs = within_map.at(InScopeName(cname));
+      auto iv_name = ivs.front();
+      auto iv_ty = GetSymbolType(UnScopedName(iv_name));
+      auto iv_bty = cast<BoundedType>(iv_ty);
+      std::string upper =
+          UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()));
+      if (rng->ubound)
+        upper = upper + " + " + ExprSTR(rng->ubound, IsHost());
+      std::string lower = rng->lbound
+                              ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
+                              : "0";
+
+      ds << d_indent << "const int __causal_split_pt__ = (("
+         << row_off_expr << ") + (" << tile_sz_expr << ") - 1) / ("
+         << tile_sz_expr << ");\n";
+      IndStream() << "for (int __causal_phase__ = 0; "
+                     "__causal_phase__ < 2; ++__causal_phase__) {\n";
+      IncrIndent();
+      IndStream()
+          << "const int __csl__ = (__causal_phase__ == 0) ? " << lower
+          << " : __causal_split_pt__;\n";
+      IndStream()
+          << "const int __csu__ = (__causal_phase__ == 0) ? "
+             "min(__causal_split_pt__, (int)("
+          << upper << ")) : " << upper << ";\n";
+      IndStream() << "for (" << SSMName(iv_name, IsHost()) << " = __csl__; "
+                  << SSMName(iv_name, IsHost()) << " < __csu__; ++"
+                  << SSMName(iv_name, IsHost()) << ") {\n";
+      IncrIndent();
+      causal_split_active_ = true;
+    } else {
       for (auto& rn : n.GetRanges()) {
         auto rng = cast<AST::LoopRange>(rn);
-        auto cname = rng->GetIVName();
+        auto cname = rng->IVName();
         for (auto iv_name : within_map.at(InScopeName(cname))) {
           auto iv_ty = GetSymbolType(UnScopedName(iv_name));
           assert(IsActualBoundedIntegerType(iv_ty));
@@ -8370,8 +8051,9 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
                               ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
                               : "0")
                       << "; " << SSMName(iv_name, IsHost()) << " < " << ub_expr
-                      << (rng->ubound ? (" + " + ExprSTR(rng->ubound, IsHost()))
-                                      : "")
+                      << (rng->ubound
+                              ? (" + " + ExprSTR(rng->ubound, IsHost()))
+                              : "")
                       << "; ++" << SSMName(iv_name, IsHost()) << ") {\n";
           IncrIndent();
         }
@@ -8391,24 +8073,133 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
   return true;
 }
 
-bool CuteCodeGen::Visit(AST::ApplyBlock& n) {
+bool CuteCodeGen::Visit(AST::FragApply& n) {
   TraceEachVisit(n);
   if (IsHost()) return true;
+  if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent, true);
 
-  // Post-order: body has been emitted; close the register loop.
-  if (apply_has_main_loop_) {
-    DecrIndent();
-    IndStream() << "}\n";
+  auto target_name = n.TargetName();
+  auto scoped = InScopeNameForRef(target_name);
+
+  if (!FCtx(fname).HasFragmentLayout(scoped)) {
+    dbgs() << "frag.apply: no layout for " << scoped << "\n";
+    return true;
   }
+  auto& fl = FCtx(fname).GetFragmentLayout(scoped);
+  auto sym = UnScopedName(SSMName(scoped, false));
+  size_t regs = fl.regs_per_thread;
+
+  std::string tid_expr;
+  if (bdim_level == ParallelLevel::GROUPx4)
+    tid_expr = "(threadIdx.x % 128)";
+  else if (!current_thread_count_expr.empty())
+    tid_expr = "__choreo_vtid_x";
+  else
+    tid_expr = "threadIdx.x";
+
+  // Set up register-direct state so that .at() codegen emits frag[__r].
+  reg_loop_var_ = "__r";
+  in_register_direct_automap_ = true;
+  automap_frag_reg_expr_.clear();
+  automap_frag_reg_expr_[scoped] = sym + "[" + reg_loop_var_ + "]";
+
+  // Override other fragment accesses in the body to register-direct form.
+  // Two cases: (1) compatible layout -> same register index;
+  // (2) 1D row-broadcast in a 2D MMA apply -> map via RowFromRegIndex.
+  auto BuildOverrides = [&](auto&& self, const ptr<AST::Node>& node) -> void {
+    if (!node) return;
+    if (auto da = dyn_cast<AST::DataAccess>(node)) {
+      if (da->AccessElement()) {
+        auto sc = InScopeNameForRef(da->data->name);
+        if (FCtx(fname).HasFragmentLayout(sc)) {
+          auto s = UnScopedName(SSMName(sc, false));
+          auto& other_fl = FCtx(fname).GetFragmentLayout(sc);
+          if (other_fl.IsCompatible(fl)) {
+            automap_frag_reg_expr_[sc] = s + "[" + reg_loop_var_ + "]";
+          } else if (other_fl.logical_cols <= 1 && fl.logical_cols > 1 &&
+                     fl.IsMMAAnchored()) {
+            automap_frag_reg_expr_[sc] =
+                s + "[" + fl.RowFromRegIndex(reg_loop_var_) + "]";
+          }
+        }
+      }
+      return;
+    }
+    if (auto expr = dyn_cast<AST::Expr>(node)) {
+      if (expr->GetL()) self(self, expr->GetL());
+      if (expr->GetR()) self(self, expr->GetR());
+      if (expr->GetC()) self(self, expr->GetC());
+      return;
+    }
+    if (auto call = dyn_cast<AST::Call>(node)) {
+      for (auto& arg : call->GetArguments()) self(self, arg);
+      return;
+    }
+    if (auto cast_expr = dyn_cast<AST::CastExpr>(node)) {
+      if (cast_expr->GetR()) self(self, cast_expr->GetR());
+      return;
+    }
+  };
+  BuildOverrides(BuildOverrides, n.body);
+
+  // Register lambda params in symbol tables so ExprSTR can resolve types.
+  // Set up frag_apply_iv_map_ before body generation.
+  for (auto& p : n.params) {
+    auto sp = SSTab().ScopedName(p);
+    if (!SSTab().IsDeclared(sp)) SSTab().DefineSymbol(sp, MakeIntegerType());
+    if (!SymTab()->Exists(sp)) SymTab()->AddSymbol(sp, MakeIntegerType());
+    frag_apply_iv_map_[p] = "__frag_iv_" + p;
+  }
+
+  // Generate body expression first to determine which iv vars are referenced.
+  std::string body_expr = ExprSTR(n.body, false);
+
+  IndStream() << "{ // frag.apply " << target_name << "\n";
+  IncrIndent();
+
+  // Only declare iv variables that are actually used in the body.
+  std::vector<bool> param_used(n.params.size(), false);
+  for (size_t pi = 0; pi < n.params.size(); ++pi) {
+    std::string iv_var = "__frag_iv_" + n.params[pi];
+    if (body_expr.find(iv_var) != std::string::npos) {
+      param_used[pi] = true;
+      ds << d_indent << "int " << iv_var << " = 0;\n";
+    }
+  }
+
+  IndStream() << "#pragma unroll\n";
+  IndStream() << "for (int " << reg_loop_var_ << " = 0; " << reg_loop_var_
+              << " < " << regs << "; ++" << reg_loop_var_ << ") {\n";
+  IncrIndent();
+
+  // Only compute iv variables that are actually referenced.
+  for (size_t pi = 0; pi < n.params.size(); ++pi) {
+    if (!param_used[pi]) continue;
+    std::string iv_var = "__frag_iv_" + n.params[pi];
+    if (n.params.size() == 1)
+      ds << d_indent << iv_var << " = "
+         << fl.LogicalRowFromReg(reg_loop_var_, tid_expr) << ";\n";
+    else if (pi == 0)
+      ds << d_indent << iv_var << " = "
+         << fl.LogicalRowFromReg(reg_loop_var_, tid_expr) << ";\n";
+    else
+      ds << d_indent << iv_var << " = "
+         << fl.LogicalColFromReg(reg_loop_var_, tid_expr) << ";\n";
+  }
+
+  // Emit: target[__r] = body_expr;
+  ds << d_indent << sym << "[" << reg_loop_var_ << "] = " << body_expr << ";\n";
+
   DecrIndent();
-  IndStream() << "} // apply " << n.SpanFragmentName() << "\n";
+  IndStream() << "}\n";
+  DecrIndent();
+  IndStream() << "} // frag.apply\n";
 
   in_register_direct_automap_ = false;
   automap_frag_reg_expr_.clear();
   reg_loop_var_.clear();
   frag_apply_iv_map_.clear();
-  apply_row_hoisted_stmts_.clear();
-  apply_has_main_loop_ = true;
+
   return true;
 }
 
@@ -8646,36 +8437,10 @@ bool CuteCodeGen::Visit(AST::FragReduce& n) {
 
   // Phase 2: Cross-thread butterfly AllReduce.
   if (rp.threads_per_row > 1) {
-    if (!rp.NeedsWorkspace()) {
-      // Inline the butterfly shuffles directly to avoid function boundaries
-      // that can cause ptxas WGMMA serialization (C7510/C7514).
-      size_t offset = rp.threads_per_row / 2;
-      int round = 0;
-      while (offset >= 1) {
-        std::string vname = "__shfl_v" + std::to_string(round);
-        IndStream() << "{\n";
-        IncrIndent();
-        IndStream() << "float " << vname
-                    << " = __shfl_xor_sync(0xffffffff, __local_reduce, "
-                    << offset << ");\n";
-        if (is_max) {
-          IndStream() << "__local_reduce = fmaxf(__local_reduce, " << vname
-                      << ");\n";
-        } else {
-          IndStream() << "__local_reduce = __local_reduce + " << vname << ";\n";
-        }
-        DecrIndent();
-        IndStream() << "}\n";
-        if (offset == 1) break;
-        offset /= 2;
-        round++;
-      }
-    } else {
-      IndStream() << "__local_reduce = choreo::AllReduce<" << reduce_type
-                  << ", " << rp.threads_per_row << ", 1>::run(__local_reduce";
-      ds << ", " << ws_name;
-      ds << ");\n";
-    }
+    IndStream() << "__local_reduce = choreo::AllReduce<" << reduce_type << ", "
+                << rp.threads_per_row << ", 1>::run(__local_reduce";
+    if (rp.NeedsWorkspace()) ds << ", " << ws_name;
+    ds << ");\n";
   }
 
   IndStream() << dst_sym << "[__row] = __local_reduce;\n";
@@ -8695,7 +8460,6 @@ bool CuteCodeGen::Visit(AST::InThreadsBlock& n) {
   ds << d_indent << "// inthreads: " << n.LOC() << "\n";
   current_inthreads = &n;
   warpspec_wgmma_arrived = false;
-  waited_events_.clear();
   if (!n.stmts->None()) {
     auto pred_str = ExprSTR(n.pred, false);
 
@@ -8703,6 +8467,17 @@ bool CuteCodeGen::Visit(AST::InThreadsBlock& n) {
     if (n.HasScopeThreadMask() && n.inthreads_level == ParallelLevel::GROUPx4 &&
         bdim_level == ParallelLevel::GROUPx4) {
       if (n.ActiveWarpGroup() >= 0) has_analyzed_warpspec = true;
+    }
+
+    // SALA: mark multi-instance consumer scopes for auto-barrier insertion
+    // (legacy mode, only when --auto-barrier is set).
+    if (CCtx().AutoBarrier() && n.async && n.HasScopeThreadMask() &&
+        n.inthreads_level == ParallelLevel::GROUPx4 &&
+        n.ActiveWarpGroup() < 0 &&
+        FCtx(fname).NeedSALAConsumerBarrier()) {
+      pending_sala_consumer_barrier_ = true;
+      sala_consumer_barrier_threads_ =
+          FCtx(fname).SALAConsumerBarrierThreads();
     }
 
     ds << d_indent << "if (" << pred_str << ") {\n";
@@ -9077,65 +8852,169 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
 void CuteCodeGen::EmitMemReuse(const std::string& df_name) {
   const auto& mri = FCtx(fname).GetDynMemReuseInfo(df_name);
   if (!mri) return;
-  hs << h_indent << R"(// JIT memory reuse begin)"
-     << "\n";
+
   for (const auto& [sto, ie] : mri->infos) {
-    hs << h_indent << "HeapSimulator::Chunks " << ie.chunks_name << ";\n";
-    for (const auto& c : ie.chunks)
-      hs << h_indent << ie.chunks_name << ".push_back(" << c << ");\n";
-  }
-  for (const auto& [sto, ie] : mri->infos) {
-    hs << h_indent << "HeapSimulator " << ie.simulator << ";\n";
-    size_t align = ie.alignment ? ie.alignment : 512;
-    if (ie.n_buffers > 0 && !ie.interference.empty()) {
-      // Emit pre-computed interference matrix (incorporates SALA HB analysis)
-      std::string imat_name = ie.chunks_name + "_imat";
-      hs << h_indent << "std::vector<bool> " << imat_name << " = {";
-      for (size_t k = 0; k < ie.interference.size(); ++k) {
-        if (k) hs << ",";
-        hs << (ie.interference[k] ? "true" : "false");
-      }
-      hs << "};\n";
-      hs << h_indent << "HeapSimulator::Result " << ie.result << " = "
-         << ie.simulator << ".Allocate(" << ie.chunks_name << ", " << align
-         << ", " << imat_name << ");\n";
-    } else {
-      hs << h_indent << "HeapSimulator::Result " << ie.result << " = "
-         << ie.simulator << ".Allocate(" << ie.chunks_name << ", " << align
-         << ");\n";
+    if (ie.n_buffers == 0) continue;
+    size_t N = ie.n_buffers;
+    size_t align = ie.alignment;
+
+    // Declare output variables in outer scope
+    hs << h_indent << "unsigned " << ie.spm_size << ";\n";
+    hs << h_indent << "unsigned long " << ie.offsets_name << "["
+       << ie.offset_args.size() << "];\n";
+    hs << h_indent << "// Parametric memory allocation plan (" << N
+       << " buffers, compile-time interference graph)\n";
+    hs << h_indent << "{\n";
+    std::string ind = h_indent + "  ";
+
+    // Buffer sizes (runtime expressions)
+    hs << ind << "constexpr size_t __co_mr_N = " << N << ";\n";
+    hs << ind << "size_t __co_mr_sizes[__co_mr_N] = {";
+    for (size_t i = 0; i < N; ++i) hs << (i ? ", " : "") << ie.size_exprs[i];
+    hs << "};\n";
+
+    // Static interference graph (compile-time constant)
+    hs << ind << "static constexpr bool "
+       << "__co_mr_interfere[__co_mr_N][__co_mr_N] = {\n";
+    for (size_t i = 0; i < N; ++i) {
+      hs << ind << "  {";
+      for (size_t j = 0; j < N; ++j)
+        hs << (j ? ", " : "")
+           << (ie.interference[i * N + j] ? "true" : "false");
+      hs << "},\n";
     }
-    hs << h_indent << "unsigned " << ie.spm_size << " = " << ie.result
-       << ".heap_size;\n";
-    // special host runtime check
+    hs << ind << "};\n";
+
+    // Sort indices by descending size (insertion sort, no heap alloc)
+    hs << ind << "int __co_mr_order[__co_mr_N];\n";
+    hs << ind << "for (int i = 0; i < (int)__co_mr_N; ++i) "
+       << "__co_mr_order[i] = i;\n";
+    hs << ind << "for (int i = 1; i < (int)__co_mr_N; ++i) {\n";
+    hs << ind << "  int key = __co_mr_order[i];\n";
+    hs << ind << "  int j = i - 1;\n";
+    hs << ind << "  while (j >= 0 && (__co_mr_sizes[__co_mr_order[j]] < "
+       << "__co_mr_sizes[key] || (__co_mr_sizes[__co_mr_order[j]] == "
+       << "__co_mr_sizes[key] && __co_mr_order[j] > key))) {\n";
+    hs << ind << "    __co_mr_order[j + 1] = __co_mr_order[j];\n";
+    hs << ind << "    --j;\n";
+    hs << ind << "  }\n";
+    hs << ind << "  __co_mr_order[j + 1] = key;\n";
+    hs << ind << "}\n";
+
+    // Greedy first-fit allocation with alignment
+    hs << ind << "size_t __co_mr_offsets[__co_mr_N] = {};\n";
+    hs << ind << "size_t __co_mr_heap = 0;\n";
+
+    hs << ind << "for (int i = 0; i < (int)__co_mr_N; ++i) {\n";
+    std::string in2 = ind + "  ";
+    hs << in2 << "int ci = __co_mr_order[i];\n";
+    hs << in2 << "size_t sz = __co_mr_sizes[ci];\n";
+
+    // Collect forbidden intervals from interfering already-placed buffers
+    hs << in2 << "size_t __co_mr_fb[__co_mr_N][2];\n";
+    hs << in2 << "int __co_mr_nfb = 0;\n";
+    hs << in2 << "for (int j = 0; j < i; ++j) {\n";
+    hs << in2 << "  int cj = __co_mr_order[j];\n";
+    hs << in2 << "  if (__co_mr_interfere[ci][cj]) {\n";
+    hs << in2 << "    __co_mr_fb[__co_mr_nfb][0] = __co_mr_offsets[cj];\n";
+    hs << in2 << "    __co_mr_fb[__co_mr_nfb][1] = __co_mr_offsets[cj] + "
+       << "__co_mr_sizes[cj];\n";
+    hs << in2 << "    __co_mr_nfb++;\n";
+    hs << in2 << "  }\n";
+    hs << in2 << "}\n";
+
+    // Sort forbidden ranges by start
+    hs << in2 << "for (int a = 0; a < __co_mr_nfb - 1; ++a)\n";
+    hs << in2 << "  for (int b = a + 1; b < __co_mr_nfb; ++b)\n";
+    hs << in2 << "    if (__co_mr_fb[a][0] > __co_mr_fb[b][0]) {\n";
+    hs << in2 << "      size_t t0 = __co_mr_fb[a][0], t1 = __co_mr_fb[a][1];\n";
+    hs << in2 << "      __co_mr_fb[a][0] = __co_mr_fb[b][0]; "
+       << "__co_mr_fb[a][1] = __co_mr_fb[b][1];\n";
+    hs << in2 << "      __co_mr_fb[b][0] = t0; __co_mr_fb[b][1] = t1;\n";
+    hs << in2 << "    }\n";
+
+    // Merge overlapping forbidden ranges
+    hs << in2 << "int __co_mr_mfb = 0;\n";
+    hs << in2 << "if (__co_mr_nfb > 0) {\n";
+    hs << in2 << "  size_t __co_mr_mg[__co_mr_N][2];\n";
+    hs << in2 << "  __co_mr_mg[0][0] = __co_mr_fb[0][0]; "
+       << "__co_mr_mg[0][1] = __co_mr_fb[0][1];\n";
+    hs << in2 << "  __co_mr_mfb = 1;\n";
+    hs << in2 << "  for (int k = 1; k < __co_mr_nfb; ++k) {\n";
+    hs << in2
+       << "    if (__co_mr_fb[k][0] <= __co_mr_mg[__co_mr_mfb-1][1]) {\n";
+    hs << in2 << "      if (__co_mr_fb[k][1] > __co_mr_mg[__co_mr_mfb-1][1])\n";
+    hs << in2 << "        __co_mr_mg[__co_mr_mfb-1][1] = __co_mr_fb[k][1];\n";
+    hs << in2 << "    } else {\n";
+    hs << in2 << "      __co_mr_mg[__co_mr_mfb][0] = __co_mr_fb[k][0];\n";
+    hs << in2 << "      __co_mr_mg[__co_mr_mfb][1] = __co_mr_fb[k][1];\n";
+    hs << in2 << "      __co_mr_mfb++;\n";
+    hs << in2 << "    }\n";
+    hs << in2 << "  }\n";
+    hs << in2 << "  for (int k = 0; k < __co_mr_mfb; ++k) {\n";
+    hs << in2 << "    __co_mr_fb[k][0] = __co_mr_mg[k][0];\n";
+    hs << in2 << "    __co_mr_fb[k][1] = __co_mr_mg[k][1];\n";
+    hs << in2 << "  }\n";
+    hs << in2 << "}\n";
+
+    // Find first valid aligned position
+    auto emitAlignUp = [&](const std::string& var) {
+      if (align > 0)
+        hs << in2 << var << " = (" << var << " + " << (align - 1) << ") / "
+           << align << " * " << align << ";\n";
+    };
+    hs << in2 << "size_t pos = 0;\n";
+    emitAlignUp("pos");
+    hs << in2 << "for (int k = 0; k < __co_mr_mfb; ++k) {\n";
+    hs << in2 << "  if (pos + sz <= __co_mr_fb[k][0]) break;\n";
+    hs << in2 << "  pos = __co_mr_fb[k][1];\n";
+    emitAlignUp("  pos");
+    hs << in2 << "}\n";
+
+    hs << in2 << "__co_mr_offsets[ci] = pos;\n";
+    hs << in2 << "if (pos + sz > __co_mr_heap) __co_mr_heap = pos + sz;\n";
+    hs << ind << "}\n";
+
+    // Align final heap size
+    if (align > 0)
+      hs << ind << "__co_mr_heap = (__co_mr_heap + " << (align - 1) << ") / "
+         << align << " * " << align << ";\n";
+
+    // Export spm_size
+    hs << ind << ie.spm_size << " = (unsigned)__co_mr_heap;\n";
+
+    // Runtime check
     std::string mem_capacity = std::to_string(CCtx().GetMemCapacity(sto));
     if (!CCtx().DisableRuntimeCheck())
-      hs << h_indent << "choreo::runtime_check(" << ie.spm_size
-         << " <= (size_t)" << mem_capacity
-         << ", \"In the memory reuse of dynamic shapes"
+      hs << ind << "choreo::runtime_check(" << ie.spm_size << " <= (size_t)"
+         << mem_capacity << ", \"In the memory reuse of dynamic shapes"
          << ", the size of the initial " << STR(sto)
          << " spm should not exceed the memory usage limit " << mem_capacity
          << " bytes.\");\n";
-    hs << h_indent << "unsigned long " << ie.offsets_name << "["
-       << mri->infos[sto].offset_args.size() << "];"
-       << "\n";
-    std::string idx = ie.chunks_name + "_idx";
-    hs << h_indent << "size_t " << idx << " = 0;\n";
-    hs << h_indent << "for (const auto& [buffer_id, offset] : " << ie.result
-       << ".chunk_offsets)\n";
-    hs << h_indent << "  " << ie.offsets_name << "[" << idx
-       << "++] = offset;\n";
+
+    // Export offsets in the order expected by offset_args (sorted)
+    // offset_args is sorted (raw with ::); buffer_ids has :: replaced with _.
+    for (size_t oi = 0; oi < ie.offset_args.size(); ++oi) {
+      auto arg_normalized = RegexReplaceAll(ie.offset_args[oi], "::", "_");
+      for (size_t bi = 0; bi < ie.buffer_ids.size(); ++bi) {
+        if ("mr_offset" + ie.buffer_ids[bi] == arg_normalized) {
+          hs << ind << ie.offsets_name << "[" << oi << "] = __co_mr_offsets["
+             << bi << "];\n";
+          break;
+        }
+      }
+    }
+
+    hs << h_indent << "}\n";
   }
-  hs << h_indent << R"(// JIT memory reuse end)"
-     << "\n";
 }
 
 static const char* CuTensorMapL2PromotionExpr(int l2_promote_bytes) {
   switch (l2_promote_bytes) {
-  case 0: return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_128B";
   case 64: return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_64B";
   case 128: return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_128B";
   case 256: return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_256B";
-  default: return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_L2_128B";
+  default: return "CUtensorMapL2promotion::CU_TENSOR_MAP_L2_PROMOTION_NONE";
   }
 }
 
@@ -9157,7 +9036,18 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     }
     auto gmem_ty = GetSpannedType(GetScopedSymbolType(g_sym));
     auto smem_ty = GetSpannedType(GetScopedSymbolType(s_sym));
-
+#if 0
+    auto gtsr = GenTensorDecl(g_ca->RefSymbol(), g_ca->RefSymbol(), gmem_ty->GetStorage(), gmem_ty->ElementType(), gmem_ty->GetShape(), true);
+    auto stsr = GenTensorDecl(s_ca->RefSymbol(), s_ca->RefSymbol(), smem_ty->GetStorage(), gmem_ty->ElementType(), smem_ty->GetShape(), true);
+    hs << gtsr.second;
+    hs << stsr.second;
+    if (desc.IsLoad())
+    hs << h_indent << "cute::make_tma_copy(TMALoadAtom{}, " << gtsr.first
+       << ", " << stsr.first << ");\n";
+    else
+    hs << h_indent << "cute::make_tma_copy(TMAStoreAtom{}, " << stsr.first
+       << ", " << gtsr.first << ");\n";
+#endif
     auto g_shape = gmem_ty->GetShape();
     auto g_stride = gmem_ty->GetStrides();
     if (auto idx = g_ca->IndexOfLastSpanAs()) {
@@ -9199,13 +9089,8 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
 
     if (desc.HasRootParam()) {
       // TMA source is a computed subview (e.g., Q_head derived from Q).
-      // Flatten the root parameter's N-D shape to 2D [outer, inner]
+      // Flatten the root parameter's N-D shape to 2D [outer_product, inner]
       // so the TMA descriptor covers the entire root tensor.
-      //
-      // Use the subview's outermost stride as inner_dim rather than the
-      // root's last dimension.  When squeezed dimensions sit between the
-      // tiled and innermost dimensions (e.g. Q[B,SEQ,H,DIM] -> Q_head[SEQ,DIM]
-      // with stride [H*DIM,1]), the row stride is H*DIM, not DIM.
       auto root_name = UnScopedName(desc.GetRootParamName());
       const auto& root_shape = desc.GetRootParamShape();
 
@@ -9391,9 +9276,9 @@ DeviceParamTypeStringify(const Choreo::Type& ty) {
   else if (isa<U32Type>(&ty))
     return "unsigned int";
   else if (isa<S64Type>(&ty))
-    return "int64_t";
+    return "long long";
   else if (isa<U64Type>(&ty))
-    return "uint64_t";
+    return "unsigned long long";
   else if (isa<BooleanType>(&ty))
     return "bool";
   else if (isa<FloatE4M3Type>(&ty))
@@ -9437,14 +9322,18 @@ static inline std::string HostParamTypeStringifyForCute(const Choreo::Type& ty,
 }
 
 std::optional<int64_t> CuteCodeGen::GetSetRegLimit(AST::ParallelBy* pb) const {
-  if (!pb) return std::nullopt;
+  if (!pb || !pb->GetBody()) return std::nullopt;
 
-  if (pb->HasMaxnreg()) {
-    auto arg = pb->GetMaxnregArg();
-    if (arg && arg->Opts().HasVal() && arg->Opts().GetVal()->IsNumeric()) {
-      auto reg_limit = VIInt(arg->Opts().GetVal());
-      if (reg_limit && reg_limit.value() > 0) return reg_limit.value();
-    }
+  for (const auto& stmt : pb->GetBody()->values) {
+    auto call = dyn_cast<AST::Call>(stmt);
+    if (!call || !call->IsBIF() || call->function->name != "setreg") continue;
+    if (!call->arguments || call->arguments->Count() != 1) return std::nullopt;
+    auto arg = dyn_cast<AST::Expr>(call->arguments->ValueAt(0));
+    if (!arg || !arg->Opts().HasVal() || !arg->Opts().GetVal()->IsNumeric())
+      return std::nullopt;
+    auto reg_limit = VIInt(arg->Opts().GetVal());
+    if (!reg_limit || reg_limit.value() <= 0) return std::nullopt;
+    return reg_limit.value();
   }
 
   return std::nullopt;
@@ -9452,15 +9341,22 @@ std::optional<int64_t> CuteCodeGen::GetSetRegLimit(AST::ParallelBy* pb) const {
 
 std::optional<int64_t>
 CuteCodeGen::GetLaunchBoundsMinBlocks(AST::ParallelBy* pb) const {
-  if (!pb || !pb->HasLaunchBounds()) return std::nullopt;
-  auto& lb_args = pb->GetLaunchBoundsArgs();
-  if (lb_args->Count() < 2) return std::nullopt;
-  auto arg = dyn_cast<AST::Expr>(lb_args->ValueAt(1));
-  if (!arg || !arg->Opts().HasVal() || !arg->Opts().GetVal()->IsNumeric())
-    return std::nullopt;
-  auto min_blocks = VIInt(arg->Opts().GetVal());
-  if (!min_blocks || min_blocks.value() <= 0) return std::nullopt;
-  return min_blocks.value();
+  if (!pb || !pb->GetBody()) return std::nullopt;
+
+  for (const auto& stmt : pb->GetBody()->values) {
+    auto call = dyn_cast<AST::Call>(stmt);
+    if (!call || !call->IsBIF() || call->function->name != "launch_bounds")
+      continue;
+    if (!call->arguments || call->arguments->Count() != 1) return std::nullopt;
+    auto arg = dyn_cast<AST::Expr>(call->arguments->ValueAt(0));
+    if (!arg || !arg->Opts().HasVal() || !arg->Opts().GetVal()->IsNumeric())
+      return std::nullopt;
+    auto min_blocks = VIInt(arg->Opts().GetVal());
+    if (!min_blocks || min_blocks.value() <= 0) return std::nullopt;
+    return min_blocks.value();
+  }
+
+  return std::nullopt;
 }
 
 void CuteCodeGen::EmitCudaFree() {
@@ -9492,37 +9388,10 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
     auto group_count = lcs[0].group_count.x * lcs[0].group4_count.x *
                        lcs[0].group_count.y * lcs[0].group_count.z;
     auto thr_count = inner_thr_count * group_count;
-
-    std::string max_thr_str;
-    if (pb && pb->HasLaunchBounds()) {
-      auto arg0 = dyn_cast<AST::Expr>(pb->GetLaunchBoundsArgs()->ValueAt(0));
-      if (arg0 && arg0->Opts().HasVal()) {
-        auto v = VIInt(arg0->Opts().GetVal());
-        if (v && v.value() > 0) max_thr_str = ValueSTR(arg0->Opts().GetVal());
-      }
-    }
-    if (max_thr_str.empty() && VIInt(thr_count).has_value())
-      max_thr_str = ValueSTR(thr_count);
-
-    if (!max_thr_str.empty()) {
-      std::optional<int64_t> max_blocks_per_cluster;
-      if (pb && pb->HasLaunchBounds() &&
-          pb->GetLaunchBoundsArgs()->Count() >= 3) {
-        auto arg2 = dyn_cast<AST::Expr>(pb->GetLaunchBoundsArgs()->ValueAt(2));
-        if (arg2 && arg2->Opts().HasVal())
-          max_blocks_per_cluster = VIInt(arg2->Opts().GetVal());
-      }
-
+    if (VIInt(thr_count).has_value()) {
       if (launch_bounds_min_blocks.has_value()) {
-        launch_bounds_attr = "__launch_bounds__(" + max_thr_str + ", " +
-                             std::to_string(*launch_bounds_min_blocks);
-        if (max_blocks_per_cluster)
-          launch_bounds_attr.value() +=
-              ", " + std::to_string(*max_blocks_per_cluster);
-        launch_bounds_attr.value() += ") ";
-      } else if (pb && pb->HasLaunchBounds() &&
-                 pb->GetLaunchBoundsArgs()->Count() == 1) {
-        launch_bounds_attr = "__launch_bounds__(" + max_thr_str + ") ";
+        launch_bounds_attr = "__launch_bounds__(" + ValueSTR(thr_count) + ", " +
+                             std::to_string(*launch_bounds_min_blocks) + ") ";
       } else if (IsWarpSpecActive() ||
                  set_cuda_func_attribute_max_dynamic_shared_memory_size) {
         int64_t min_blocks = 1;
@@ -9530,7 +9399,7 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
                 cgi.GetFunctionTrait(fname).inferred_launch_bounds_min_blocks;
             inferred > 0)
           min_blocks = inferred;
-        launch_bounds_attr = "__launch_bounds__(" + max_thr_str + ", " +
+        launch_bounds_attr = "__launch_bounds__(" + ValueSTR(thr_count) + ", " +
                              std::to_string(min_blocks) + ") ";
       }
     }
@@ -9625,8 +9494,7 @@ void CuteCodeGen::EmitFastCompileCache(std::ostream& os,
      << "\n";
   os << R"(  echo "[choreo-fc] Warning: cannot write to ${CHOREO_CACHE_DIR}, using temp dir" >&2)"
      << "\n";
-  os << R"(  CHOREO_CACHE_DIR=$(mktemp -d))"
-     << "\n";
+  os << R"(  CHOREO_CACHE_DIR=$(mktemp -d))" << "\n";
   os << "fi\n\n";
 
   // Cache key includes arch, content fingerprint, and CUDA toolkit version.
@@ -9639,16 +9507,11 @@ void CuteCodeGen::EmitFastCompileCache(std::ostream& os,
      << fp_hex << ".o\n\n";
 
   // Build with flock to prevent concurrent builds from colliding.
-  os << R"(if [ ! -f "${PRECOMP_CACHED}" ]; then)"
-     << "\n";
-  os << R"(  LOCK_FILE="${CHOREO_CACHE_DIR}/.choreo_precompile.lock")"
-     << "\n";
-  os << R"(  ()"
-     << "\n";
-  os << R"(    flock -x 200)"
-     << "\n";
-  os << R"(    if [ ! -f "${PRECOMP_CACHED}" ]; then)"
-     << "\n";
+  os << R"(if [ ! -f "${PRECOMP_CACHED}" ]; then)" << "\n";
+  os << R"(  LOCK_FILE="${CHOREO_CACHE_DIR}/.choreo_precompile.lock")" << "\n";
+  os << R"(  ()" << "\n";
+  os << R"(    flock -x 200)" << "\n";
+  os << R"(    if [ ! -f "${PRECOMP_CACHED}" ]; then)" << "\n";
   os << R"(      echo "[choreo-fc] Building precompiled CuTe runtime for ${nv_arch} (one-time)..." >&2)"
      << "\n";
   os << "      ${NVCC} -dc ${DCFLAGS} " << precomp_cu
@@ -9657,15 +9520,12 @@ void CuteCodeGen::EmitFastCompileCache(std::ostream& os,
      << "\n";
   os << R"(      echo "[choreo-fc] Cached at ${PRECOMP_CACHED}" >&2)"
      << "\n";
-  os << R"(    fi)"
-     << "\n";
-  os << R"(  ) 200>"${LOCK_FILE}")"
-     << "\n";
+  os << R"(    fi)" << "\n";
+  os << R"(  ) 200>"${LOCK_FILE}")" << "\n";
   os << "fi\n\n";
 
   // Final check: the precompiled object must exist
-  os << R"(if [ ! -f "${PRECOMP_CACHED}" ]; then)"
-     << "\n";
+  os << R"(if [ ! -f "${PRECOMP_CACHED}" ]; then)" << "\n";
   os << R"(  echo "[choreo-fc] Error: failed to build precompiled runtime at ${PRECOMP_CACHED}" >&2)"
      << "\n";
   os << "  exit 1\nfi\n\n";
@@ -9793,6 +9653,7 @@ show_usage() {
   if (!target_options.GetValue().empty())
     os << " " << target_options.GetValue();
   if (use_pic) os << " -fPIC";
+  if (use_fast_math) os << " --use_fast_math";
   if (verbose) os << " -v"; // if it requires to be verbose
   os << " --expt-relaxed-constexpr";
   // always enclose
@@ -9831,24 +9692,20 @@ show_usage() {
     // Content fingerprint (computed at choreo build time)
     EmitFastCompileCache(os, precomp_cu);
 
-    os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)"
-       << "\n";
+    os << R"(if [ "$1" == "--execute" ] || [ "$#" -eq 0 ]; then)" << "\n";
     os << "  ${NVCC} -dc ${DCFLAGS} " << cc_file << " -o " << kernel_obj
        << "\n";
     os << "  ${NVCC} ${CFLAGS} " << kernel_obj << " ${PRECOMP_CACHED} -o "
        << exe_file << "\n";
     os << "  " << exe_file << "\n";
-    os << R"(elif [ "$1" == "--compile-module" ]; then)"
-       << "\n";
+    os << R"(elif [ "$1" == "--compile-module" ]; then)" << "\n";
     os << "  ${NVCC} -dc ${DCFLAGS} " << cc_file << " -o " << exe_file << "\n";
-    os << R"(elif [ "$1" == "--compile-link" ]; then)"
-       << "\n";
+    os << R"(elif [ "$1" == "--compile-link" ]; then)" << "\n";
     os << "  ${NVCC} -dc ${DCFLAGS} " << cc_file << " -o " << kernel_obj
        << "\n";
     os << "  ${NVCC} ${CFLAGS} " << kernel_obj << " ${PRECOMP_CACHED} -o "
        << exe_file << "\n";
-    os << R"(elif [ "$1" == "--lib" ]; then)"
-       << "\n";
+    os << R"(elif [ "$1" == "--lib" ]; then)" << "\n";
     os << "  ${NVCC} --lib -Xcompiler -fPIC ${CFLAGS} " << cc_file << " -o "
        << exe_file << "\n";
     os << "\nelse show_usage";
@@ -9931,18 +9788,10 @@ const std::string CuteCodeGen::ValueSTR(const ValueItem& vi, bool LL_suffix,
   // This avoids re-expanding expressions like kv_tiles when they appear
   // inside larger expressions like kv_bound's ternary.
   if (!IsHost() && !shp_lit && !LL_suffix && !known_val_str_to_var_.empty()) {
-    auto isWordChar = [](char c) {
-      return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
-    };
     for (auto& [expr, var] : known_val_str_to_var_) {
       for (auto pos = result.find(expr); pos != std::string::npos;
-           pos = result.find(expr, pos + 1)) {
-        auto end = pos + expr.size();
-        if (pos > 0 && isWordChar(result[pos - 1])) continue;
-        if (end < result.size() && isWordChar(result[end])) continue;
+           pos = result.find(expr, pos + var.size()))
         result.replace(pos, expr.size(), var);
-        pos += var.size() - 1;
-      }
     }
   }
   return result;
@@ -10085,7 +9934,7 @@ const std::string CuteCodeGen::ExprCastSTR(
     else if (IsFloatType(f)) {
       if (f != BT::F32 && f != BT::F64)
         res << "static_cast<" << nbt << ">("
-            << ExprCastSTR(n, val, BT::F32, f, is_host, is_explicit) << ")";
+            << ExprCastSTR(n, val, BT::F32, f, is_host) << ")";
       else
         res << "static_cast<" << nbt << ">(" << value << ")";
     }
@@ -10095,8 +9944,8 @@ const std::string CuteCodeGen::ExprCastSTR(
     if (IsIntegralType(f))
       res << "static_cast<double>(" << value << ")";
     else
-      res << "static_cast<double>("
-          << ExprCastSTR(n, val, BT::F32, f, is_host, is_explicit) << ")";
+      res << "static_cast<double>(" << ExprCastSTR(n, val, BT::F32, f, is_host)
+          << ")";
     break;
   }
   case BT::F32: {
@@ -10115,18 +9964,18 @@ const std::string CuteCodeGen::ExprCastSTR(
     break;
   }
   case BT::F16:
-    res << "choreo::f32_to_f16("
-        << ExprCastSTR(n, val, BT::F32, f, is_host, is_explicit) << ")";
+    res << "choreo::f32_to_f16(" << ExprCastSTR(n, val, BT::F32, f, is_host)
+        << ")";
     break;
   case BT::BF16:
-    res << "choreo::f32_to_bf16("
-        << ExprCastSTR(n, val, BT::F32, f, is_host, is_explicit) << ")";
+    res << "choreo::f32_to_bf16(" << ExprCastSTR(n, val, BT::F32, f, is_host)
+        << ")";
     break;
   case BT::F8_E4M3:
   case BT::F8_E5M2:
     res << "choreo::utils::from_f32<"
         << ((t == BT::F8_E4M3) ? "f8_e4m3" : "f8_e5m2") << ">("
-        << ExprCastSTR(n, val, BT::F32, f, is_host, is_explicit) << ")";
+        << ExprCastSTR(n, val, BT::F32, f, is_host) << ")";
     break;
   default:
     choreo_unreachable("unsupport cast: '" + STR(f) + "' to '" + STR(t) + "'");
@@ -10493,16 +10342,14 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
       if (!is_host && ssm.HasDeviceName(sname)) {
         return UnScopedName(ssm.DeviceName(sname));
       }
-      if (!frag_apply_iv_map_.count(sym->name) &&
-          FCtx(fname).HasSymbolValues(sname)) {
+      if (FCtx(fname).HasSymbolValues(sname)) {
         auto svs = FCtx(fname).GetSymbolValues(sname);
         if (svs.HasVal()) return ValueSTR(svs.GetVal());
       }
     }
 
-    if (ConvertibleToInt(NodeType(*e)) && frag_apply_iv_map_.empty()) {
+    if (ConvertibleToInt(NodeType(*e)))
       if (expr->Opts().HasVal()) return ValueSTR(expr->Opts().GetVal());
-    }
 
     if (expr->IsReference()) {
       if (PSTR(expr) == "_") return "0";
@@ -10715,8 +10562,8 @@ const std::string CuteCodeGen::CallSTR(AST::Call& n) const {
     return oss.str();
   }
 
-  static const std::unordered_map<std::string, std::string> cuda_intrinsic_map =
-      {{"__fmaf", "fmaf"}, {"__frcp_rn", "__frcp_rn"}};
+  static const std::unordered_map<std::string, std::string>
+      cuda_intrinsic_map = {{"__fmaf", "fmaf"}, {"__frcp_rn", "__frcp_rn"}};
 
   auto func_name = [&n](const std::string& name) -> std::string {
     if (!n.IsArith()) return name;
@@ -10758,7 +10605,6 @@ const std::string CuteCodeGen::CallSTR(AST::Call& n) const {
     if (auto sty = GetSpannedType(NodeType(*a))) {
       std::string bts{NameBaseType(sty->ElementType())};
       auto m_ty = sty->GetStorage();
-      std::cerr << "m_ty: " << STR(m_ty) << std::endl;
       auto mem_attr = CudaParamStorage(m_ty);
       if (a->HasNote("annotate_as") && !mem_attr.empty())
         bts = mem_attr + " " + bts;

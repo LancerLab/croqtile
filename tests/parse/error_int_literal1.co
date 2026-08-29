@@ -1,7 +1,0 @@
-// RUN: not choreo %s 2>&1 | FileCheck %s
-
-__co__ void foo () {
-  y = -9223372036854775808;
-}
-
-// CHECK: error: signed integer literal '9223372036854775808' out of range [0, 9223372036854775807].

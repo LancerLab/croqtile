@@ -175,8 +175,6 @@ void ParallelBy::accept(Choreo::Visitor& v) {
   if (bound_expr) bound_expr->accept(v);
   if (cmpt_bounds) cmpt_bounds->accept(v);
   if (stream_expr) stream_expr->accept(v);
-  if (launch_bounds_args) launch_bounds_args->accept(v);
-  if (maxnreg_arg) maxnreg_arg->accept(v);
   v.Visit(*this);
 
   // handle identifier/matcher inside 'parallelby'
@@ -244,8 +242,6 @@ void MMA::accept(Choreo::Visitor& v) {
     operation->LoadFrom()->accept(v);
     if (operation->IsLoadR() && operation->LoadTo())
       operation->LoadTo()->accept(v);
-  } else if (operation->IsDesc()) {
-    operation->DescFrom()->accept(v);
   } else if (operation->IsKind(MMAOperation::Exec)) {
     if (operation->ExecOperand(0)) operation->ExecOperand(0)->accept(v);
     if (operation->ExecOperand(1)) operation->ExecOperand(1)->accept(v);
@@ -265,9 +261,8 @@ void MMA::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
-void ApplyBlock::accept(Choreo::Visitor& v) {
+void FragApply::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
-  if (body) body->accept(v);
   v.Visit(*this);
   v.AfterVisit(*this);
 }
@@ -387,23 +382,10 @@ void Synchronize::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
-void Barrier::accept(Choreo::Visitor& v) {
-  v.BeforeVisit(*this);
-  v.Visit(*this);
-  v.AfterVisit(*this);
-}
-
-void Fence::accept(Choreo::Visitor& v) {
-  v.BeforeVisit(*this);
-  v.Visit(*this);
-  v.AfterVisit(*this);
-}
-
 void LoopRange::accept(Choreo::Visitor& v) {
   if (lbound) lbound->accept(v);
   if (ubound) ubound->accept(v);
-  if (rv) rv->accept(v);
-  if (HasExplicitIV()) iv->accept(v);
+  iv->accept(v);
   v.Visit(*this);
 }
 

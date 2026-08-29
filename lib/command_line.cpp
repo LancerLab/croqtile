@@ -18,8 +18,8 @@ Option<std::string> target(OptionKind::User, "--target", "-t",
                            "show current supported targets.",
                            "--target <platform>", true);
 Option<std::string> arch(OptionKind::User, "-arch", "", "" /*default empty*/,
-                         "Set the architecture. Use 'native' to auto-detect.",
-                         "-arch=<processor|native>");
+                         "Set the architecture to execute the binary code.",
+                         "-arch=<processor>");
 Option<std::string> output(OptionKind::User, "-o", "", "",
                            "Place the output into <file>.", "-o <file>", true);
 Option<std::string>
@@ -39,17 +39,6 @@ Option<bool> compile_only(
     "Compile choreo code and the generated target code; Without linking.");
 Option<bool> generate_script(OptionKind::User, "--generate-script", "-gs",
                              false, "Generate target script.");
-Option<bool> make_lib(OptionKind::User, "--lib", "", false,
-                      "Compile and archive into a static library (.a). "
-                      "Implies -fPIC. User main() is automatically suppressed "
-                      "to avoid link conflicts.");
-Option<bool> suppress_main(OptionKind::Hidden, "--suppress-main", "", false,
-                           "Suppress user main() in generated code. "
-                           "Automatically set by --lib.");
-Option<size_t> parallel_jobs(OptionKind::User, "-j", "", 1,
-                             "Number of parallel compilation jobs for "
-                             "multi-file --lib mode.",
-                             "-j <N>");
 namespace Choreo {
 Option<bool>
     sim_sparse(OptionKind::Hidden, "--sim", "-sim", false,
@@ -91,12 +80,15 @@ Option<bool> use_kernel_template(
     OptionKind::Hidden, "--use-kernel-template", "-kt", false,
     "(Experimental) Allow choreo code to instantiate C++ template functions.");
 Option<bool> use_hetero_tileflow(
-    OptionKind::Hidden, "--use-hetero-tileflow-discard", "-ht", false,
+    OptionKind::Hidden, "--use-hetero-tileflow", "-ht", false,
     "(Experimental) Allow choreo code to apply implicit/aggressive tileflow"
     "optimisation under heterogeneous scenario.");
 Option<bool>
     use_pic(OptionKind::Hidden, "--use-pic", "-fpic", false,
             "Generate position-independent code if possible (small mode).");
+Option<bool> simplify_fp_valno(
+    OptionKind::Hidden, "--simplify-fp-valno", "-sfv", false,
+    "(Experimental) Simplify the value numbering for floating point types.");
 Option<bool>
     native_f16(OptionKind::User, "--native-f16", "-f16n", false,
                "Utilize native f16 type when target platform support.");
@@ -203,6 +195,8 @@ Option<bool> visualiz(OptionKind::Hidden, "--visualize", "-u", false,
                       "Visualize the data movement of DMAs.");
 Option<bool> ncodegen(OptionKind::Hidden, "--no-codegen", "-s", false,
                       "Do not generate Code.");
+Option<bool> sym_repl(OptionKind::Hidden, "--print-sym-replace", "-sr", false,
+                      "Trace the symbol replace process.");
 Option<bool> prt_pass(OptionKind::Hidden, "--show-passes", "-sp", false,
                       "Show the visit pass pipeline.");
 Option<bool>
@@ -210,10 +204,15 @@ Option<bool>
                 "Measure and display the time spent in each compiler pass.");
 Option<bool> save_temps(OptionKind::Hidden, "--save-temps", "", false,
                         "Save the temporal files.");
+Option<bool> liveness(OptionKind::Hidden, "--liveness", "", true,
+                      "Analyze the liveness of the program.");
 Option<bool> mem_reuse(OptionKind::Hidden, "--mem-reuse", "", true,
                        "Analyze the memory usage, then perform memory reuse.");
 Option<bool> no_sala(OptionKind::Hidden, "--no-sala", "", false,
                      "Disable signal-aware liveness analysis (SALA).");
+Option<bool> auto_barrier(OptionKind::Hidden, "--auto-barrier", "", false,
+                          "Auto-insert named barriers for multi-consumer "
+                          "epilogues (legacy; prefer explicit sync.wg).");
 Option<bool> diag_dma(OptionKind::Hidden, "--diag-dma", "-dd", true,
                       "Enable runtime DMA diagnosis.");
 Option<bool> print_node_type(OptionKind::Hidden, "--print-node-type", "-pnt",
@@ -246,6 +245,24 @@ Option<size_t> shared_mem_alignment(OptionKind::Hidden,
                                     "--shared-mem-alignment", "-fsmem-align",
                                     true,
                                     "Set the alignment of shared memory.");
+Option<bool> use_warpspec(OptionKind::Hidden, "--use-warpspec", "", false,
+                          "Enable warp-specialized synchronization for shared "
+                          "event/full-empty pipelines.");
+Option<bool> hoist_wgmma_arrive(
+    OptionKind::User, "--hoist-wgmma-arrive", "", false,
+    "Hoist warpgroup_arrive() before unrolled foreach loops containing "
+    "WGMMA exec without commit, enabling batched arrive for the entire "
+    "unrolled loop body.");
+Option<bool> single_thread_producer(
+    OptionKind::User, "--single-thread-producer", "", true,
+    "When used with --use-warpspec, keep the producer inthreads scope single-"
+    "threaded. Set to false to instead single-guard producer TMA/event "
+    "operations individually.");
+Option<bool> skip_epilogue_group_sync(
+    OptionKind::User, "--skip-epilogue-group-sync", "", false,
+    "Skip wg_barrier.sync() before shared-to-global TMA copies in warpspec "
+    "mode. Safe when the writing warpgroup exclusively owns the shared buffer "
+    "and fence_proxy_async_shared_cta() provides sufficient ordering.");
 Option<bool>
     use_target_lib(OptionKind::User, "--use-target-lib", "-utl", false,
                    "Lower __lib_* builtins to target-specific library calls. "
@@ -268,6 +285,12 @@ bool CommandLine::Parse(int argc, char** argv) {
 
     if (end_of_options) {
       // After '--', treat everything as positional (input file)
+      if (!r.GetInputFileName().empty()) {
+        errs() << "error: set input file twice: '" << r.GetInputFileName()
+               << "' and '" << arg << "'.\n";
+        ret_code = 1;
+        return false;
+      }
       r.SetInputFileDirect(arg);
       continue;
     }
@@ -324,15 +347,6 @@ bool CommandLine::Parse(int argc, char** argv) {
         return false;
       }
       CCtx().SetOptimizationLevel(level);
-    } else if (arg.substr(0, 2) == "-j" && arg.size() > 2) {
-      // GCC-style -jN: parse concatenated job count
-      try {
-        parallel_jobs = (size_t)std::stoul(arg.substr(2));
-      } catch (...) {
-        std::cerr << "Invalid job count: " << arg << ".\n";
-        ret_code = 1;
-        return false;
-      }
     } else if (!r.Parse(argc, argv, i)) {
       if (!r.Message().empty()) errs() << r.Message() << "\n";
       exit(r.ReturnCode());
@@ -402,40 +416,18 @@ bool CommandLine::Parse(int argc, char** argv) {
       exit(1);
     }
     CCtx().SetOutputKind(OutputKind::PreProcessedCode);
-  } else if (make_lib) {
-    CCtx().SetOutputKind(OutputKind::TargetLibrary);
-    if (output.GetValue().empty()) output = "a.a";
-  } else if (emit_source) {
+  } else if (emit_source)
     CCtx().SetOutputKind(OutputKind::TargetSourceCode);
-  } else if (compile_only) {
+  else if (compile_only) {
     CCtx().SetOutputKind(OutputKind::TargetModule);
-    if (output.GetValue().empty()) output = "a.o";
+    if (output.GetValue().empty()) output = "a.o"; // default module name
   } else if (generate_script)
     CCtx().SetOutputKind(OutputKind::ShellScript);
   else {
     CCtx().SetOutputKind(OutputKind::TargetExecutable);
-    if (output.GetValue().empty()) output = "a.out";
+    if (output.GetValue().empty()) output = "a.out"; // default exe name
   }
-
-  CCtx().SetDeviceOnly(make_lib.GetValue() || suppress_main.GetValue());
-
-  // Multi-file is only supported for --lib mode
-  if (r.HasMultipleInputs() && !make_lib) {
-    errs() << "error: multiple input files are only supported with --lib.\n";
-    ret_code = 1;
-    return false;
-  }
-
-  // For modes where the backend produces binary output (module, executable,
-  // library), don't open the output file as a text stream -- the backend
-  // scripts write directly. For source/script modes, open the stream for text
-  // output.
-  switch (CCtx().GetOutputKind()) {
-  case OutputKind::TargetModule:
-  case OutputKind::TargetExecutable:
-  case OutputKind::TargetLibrary: r.SetOutputFileName(output.GetValue()); break;
-  default: r.SetOutputStream(output.GetValue()); break;
-  }
+  r.SetOutputStream(output.GetValue());
 
   // save the options to the global context
   CCtx().SetGenDebugInfo(generate_debug_info.GetValue());
@@ -459,13 +451,20 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetNoVectorize(no_vectorize.GetValue());
   CCtx().SetVectorize(vectorize.GetValue());
   CCtx().SetShowSourceLocation(!no_show_source.GetValue());
+  CCtx().SetLivenessAnalysis(liveness.GetValue());
   CCtx().SetMemReuse(mem_reuse.GetValue());
   CCtx().SetSALA(!no_sala.GetValue());
+  CCtx().SetAutoBarrier(auto_barrier.GetValue());
+  CCtx().SetSimplifyFpValno(simplify_fp_valno.GetValue());
   CCtx().SetVerifyVisitors(verify_visitors.GetValue());
   CCtx().SetDMADiagnosis(diag_dma.GetValue());
   CCtx().SetLoopNorm(loop_norm.GetValue());
   CCtx().SetMaxLocalMemCapacityPerThread(max_local_mem_capacity.GetValue());
   CCtx().SetSharedMemAlignment(shared_mem_alignment.GetValue());
+  CCtx().SetUseWarpSpec(use_warpspec.GetValue());
+  CCtx().SetHoistWGMMAArrive(hoist_wgmma_arrive.GetValue());
+  CCtx().SetSingleThreadProducer(single_thread_producer.GetValue());
+  CCtx().SetSkipEpilogueGroupSync(skip_epilogue_group_sync.GetValue());
   if (use_target_lib.WasExplicitlySet())
     CCtx().SetUseTargetLib(use_target_lib.GetValue());
   else

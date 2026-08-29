@@ -1,5 +1,4 @@
 #include "visitor.hpp"
-#include "choreo_api.hpp"
 #include <set>
 
 using namespace Choreo;
@@ -63,8 +62,3 @@ void Visitor::ValidatePassEnvVars() {
 
 location loc;
 AST::Program root(loc);
-
-namespace Choreo {
-AST::Program& CompilerAPI::GetAST() { return root; }
-location& CompilerAPI::GetLoc() { return loc; }
-} // namespace Choreo

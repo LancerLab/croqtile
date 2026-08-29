@@ -150,10 +150,10 @@ private:
       size_t heap_size;                            // total memory size
     };
 
-    using HBOverride =
-        std::function<bool(const std::string&, const std::string&)>;
-    using HBMustInterfere =
-        std::function<bool(const std::string&, const std::string&)>;
+    using HBOverride = std::function<bool(const std::string&,
+                                          const std::string&)>;
+    using HBMustInterfere = std::function<bool(const std::string&,
+                                               const std::string&)>;
 
     // global decreasing size best fit allocate algorithm
     // (support arbitrary alignment)
@@ -186,8 +186,9 @@ private:
       for (size_t i = 0; i < length; ++i)
         for (size_t j = i + 1; j < length; ++j) {
           if (sorted_chunks[i].Interfere(sorted_chunks[j])) {
-            if (hb_override && hb_override(sorted_chunks[i].buffer_id,
-                                           sorted_chunks[j].buffer_id))
+            if (hb_override &&
+                hb_override(sorted_chunks[i].buffer_id,
+                            sorted_chunks[j].buffer_id))
               continue;
             interference_graph[i][j] = true;
             interference_graph[j][i] = true;
@@ -290,7 +291,8 @@ private:
     Result Allocate(const std::vector<Chunk>& chunks, int64_t alignment = 0,
                     HBOverride hb_override = nullptr,
                     HBMustInterfere hb_must_interfere = nullptr) {
-      return GlobalDecreasingSizeBestFitAllocate(chunks, alignment, hb_override,
+      return GlobalDecreasingSizeBestFitAllocate(chunks, alignment,
+                                                 hb_override,
                                                  hb_must_interfere);
     }
   };
@@ -298,6 +300,7 @@ private:
 public:
   MemReuse() : VisitorWithSymTab("memreuse") {
     if (trace_visit) debug_visit = true;
+    // TODO: maybe should do the same for other passes.
     if (disabled) CCtx().SetMemReuse(false);
   }
   ~MemReuse() {}

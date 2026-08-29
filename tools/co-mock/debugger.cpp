@@ -42,18 +42,10 @@ void Debugger::ShowLocation(AST::Node& stmt) {
 bool Debugger::CommandLoop(AST::Node& stmt) {
   ShowLocation(stmt);
 
-  bool scripted = (input_ != &std::cin);
-
   while (true) {
-    if (!scripted) std::cout << "(co-mock) " << std::flush;
+    std::cout << "(co-mock) " << std::flush;
     std::string input;
-    if (!std::getline(*input_, input)) {
-      if (scripted) {
-        // Script exhausted: switch to stdin for remaining execution
-        input_ = &std::cin;
-        mode_ = Run;
-        return true;
-      }
+    if (!std::getline(std::cin, input)) {
       std::cout << "\n";
       return false;
     }
@@ -61,6 +53,7 @@ bool Debugger::CommandLoop(AST::Node& stmt) {
     // Trim whitespace
     auto start = input.find_first_not_of(" \t");
     if (start == std::string::npos) {
+      // Empty line repeats last step action
       mode_ = StepInto;
       step_depth_ = current_depth_;
       return true;
@@ -69,10 +62,9 @@ bool Debugger::CommandLoop(AST::Node& stmt) {
     auto end = input.find_last_not_of(" \t");
     if (end != std::string::npos) input = input.substr(0, end + 1);
 
-    if (scripted) std::cout << "(co-mock) " << input << "\n";
-
     if (!ProcessCommand(input, stmt)) return false;
 
+    // If mode changed from the command, resume execution
     if (mode_ == Run || mode_ == StepInto || mode_ == StepOver) return true;
   }
 }
@@ -119,12 +111,6 @@ bool Debugger::ProcessCommand(const std::string& input, AST::Node& stmt) {
     iss >> what;
     if (what == "break" || what == "breakpoints" || what == "b")
       CmdBreakpoints();
-    else if (what == "futures" || what == "fut" || what == "f")
-      CmdInfoFutures();
-    else if (what == "mem" || what == "memory" || what == "m")
-      CmdInfoMem();
-    else if (what == "locals" || what == "l")
-      CmdInfo();
     else
       CmdInfo();
     mode_ = (Mode)-1;
@@ -155,8 +141,6 @@ void Debugger::CmdHelp() {
       << "  b <line>       Set breakpoint at line number\n"
       << "  d <line>       Delete breakpoint at line number\n"
       << "  info           Show all variables in scope\n"
-      << "  info futures   Show async DMA future status\n"
-      << "  info mem       Show memory allocations\n"
       << "  info break     Show all breakpoints\n"
       << "  q, quit        Exit the debugger\n"
       << "  <Enter>        Repeat last step\n"
@@ -245,39 +229,6 @@ void Debugger::CmdInfo() {
       std::cout << "\n";
     }
   }
-}
-
-void Debugger::CmdInfoFutures() {
-  bool found = false;
-  auto& scopes = mem_.AllScopes();
-  for (int s = (int)scopes.size() - 1; s >= 0; --s) {
-    for (auto& [name, val] : scopes[s]) {
-      if (val.kind != Value::Future) continue;
-      found = true;
-      std::cout << "  " << name << ": " << val.ToString() << "\n";
-    }
-  }
-  if (!found) std::cout << "No active futures.\n";
-}
-
-void Debugger::CmdInfoMem() {
-  std::set<void*> seen;
-  auto& scopes = mem_.AllScopes();
-  for (int s = (int)scopes.size() - 1; s >= 0; --s) {
-    for (auto& [name, val] : scopes[s]) {
-      if (val.kind != Value::Pointer || !val.alloc) continue;
-      if (seen.count(val.alloc->RawPtr())) continue;
-      seen.insert(val.alloc->RawPtr());
-      std::cout << "  " << name << ": " << STR(val.alloc->storage) << " "
-                << STR(val.alloc->elem_type) << "[";
-      for (size_t i = 0; i < val.alloc->shape.size(); ++i) {
-        if (i) std::cout << ", ";
-        std::cout << val.alloc->shape[i];
-      }
-      std::cout << "] (" << val.alloc->TotalBytes() << " bytes)\n";
-    }
-  }
-  if (seen.empty()) std::cout << "No allocations.\n";
 }
 
 void Debugger::CmdBreak(const std::string& arg) {

@@ -1,7 +1,0 @@
-// RUN: not choreo %s 2>&1 | FileCheck %s
-
-__co__ void foo () {
-  mds : [0x1ffffffffffffffffULL, 1];
-}
-
-// CHECK: error: unsigned integer literal '0x1ffffffffffffffffULL' out of range [0, 0xffffffffffffffff].

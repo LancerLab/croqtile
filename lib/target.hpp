@@ -3,7 +3,6 @@
 
 #include "aux.hpp"
 #include "preprocess.hpp"
-#include <memory>
 #include <set>
 
 namespace Choreo {
@@ -14,8 +13,6 @@ enum class ParallelLevel;
 enum class SwizMode;
 class ASTPipeline;
 class Preprocess;
-struct DeviceCodeGen;
-struct CodeGenerator;
 
 // see the Description
 enum class ChoreoFeature {
@@ -33,10 +30,6 @@ enum class ChoreoFeature {
   VECTORIZE,
   HDRPARSE,
   LIBCALL,
-  MMA_UKERNEL,
-  BARRIER,
-  FENCE,
-  COOPERATIVE_LAUNCH,
 };
 
 inline static const std::string STR(ChoreoFeature cf) {
@@ -55,10 +48,6 @@ inline static const std::string STR(ChoreoFeature cf) {
   case ChoreoFeature::VECTORIZE: return "vectorize";
   case ChoreoFeature::HDRPARSE: return "hdrparse";
   case ChoreoFeature::LIBCALL: return "libcall";
-  case ChoreoFeature::MMA_UKERNEL: return "mma_ukernel";
-  case ChoreoFeature::BARRIER: return "barrier";
-  case ChoreoFeature::FENCE: return "fence";
-  case ChoreoFeature::COOPERATIVE_LAUNCH: return "cooperative_launch";
   default: choreo_unreachable("unsupported feature kind.");
   }
 }
@@ -86,14 +75,6 @@ inline static const std::string Description(ChoreoFeature cf) {
     return "Parse C++ Header Files Included by Choreo Source.";
   case ChoreoFeature::LIBCALL:
     return "Target Library (__lib_*) Builtin Support.";
-  case ChoreoFeature::MMA_UKERNEL:
-    return "Micro-kernel based MMA via target library calls.";
-  case ChoreoFeature::BARRIER:
-    return "Execution barrier synchronization at parallel levels.";
-  case ChoreoFeature::FENCE:
-    return "Memory fence for ordering memory operations.";
-  case ChoreoFeature::COOPERATIVE_LAUNCH:
-    return "Cooperative kernel launch for grid-level synchronization.";
   default: choreo_unreachable("unsupported feature kind.");
   }
 }
@@ -130,7 +111,6 @@ public:
 
   // Target hooks -- keep these abstract
   virtual const std::string Name() const = 0;
-  virtual const std::string DeviceName() const { return Name(); }
   virtual const std::vector<ArchInfo> SupportedArchs() const { return {}; }
   virtual const std::unordered_map<std::string, std::string>
   ChoreoMacros(const ArchId&) const {
@@ -143,15 +123,6 @@ public:
                          "' supports no architecture.");
     return archs.begin()->id;
   }
-
-  // Resolve "native" to a concrete arch by probing local hardware.
-  // Returns empty string if detection is not supported or fails.
-  virtual ArchId ResolveNativeArch() const { return ""; }
-
-  // Return path to the host C++ compiler for this target.
-  // Used by --lib multi-file driver to compile .cpp wrapper files.
-  virtual std::string HostCXXCompiler() const { return "c++"; }
-
   virtual const std::vector<FeatureToggle>
   SupportedFeatures(const ArchId&) const {
     return {};
@@ -200,27 +171,6 @@ public:
     return true;
   }
   virtual int DefaultOptLevel(const ArchId&) const { return 0; }
-
-  // Barrier, fence, and cooperative launch support queries.
-  // Targets override these to declare which barrier levels, fence scopes,
-  // and cooperative launch are supported for each architecture.
-
-  // Whether execution barrier at the given parallel level is supported.
-  virtual bool IsBarrierSupported(const ArchId&, ParallelLevel) const {
-    return IsFeatureSupported(STR(ChoreoFeature::BARRIER));
-  }
-  // Whether memory fence at the given visibility level is supported.
-  virtual bool IsFenceSupported(const ArchId&, ParallelLevel) const {
-    return IsFeatureSupported(STR(ChoreoFeature::FENCE));
-  }
-  // Default memory scope for a fence at the given visibility level.
-  // Returns Storage::NONE if the default is target-defined (not specifiable).
-  virtual Storage GetDefaultFenceMemory(const ArchId&,
-                                        ParallelLevel visibility) const;
-  // Whether the target supports cooperative kernel launches.
-  virtual bool SupportsCooperativeLaunch(const ArchId&) const {
-    return IsFeatureSupported(STR(ChoreoFeature::COOPERATIVE_LAUNCH));
-  }
 
   virtual size_t VectorizeLimit(const ArchId& arch) const {
     choreo_unreachable("unexpected architecture: " + arch + ".");
@@ -314,51 +264,7 @@ public:
   // Whether this target enables target-library lowering by default.
   virtual bool DefaultUseTargetLib() const { return false; }
 
-  // MMA target strategy name for CoIR lowering.
-  // Returns the string used to annotate coir.mma.exec operations:
-  //   "wgmma"    -- warp-group MMA (SM90+)
-  //   "mma_sync" -- cooperative MMA (SM80)
-  //   "ukernel"  -- library-based micro-kernel MMA
-  //   ""         -- target does not support MMA
-  virtual std::string MMATargetName(const ArchId& arch) const {
-    if (IsFeatureSupported(arch, STR(ChoreoFeature::MMA_UKERNEL)))
-      return "ukernel";
-    if (IsFeatureSupported(arch, STR(ChoreoFeature::WGMMA))) return "wgmma";
-    if (IsFeatureSupported(arch, STR(ChoreoFeature::MMA))) return "mma_sync";
-    return "";
-  }
-
-  // Whether TMA is supported for the given architecture (for CoIR lowering).
-  virtual bool HasTMA(const ArchId& arch) const {
-    return IsFeatureSupported(arch, STR(ChoreoFeature::TMA));
-  }
-
-  // Whether the target requires a hardware DMA engine for global<->local
-  // memory transfers (for CoIR lowering).  When true, ClassifyCopies
-  // produces coir.dma.copy instead of coir.thread.copy for global<->local.
-  virtual bool HasDMA(const ArchId& arch) const {
-    return IsFeatureSupported(arch, STR(ChoreoFeature::ASYNC_DMA));
-  }
-
-  // Whether the target's code generation only produces binaries (no text
-  // source or script emission).  Targets that return true default to
-  // compile_binary mode and reject -es/-gs.
-  virtual bool IsBinaryOnlyCodeGen() const { return false; }
-
   virtual bool PlanCodeGenStages(ASTPipeline&) const = 0;
-
-  /// Run the pre-codegen AST stages that populate CodeGenInfo and register
-  /// target-specific assessments (HW constraints).  Called by CoCC before
-  /// ASTCoIRGen so that the assessor contains both sema-level and
-  /// target-level assertions for the COIR path.  Targets override to add
-  /// their adaptor (e.g. GPUAdaptor).  The base implementation adds only
-  /// CodegenPrepare.
-  virtual bool PlanPreCodegenStages(ASTPipeline& p) const;
-
-  // Factory for DeviceCodeGen used by HeteroCodeGen. Returns nullptr if
-  // the target does not support heterogeneous device code generation.
-  virtual std::unique_ptr<DeviceCodeGen> MakeDeviceCodeGen() const;
-  virtual bool HasDeviceCodeGen() const;
 
   virtual const std::vector<ParallelLevel>
   GetParallelLevels(const ArchId&) const = 0;

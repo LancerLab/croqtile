@@ -1,8 +1,0 @@
-// RUN: not choreo %target %s 2>&1 | FileCheck %s
-// CHECK: Parsing failed due to syntax errors.
-
-__co__ void bad_placement() {
-  launch_bounds(7);
-}
-
-int main() { return 0; }

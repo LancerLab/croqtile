@@ -1,3 +1,0 @@
-// RUN: not choreo abccccdefal 2>&1 | FileCheck %s
-
-// CHECK: The input file 'abccccdefal' does not exist.

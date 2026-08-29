@@ -1,3 +1,0 @@
-# User-facing target names that map to the GPU backend.
-cute
-nvptx

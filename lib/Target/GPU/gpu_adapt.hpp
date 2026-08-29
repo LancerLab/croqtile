@@ -100,7 +100,6 @@ private:
 
       VST_DEBUG(ps.Show(dbgs(), lvl); dbgs() << "\n";);
       CheckPBSettings(pb);
-      CheckLaunchBounds(pb);
       CheckStreamBinding(pb);
     }
     return true;
@@ -207,32 +206,6 @@ public:
     }
   }
 
-  void CheckLaunchBounds(AST::ParallelBy* pb) {
-    if (!pb->HasLaunchBounds()) return;
-    if (pb->GetLevel() != ParallelLevel::BLOCK) return;
-    auto& lb_args = pb->GetLaunchBoundsArgs();
-    if (lb_args->Count() < 1) return;
-    auto arg0 = dyn_cast<AST::Expr>(lb_args->ValueAt(0));
-    if (!arg0 || !arg0->Opts().HasVal()) return;
-    auto max_threads = VIInt(arg0->Opts().GetVal());
-    if (!max_threads || max_threads.value() == 0) return;
-    auto& lcs = cgi.GetFunctionLaunches(fname);
-    if (lcs.empty()) return;
-    auto inner_thr =
-        lcs[0].thread_count.x * lcs[0].thread_count.y * lcs[0].thread_count.z;
-    auto group_cnt = lcs[0].group_count.x * lcs[0].group4_count.x *
-                     lcs[0].group_count.y * lcs[0].group_count.z;
-    auto computed = (inner_thr * group_cnt)->Normalize();
-    if (auto ct = VIInt(computed)) {
-      if (ct.value() > max_threads.value())
-        Error1(lb_args->ValueAt(0)->LOC(),
-               "[[launch_bounds]] maxThreadsPerBlock (" +
-                   std::to_string(max_threads.value()) +
-                   ") is less than the computed thread count (" +
-                   std::to_string(ct.value()) + ").");
-    }
-  }
-
   void CheckStreamBinding(AST::ParallelBy* pb) {
     if (!pb->HasStream()) return;
     auto lvl = pb->GetLevel();
@@ -246,19 +219,19 @@ public:
     auto se = pb->StreamExpr();
     if (!se->IsReference()) {
       Error1(se->LOC(),
-             "stream binding in parallel<...> must be a stream variable.");
+             "stream binding in parallel(...) must be a stream variable.");
       return;
     }
     auto id = dyn_cast<AST::Identifier>(se->GetR().get());
     if (!id) {
       Error1(se->LOC(),
-             "stream binding in parallel<...> must be a stream variable.");
+             "stream binding in parallel(...) must be a stream variable.");
       return;
     }
     auto ty = GetSymbolType(id->name);
     if (!isa<StreamType>(ty))
       Error1(se->LOC(), "'" + id->name +
-                            "' is not a stream type; parallel<...> requires "
+                            "' is not a stream type; parallel(...) requires "
                             "a stream variable.");
   }
 
@@ -880,7 +853,7 @@ public:
     } break;
     case AST::MMAOperation::Load: break;
     case AST::MMAOperation::LoadR: break;
-    case AST::MMAOperation::Desc: break;
+    case AST::MMAOperation::LoadS: break;
     case AST::MMAOperation::Exec: {
       auto& a_sym = AST::FragName(op.ExecOperand(1));
       auto& b_sym = AST::FragName(op.ExecOperand(2));
@@ -985,15 +958,6 @@ public:
                             "but target is SM" +
                             std::to_string(arch) + ".");
 
-      // mma.desc denotes a WGMMA shared-memory descriptor.  Other MMA
-      // families consume register fragments, so accepting a shared operand
-      // here would leave the fragment unmaterialized in their codegen.
-      if (mma_ty != MMAType::WGMMA && (a_sty->GetStorage() == Storage::SHARED ||
-                                       b_sty->GetStorage() == Storage::SHARED))
-        Error1(n.LOC(),
-               "mma.desc is only valid for WGMMA shared-memory operands; "
-               "use mma.load for WMMA/mma.sync operands.");
-
       FCtx(fname).SetFragMMAType(InScopeName(a_sym), mma_ty);
       FCtx(fname).SetFragMMAType(InScopeName(b_sym), mma_ty);
       FCtx(fname).SetFragMMAType(InScopeName(c_sym), mma_ty);
@@ -1013,7 +977,9 @@ public:
         if (op.IsSparse() && !e_sym.empty())
           FCtx(fname).SetMMAPolicyOfFrag(InScopeName(e_sym), mma_policy);
       } else if (mma_ty == MMAType::WGMMA) {
-        bool is_rs = a_sty->GetStorage() == Storage::REG;
+        auto a_raw_ty = GetSymbolType(a_sym);
+        bool is_rs =
+            a_sty->GetStorage() == Storage::REG && !isa<FutureType>(a_raw_ty);
         std::string mma_policy =
             is_rs ? MMALimit::MMAConfig2WGMMANameRS(mma_config)
                   : MMALimit::MMAConfig2WGMMAName(mma_config);

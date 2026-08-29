@@ -1,6 +1,0 @@
-// RUN: not choreo -e %s 2>&1 | FileCheck %s
-
-__co__ void illegal_params(long double f) { }
-
-// CHECK: error: syntax error, unexpected IDENTIFIER, expecting ) or ","
-// CHECK: Parsing failed due to syntax errors.

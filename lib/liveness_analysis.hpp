@@ -8,10 +8,10 @@
 #include "types.hpp"
 #include "visitor.hpp"
 
-#include <algorithm>
 #include <queue>
 #include <sstream>
 #include <unordered_set>
+#include <algorithm>
 
 namespace Choreo {
 
@@ -163,6 +163,7 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   LivenessAnalyzer() : VisitorWithSymTab("liveness") {
     auto_declare_symbols = true;
     if (trace_visit) debug_visit = true; // force debug when tracing
+    if (disabled) CCtx().SetLivenessAnalysis(false);
   }
   ~LivenessAnalyzer() {}
 
@@ -170,7 +171,7 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 
   // When adding a new statement node type to HasStmt(), also add a Visit()
   // override and DumpStmtBriefly() case, then update this count.
-  static constexpr size_t NumVisitOverrides() { return 20; }
+  static constexpr size_t NumVisitOverrides() { return 18; }
 
   static VarSet& SetUnionInPlace(VarSet& a, const VarSet& b);
   static VarSet& SetDiffInPlace(VarSet& a, const VarSet& b);
@@ -210,8 +211,6 @@ public:
   bool Visit(AST::Call&) override;
   bool Visit(AST::Rotate&) override;
   bool Visit(AST::Synchronize&) override;
-  bool Visit(AST::Barrier&) override;
-  bool Visit(AST::Fence&) override;
   bool Visit(AST::Trigger&) override;
   bool Visit(AST::Select&) override;
   bool Visit(AST::Return&) override;
@@ -332,27 +331,39 @@ public:
     bool multi_instance = false;
     int multi_instance_count = 0;
     bool has_cta_barrier_before = false;
+    bool auto_barrier = false;
+  };
+
+  struct AutoBarrierInfo {
+    int wg_id = -1;
+    int num_consumer_instances = 0;
+    int num_consumer_threads = 0;
+    int epilogue_phase_id = -1;
   };
 
   struct HBGraph {
     std::vector<HBPhase> phases;
     std::vector<std::vector<bool>> reachable;
     std::set<std::string> globally_live_bufs;
+    std::vector<AutoBarrierInfo> auto_barriers;
 
     void AddEdge(int from, int to);
     void ComputeTransitiveClosure();
     bool Reaches(int from, int to) const;
-    bool CanOverlap(const std::string& buf_a, const std::string& buf_b) const;
+    bool CanOverlap(const std::string& buf_a,
+                    const std::string& buf_b) const;
     bool IsUnsafeMultiInstanceOverlap(const std::string& buf_a,
                                       const std::string& buf_b) const;
     void Dump(std::ostream& os) const;
     void DumpDot(std::ostream& os, const std::string& scope) const;
   };
 
-  const std::map<std::string, HBGraph>& HBGraphs() const { return hb_graphs; }
+  std::map<std::string, HBGraph> hb_graphs;
+  const std::map<std::string, HBGraph>& HBGraphs() const {
+    return hb_graphs;
+  }
 
 private:
-  std::map<std::string, HBGraph> hb_graphs;
   struct WGInfo {
     int wg_id = -1;
     std::string scope_name;
@@ -366,6 +377,8 @@ private:
     int64_t pv_bound = -1;
     int next_phase_id = 0;
     std::vector<WGInfo> warp_groups;
+    std::unordered_map<std::string, std::vector<std::pair<int, bool>>>
+        event_phases;
     std::set<std::string> globally_live_bufs;
   };
   std::map<std::string, HBBuildState> hb_build_states;
@@ -420,6 +433,7 @@ private:
   void AddFut2Buffers(const std::string& fut, const DMABufInfo& buf_info);
   void AddAsyncInthreadsVar(const std::string& scope_name,
                             const std::string& var);
+  void HandleAnon(const std::string& name);
 
   struct BlockInfo {
     VarSet in;

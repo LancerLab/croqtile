@@ -1,6 +1,5 @@
 #include "pipeline.hpp"
 #include "active_threads.hpp"
-#include "codegen.hpp"
 #include "codegen_prepare.hpp"
 #include "colors.hpp"
 #include "earlysema.hpp"
@@ -14,60 +13,10 @@
 #include "semacheck.hpp"
 #include "shapeinfer.hpp"
 #include "symbexpr.hpp"
-#include "target_utils.hpp"
 #include "typeinfer.hpp"
 #include "visualize.hpp"
 #include <chrono>
 #include <iomanip>
-
-extern Choreo::AST::Program root;
-
-void Choreo::CompilationContext::SavePreSemaRoot(AST::Node& r) {
-  pre_sema_root_ = r.Clone();
-}
-
-// --- TargetCompilationState implementation ---
-
-struct Choreo::CompilationContext::TargetCompilationState::CGIHolder {
-  std::unique_ptr<CodeGenInfo> cgi;
-};
-
-Choreo::CompilationContext::TargetCompilationState::TargetCompilationState() =
-    default;
-Choreo::CompilationContext::TargetCompilationState::~TargetCompilationState() =
-    default;
-Choreo::CompilationContext::TargetCompilationState::TargetCompilationState(
-    TargetCompilationState&&) noexcept = default;
-Choreo::CompilationContext::TargetCompilationState&
-Choreo::CompilationContext::TargetCompilationState::operator=(
-    TargetCompilationState&&) noexcept = default;
-
-Choreo::CompilationContext::TargetCompilationState
-Choreo::CompilationContext::SaveTargetState() {
-  TargetCompilationState s;
-  s.target = std::move(compile_target);
-  s.archs = archs;
-  s.output_kind = out_kind;
-  s.sym_tab = sym_tab;
-  s.anonymous_count = SymbolTable::anonymous_count;
-  s.anon_pb_count = SymbolTable::anon_pb_count;
-  s.cgi_holder = std::make_unique<TargetCompilationState::CGIHolder>();
-  s.cgi_holder->cgi = std::move(CodeGenInfo::instance);
-  s.pl_depth_map = std::move(pl_depth_map_);
-  return s;
-}
-
-void Choreo::CompilationContext::RestoreTargetState(
-    TargetCompilationState&& s) {
-  compile_target = std::move(s.target);
-  archs = s.archs;
-  out_kind = s.output_kind;
-  sym_tab = s.sym_tab;
-  SymbolTable::anonymous_count = s.anonymous_count;
-  SymbolTable::anon_pb_count = s.anon_pb_count;
-  CodeGenInfo::instance = std::move(s.cgi_holder->cgi);
-  pl_depth_map_ = std::move(s.pl_depth_map);
-}
 
 using namespace Choreo;
 
@@ -167,10 +116,40 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
   if (abend || pass_failed) return false;
 
   if (CCtx().PrintStats()) {
-    PrintAssessmentStats(CCtx().GetAssessmentStats());
+    const auto& s = CCtx().GetAssessmentStats();
     const char* sep =
         "===-------------------------------------------------------------------"
         "----===";
+    errs() << "\n"
+           << color::err(color::kBold) << sep << "\n"
+           << "                      ... Assessment Statistics ...\n"
+           << sep << color::err(color::kReset) << "\n";
+    auto row = [&](size_t n, const char* desc) {
+      errs() << color::err(color::kBold) << std::right << std::setw(6) << n
+             << color::err(color::kReset) << "  assess  - " << desc << "\n";
+    };
+    row(s.total, "Assessments evaluated");
+    row(s.static_true, "Resolved at compile time (static-true)");
+    row(s.static_false, "Proven false at compile time (static-false)");
+    row(s.runtime_total, "Runtime assertions generated");
+    row(s.runtime_entry, "Runtime assertions (entry cost)");
+    row(s.runtime_low, "Runtime assertions (low cost)");
+    row(s.runtime_medium, "Runtime assertions (medium cost)");
+    row(s.runtime_high, "Runtime assertions (high cost)");
+    row(s.runtime_enabled, "Runtime assertions enabled");
+    row(s.runtime_disabled, "Runtime assertions disabled by cost filter");
+    errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
+           << "\n";
+    row(s.unclassified_total, "Assessments (unclassified)");
+    row(s.shape_compat_total, "Assessments (shape-compatibility)");
+    row(s.elem_access_total, "Assessments (element-access)");
+    row(s.loop_bound_total, "Assessments (loop-bound)");
+    row(s.hw_constraint_total, "Assessments (hw-constraint)");
+    row(s.unclassified_runtime, "Runtime assertions (unclassified)");
+    row(s.shape_compat_runtime, "Runtime assertions (shape-compatibility)");
+    row(s.elem_access_runtime, "Runtime assertions (element-access)");
+    row(s.loop_bound_runtime, "Runtime assertions (loop-bound)");
+    row(s.hw_constraint_runtime, "Runtime assertions (hw-constraint)");
 
 #if CHOREO_ENABLE_SBE_STATS
     // SBE stats live under --stats so they follow the same colored reporting
@@ -255,11 +234,6 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
 }
 
 ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
-  // For heterogeneous compilation, save a pre-sema clone of the AST so that
-  // device offload functions can be compiled from a clean (artifact-free) AST.
-  if (CCtx().NeedPreSemaClone())
-    AddAction([](ASTPipeline&) { CCtx().SavePreSemaRoot(root); });
-
   // Initialize the common ast pipeline.
   // apply early semantics check without knowing type details
   AddStage<EarlySemantics>();
@@ -326,40 +300,4 @@ ASTPipeline& ASTPipeline::Get() {
   std::call_once(init_flag,
                  []() { instance = std::make_unique<ASTPipeline>(); });
   return *instance;
-}
-
-void Choreo::PrintAssessmentStats(const AssessmentStats& s) {
-  const char* sep =
-      "===-------------------------------------------------------------------"
-      "----===";
-  errs() << "\n"
-         << color::err(color::kBold) << sep << "\n"
-         << "                      ... Assessment Statistics ...\n"
-         << sep << color::err(color::kReset) << "\n";
-  auto row = [&](size_t n, const char* desc) {
-    errs() << color::err(color::kBold) << std::right << std::setw(6) << n
-           << color::err(color::kReset) << "  assess  - " << desc << "\n";
-  };
-  row(s.total, "Assessments evaluated");
-  row(s.static_true, "Resolved at compile time (static-true)");
-  row(s.static_false, "Proven false at compile time (static-false)");
-  row(s.runtime_total, "Runtime assertions generated");
-  row(s.runtime_entry, "Runtime assertions (entry cost)");
-  row(s.runtime_low, "Runtime assertions (low cost)");
-  row(s.runtime_medium, "Runtime assertions (medium cost)");
-  row(s.runtime_high, "Runtime assertions (high cost)");
-  row(s.runtime_enabled, "Runtime assertions enabled");
-  row(s.runtime_disabled, "Runtime assertions disabled by cost filter");
-  errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
-         << "\n";
-  row(s.unclassified_total, "Assessments (unclassified)");
-  row(s.shape_compat_total, "Assessments (shape-compatibility)");
-  row(s.elem_access_total, "Assessments (element-access)");
-  row(s.loop_bound_total, "Assessments (loop-bound)");
-  row(s.hw_constraint_total, "Assessments (hw-constraint)");
-  row(s.unclassified_runtime, "Runtime assertions (unclassified)");
-  row(s.shape_compat_runtime, "Runtime assertions (shape-compatibility)");
-  row(s.elem_access_runtime, "Runtime assertions (element-access)");
-  row(s.loop_bound_runtime, "Runtime assertions (loop-bound)");
-  row(s.hw_constraint_runtime, "Runtime assertions (hw-constraint)");
 }

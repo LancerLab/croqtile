@@ -1,9 +1,0 @@
-// RUN: choreo %s 2>&1 | FileCheck %s
-
-__co__ auto illegal_arith(bf16 x, f16 y) {
-  f32 f = x + y; // error even auto promotion
-  return f;
-}
-// CHECK: unexpect floating-point types in promote: bf16 and f16
-
-// TODO: check if cast can happend when decl unmutable vars

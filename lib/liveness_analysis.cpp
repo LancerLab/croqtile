@@ -43,7 +43,7 @@ using namespace Choreo;
 //   4. Update kNumStmtTypes below
 // The runtime assert in HasStmt() will fire if the count is wrong.
 // ==========================================================================
-static constexpr size_t kNumStmtTypes = 20;
+static constexpr size_t kNumStmtTypes = 18;
 static_assert(kNumStmtTypes == LivenessAnalyzer::NumVisitOverrides(),
               "HasStmt type count and Visit override count are out of sync. "
               "When adding a new statement node type, update both HasStmt() "
@@ -138,17 +138,15 @@ bool LivenessAnalyzer::HasStmt(const AST::Node& n) const {
                  isa<AST::Call>(&n) ||              // 7
                  isa<AST::Rotate>(&n) ||            // 8
                  isa<AST::Synchronize>(&n) ||       // 9
-                 isa<AST::Barrier>(&n) ||           // 10
-                 isa<AST::Fence>(&n) ||             // 11
-                 isa<AST::Trigger>(&n) ||           // 12
-                 isa<AST::Return>(&n) ||            // 13
-                 isa<AST::ParallelBy>(&n) ||        // 14
-                 isa<AST::WithBlock>(&n) ||         // 15
-                 isa<AST::ForeachBlock>(&n) ||      // 16
-                 isa<AST::WhileBlock>(&n) ||        // 17
-                 isa<AST::InThreadsBlock>(&n) ||    // 18
-                 isa<AST::IfElseBlock>(&n) ||       // 19
-                 isa<AST::ChoreoFunction>(&n);      // 20
+                 isa<AST::Trigger>(&n) ||           // 10
+                 isa<AST::Return>(&n) ||            // 11
+                 isa<AST::ParallelBy>(&n) ||        // 12
+                 isa<AST::WithBlock>(&n) ||         // 13
+                 isa<AST::ForeachBlock>(&n) ||      // 14
+                 isa<AST::WhileBlock>(&n) ||        // 15
+                 isa<AST::InThreadsBlock>(&n) ||    // 16
+                 isa<AST::IfElseBlock>(&n) ||       // 17
+                 isa<AST::ChoreoFunction>(&n);      // 18
   return is_stmt;
 }
 
@@ -282,9 +280,24 @@ void LivenessAnalyzer::AddUse(const Stmt* s, const std::string& var,
       */
       break;
     } else {
-      // res > 0: def is in a narrower scope than the use site.
-      // This can happen with inner-loop re-definitions shadowing an
-      // outer def.  No extra use needed at loop end - skip.
+      // TODO: the case is invalid?
+      assert(false);
+      /*
+      {
+        def x
+        loop {
+          def x;                          (event.second)
+          {
+            use x;
+            ...
+          }
+        }
+        use x;                            (SSTab().ScopeName())
+      }
+      then res is 1, which means that
+      the current scope !>= the scope of the definition point
+      just ignore it.
+      */
       continue;
     }
   }
@@ -494,7 +507,8 @@ bool LivenessAnalyzer::HBGraph::CanOverlap(const std::string& buf_a,
     for (int pb : phases_b) {
       if (pa == pb) return false;
       if (!Reaches(pa, pb) && !Reaches(pb, pa)) return false;
-      if (needsCTABarrier(pa, pb) && !hasCTABarrier(pa, pb)) return false;
+      if (needsCTABarrier(pa, pb) && !hasCTABarrier(pa, pb))
+        return false;
     }
   return true;
 }
@@ -518,7 +532,8 @@ bool LivenessAnalyzer::HBGraph::IsUnsafeMultiInstanceOverlap(
       int lo = std::min(pa_id, pb_id), hi = std::max(pa_id, pb_id);
       bool has_barrier = false;
       for (int k = lo + 1; k <= hi; ++k) {
-        if (phases[k].wg_id == pa.wg_id && phases[k].has_cta_barrier_before) {
+        if (phases[k].wg_id == pa.wg_id &&
+            phases[k].has_cta_barrier_before) {
           has_barrier = true;
           break;
         }
@@ -535,7 +550,7 @@ void LivenessAnalyzer::HBGraph::Dump(std::ostream& os) const {
     os << "    Phase " << p.phase_id << " [WG" << p.wg_id;
     if (p.multi_instance) os << " multi";
     if (p.is_async) os << " async";
-    if (p.has_cta_barrier_before) os << " cta-bar";
+    if (p.has_cta_barrier_before) os << (p.auto_barrier ? " auto-bar" : " cta-bar");
     os << "] stmts [" << p.first_stmt_id << "," << p.last_stmt_id << "]";
     if (!p.signal_in.empty()) os << " in=" << p.signal_in;
     if (!p.signal_out.empty()) os << " out=" << p.signal_out;
@@ -556,15 +571,6 @@ void LivenessAnalyzer::HBGraph::Dump(std::ostream& os) const {
 
 void LivenessAnalyzer::HBGraph::DumpDot(std::ostream& os,
                                         const std::string& scope) const {
-  auto shortName = [](const std::string& s) -> std::string {
-    auto trimmed = s;
-    while (trimmed.size() >= 2 && trimmed.substr(trimmed.size() - 2) == "::")
-      trimmed.erase(trimmed.size() - 2);
-    while (!trimmed.empty() && trimmed[0] == ':') trimmed.erase(0, 1);
-    auto pos = trimmed.rfind("::");
-    return pos != std::string::npos ? trimmed.substr(pos + 2) : trimmed;
-  };
-
   os << "digraph \"HB_" << scope << "\" {\n"
      << "  rankdir=TB;\n"
      << "  node [shape=box, style=\"rounded,filled\", fontsize=10];\n"
@@ -584,25 +590,26 @@ void LivenessAnalyzer::HBGraph::DumpDot(std::ostream& os,
   for (const auto& [wg_id, idxs] : by_wg) {
     int ci = wg_id % 6;
     os << "  subgraph cluster_wg" << wg_id << " {\n"
-       << "    label=\"WG" << wg_id << "\";\n"
+       << "    label=\"WG" << wg_id
+       << (wg_id == 0 ? " (Producer)" : " (Consumer)") << "\";\n"
        << "    style=dashed; color=\"" << colors[ci] << "\";\n\n";
     for (int i : idxs) {
       const auto& p = phases[i];
       os << "    p" << i << " [label=\"P" << p.phase_id;
-      if (!p.signal_in.empty()) os << "\\nwait " << shortName(p.signal_in);
-      if (!p.signal_out.empty()) os << "\\ntrigger " << shortName(p.signal_out);
+      if (!p.signal_in.empty()) os << "\\nwait " << p.signal_in;
+      if (!p.signal_out.empty()) os << "\\ntrigger " << p.signal_out;
       if (!p.buffers_accessed.empty()) {
         os << "\\n[";
         bool first = true;
         for (const auto& b : p.buffers_accessed) {
-          if (!first) os << ", ";
-          os << shortName(b);
+          if (!first) os << ",";
+          os << b;
           first = false;
         }
         os << "]";
       }
-      os << "\", fillcolor=\"" << fills[ci] << "\", color=\"" << colors[ci]
-         << "\"];\n";
+      os << "\", fillcolor=\"" << fills[ci] << "\", color=\""
+         << colors[ci] << "\"];\n";
     }
     os << "  }\n\n";
   }
@@ -613,12 +620,6 @@ void LivenessAnalyzer::HBGraph::DumpDot(std::ostream& os,
          << " [style=solid, color=\"#666666\"];\n";
   }
 
-  struct SigEdge {
-    int from, to;
-    std::string event;
-    bool accepted;
-  };
-  std::vector<SigEdge> sig_edges;
   std::unordered_map<std::string, std::vector<int>> trigger_map, wait_map;
   for (size_t i = 0; i < phases.size(); ++i) {
     if (!phases[i].signal_out.empty())
@@ -630,34 +631,17 @@ void LivenessAnalyzer::HBGraph::DumpDot(std::ostream& os,
     auto wit = wait_map.find(event);
     if (wit == wait_map.end()) continue;
     for (int t : triggers)
-      for (int w : wit->second) {
-        if (phases[t].wg_id == phases[w].wg_id) continue;
-        sig_edges.push_back({t, w, event, Reaches(t, w)});
-      }
-  }
-
-  std::set<std::pair<int, int>> bidir_pairs;
-  for (size_t i = 0; i < sig_edges.size(); ++i)
-    for (size_t j = i + 1; j < sig_edges.size(); ++j)
-      if (sig_edges[i].from == sig_edges[j].to &&
-          sig_edges[i].to == sig_edges[j].from) {
-        bidir_pairs.insert({sig_edges[i].from, sig_edges[i].to});
-        bidir_pairs.insert({sig_edges[j].from, sig_edges[j].to});
-      }
-
-  for (const auto& e : sig_edges) {
-    bool is_bidir = bidir_pairs.count({e.from, e.to}) > 0;
-    bool goes_down = e.from < e.to;
-    os << "  p" << e.from;
-    if (is_bidir) os << (goes_down ? ":e" : ":w");
-    os << " -> p" << e.to;
-    if (is_bidir) os << (goes_down ? ":e" : ":w");
-    os << " [style=" << (e.accepted ? "dashed" : "dotted") << ", color=\""
-       << (e.accepted ? "#CC0000" : "#999999") << "\", label=\""
-       << shortName(e.event) << (e.accepted ? "" : " (dropped)")
-       << "\", fontcolor=\"" << (e.accepted ? "#CC0000" : "#999999") << "\"";
-    if (!e.accepted) os << ", constraint=false";
-    os << "];\n";
+      for (int w : wit->second)
+        if (phases[t].wg_id != phases[w].wg_id) {
+          bool in_graph = Reaches(t, w);
+          os << "  p" << t << " -> p" << w
+             << " [style=" << (in_graph ? "dashed" : "dotted")
+             << ", color=\"" << (in_graph ? "#CC0000" : "#999999")
+             << "\", label=\"" << event
+             << (in_graph ? "" : " (filtered)")
+             << "\", fontcolor=\""
+             << (in_graph ? "#CC0000" : "#999999") << "\"];\n";
+        }
   }
 
   os << "}\n";
@@ -674,28 +658,34 @@ static int64_t ExtractPVValue(AST::Expr* pred, const std::string& pv_name) {
   auto* rhs_id = AST::GetIdentifier(*pred->GetR());
   if (kind == Opcode::Kind::Eq) {
     if (lhs_id && lhs_id->name == pv_name) {
-      if (auto il = AST::GetIntLiteral(*pred->GetR())) return il->Val();
+      if (auto il = AST::GetIntLiteral(*pred->GetR()))
+        return il->Val();
     }
     if (rhs_id && rhs_id->name == pv_name) {
-      if (auto il = AST::GetIntLiteral(*pred->GetL())) return il->Val();
+      if (auto il = AST::GetIntLiteral(*pred->GetL()))
+        return il->Val();
     }
   }
   // pv > N -> canonical WG = N+1 (first value in the range)
   if (kind == Opcode::Kind::Gt) {
     if (lhs_id && lhs_id->name == pv_name) {
-      if (auto il = AST::GetIntLiteral(*pred->GetR())) return il->Val() + 1;
+      if (auto il = AST::GetIntLiteral(*pred->GetR()))
+        return il->Val() + 1;
     }
     if (rhs_id && rhs_id->name == pv_name) {
-      if (auto il = AST::GetIntLiteral(*pred->GetL())) return il->Val() - 1;
+      if (auto il = AST::GetIntLiteral(*pred->GetL()))
+        return il->Val() - 1;
     }
   }
   // pv >= N -> canonical WG = N
   if (kind == Opcode::Kind::Ge) {
     if (lhs_id && lhs_id->name == pv_name) {
-      if (auto il = AST::GetIntLiteral(*pred->GetR())) return il->Val();
+      if (auto il = AST::GetIntLiteral(*pred->GetR()))
+        return il->Val();
     }
     if (rhs_id && rhs_id->name == pv_name) {
-      if (auto il = AST::GetIntLiteral(*pred->GetL())) return il->Val();
+      if (auto il = AST::GetIntLiteral(*pred->GetL()))
+        return il->Val();
     }
   }
   // pv != N -> canonical WG = the "other" side
@@ -740,19 +730,19 @@ static int EvalPredForPV(AST::Expr* pred, const std::string& pv_name,
   auto kind = pred->GetOp().GetKind();
 
   if (kind == Opcode::Kind::LogicAnd) {
-    int l =
-        EvalPredForPV(dyn_cast<AST::Expr>(pred->GetL().get()), pv_name, pv_val);
-    int r =
-        EvalPredForPV(dyn_cast<AST::Expr>(pred->GetR().get()), pv_name, pv_val);
+    int l = EvalPredForPV(dyn_cast<AST::Expr>(pred->GetL().get()),
+                          pv_name, pv_val);
+    int r = EvalPredForPV(dyn_cast<AST::Expr>(pred->GetR().get()),
+                          pv_name, pv_val);
     if (l == 0 || r == 0) return 0;
     if (l == 1 && r == 1) return 1;
     return -1;
   }
   if (kind == Opcode::Kind::LogicOr) {
-    int l =
-        EvalPredForPV(dyn_cast<AST::Expr>(pred->GetL().get()), pv_name, pv_val);
-    int r =
-        EvalPredForPV(dyn_cast<AST::Expr>(pred->GetR().get()), pv_name, pv_val);
+    int l = EvalPredForPV(dyn_cast<AST::Expr>(pred->GetL().get()),
+                          pv_name, pv_val);
+    int r = EvalPredForPV(dyn_cast<AST::Expr>(pred->GetR().get()),
+                          pv_name, pv_val);
     if (l == 1 || r == 1) return 1;
     if (l == 0 && r == 0) return 0;
     return -1;
@@ -773,7 +763,8 @@ static int EvalPredForPV(AST::Expr* pred, const std::string& pv_name,
   return EvalCmp(kind, c, pv_val) ? 1 : 0;
 }
 
-static int CountMatchingInstances(AST::Expr* pred, const std::string& pv_name,
+static int CountMatchingInstances(AST::Expr* pred,
+                                  const std::string& pv_name,
                                   int64_t pv_bound) {
   if (!pred || pv_bound <= 0) return -1;
   int count = 0;
@@ -800,10 +791,10 @@ static bool IsMultiInstancePredicate(AST::Expr* pred,
                        (rhs_id && rhs_id->name == pv_name);
     if (involves_pv) return kind != Opcode::Kind::Eq;
     if (kind == Opcode::Kind::LogicAnd || kind == Opcode::Kind::LogicOr) {
-      return IsMultiInstancePredicate(dyn_cast<AST::Expr>(pred->GetL().get()),
-                                      pv_name, -1) ||
-             IsMultiInstancePredicate(dyn_cast<AST::Expr>(pred->GetR().get()),
-                                      pv_name, -1);
+      return IsMultiInstancePredicate(
+                 dyn_cast<AST::Expr>(pred->GetL().get()), pv_name, -1) ||
+             IsMultiInstancePredicate(
+                 dyn_cast<AST::Expr>(pred->GetR().get()), pv_name, -1);
     }
     return false;
   }
@@ -913,39 +904,81 @@ void LivenessAnalyzer::BuildHBGraph(const std::string& paraby_scope) {
       graph.ComputeTransitiveClosure();
     } else {
       VST_DEBUG(dbgs() << "  Skipped back-edge: phase " << e.trigger_idx
-                       << " -> phase " << e.wait_idx << " (event '" << e.event
-                       << "' would create cycle)\n");
+                       << " -> phase " << e.wait_idx << " (event '"
+                       << e.event << "' would create cycle)\n");
     }
   }
+
+  for (size_t i = 0; i < n; ++i) {
+    if (graph.reachable[i][i]) {
+      errs() << "warning: HB graph has a cycle at phase " << i
+             << " (self-reachable after signal edge insertion)\n";
+    }
+  }
+
+  if (CCtx().DumpHB()) graph.Dump(errs());
+
+  // Multi-consumer barrier check: for multi-instance consumer WGs, if the
+  // last phase is an epilogue (no signal_out) preceded by mainloop phases
+  // (with signal_out), a named barrier (bar.sync / sync.wg) is required
+  // between the phases for safe buffer overlap.
+  {
+    std::map<int, std::vector<int>> wg_phases;
+    for (size_t i = 0; i < n; ++i)
+      wg_phases[graph.phases[i].wg_id].push_back(i);
+
+    for (auto& [wg_id, pids] : wg_phases) {
+      if (pids.size() < 2) continue;
+      auto& last = graph.phases[pids.back()];
+      if (!last.multi_instance || last.multi_instance_count <= 1) continue;
+      if (!last.signal_out.empty()) continue;
+      if (last.has_cta_barrier_before) continue;
+
+      bool prev_has_signal = false;
+      for (int i = (int)pids.size() - 2; i >= 0; --i) {
+        if (!graph.phases[pids[i]].signal_out.empty()) {
+          prev_has_signal = true;
+          break;
+        }
+      }
+      if (!prev_has_signal) continue;
+
+      if (CCtx().AutoBarrier()) {
+        last.has_cta_barrier_before = true;
+        last.auto_barrier = true;
+
+        AutoBarrierInfo abi;
+        abi.wg_id = wg_id;
+        abi.num_consumer_instances = last.multi_instance_count;
+        abi.num_consumer_threads = last.multi_instance_count * 128;
+        abi.epilogue_phase_id = last.phase_id;
+        graph.auto_barriers.push_back(abi);
+
+        VST_DEBUG(dbgs() << "  Auto-barrier: WG" << wg_id
+                         << " epilogue phase " << last.phase_id << " ("
+                         << abi.num_consumer_instances << " instances, "
+                         << abi.num_consumer_threads << " threads)\n");
+      } else {
+        errs() << "warning: multi-consumer epilogue (WG scope " << wg_id
+               << ", phase " << last.phase_id << ", "
+               << last.multi_instance_count
+               << " instances) has no sync.wg barrier.\n"
+               << "  SALA cannot safely overlap buffers without a "
+                  "sync.wg at the mainloop-epilogue boundary.\n"
+               << "  Add 'sync.wg <consumer_wg_ids>;' ("
+               << last.multi_instance_count * 128
+               << " threads) before mma.store, or use --auto-barrier.\n";
+      }
+    }
+  }
+
   VST_DEBUG({
     dbgs() << "Built HB graph for scope '" << paraby_scope << "':\n";
     graph.Dump(dbgs());
   });
 
-  {
-    std::map<int, std::vector<int>> wg_phases;
-    for (size_t i = 0; i < n; ++i) wg_phases[graph.phases[i].wg_id].push_back(i);
-    for (const auto& [wg_id, phases] : wg_phases) {
-      if (phases.size() < 2) continue;
-      const auto& last = graph.phases[phases.back()];
-      if (!last.multi_instance) continue;
-      if (!last.signal_out.empty()) continue;
-      bool prev_has_signal = false;
-      for (auto it = phases.rbegin() + 1; it != phases.rend(); ++it)
-        if (!graph.phases[*it].signal_out.empty()) { prev_has_signal = true; break; }
-      if (!prev_has_signal) continue;
-      if (!last.has_cta_barrier_before) {
-        errs() << "warning: multi-consumer epilogue (WG scope " << wg_id
-               << ", phase " << last.phase_id << ", " << last.multi_instance_count
-               << " instances) has no sync.wg barrier.\n"
-               << "  SALA cannot safely overlap buffers without a "
-                  "sync.wg at the mainloop-epilogue boundary.\n"
-               << "  Add 'sync.wg <consumer_wg_ids>;' ("
-               << last.multi_instance_count * 128 << " threads) before mma.store.\n";
-      }
-    }
-  }
   if (CCtx().DumpHB()) graph.DumpDot(errs(), paraby_scope);
+
   hb_graphs[paraby_scope] = std::move(graph);
 }
 
@@ -1019,17 +1052,15 @@ void LivenessAnalyzer::DumpLivenessResults(
     if (var_name == "::__choreo_parent_dim__") return true;
     return false;
   };
-  VST_DEBUG({
-    if (!stmt_linfo[preorder_stmts[0]].live_in.empty()) {
-      std::set<std::string> li_set;
-      for (const auto& item : stmt_linfo[preorder_stmts[0]].live_in)
-        if (!IsGlobalOrBuiltIn(item)) li_set.insert(item);
-      if (!li_set.empty()) {
-        errs() << StmtStr(preorder_stmts[0]);
-        errs() << "live_in of the first stmt is not empty, including:\n";
-        for (const auto& item : li_set) errs() << "\t" << item << "\n";
-        choreo_unreachable("expecting the live_in of the first stmt is empty.");
-      }
+  VST_DEBUG(if (!stmt_linfo[preorder_stmts[0]].live_in.empty()) {
+    std::set<std::string> li_set;
+    for (const auto& item : stmt_linfo[preorder_stmts[0]].live_in)
+      if (!IsGlobalOrBuiltIn(item)) li_set.insert(item);
+    if (!li_set.empty()) {
+      errs() << StmtStr(preorder_stmts[0]);
+      errs() << "live_in of the first stmt is not empty, including:\n";
+      for (const auto& item : li_set) errs() << "\t" << item << "\n";
+      choreo_unreachable("expecting the live_in of the first stmt is empty.");
     }
   });
 }
@@ -1244,10 +1275,6 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
     os << ")";
   } else if (const auto sync = dyn_cast<AST::Synchronize>(&n)) {
     os << "sync." << STR(sync->Resource());
-  } else if (const auto bar = dyn_cast<AST::Barrier>(&n)) {
-    os << "sync.barrier : " << STR(bar->GetLevel());
-  } else if (const auto fence = dyn_cast<AST::Fence>(&n)) {
-    os << "sync.fence : " << STR(fence->GetVisibility());
   } else if (const auto tr = dyn_cast<AST::Trigger>(&n)) {
     os << "trigger ";
     tr->targets->Print(os);
@@ -1286,7 +1313,7 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
     for (size_t i = 0; i < fb->ranges->Count(); ++i) {
       if (i > 0) os << ", ";
       auto lr = cast<AST::LoopRange>(fb->ranges->values[i]);
-      os << lr->GetRV()->name << "(";
+      os << lr->iv->name << "(";
       os << (lr->lbound ? PSTR(lr->lbound) : "") << ":";
       os << (lr->ubound ? PSTR(lr->ubound) : "") << ":";
       os << (IsValidStep(lr->step) ? std::to_string(lr->step) : "") << ")";
@@ -1394,12 +1421,13 @@ void LivenessAnalyzer::DumpMMA(const AST::MMA& mma, std::ostream& os) {
          << PSTR(op->LoadFrom());
     } break;
     case AST::MMAOperation::LoadR: {
-      os << "mma.load " << PSTR(op->LoadFrom());
+      os << "mma.loadR " << PSTR(op->LoadFrom());
       if (op->LoadTo()) os << ", " << PSTR(op->LoadTo());
     } break;
-    case AST::MMAOperation::Desc:
-      os << PSTR(op->DescTo()) << " = mma.desc " << PSTR(op->DescFrom());
-      break;
+    case AST::MMAOperation::LoadS: {
+      os << "mma.loadS " << (op->IsAsync() ? ".async" : "") << " "
+         << PSTR(op->LoadFrom());
+    } break;
     case AST::MMAOperation::Exec: {
       os << "mma.exec";
       switch (op->GetMethod()) {
@@ -1442,7 +1470,7 @@ bool LivenessAnalyzer::IsLoopBlock(const AST::Node& n) {
 
 // TODO: should wait dma be treated as holding point?
 bool LivenessAnalyzer::IsSyncPoint(const AST::Node& n) {
-  return isa<AST::Synchronize>(&n) || isa<AST::Barrier>(&n);
+  return isa<AST::Synchronize>(&n);
 }
 
 bool LivenessAnalyzer::ShouldIndent(const AST::Node& n) {
@@ -1595,6 +1623,8 @@ void LivenessAnalyzer::HandleStmtInAfter(AST::Node& n) {
   ++stmt_id;
   RecordStmt(*rbrace, false);
 
+  DumpStmtBriefly(*rbrace, stmts_with_indent, false);
+
   if (IsLoopBlock(n) && events_to_add.count(&n)) {
     adding_synthetic_uses = true;
     for (const auto& [event_type, var] : events_to_add[&n]) {
@@ -1631,10 +1661,6 @@ bool LivenessAnalyzer::BeforeVisitImpl(AST::Node& n) {
       AddDef(current_stmt, sname, true);
     }
   } else if (auto ib = dyn_cast<AST::InThreadsBlock>(&n)) {
-    // TODO: Check if this pattern is done
-    // For vars which are defined inside inthreads.async block,
-    // an extra use should be added to the sync point statement.
-    // In other words, their liveness is extended to the sync point.
     if (ib->async) ++inthreads_async_level;
 
     if (cur_hb_state) {
@@ -1645,11 +1671,10 @@ bool LivenessAnalyzer::BeforeVisitImpl(AST::Node& n) {
         cur_block_is_async = ib->async;
         cur_block_multi_instance = IsMultiInstancePredicate(
             pred, cur_hb_state->pv_name, cur_hb_state->pv_bound);
-        cur_multi_instance_count =
-            cur_block_multi_instance
-                ? CountMatchingInstances(pred, cur_hb_state->pv_name,
-                                         cur_hb_state->pv_bound)
-                : 1;
+        cur_multi_instance_count = cur_block_multi_instance
+            ? CountMatchingInstances(pred, cur_hb_state->pv_name,
+                                     cur_hb_state->pv_bound)
+            : 1;
         StartNewHBPhase("");
         if (cur_hb_phase)
           cur_hb_phase->has_cta_barrier_before =
@@ -1850,6 +1875,7 @@ bool LivenessAnalyzer::Visit(AST::Assignment& n) {
     VST_DEBUG(dbgs() << "The assignment is not sel or sa: " << STR(n) << ".\n");
     if (n.AssignToDataElement()) {
       AddUse(current_stmt, n.GetDataArrayName());
+      RecordHBBufferAccess(InScopeName(n.GetDataArrayName()), "DataAccess");
     } else if (PrefixedWith(n.GetName(), "anon_")) {
       AddDef(current_stmt, n.GetName());
     } else {
@@ -1897,8 +1923,8 @@ bool LivenessAnalyzer::Visit(AST::ParallelBy& n) {
     cur_hb_state = &state;
     pending_phases.clear();
     VST_DEBUG(dbgs() << "[HB] Entered GROUPx4 parallel scope: " << scope
-                     << " pv=" << state.pv_name << " bound=" << state.pv_bound
-                     << "\n");
+                     << " pv=" << state.pv_name
+                     << " bound=" << state.pv_bound << "\n");
   }
   return true;
 }
@@ -1976,39 +2002,47 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
     AddUse(current_stmt, GetAllSymbolicOperands(pc->GetPadValue().get()));
   }
 
-  if (!n.future.empty()) {
-    RecordHBBufferAccess(InScopeName(n.ToSymbol()), "DMA-to");
-    RecordHBBufferAccess(InScopeName(n.FromSymbol()), "DMA-from");
-  }
+  RecordHBBufferAccess(InScopeName(n.ToSymbol()), "DMA-to");
+  RecordHBBufferAccess(InScopeName(n.FromSymbol()), "DMA-from");
 
   return true;
 }
 
 bool LivenessAnalyzer::Visit(AST::MMA& n) {
   TraceEachVisit(n);
-  stmt_linfo[current_stmt].buffer_related = true;
   auto op = n.GetOperation();
   switch (op->Tag()) {
-  case AST::MMAOperation::Scale: {
-    AddUse(current_stmt, GetAllSymbolicOperands(op->ScaleA().get()));
-    AddUse(current_stmt, GetAllSymbolicOperands(op->ScaleB().get()));
-  } break;
+  case AST::MMAOperation::Fill: break;
+  case AST::MMAOperation::Load: break;
   case AST::MMAOperation::Exec: {
-    AddUse(current_stmt, GetAllSymbolicOperands(op->ExecOperand(1).get()));
-    AddUse(current_stmt, GetAllSymbolicOperands(op->ExecOperand(2).get()));
-  } break;
-  case AST::MMAOperation::Store: {
-    AddUse(current_stmt, GetAllSymbolicOperands(op->StoreTo().get()));
-  } break;
-  case AST::MMAOperation::Load:
-  case AST::MMAOperation::LoadR: {
-    AddUse(current_stmt, GetAllSymbolicOperands(op->LoadFrom().get()));
-  } break;
-  case AST::MMAOperation::Desc:
-    AddUse(current_stmt, GetAllSymbolicOperands(op->DescFrom().get()));
+    for (int i = 1; i <= 2; i++) {
+      auto operand = op->ExecOperand(i);
+      if (!operand) continue;
+      if (auto expr = dyn_cast<AST::Expr>(operand.get())) {
+        if (expr->op == Op::ElemOf) {
+          auto base = AST::GetArrayBaseSymbol(*expr);
+          if (base)
+            RecordHBBufferAccess(InScopeName(base->name), "MMA-exec");
+        } else if (auto sym = expr->GetSymbol()) {
+          RecordHBBufferAccess(InScopeName(sym->name), "MMA-exec");
+        }
+      }
+    }
     break;
-  default: break;
   }
+  case AST::MMAOperation::Store: {
+    auto store_to = op->StoreTo();
+    if (store_to) RecordHBBufferAccess(InScopeName(store_to->RefSymbol()), "MMA-store");
+    break;
+  }
+  case AST::MMAOperation::Commit: break;
+  case AST::MMAOperation::Scale: break;
+  case AST::MMAOperation::Wait: break;
+  case AST::MMAOperation::LoadR: break;
+  case AST::MMAOperation::LoadS: break;
+  }
+
+  stmt_linfo[current_stmt].buffer_related = true;
   return true;
 }
 
@@ -2017,6 +2051,8 @@ bool LivenessAnalyzer::Visit(AST::ChunkAt& n) {
   assert(n.sa == nullptr && "after norm, there should be no span_as.");
 
   AddUse(current_stmt, n.RefSymbol());
+
+  RecordHBBufferAccess(InScopeName(n.RefSymbol()), "ChunkAt");
 
   for (auto tsi : n.AllOperations())
     for (const auto& rfn : tsi->ReferredNodes()) {
@@ -2078,6 +2114,7 @@ bool LivenessAnalyzer::Visit(AST::Call& n) {
              "expect a future operand.");
       if (auto id = cast<AST::Expr>(expr->GetR())->GetSymbol()) {
         AddUse(current_stmt, id->name);
+        RecordHBBufferAccess(InScopeName(id->name), "Call-arg");
       } else
         choreo_unreachable("Can not retrieve name of the future.");
     } else if (expr->op == Op::AddrOf) {
@@ -2085,9 +2122,6 @@ bool LivenessAnalyzer::Visit(AST::Call& n) {
         AddUse(current_stmt, id->name);
       else if (!isa<AST::DataAccess>(expr->GetR()))
         choreo_unreachable("Can not retrieve name of the future.");
-    } else if (expr->op == Op::ElemOf) {
-      if (auto base = AST::GetArrayBaseSymbol(*expr))
-        AddUse(current_stmt, base->name);
     } else {
       assert(isa<AST::ChunkAt>(expr->GetR()) && "expect a chunkat operand.");
     }
@@ -2129,15 +2163,6 @@ bool LivenessAnalyzer::Visit(AST::Synchronize& n) {
   adding_synthetic_uses = true;
   for (const auto& [scope, vars] : async_inthreads_vars) {
     if (!PrefixedWith(scope, cur_scope)) continue;
-    // TODO: Check if this pattern is done.
-    // the scope of vars is inside cur_scope.
-    /*
-    {
-      inthreads.async() { def x; ...}
-      inthreads.async() { def y; ...}
-      sync.shared; // add extra use of both x and y here manually!
-    }
-    */
     for (const auto& var : vars) AddUse(&n, var, false);
   }
   adding_synthetic_uses = false;
@@ -2146,29 +2171,6 @@ bool LivenessAnalyzer::Visit(AST::Synchronize& n) {
     cta_barrier_since_last_inthreads = true;
     if (cur_hb_phase) cur_hb_phase->has_cta_barrier_before = true;
   }
-  return true;
-}
-
-bool LivenessAnalyzer::Visit(AST::Barrier& n) {
-  TraceEachVisit(n);
-  std::string cur_scope = SSTab().ScopeName();
-  visiting_synchronize = true;
-  adding_synthetic_uses = true;
-  for (const auto& [scope, vars] : async_inthreads_vars) {
-    if (!PrefixedWith(scope, cur_scope)) continue;
-    for (const auto& var : vars) AddUse(&n, var, false);
-  }
-  adding_synthetic_uses = false;
-  visiting_synchronize = false;
-  if (cur_hb_state) {
-    cta_barrier_since_last_inthreads = true;
-    if (cur_hb_phase) cur_hb_phase->has_cta_barrier_before = true;
-  }
-  return true;
-}
-
-bool LivenessAnalyzer::Visit(AST::Fence& n) {
-  TraceEachVisit(n);
   return true;
 }
 
@@ -2200,11 +2202,13 @@ bool LivenessAnalyzer::Visit(AST::Return& n) {
     stmt_linfo[current_stmt].buffer_related = true;
     if (auto id = AST::GetIdentifier(*n.value)) {
       AddUse(current_stmt, id->name);
+      RecordHBBufferAccess(InScopeName(id->name), "Return-id");
     } else if (auto expr = dyn_cast<AST::Expr>(n.value);
                expr && expr->op == Op::DataOf) {
       auto id = cast<AST::Expr>(expr->GetR())->GetSymbol();
       assert(id && "expect a symbol");
       AddUse(current_stmt, id->name);
+      RecordHBBufferAccess(InScopeName(id->name), "Return-data");
     } else {
       choreo_unreachable(
           "expecting the return value is an identifier or future.data.");
@@ -2222,8 +2226,8 @@ bool LivenessAnalyzer::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
   for (const auto& item : n.GetRanges()) {
     auto range = cast<AST::LoopRange>(item);
-    // Although the range var is reset to zero, still treat it as a use.
-    AddUse(current_stmt, range->GetRVName());
+    // Although `iv` is reset to zero, still treat it as a use.
+    AddUse(current_stmt, range->IVName());
     for (const auto& offset : {range->lbound, range->ubound}) {
       if (!offset) continue;
       if (auto id = AST::GetIdentifier(*offset))

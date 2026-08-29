@@ -10,8 +10,6 @@
 #include <cstring>
 #include <functional>
 #include <iostream>
-#include <set>
-#include <thread>
 
 namespace Choreo {
 namespace Mock {
@@ -53,7 +51,6 @@ bool MockInterpreter::RunOnProgramImpl(AST::Node& root) {
 // -----------------------------------------------------------------------
 void MockInterpreter::ExecBlock(const ptr<AST::MultiNodes>& stmts) {
   if (!stmts) return;
-  if (debugger_ && debugger_->IsActive()) debugger_->EnterBlock();
   auto subs = stmts->AllSubs();
   for (size_t i = 0; i < subs.size(); ++i) {
     if (cf.kind != ControlFlow::None || quit_requested_) return;
@@ -67,7 +64,6 @@ void MockInterpreter::ExecBlock(const ptr<AST::MultiNodes>& stmts) {
       ExecStatement(subs[i]);
     }
   }
-  if (debugger_ && debugger_->IsActive()) debugger_->LeaveBlock();
 }
 
 void MockInterpreter::ExecStatement(const ptr<AST::Node>& stmt) {
@@ -107,60 +103,27 @@ void MockInterpreter::ExecStatement(const ptr<AST::Node>& stmt) {
     ExecBlock(wb->stmts);
   else if (auto mn = dyn_cast<AST::MultiNodes>(stmt))
     ExecBlock(mn);
-  else if (isa<AST::Synchronize>(stmt) || isa<AST::Yield>(stmt) ||
-           isa<AST::Trigger>(stmt)) {
-  } // no-ops for mock interpreter
+  else if (dyn_cast<AST::Wait>(stmt)) {
+  } // no-op for Phase 1
+  else if (dyn_cast<AST::Synchronize>(stmt)) {
+  } // no-op
+  else if (dyn_cast<AST::Yield>(stmt)) {
+  } // no-op
+  else if (dyn_cast<AST::Trigger>(stmt)) {
+  } // no-op
   else if (auto cpp = dyn_cast<AST::CppSourceCode>(stmt)) {
     if (cpp->kind == AST::CppSourceCode::Host ||
         cpp->kind == AST::CppSourceCode::Device)
       Warning(cpp->LOC(), "mock: host C++ source code is not interpretable.");
   } else if (auto mma = dyn_cast<AST::MMA>(stmt))
-    ExecMMA(*mma);
+    Error1(mma->LOC(), "mock: MMA operations are not supported.");
   else if (auto rot = dyn_cast<AST::Rotate>(stmt))
-    ExecRotate(*rot);
-  else if (auto wait = dyn_cast<AST::Wait>(stmt))
-    ExecWait(*wait);
-  else if (auto itb = dyn_cast<AST::InThreadsBlock>(stmt))
-    ExecInThreads(*itb);
-  else if (auto ab = dyn_cast<AST::ApplyBlock>(stmt))
-    ExecApply(*ab);
-  else if (auto fr = dyn_cast<AST::FragReduce>(stmt))
-    ExecFragReduce(*fr);
-  else if (auto ft = dyn_cast<AST::FragTransfer>(stmt))
-    ExecFragTransfer(*ft);
-  else if (isa<AST::NamedTypeDecl>(stmt)) {
-  } // type alias, skip
-  else {
-    Warning(stmt->LOC(), "mock: unhandled statement type '" +
-                             std::string(stmt->TypeNameString()) + "'");
-  }
+    Error1(rot->LOC(), "mock: rotate operations are not supported.");
 }
 
 // -----------------------------------------------------------------------
-// ParallelBy -- threaded execution over bound range
+// ParallelBy -- serial for-loop over bound range
 // -----------------------------------------------------------------------
-void MockInterpreter::ExecParallelByBody(
-    AST::ParallelBy& n, int64_t i, int64_t /*bound*/,
-    const std::string& pv_name, bool has_sub,
-    const std::vector<std::string>& sub_names,
-    const std::vector<int64_t>& sub_bounds) {
-  mem.EnterScope();
-  mem.PushThread(pv_name, i);
-  mem.Define(pv_name, Value::MakeInt(i));
-
-  if (has_sub) {
-    int64_t remaining = i;
-    for (int j = (int)sub_names.size() - 1; j >= 0; --j) {
-      mem.Define(sub_names[j], Value::MakeInt(remaining % sub_bounds[j]));
-      remaining /= sub_bounds[j];
-    }
-  }
-
-  ExecBlock(n.stmts);
-  mem.PopThread();
-  mem.LeaveScope();
-}
-
 void MockInterpreter::ExecParallelBy(AST::ParallelBy& n) {
   auto bound_val = ExprEval(n.BoundExpr());
   int64_t bound = bound_val.AsInt();
@@ -180,36 +143,28 @@ void MockInterpreter::ExecParallelBy(AST::ParallelBy& n) {
     }
   }
 
-#ifdef __EMSCRIPTEN__
   for (int64_t i = 0; i < bound; ++i) {
-    ExecParallelByBody(n, i, bound, pv_name, has_sub, sub_names, sub_bounds);
+    mem.EnterScope();
+    mem.Define(pv_name, Value::MakeInt(i));
+
+    if (has_sub) {
+      int64_t remaining = i;
+      for (int j = (int)sub_names.size() - 1; j >= 0; --j) {
+        mem.Define(sub_names[j], Value::MakeInt(remaining % sub_bounds[j]));
+        remaining /= sub_bounds[j];
+      }
+    }
+
+    ExecBlock(n.stmts);
+    mem.LeaveScope();
+
+    if (cf.kind == ControlFlow::Return) return;
+    if (cf.kind == ControlFlow::Break) {
+      cf.kind = ControlFlow::None;
+      break;
+    }
+    if (cf.kind == ControlFlow::Continue) cf.kind = ControlFlow::None;
   }
-#else
-  // Shared mutex for serializing print output across threads
-  std::mutex pm;
-  bool own_mutex = (print_mutex_ == nullptr);
-  if (own_mutex) print_mutex_ = &pm;
-
-  std::vector<std::thread> threads;
-  threads.reserve(bound);
-
-  for (int64_t i = 0; i < bound; ++i) {
-    threads.emplace_back([this, &n, i, bound, &pv_name, has_sub, &sub_names,
-                          &sub_bounds, &pm]() {
-      MockInterpreter child;
-      child.mem = mem.Fork();
-      child.functions = functions;
-      child.print_mutex_ = &pm;
-
-      child.ExecParallelByBody(n, i, bound, pv_name, has_sub, sub_names,
-                               sub_bounds);
-    });
-  }
-
-  for (auto& t : threads) t.join();
-
-  if (own_mutex) print_mutex_ = nullptr;
-#endif
 }
 
 // -----------------------------------------------------------------------
@@ -357,7 +312,7 @@ void MockInterpreter::ExecForeach(AST::ForeachBlock& n) {
   for (auto& r : n.ranges->AllValues()) {
     auto lr = cast<AST::LoopRange>(r);
     RangeInfo ri;
-    ri.iv_name = lr->GetIVName();
+    ri.iv_name = lr->IVName();
 
     if (lr->lbound)
       ri.lb = ExprEval(lr->lbound).AsInt();
@@ -368,7 +323,7 @@ void MockInterpreter::ExecForeach(AST::ForeachBlock& n) {
       ri.ub = ExprEval(lr->ubound).AsInt();
     } else {
       ri.ub = 0;
-      auto iv_ty = lr->GetIV()->GetType();
+      auto iv_ty = lr->IV()->GetType();
       if (auto bit = dyn_cast<BoundedITupleType>(iv_ty.get())) {
         auto ub_val = bit->GetUpperBound();
         if (auto iv = VIInt(ub_val)) ri.ub = *iv;
@@ -418,7 +373,9 @@ void MockInterpreter::ExecCall(AST::Call& n) {
   if (n.arguments)
     for (auto& arg : n.GetArguments()) args.push_back(ExprEval(arg));
 
-  if (n.IsBIF() || IsKnownBIF(func_name)) {
+  if (n.IsBIF() || func_name == "print" || func_name == "println" ||
+      func_name == "assert" || func_name == "sizeof" || func_name == "min" ||
+      func_name == "max" || func_name == "abs") {
     CallBIF(func_name, args, n);
     return;
   }
@@ -462,89 +419,14 @@ void MockInterpreter::ExecDMA(AST::DMA& n) {
   auto src = ExprEval(n.from);
   auto dst = ExprEval(n.to);
 
-  if (src.kind != Value::Pointer || dst.kind != Value::Pointer || !src.alloc ||
-      !dst.alloc)
-    return;
-
-  size_t bytes = std::min(src.alloc->TotalBytes() - src.offset,
-                          dst.alloc->TotalBytes() - dst.offset);
-
-  if (n.IsAsync() && !n.future.empty()) {
-    auto src_ptr = std::const_pointer_cast<Allocation>(src.alloc);
-    auto dst_ptr = dst.alloc;
-    size_t s_off = src.offset, d_off = dst.offset;
-    auto fut = std::async(
-        std::launch::async, [src_ptr, dst_ptr, s_off, d_off, bytes]() {
-          std::memcpy((uint8_t*)dst_ptr->RawPtr() + d_off,
-                      (const uint8_t*)src_ptr->RawPtr() + s_off, bytes);
-        });
-    std::string src_sym, dst_sym;
-    if (auto ca = dyn_cast<AST::ChunkAt>(n.from)) src_sym = ca->RefSymbol();
-    if (auto ca = dyn_cast<AST::ChunkAt>(n.to)) dst_sym = ca->RefSymbol();
-    mem.Define(n.future,
-               Value::MakeFuture(fut.share(), src_sym, dst_sym, bytes));
-  } else {
+  if (src.kind == Value::Pointer && dst.kind == Value::Pointer && src.alloc &&
+      dst.alloc) {
+    size_t bytes = std::min(src.alloc->TotalBytes(), dst.alloc->TotalBytes());
     std::memcpy((uint8_t*)dst.alloc->RawPtr() + dst.offset,
                 (const uint8_t*)src.alloc->RawPtr() + src.offset, bytes);
-    if (!n.future.empty()) mem.Define(n.future, Value::MakeBool(true));
   }
-}
 
-// -----------------------------------------------------------------------
-// Wait -- block until futures complete
-// -----------------------------------------------------------------------
-void MockInterpreter::ExecWait(AST::Wait& n) {
-  for (auto& t : n.GetTargets()) {
-    std::string name;
-    if (auto id = dyn_cast<AST::Identifier>(t))
-      name = id->name;
-    else if (auto da = dyn_cast<AST::DataAccess>(t))
-      name = da->GetDataName();
-    else if (auto expr = dyn_cast<AST::Expr>(t)) {
-      if (expr->GetForm() == AST::Expr::Reference) {
-        if (auto id = dyn_cast<AST::Identifier>(expr->GetR()))
-          name = id->name;
-        else if (auto da = dyn_cast<AST::DataAccess>(expr->GetR()))
-          name = da->GetDataName();
-      }
-    }
-    if (name.empty() || !mem.Exists(name)) continue;
-    auto& val = mem.Lookup(name);
-    if (val.kind == Value::Future && val.future_info &&
-        val.future_info->handle.valid())
-      val.future_info->handle.get();
-  }
-}
-
-// -----------------------------------------------------------------------
-// Rotate -- circular rotation of variable values
-// -----------------------------------------------------------------------
-void MockInterpreter::ExecRotate(AST::Rotate& n) {
-  auto& ids = n.GetIds();
-  if (ids.size() < 2) return;
-
-  std::vector<std::string> names;
-  for (auto& id_node : ids) {
-    if (auto id = dyn_cast<AST::Identifier>(id_node)) names.push_back(id->name);
-  }
-  if (names.size() < 2) return;
-
-  Value last = mem.Lookup(names.back());
-  for (int i = (int)names.size() - 1; i > 0; --i)
-    mem.Define(names[i], mem.Lookup(names[i - 1]));
-  mem.Define(names[0], last);
-}
-
-// -----------------------------------------------------------------------
-// InThreadsBlock -- execute body under predicate
-// -----------------------------------------------------------------------
-void MockInterpreter::ExecInThreads(AST::InThreadsBlock& n) {
-  auto pred = ExprEval(n.GetPredicate());
-  if (pred.AsBool()) {
-    mem.EnterScope();
-    ExecBlock(n.stmts);
-    mem.LeaveScope();
-  }
+  if (!n.future.empty()) mem.Define(n.future, Value::MakeBool(true));
 }
 
 // -----------------------------------------------------------------------
@@ -588,23 +470,14 @@ Value MockInterpreter::ExprEval(const ptr<AST::Node>& e) {
   if (auto lit = dyn_cast<AST::BoolLiteral>(e))
     return Value::MakeBool(lit->value);
 
-  if (auto lit = dyn_cast<AST::StringLiteral>(e))
-    return Value::MakeString(lit->Val());
-
   if (auto id = dyn_cast<AST::Identifier>(e)) {
     if (mem.Exists(id->name)) return mem.Lookup(id->name);
-    Warning(id->LOC(),
-            "mock: undefined variable '" + id->name + "', defaulting to 0.");
     return Value::MakeInt(0);
   }
 
   if (auto da = dyn_cast<AST::DataAccess>(e)) {
     std::string name = da->GetDataName();
-    if (!mem.Exists(name)) {
-      Warning(da->LOC(),
-              "mock: undefined variable '" + name + "', defaulting to 0.");
-      return Value::MakeInt(0);
-    }
+    if (!mem.Exists(name)) return Value::MakeInt(0);
 
     auto& val = mem.Lookup(name);
     if (!da->AccessElement()) return val;
@@ -628,21 +501,8 @@ Value MockInterpreter::ExprEval(const ptr<AST::Node>& e) {
   if (auto expr = dyn_cast<AST::Expr>(e)) {
     if (expr->GetForm() == AST::Expr::Reference) return ExprEval(expr->GetR());
 
-    if (expr->GetForm() == AST::Expr::Unary) {
-      auto k = expr->op.GetKind();
-      if (k == Op::PreInc || k == Op::PreDec) {
-        Value val = ExprEval(expr->GetR());
-        Value result = EvalUnaryOp(expr->op, val);
-        if (auto id = dyn_cast<AST::Identifier>(expr->GetR()))
-          mem.Define(id->name, result);
-        else if (auto da = dyn_cast<AST::DataAccess>(expr->GetR())) {
-          if (!da->AccessElement())
-            mem.Define(da->GetDataName(), result);
-        }
-        return result;
-      }
+    if (expr->GetForm() == AST::Expr::Unary)
       return EvalUnaryOp(expr->op, ExprEval(expr->GetR()));
-    }
 
     if (expr->GetForm() == AST::Expr::Binary) {
       if (expr->op == Op::ElemOf) {
@@ -697,7 +557,8 @@ Value MockInterpreter::ExprEval(const ptr<AST::Node>& e) {
     if (call->arguments)
       for (auto& arg : call->GetArguments()) args.push_back(ExprEval(arg));
 
-    if (call->IsBIF() || IsKnownBIF(func_name))
+    if (call->IsBIF() || func_name == "sizeof" || func_name == "min" ||
+        func_name == "max" || func_name == "abs")
       return CallBIF(func_name, args, *call);
 
     auto it = functions.find(func_name);
@@ -730,28 +591,8 @@ Value MockInterpreter::ExprEval(const ptr<AST::Node>& e) {
     std::string base_name = chunk->data->name;
     auto dot = base_name.rfind(".data");
     if (dot != std::string::npos) base_name = base_name.substr(0, dot);
-    if (!mem.Exists(base_name)) return Value::MakeInt(0);
-
-    auto& base_val = mem.Lookup(base_name);
-
-    if (chunk->HasOperation() && base_val.kind == Value::Pointer &&
-        base_val.alloc) {
-      for (auto& op : chunk->AllOperations()) {
-        auto indices_mv = op->GetIndices();
-        if (!indices_mv || indices_mv->Count() == 0) continue;
-
-        std::vector<size_t> idx_vals;
-        for (auto& idx_node : indices_mv->AllValues())
-          idx_vals.push_back((size_t)ExprEval(idx_node).AsInt());
-
-        size_t linear = ComputeLinearIndex(idx_vals, base_val.alloc->shape);
-        size_t byte_offset =
-            linear * base_val.alloc->ElemSize() + base_val.offset;
-        return base_val.ReadFromAlloc(byte_offset, base_val.base_type);
-      }
-    }
-
-    return base_val;
+    if (mem.Exists(base_name)) return mem.Lookup(base_name);
+    return Value::MakeInt(0);
   }
 
   if (auto sel = dyn_cast<AST::Select>(e)) {
@@ -762,10 +603,6 @@ Value MockInterpreter::ExprEval(const ptr<AST::Node>& e) {
     return Value::MakeInt(0);
   }
 
-  if (e->LOC().begin.line > 0) {
-    Warning(e->LOC(), "mock: unhandled expression type '" +
-                          std::string(e->TypeNameString()) + "'");
-  }
   return Value::MakeInt(0);
 }
 
@@ -807,7 +644,6 @@ Value MockInterpreter::EvalBinaryOp(Opcode op, const Value& lhs,
   case Op::Mul: return Value::MakeInt(l * r);
   case Op::Div: return Value::MakeInt(r != 0 ? l / r : 0);
   case Op::Mod: return Value::MakeInt(r != 0 ? l % r : 0);
-  case Op::CeilDiv: return Value::MakeInt(r != 0 ? (l + r - 1) / r : 0);
   case Op::Eq: return Value::MakeBool(l == r);
   case Op::Ne: return Value::MakeBool(l != r);
   case Op::Gt: return Value::MakeBool(l > r);
@@ -830,55 +666,23 @@ Value MockInterpreter::EvalBinaryOp(Opcode op, const Value& lhs,
 // -----------------------------------------------------------------------
 Value MockInterpreter::EvalUnaryOp(Opcode op, const Value& operand) {
   auto k = op.GetKind();
-  bool is_float = (operand.base_type == BaseType::F32 ||
-                   operand.base_type == BaseType::F64);
   switch (k) {
-  case Op::Sub:
-    if (is_float) return Value::MakeDouble(-operand.AsDouble());
-    return Value::MakeInt(-operand.AsInt());
+  case Op::Sub: return Value::MakeInt(-operand.AsInt());
   case Op::LogicNot: return Value::MakeBool(!operand.AsBool());
   case Op::BitNot: return Value::MakeInt(~operand.AsInt());
-  case Op::PreInc:
-    if (is_float) return Value::MakeDouble(operand.AsDouble() + 1.0);
-    return Value::MakeInt(operand.AsInt() + 1);
-  case Op::PreDec:
-    if (is_float) return Value::MakeDouble(operand.AsDouble() - 1.0);
-    return Value::MakeInt(operand.AsInt() - 1);
-  case Op::GetUBound: return operand;
+  case Op::PreInc: return Value::MakeInt(operand.AsInt() + 1);
+  case Op::PreDec: return Value::MakeInt(operand.AsInt() - 1);
   default: return operand;
   }
-}
-
-static std::string StripBIFPrefix(const std::string& name) {
-  if (name.size() > 2 && name[0] == '_' && name[1] == '_' &&
-      name != "__co__" && name != "__cpp__")
-    return name.substr(2);
-  return name;
-}
-
-bool MockInterpreter::IsKnownBIF(const std::string& name) const {
-  static const std::set<std::string> bifs = {
-      "print",   "println",   "assert",   "sizeof", "min",   "max",
-      "abs",     "sqrt",      "rsqrt",    "sin",    "cos",   "tan",
-      "exp",     "log",       "floor",    "ceil",   "round", "pow",
-      "alignup", "aligndown", "isfinite", "sign",   "fabs",  "fmaf",
-      "exp2f",   "expm1",     "frcp_rn",  "gelu",   "sigmoid",
-      "sinh",    "cosh",      "softplus", "log1p",  "acos",  "asin",
-      "atan",    "atan2",     "tanh",
-  };
-  return bifs.count(name) > 0 || bifs.count(StripBIFPrefix(name)) > 0;
 }
 
 // -----------------------------------------------------------------------
 // Built-in function calls
 // -----------------------------------------------------------------------
-Value MockInterpreter::CallBIF(const std::string& raw_name,
+Value MockInterpreter::CallBIF(const std::string& name,
                                const std::vector<Value>& args,
                                const AST::Call& node) {
-  auto name = StripBIFPrefix(raw_name);
   if (name == "print" || name == "println") {
-    std::unique_lock<std::mutex> lock;
-    if (print_mutex_) lock = std::unique_lock<std::mutex>(*print_mutex_);
     for (size_t i = 0; i < args.size(); ++i) {
       if (i > 0) std::cout << " ";
       std::cout << args[i].ToString();
@@ -899,198 +703,24 @@ Value MockInterpreter::CallBIF(const std::string& raw_name,
     return Value::MakeInt(0);
   }
 
-  if (name == "min" || name == "max") {
+  if (name == "min") {
     if (args.size() >= 2) {
-      bool use_float = (args[0].base_type == BaseType::F32 ||
-                        args[0].base_type == BaseType::F64 ||
-                        args[1].base_type == BaseType::F32 ||
-                        args[1].base_type == BaseType::F64);
-      if (use_float) {
-        double a = args[0].AsDouble(), b = args[1].AsDouble();
-        bool pick_a = (name == "min") ? (a < b) : (a > b);
-        return Value::MakeDouble(pick_a ? a : b);
-      }
       int64_t a = args[0].AsInt(), b = args[1].AsInt();
-      bool pick_a = (name == "min") ? (a < b) : (a > b);
-      return Value::MakeInt(pick_a ? a : b);
+      return Value::MakeInt(a < b ? a : b);
+    }
+    return args.empty() ? Value::MakeInt(0) : args[0];
+  }
+
+  if (name == "max") {
+    if (args.size() >= 2) {
+      int64_t a = args[0].AsInt(), b = args[1].AsInt();
+      return Value::MakeInt(a > b ? a : b);
     }
     return args.empty() ? Value::MakeInt(0) : args[0];
   }
 
   if (name == "abs") {
-    if (!args.empty()) {
-      if (args[0].base_type == BaseType::F32 ||
-          args[0].base_type == BaseType::F64)
-        return Value::MakeDouble(std::abs(args[0].AsDouble()));
-      return Value::MakeInt(std::abs(args[0].AsInt()));
-    }
-    return Value::MakeInt(0);
-  }
-
-  {
-    using MathFn = double (*)(double);
-    static const std::map<std::string, MathFn> math_fns = {
-        {"sqrt", std::sqrt},   {"sin", std::sin},     {"cos", std::cos},
-        {"tan", std::tan},     {"exp", std::exp},     {"log", std::log},
-        {"floor", std::floor}, {"ceil", std::ceil},   {"round", std::round},
-        {"sinh", std::sinh},   {"cosh", std::cosh},   {"tanh", std::tanh},
-        {"acos", std::acos},   {"asin", std::asin},   {"atan", std::atan},
-        {"log1p", std::log1p}, {"expm1", std::expm1}, {"exp2f", ::exp2},
-        {"fabs", std::fabs},   {"cbrt", std::cbrt},
-    };
-    auto it = math_fns.find(name);
-    if (it != math_fns.end()) {
-      if (!args.empty())
-        return Value::MakeDouble(it->second(args[0].AsDouble()));
-      return Value::MakeDouble(0);
-    }
-    if (name == "rsqrt" || name == "frcp_rn") {
-      if (!args.empty()) {
-        double v = args[0].AsDouble();
-        return Value::MakeDouble(name == "rsqrt" ? 1.0 / std::sqrt(v)
-                                                 : 1.0 / v);
-      }
-      return Value::MakeDouble(0);
-    }
-    if (name == "sign") {
-      if (!args.empty()) {
-        double v = args[0].AsDouble();
-        return Value::MakeDouble(v > 0 ? 1.0 : (v < 0 ? -1.0 : 0.0));
-      }
-      return Value::MakeDouble(0);
-    }
-    if (name == "gelu") {
-      if (!args.empty()) {
-        double x = args[0].AsDouble();
-        return Value::MakeDouble(
-            0.5 * x * (1.0 + std::tanh(std::sqrt(2.0 / M_PI) *
-                                        (x + 0.044715 * x * x * x))));
-      }
-      return Value::MakeDouble(0);
-    }
-    if (name == "sigmoid") {
-      if (!args.empty())
-        return Value::MakeDouble(1.0 / (1.0 + std::exp(-args[0].AsDouble())));
-      return Value::MakeDouble(0);
-    }
-    if (name == "softplus") {
-      if (!args.empty())
-        return Value::MakeDouble(std::log1p(std::exp(args[0].AsDouble())));
-      return Value::MakeDouble(0);
-    }
-  }
-
-  if (name == "pow" || name == "atan2") {
-    if (args.size() >= 2) {
-      double a = args[0].AsDouble(), b = args[1].AsDouble();
-      return Value::MakeDouble(name == "pow" ? std::pow(a, b)
-                                             : std::atan2(a, b));
-    }
-    return Value::MakeDouble(0);
-  }
-
-  if (name == "fmaf") {
-    if (args.size() >= 3)
-      return Value::MakeDouble(std::fma(args[0].AsDouble(),
-                                        args[1].AsDouble(),
-                                        args[2].AsDouble()));
-    return Value::MakeDouble(0);
-  }
-
-  if (name == "alignup") {
-    if (args.size() >= 2) {
-      int64_t v = args[0].AsInt(), a = args[1].AsInt();
-      return Value::MakeInt(a > 0 ? ((v + a - 1) / a) * a : v);
-    }
-    return Value::MakeInt(0);
-  }
-
-  if (name == "aligndown") {
-    if (args.size() >= 2) {
-      int64_t v = args[0].AsInt(), a = args[1].AsInt();
-      return Value::MakeInt(a > 0 ? (v / a) * a : v);
-    }
-    return Value::MakeInt(0);
-  }
-
-  if (name == "isfinite") {
-    if (!args.empty())
-      return Value::MakeBool(std::isfinite(args[0].AsDouble()));
-    return Value::MakeBool(false);
-  }
-
-  if (name.substr(0, 7) == "atomic_") {
-    if (node.arguments && node.arguments->Count() >= 2) {
-      auto& arg_nodes = node.GetArguments();
-      Value old_val = args[0];
-      Value operand = args.size() > 1 ? args[1] : Value::MakeInt(0);
-      Value new_val = old_val;
-      std::string op = name.substr(7);
-      if (op == "add")
-        new_val = Value::MakeInt(old_val.AsInt() + operand.AsInt());
-      else if (op == "sub")
-        new_val = Value::MakeInt(old_val.AsInt() - operand.AsInt());
-      else if (op == "max")
-        new_val = Value::MakeInt(std::max(old_val.AsInt(), operand.AsInt()));
-      else if (op == "min")
-        new_val = Value::MakeInt(std::min(old_val.AsInt(), operand.AsInt()));
-      else if (op == "and")
-        new_val = Value::MakeInt(old_val.AsInt() & operand.AsInt());
-      else if (op == "or")
-        new_val = Value::MakeInt(old_val.AsInt() | operand.AsInt());
-      else if (op == "xor")
-        new_val = Value::MakeInt(old_val.AsInt() ^ operand.AsInt());
-      else if (op == "exch")
-        new_val = operand;
-      else if (op == "cas" && args.size() >= 3) {
-        if (old_val.AsInt() == operand.AsInt())
-          new_val = args[2];
-      }
-
-      auto target_node = arg_nodes[0];
-      if (auto expr = dyn_cast<AST::Expr>(target_node))
-        if (expr->GetForm() == AST::Expr::Reference)
-          target_node = expr->GetR();
-
-      if (auto chunk = dyn_cast<AST::ChunkAt>(target_node)) {
-        std::string base_name = chunk->data->name;
-        auto dot = base_name.rfind(".data");
-        if (dot != std::string::npos) base_name = base_name.substr(0, dot);
-        if (mem.Exists(base_name)) {
-          auto& arr_val = mem.Lookup(base_name);
-          if (arr_val.kind == Value::Pointer && arr_val.alloc &&
-              chunk->indices) {
-            std::vector<size_t> indices;
-            for (auto& idx : chunk->indices->AllValues())
-              indices.push_back((size_t)ExprEval(idx).AsInt());
-            size_t linear =
-                ComputeLinearIndex(indices, arr_val.alloc->shape);
-            size_t byte_off =
-                linear * arr_val.alloc->ElemSize() + arr_val.offset;
-            arr_val.WriteToAlloc(byte_off, new_val);
-          }
-        }
-      } else if (auto da = dyn_cast<AST::DataAccess>(target_node)) {
-        if (da->AccessElement()) {
-          auto& arr_val = mem.Lookup(da->GetDataName());
-          if (arr_val.kind == Value::Pointer && arr_val.alloc) {
-            std::vector<size_t> indices;
-            for (auto& idx : da->GetIndices())
-              indices.push_back((size_t)ExprEval(idx).AsInt());
-            size_t linear =
-                ComputeLinearIndex(indices, arr_val.alloc->shape);
-            size_t byte_off =
-                linear * arr_val.alloc->ElemSize() + arr_val.offset;
-            arr_val.WriteToAlloc(byte_off, new_val);
-          }
-        } else {
-          mem.Define(da->GetDataName(), new_val);
-        }
-      } else if (auto id = dyn_cast<AST::Identifier>(target_node)) {
-        mem.Define(id->name, new_val);
-      }
-      return old_val;
-    }
+    if (!args.empty()) return Value::MakeInt(std::abs(args[0].AsInt()));
     return Value::MakeInt(0);
   }
 
@@ -1193,419 +823,6 @@ Value MockInterpreter::CastValue(const Value& v, BaseType target_type) const {
   }
 
   return result;
-}
-
-static std::string NameFromExpr(const ptr<AST::Expr>& e) {
-  if (!e) return "";
-  if (e->GetForm() == AST::Expr::Reference) {
-    if (auto id = dyn_cast<AST::Identifier>(e->GetR())) return id->name;
-    if (auto da = dyn_cast<AST::DataAccess>(e->GetR()))
-      return da->GetDataName();
-  }
-  return "";
-}
-
-static Value MakeScalarOf(BaseType bt, double v) {
-  Value r;
-  r.kind = Value::Scalar;
-  r.base_type = bt;
-  if (bt == BaseType::F32)
-    r.scalar.f32 = (float)v;
-  else if (bt == BaseType::F64)
-    r.scalar.f64 = v;
-  else
-    r.scalar.i64 = (int64_t)v;
-  return r;
-}
-
-// -----------------------------------------------------------------------
-// MMA -- matrix multiply-accumulate mock using reference GEMM
-// -----------------------------------------------------------------------
-void MockInterpreter::ExecMMA(AST::MMA& n) {
-  auto& op = *n.GetOperation();
-
-  using MMAOp = AST::MMAOperation;
-  if (op.IsKind(MMAOp::Fill)) {
-    auto fill_val = ExprEval(op.FillingValue());
-    std::string name = NameFromExpr(op.FillingTo());
-    if (name.empty()) {
-      Warning(n.LOC(), "mock: mma.fill target is not a simple identifier.");
-      return;
-    }
-
-    if (mem.Exists(name)) {
-      auto& existing = mem.Lookup(name);
-      if (existing.kind == Value::Pointer && existing.alloc) {
-        double fv = fill_val.AsDouble();
-        Value tmp = MakeScalarOf(existing.alloc->elem_type, fv);
-        for (size_t i = 0; i < existing.alloc->TotalElements(); ++i) {
-          auto ptr_val = Value::MakePointer(existing.alloc, existing.alloc->elem_type);
-          ptr_val.WriteToAlloc(i * existing.alloc->ElemSize(), tmp);
-        }
-        return;
-      }
-    }
-
-    auto fill_type = op.FillingType();
-    if (fill_type == BaseType::UNKSCALAR)
-      fill_type = (fill_val.base_type == BaseType::F32 ||
-                   fill_val.base_type == BaseType::F64)
-                      ? fill_val.base_type
-                      : BaseType::F32;
-
-    auto dims_mv = op.FillingArrayDims();
-    std::vector<size_t> shape;
-    if (dims_mv) {
-      for (size_t i = 0; i < dims_mv->Count(); ++i)
-        shape.push_back((size_t)ExprEval(dims_mv->ValueAt(i)).AsInt());
-    }
-    if (shape.empty()) shape = {1, 1};
-
-    auto alloc = mem.Allocate(fill_type, shape, Storage::LOCAL);
-    double fv = fill_val.AsDouble();
-    Value tmp = MakeScalarOf(fill_type, fv);
-    for (size_t i = 0; i < alloc->TotalElements(); ++i) {
-      auto ptr_val = Value::MakePointer(alloc, fill_type);
-      ptr_val.WriteToAlloc(i * alloc->ElemSize(), tmp);
-    }
-
-    mem.Define(name, Value::MakePointer(alloc, fill_type));
-
-  } else if (op.IsLoad()) {
-    auto src_val = ExprEval(op.LoadFrom());
-    if (src_val.kind != Value::Pointer || !src_val.alloc) {
-      Warning(n.LOC(), "mock: mma.load source is not a valid pointer.");
-      return;
-    }
-
-    auto& src_alloc = src_val.alloc;
-    auto alloc =
-        mem.Allocate(src_alloc->elem_type, src_alloc->shape, Storage::LOCAL);
-    size_t bytes = std::min(alloc->TotalBytes(), src_alloc->TotalBytes());
-    std::memcpy(alloc->RawPtr(),
-                (const uint8_t*)src_alloc->RawPtr() + src_val.offset, bytes);
-
-    if (op.IsLoadR()) {
-      std::string dst_name = NameFromExpr(op.LoadTo());
-      if (!dst_name.empty() && mem.Exists(dst_name)) {
-        auto& dst = mem.Lookup(dst_name);
-        if (dst.kind == Value::Pointer && dst.alloc) {
-          size_t copy_bytes =
-              std::min(dst.alloc->TotalBytes(), alloc->TotalBytes());
-          std::memcpy(dst.alloc->RawPtr(), alloc->RawPtr(), copy_bytes);
-        }
-      }
-    } else {
-      std::string dst_name = NameFromExpr(op.LoadTo());
-      if (!dst_name.empty())
-        mem.Define(dst_name, Value::MakePointer(alloc, src_alloc->elem_type));
-    }
-
-  } else if (op.IsKind(MMAOp::Exec)) {
-    auto acc_val = ExprEval(op.ExecOperand(0));
-    auto lhs_val = ExprEval(op.ExecOperand(1));
-    auto rhs_val = ExprEval(op.ExecOperand(2));
-
-    if (acc_val.kind != Value::Pointer || !acc_val.alloc ||
-        lhs_val.kind != Value::Pointer || !lhs_val.alloc ||
-        rhs_val.kind != Value::Pointer || !rhs_val.alloc) {
-      Warning(n.LOC(), "mock: mma.exec operands must be valid pointers.");
-      return;
-    }
-
-    auto method = op.GetMethod();
-    auto& a_shape = lhs_val.alloc->shape;
-    auto& b_shape = rhs_val.alloc->shape;
-
-    if (a_shape.size() < 2 || b_shape.size() < 2) {
-      Warning(n.LOC(), "mock: mma.exec operands must be 2D arrays.");
-      return;
-    }
-
-    int64_t M = 0, N = 0, K = 0;
-    switch (method) {
-    case MMAOp::ROW_COL:
-      M = a_shape[0];
-      K = a_shape[1];
-      N = b_shape[1];
-      break;
-    case MMAOp::ROW_ROW:
-      M = a_shape[0];
-      K = a_shape[1];
-      N = b_shape[0];
-      break;
-    case MMAOp::COL_ROW:
-      M = a_shape[1];
-      K = a_shape[0];
-      N = b_shape[0];
-      break;
-    case MMAOp::COL_COL:
-      M = a_shape[1];
-      K = a_shape[0];
-      N = b_shape[1];
-      break;
-    }
-
-    auto acc_alloc = acc_val.alloc;
-    if (acc_alloc->TotalElements() == 1 && (M > 1 || N > 1)) {
-      double init_val = 0;
-      auto old_ptr = Value::MakePointer(acc_alloc, acc_val.base_type);
-      auto old_elem = old_ptr.ReadFromAlloc(0, acc_alloc->elem_type);
-      init_val = old_elem.AsDouble();
-
-      auto new_alloc = mem.Allocate(acc_alloc->elem_type,
-                                    {(size_t)M, (size_t)N}, Storage::LOCAL);
-      Value fill = MakeScalarOf(new_alloc->elem_type, init_val);
-      for (size_t i = 0; i < new_alloc->TotalElements(); ++i) {
-        auto tmp = Value::MakePointer(new_alloc, new_alloc->elem_type);
-        tmp.WriteToAlloc(i * new_alloc->ElemSize(), fill);
-      }
-
-      acc_alloc = new_alloc;
-      std::string acc_name = NameFromExpr(op.ExecOperand(0));
-      if (!acc_name.empty() && mem.Exists(acc_name))
-        mem.Define(acc_name,
-                   Value::MakePointer(new_alloc, new_alloc->elem_type));
-    }
-
-    // Reference GEMM: D[m,n] += A[...] * B[...]
-    size_t a_elem = lhs_val.alloc->ElemSize();
-    size_t b_elem = rhs_val.alloc->ElemSize();
-    size_t c_elem = acc_alloc->ElemSize();
-    auto a_bt = lhs_val.alloc->elem_type;
-    auto b_bt = rhs_val.alloc->elem_type;
-    auto c_bt = acc_alloc->elem_type;
-
-    for (int64_t m = 0; m < M; ++m) {
-      for (int64_t n = 0; n < N; ++n) {
-        double acc = 0;
-        auto c_ptr = Value::MakePointer(acc_alloc, c_bt);
-        auto c_old = c_ptr.ReadFromAlloc((size_t)(m * N + n) * c_elem, c_bt);
-        acc = c_old.AsDouble();
-
-        for (int64_t k = 0; k < K; ++k) {
-          size_t a_idx = 0, b_idx = 0;
-          switch (method) {
-          case MMAOp::ROW_COL:
-            a_idx = m * K + k;
-            b_idx = k * N + n;
-            break;
-          case MMAOp::ROW_ROW:
-            a_idx = m * K + k;
-            b_idx = n * K + k;
-            break;
-          case MMAOp::COL_ROW:
-            a_idx = k * M + m;
-            b_idx = n * K + k;
-            break;
-          case MMAOp::COL_COL:
-            a_idx = k * M + m;
-            b_idx = k * N + n;
-            break;
-          }
-
-          auto a_ptr = Value::MakePointer(lhs_val.alloc, a_bt);
-          auto a_val =
-              a_ptr.ReadFromAlloc(a_idx * a_elem + lhs_val.offset, a_bt);
-          auto b_ptr = Value::MakePointer(rhs_val.alloc, b_bt);
-          auto b_val =
-              b_ptr.ReadFromAlloc(b_idx * b_elem + rhs_val.offset, b_bt);
-          acc += a_val.AsDouble() * b_val.AsDouble();
-        }
-
-        auto d_ptr = Value::MakePointer(acc_alloc, c_bt);
-        d_ptr.WriteToAlloc((size_t)(m * N + n) * c_elem,
-                           MakeScalarOf(c_bt, acc));
-      }
-    }
-
-  } else if (op.IsKind(MMAOp::Store)) {
-    auto src_val = ExprEval(op.StoreFrom());
-    auto dst_val = ExprEval(op.StoreTo());
-
-    if (src_val.kind != Value::Pointer || !src_val.alloc ||
-        dst_val.kind != Value::Pointer || !dst_val.alloc) {
-      Warning(n.LOC(), "mock: mma.store operands must be valid pointers.");
-      return;
-    }
-
-    auto& src = src_val.alloc;
-    auto& dst = dst_val.alloc;
-
-    if (op.StoreIsTranspose() && src->shape.size() >= 2) {
-      size_t M = src->shape[0], N = src->shape[1];
-      size_t elem = src->ElemSize();
-      auto bt = src->elem_type;
-      for (size_t m = 0; m < M; ++m) {
-        for (size_t n = 0; n < N; ++n) {
-          auto sp = Value::MakePointer(src_val.alloc, bt);
-          auto val = sp.ReadFromAlloc((m * N + n) * elem + src_val.offset, bt);
-          auto dp = Value::MakePointer(dst_val.alloc, bt);
-          dp.WriteToAlloc((n * M + m) * elem + dst_val.offset, val);
-        }
-      }
-    } else {
-      size_t bytes = std::min(src->TotalBytes() - src_val.offset,
-                              dst->TotalBytes() - dst_val.offset);
-      std::memcpy((uint8_t*)dst->RawPtr() + dst_val.offset,
-                  (const uint8_t*)src->RawPtr() + src_val.offset, bytes);
-    }
-
-  } else if (op.IsKind(MMAOp::Scale)) {
-    auto acc_val = ExprEval(op.ScaleAccumulator());
-    auto scale_b_val = ExprEval(op.ScaleB());
-    if (acc_val.kind != Value::Pointer || !acc_val.alloc) return;
-
-    double sb = scale_b_val.AsDouble();
-    auto bt = acc_val.alloc->elem_type;
-    size_t elem = acc_val.alloc->ElemSize();
-    for (size_t i = 0; i < acc_val.alloc->TotalElements(); ++i) {
-      auto ptr = Value::MakePointer(acc_val.alloc, bt);
-      auto v = ptr.ReadFromAlloc(i * elem + acc_val.offset, bt);
-      ptr.WriteToAlloc(i * elem + acc_val.offset,
-                       MakeScalarOf(bt, v.AsDouble() * sb));
-    }
-
-  } else if (op.IsKind(MMAOp::Commit) || op.IsKind(MMAOp::Wait)) {
-    // No-ops for single-threaded mock.
-  } else {
-    Warning(n.LOC(), "mock: unhandled MMA operation kind.");
-  }
-}
-
-// -----------------------------------------------------------------------
-// ApplyBlock -- element-wise iteration over a fragment's span
-// -----------------------------------------------------------------------
-void MockInterpreter::ExecApply(AST::ApplyBlock& n) {
-  std::string frag_name = n.SpanFragmentName();
-  if (!mem.Exists(frag_name)) {
-    Warning(n.LOC(), "mock: apply target '" + frag_name + "' not found.");
-    return;
-  }
-  auto& frag_val = mem.Lookup(frag_name);
-  if (frag_val.kind != Value::Pointer || !frag_val.alloc) {
-    Warning(n.LOC(), "mock: apply target must be a pointer/fragment.");
-    return;
-  }
-
-  auto& shape = frag_val.alloc->shape;
-  auto& iters = n.iterators;
-
-  if (iters.size() == 1 || shape.size() == 1) {
-    size_t total = frag_val.alloc->TotalElements();
-    for (size_t i = 0; i < total; ++i) {
-      mem.EnterScope();
-      mem.Define(iters[0], Value::MakeInt((int64_t)i));
-      ExecBlock(n.body);
-      mem.LeaveScope();
-      if (cf.kind != ControlFlow::None) break;
-    }
-  } else if (iters.size() >= 2 && shape.size() >= 2) {
-    for (size_t i = 0; i < shape[0]; ++i) {
-      for (size_t j = 0; j < shape[1]; ++j) {
-        mem.EnterScope();
-        mem.Define(iters[0], Value::MakeInt((int64_t)i));
-        mem.Define(iters[1], Value::MakeInt((int64_t)j));
-        ExecBlock(n.body);
-        mem.LeaveScope();
-        if (cf.kind != ControlFlow::None) break;
-      }
-      if (cf.kind != ControlFlow::None) break;
-    }
-  }
-}
-
-// -----------------------------------------------------------------------
-// FragReduce -- row/column reduction of a 2D array into a 1D array
-// reduce_sum(dst, src, dim)  /  reduce_max(dst, src, dim)
-// -----------------------------------------------------------------------
-void MockInterpreter::ExecFragReduce(AST::FragReduce& n) {
-  auto src_name = n.SrcName();
-  auto dst_name = n.DstName();
-
-  if (!mem.Exists(src_name) || !mem.Exists(dst_name)) {
-    Warning(n.LOC(), "mock: reduce operand not found.");
-    return;
-  }
-
-  auto& src_val = mem.Lookup(src_name);
-  auto& dst_val = mem.Lookup(dst_name);
-
-  if (src_val.kind != Value::Pointer || !src_val.alloc ||
-      dst_val.kind != Value::Pointer || !dst_val.alloc) {
-    Warning(n.LOC(), "mock: reduce operands must be arrays.");
-    return;
-  }
-
-  auto& s = *src_val.alloc;
-  auto& d = *dst_val.alloc;
-  if (s.shape.size() < 2) {
-    Warning(n.LOC(), "mock: reduce source must be at least 2D.");
-    return;
-  }
-
-  size_t rows = s.shape[0], cols = s.shape[1];
-  size_t se = s.ElemSize(), de = d.ElemSize();
-  auto sbt = s.elem_type, dbt = d.elem_type;
-
-  auto read_src = [&](size_t idx) {
-    auto p = Value::MakePointer(src_val.alloc, sbt);
-    return p.ReadFromAlloc(idx * se + src_val.offset, sbt);
-  };
-  auto write_dst = [&](size_t idx, double v) {
-    auto p = Value::MakePointer(dst_val.alloc, dbt);
-    p.WriteToAlloc(idx * de + dst_val.offset, MakeScalarOf(dbt, v));
-  };
-
-  auto reduce_range = [&](size_t out_idx, size_t start, size_t stride,
-                          size_t count) {
-    auto first = read_src(start);
-    double best = first.AsDouble();
-    double sum = best;
-    for (size_t k = 1; k < count; ++k) {
-      double v = read_src(start + k * stride).AsDouble();
-      sum += v;
-      if (v > best) best = v;
-    }
-    write_dst(out_idx,
-              n.op == AST::FragReduceOp::SUM ? sum : best);
-  };
-
-  if (n.dim == 1) {
-    for (size_t i = 0; i < rows; ++i)
-      reduce_range(i, i * cols, 1, cols);
-  } else if (n.dim == 0) {
-    for (size_t j = 0; j < cols; ++j)
-      reduce_range(j, j, cols, rows);
-  } else {
-    Warning(n.LOC(), "mock: unsupported reduce dim=" + std::to_string(n.dim));
-  }
-}
-
-// -----------------------------------------------------------------------
-// FragTransfer -- copy between arrays
-// copy(dst, src)
-// -----------------------------------------------------------------------
-void MockInterpreter::ExecFragTransfer(AST::FragTransfer& n) {
-  auto dst_name = n.DstName();
-  auto src_name = n.SrcName();
-
-  if (!mem.Exists(src_name) || !mem.Exists(dst_name)) {
-    Warning(n.LOC(), "mock: copy operand not found.");
-    return;
-  }
-
-  auto& src_val = mem.Lookup(src_name);
-  auto& dst_val = mem.Lookup(dst_name);
-
-  if (src_val.kind != Value::Pointer || !src_val.alloc ||
-      dst_val.kind != Value::Pointer || !dst_val.alloc) {
-    Warning(n.LOC(), "mock: copy operands must be arrays.");
-    return;
-  }
-
-  size_t bytes = std::min(src_val.alloc->TotalBytes(), dst_val.alloc->TotalBytes());
-  std::memcpy(dst_val.alloc->RawPtr(), src_val.alloc->RawPtr(), bytes);
 }
 
 } // namespace Mock

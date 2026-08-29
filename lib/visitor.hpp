@@ -89,7 +89,7 @@ struct Visitor {
   virtual bool Visit(AST::SpanAs&) = 0;
   virtual bool Visit(AST::DMA&) = 0;
   virtual bool Visit(AST::MMA&) = 0;
-  virtual bool Visit(AST::ApplyBlock&) = 0;
+  virtual bool Visit(AST::FragApply&) = 0;
   virtual bool Visit(AST::FragTransfer&) = 0;
   virtual bool Visit(AST::FragReduce&) = 0;
   virtual bool Visit(AST::ChunkAt&) = 0;
@@ -101,8 +101,6 @@ struct Visitor {
   virtual bool Visit(AST::Call&) = 0;
   virtual bool Visit(AST::Rotate&) = 0;
   virtual bool Visit(AST::Synchronize&) = 0;
-  virtual bool Visit(AST::Barrier&) = 0;
-  virtual bool Visit(AST::Fence&) = 0;
   virtual bool Visit(AST::Select&) = 0;
   virtual bool Visit(AST::Return&) = 0;
   virtual bool Visit(AST::LoopRange&) = 0;
@@ -377,7 +375,6 @@ public:
   }
 
   virtual int Status() { return error_count; }
-  int ErrorCount() const { return error_count; }
   virtual bool HasError() const {
     if (error_count > 0) {
       dbgs() << "Totally " << error_count << " errors have been detected.\n";
@@ -489,9 +486,6 @@ public:
         }
     } else if (isa<AST::ForeachBlock>(&n)) {
       SSTab().EnterScope("foreach_" + std::to_string(fe_count++));
-    } else if (auto ab = dyn_cast<AST::ApplyBlock>(&n)) {
-      SSTab().EnterScope("apply_" + std::to_string(fe_count++));
-      for (auto& p : ab->iterators) SSTab().DefineSymbol(p, MakeIntegerType());
     } else if (isa<AST::InThreadsBlock>(&n)) {
       SSTab().EnterScope("inthreads_" + std::to_string(it_count++));
     } else if (isa<AST::WhileBlock>(&n)) {
@@ -556,8 +550,7 @@ public:
       SSTab().LeaveScope();
     } else if (isa<AST::ParallelBy>(&n) || isa<AST::WithBlock>(&n) ||
                isa<AST::ForeachBlock>(&n) || isa<AST::InThreadsBlock>(&n) ||
-               isa<AST::WhileBlock>(&n) || isa<AST::IfElseBlock>(&n) ||
-               isa<AST::ApplyBlock>(&n)) {
+               isa<AST::WhileBlock>(&n) || isa<AST::IfElseBlock>(&n)) {
       SSTab().LeaveScope();
     }
 
@@ -626,7 +619,7 @@ public:
   bool Visit(AST::SpanAs&) override { return true; }
   bool Visit(AST::DMA&) override { return true; }
   bool Visit(AST::MMA&) override { return true; }
-  bool Visit(AST::ApplyBlock&) override { return true; }
+  bool Visit(AST::FragApply&) override { return true; }
   bool Visit(AST::FragTransfer&) override { return true; }
   bool Visit(AST::FragReduce&) override { return true; }
   bool Visit(AST::ChunkAt&) override { return true; }
@@ -638,8 +631,6 @@ public:
   bool Visit(AST::Call&) override { return true; }
   bool Visit(AST::Rotate&) override { return true; }
   bool Visit(AST::Synchronize&) override { return true; }
-  bool Visit(AST::Barrier&) override { return true; }
-  bool Visit(AST::Fence&) override { return true; }
   bool Visit(AST::Select&) override { return true; }
   bool Visit(AST::Return&) override { return true; }
   bool Visit(AST::LoopRange&) override { return true; }
@@ -893,14 +884,6 @@ public:
     TraceEachVisit(n);
     return VisitNode(n);
   }
-  bool Visit(AST::Barrier& n) final {
-    TraceEachVisit(n);
-    return VisitNode(n);
-  }
-  bool Visit(AST::Fence& n) final {
-    TraceEachVisit(n);
-    return VisitNode(n);
-  }
   bool Visit(AST::Select& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
@@ -978,7 +961,7 @@ public:
   virtual bool VisitNode(AST::SpanAs&) { return true; }
   virtual bool VisitNode(AST::DMA&) { return true; }
   virtual bool VisitNode(AST::MMA&) { return true; }
-  virtual bool VisitNode(AST::ApplyBlock&) { return true; }
+  virtual bool VisitNode(AST::FragApply&) { return true; }
   virtual bool VisitNode(AST::ChunkAt&) { return true; }
   virtual bool VisitNode(AST::Wait&) { return true; }
   virtual bool VisitNode(AST::Trigger&) { return true; }
@@ -987,8 +970,6 @@ public:
   virtual bool VisitNode(AST::Call&) { return true; }
   virtual bool VisitNode(AST::Rotate&) { return true; }
   virtual bool VisitNode(AST::Synchronize&) { return true; }
-  virtual bool VisitNode(AST::Barrier&) { return true; }
-  virtual bool VisitNode(AST::Fence&) { return true; }
   virtual bool VisitNode(AST::Select&) { return true; }
   virtual bool VisitNode(AST::Return&) { return true; }
   virtual bool VisitNode(AST::LoopRange&) { return true; }
@@ -1075,12 +1056,6 @@ public:
     return true;
   }
 
-  int Status() override {
-    int total = error_count;
-    for (auto* v : members) total += v->ErrorCount();
-    return total;
-  }
-
 private:
   // disable the interfaces
   bool InMidVisit(AST::Node&) final { return true; }
@@ -1114,7 +1089,7 @@ private:
   bool Visit(AST::SpanAs&) final { return true; }
   bool Visit(AST::DMA&) final { return true; }
   bool Visit(AST::MMA&) final { return true; }
-  bool Visit(AST::ApplyBlock&) final { return true; }
+  bool Visit(AST::FragApply&) final { return true; }
   bool Visit(AST::FragTransfer&) final { return true; }
   bool Visit(AST::FragReduce&) final { return true; }
   bool Visit(AST::ChunkAt&) final { return true; }
@@ -1126,8 +1101,6 @@ private:
   bool Visit(AST::Call&) final { return true; }
   bool Visit(AST::Rotate&) final { return true; }
   bool Visit(AST::Synchronize&) final { return true; }
-  bool Visit(AST::Barrier&) final { return true; }
-  bool Visit(AST::Fence&) final { return true; }
   bool Visit(AST::Select&) final { return true; }
   bool Visit(AST::Return&) final { return true; }
   bool Visit(AST::LoopRange&) final { return true; }

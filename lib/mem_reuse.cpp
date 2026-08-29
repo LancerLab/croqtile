@@ -500,19 +500,10 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
 
         const LivenessAnalyzer::HBGraph* hb_graph = nullptr;
         if (sto == Storage::SHARED) {
-          auto it = la.HBGraphs().find(df_name);
-          if (it != la.HBGraphs().end()) {
-            hb_graph = &it->second;
-          } else {
-            // Find the most specific HB graph whose scope is a child
-            // of df_name (scope starts with df_name). Use longest match
-            // to avoid prefix-collision.
-            size_t best_len = 0;
-            for (const auto& [scope, graph] : la.HBGraphs()) {
-              if (scope.find(df_name) == 0 && scope.size() > best_len) {
-                best_len = scope.size();
-                hb_graph = &graph;
-              }
+          for (const auto& [scope, graph] : la.HBGraphs()) {
+            if (scope.find(df_name) == 0) {
+              hb_graph = &graph;
+              break;
             }
           }
         }
@@ -539,21 +530,19 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
                 hb_graph->CanOverlap(all_bufs[i].buffer_id,
                                      all_bufs[j].buffer_id)) {
               interfere = false;
-              VST_DEBUG(dbgs()
-                        << "info: HB analysis: buffers "
-                        << UnScopedExpr(all_bufs[i].buffer_id) << " and "
-                        << UnScopedExpr(all_bufs[j].buffer_id)
-                        << " can share memory (signal-ordered lifetimes).\n");
+              errs() << "info: HB analysis: buffers "
+                     << UnScopedExpr(all_bufs[i].buffer_id) << " and "
+                     << UnScopedExpr(all_bufs[j].buffer_id)
+                     << " can share memory (signal-ordered lifetimes).\n";
             }
             if (!interfere && hb_graph &&
-                hb_graph->IsUnsafeMultiInstanceOverlap(all_bufs[i].buffer_id,
-                                                       all_bufs[j].buffer_id)) {
+                hb_graph->IsUnsafeMultiInstanceOverlap(
+                    all_bufs[i].buffer_id, all_bufs[j].buffer_id)) {
               interfere = true;
-              VST_DEBUG(dbgs()
-                        << "info: HB analysis: buffers "
-                        << UnScopedExpr(all_bufs[i].buffer_id) << " and "
-                        << UnScopedExpr(all_bufs[j].buffer_id)
-                        << " cannot share memory (multi-instance safety).\n");
+              errs() << "info: HB analysis: buffers "
+                     << UnScopedExpr(all_bufs[i].buffer_id) << " and "
+                     << UnScopedExpr(all_bufs[j].buffer_id)
+                     << " cannot share memory (multi-instance safety).\n";
             }
             ie.interference[i * n + j] = interfere;
             ie.interference[j * n + i] = interfere;
@@ -579,32 +568,22 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
     std::vector<std::pair<std::string, std::string>> hb_overlapped_pairs;
     if (sto == Storage::SHARED) {
       const auto& hb_graphs = la.HBGraphs();
-      const LivenessAnalyzer::HBGraph* hb_graph_ptr = nullptr;
-      auto it = hb_graphs.find(df_name);
-      if (it != hb_graphs.end()) {
-        hb_graph_ptr = &it->second;
-      } else {
-        size_t best_len = 0;
-        for (const auto& [scope, graph] : hb_graphs) {
-          if (scope.find(df_name) == 0 && scope.size() > best_len) {
-            best_len = scope.size();
-            hb_graph_ptr = &graph;
-          }
+      for (const auto& [scope, graph] : hb_graphs) {
+        if (scope.find(df_name) == 0) {
+          hb_override = [&graph, &hb_overlapped_pairs](
+                            const std::string& a, const std::string& b) {
+            if (graph.CanOverlap(a, b)) {
+              hb_overlapped_pairs.emplace_back(a, b);
+              return true;
+            }
+            return false;
+          };
+          hb_must_interfere = [&graph](const std::string& a,
+                                       const std::string& b) {
+            return graph.IsUnsafeMultiInstanceOverlap(a, b);
+          };
+          break;
         }
-      }
-      if (hb_graph_ptr) {
-        hb_override = [hb_graph_ptr, &hb_overlapped_pairs](
-                          const std::string& a, const std::string& b) {
-          if (hb_graph_ptr->CanOverlap(a, b)) {
-            hb_overlapped_pairs.emplace_back(a, b);
-            return true;
-          }
-          return false;
-        };
-        hb_must_interfere = [hb_graph_ptr](const std::string& a,
-                                           const std::string& b) {
-          return hb_graph_ptr->IsUnsafeMultiInstanceOverlap(a, b);
-        };
       }
     }
 
@@ -613,7 +592,8 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
     if (!chunks.empty()) {
       size_t baseline_size = simulator.Allocate(chunks, alignment).heap_size;
       HeapSimulator::Result result =
-          simulator.Allocate(chunks, alignment, hb_override, hb_must_interfere);
+          simulator.Allocate(chunks, alignment, hb_override,
+                             hb_must_interfere);
       if (!ValidateResult(result, chunks, hb_override, hb_must_interfere)) {
         VST_DEBUG(dbgs() << "  in device function: " << df_name << "\n");
         assert(false && "memory reuse validation failed");
@@ -625,19 +605,35 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
       CCtx().GetMemReuseStats().total_static_heap_bytes += result.heap_size;
       for (const auto& [buffer_id, offset] : result.chunk_offsets)
         ctx.mem_offset.emplace(buffer_id, offset);
-      VST_DEBUG({
-        dbgs() << "For '" << df_name << "'\n\t" << STR(sto)
-               << " memory usage: " << result.heap_size << " bytes\n";
-        if (!hb_overlapped_pairs.empty() && result.heap_size < baseline_size) {
-          dbgs() << "info: HB analysis: shared memory reduced from "
-                 << baseline_size << " to " << result.heap_size << " bytes ("
-                 << (baseline_size - result.heap_size)
-                 << " saved). Overlapped buffers:";
-          for (const auto& [a, b] : hb_overlapped_pairs)
-            dbgs() << " (" << UnScopedExpr(a) << ", " << UnScopedExpr(b) << ")";
-          dbgs() << "\n";
+      VST_DEBUG(dbgs() << "For '" << df_name << "'\n\t" << STR(sto)
+                       << " memory usage: " << result.heap_size << " bytes\n");
+      if (!hb_overlapped_pairs.empty() &&
+          result.heap_size < baseline_size) {
+        errs() << "info: HB analysis: shared memory reduced from "
+               << baseline_size << " to " << result.heap_size
+               << " bytes (" << (baseline_size - result.heap_size)
+               << " saved). Overlapped buffers:";
+        for (const auto& [a, b] : hb_overlapped_pairs) {
+          errs() << " (" << UnScopedExpr(a) << ", " << UnScopedExpr(b) << ")";
         }
-      });
+        errs() << "\n";
+      }
+      // Auto-barrier propagation: when the HB graph has auto-barriers,
+      // propagate the requirement to codegen.  The named barrier is
+      // cheap (~1 us) and ensures correctness when the allocator
+      // overlaps multi-instance mainloop and epilogue buffers.
+      for (const auto& [scope, graph] : la.HBGraphs()) {
+        if (scope.find(df_name) != 0) continue;
+        for (const auto& abi : graph.auto_barriers) {
+          FCtx(co_func_name).SetSALAConsumerBarrier(
+              abi.num_consumer_threads);
+          errs() << "info: SALA auto-barrier: " << abi.num_consumer_instances
+                 << " consumer WG instances (" << abi.num_consumer_threads
+                 << " threads), bar.sync before epilogue phase "
+                 << abi.epilogue_phase_id << "\n";
+        }
+        break;
+      }
     }
   };
 
@@ -665,11 +661,9 @@ bool MemReuse::ValidateResult(
         auto o2 = res.chunk_offsets.at(c2.buffer_id);
         if ((o1 <= o2 && o1 + c1.size > o2) ||
             (o2 <= o1 && o2 + c2.size > o1)) {
-          VST_DEBUG(
-              dbgs() << "Error: unexpected memory overlap detected between "
-                        "buffers "
-                     << c1.buffer_id << " and " << c2.buffer_id
-                     << " after applying memory reuse.\n");
+          dbgs() << "Error: unexpected memory overlap detected between buffers "
+                 << c1.buffer_id << " and " << c2.buffer_id
+                 << " after applying memory reuse.\n";
           return false;
         }
       }

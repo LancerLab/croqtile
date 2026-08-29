@@ -1,13 +1,11 @@
-#include "amdgpu_adapt.hpp"
 #include "assert_site.hpp"
-#include "codegen_prepare.hpp"
+#include "gpu_adapt.hpp"
 #include "gpu_target.hpp"
 #include "hip_codegen.hpp"
 #include "hip_dma_plan.hpp"
 #include "io.hpp"
 #include "memcheck.hpp"
 #include "pipeline.hpp"
-#include "sys_utils.hpp"
 #include "target_registry.hpp"
 #include "types.hpp"
 
@@ -20,7 +18,6 @@ public:
   ~AMDGPUTarget() {}
   const std::string Name() const override { return "hip"; }
   static TargetID Id() { return reinterpret_cast<TargetID>(&id); }
-  std::string HostCXXCompiler() const override { return "hipcc"; }
 
   int DefaultOptLevel(const ArchId&) const override { return 3; }
 
@@ -37,36 +34,13 @@ public:
 
   const ArchId DefaultArch() const override { return "gfx1030"; }
 
-  ArchId ResolveNativeArch() const override {
-    std::string cfg_dir;
-#ifdef __CHOREO_ROCM_DIR__
-    cfg_dir = STRINGIZE(__CHOREO_ROCM_DIR__);
-#endif
-    auto hipcc = FindToolchain(cfg_dir, "hipcc");
-    if (hipcc.empty()) return "";
-    auto arch =
-        CompileAndRun(hipcc,
-                      "#include <cstdio>\n"
-                      "#include <hip/hip_runtime.h>\n"
-                      "int main(){hipDeviceProp_t p;"
-                      "if(hipGetDeviceProperties(&p,0)!=hipSuccess)return 1;"
-                      "printf(\"%s\",p.gcnArchName);return 0;}\n",
-                      ".cpp");
-    if (!arch.empty() && IsArchSupported(arch)) return arch;
-    return "";
-  }
-
-  size_t GetMemCapacity(const Storage& sto, const ArchId& arch) const override {
-    // arch -> {local, shared}
-    static std::map<std::string, std::pair<size_t, size_t>> caps = {
-        {"gfx1030", {1024, 64ull * 1024}},  // RDNA2: 64KB LDS per WGP
-        {"gfx1100", {1024, 128ull * 1024}}, // RDNA3: 128KB LDS per WGP
-    };
-    if (sto == Storage::GLOBAL) return 16ull * 1024 * 1024 * 1024;
-    auto it = caps.find(arch);
-    auto& cap = (it != caps.end()) ? it->second : caps.at("gfx1030");
-    if (sto == Storage::LOCAL) return cap.first;
-    if (sto == Storage::SHARED) return cap.second;
+  size_t GetMemCapacity(const Storage& sto, const ArchId&) const override {
+    if (sto == Storage::LOCAL)
+      return 1024;
+    else if (sto == Storage::SHARED)
+      return 64ull * 1024; // 64KB LDS
+    else if (sto == Storage::GLOBAL)
+      return 16ull * 1024 * 1024 * 1024; // 16GB
     choreo_unreachable("unsupported memory level.");
     return 0;
   }
@@ -89,21 +63,16 @@ public:
     return {
         {STR(ChoreoFeature::DGMA), Description(ChoreoFeature::DGMA)},
         {STR(ChoreoFeature::MEMALLOC), Description(ChoreoFeature::MEMALLOC)},
+        {STR(ChoreoFeature::VECTORIZE), Description(ChoreoFeature::VECTORIZE)},
         {STR(ChoreoFeature::SLML), Description(ChoreoFeature::SLML)},
-        {STR(ChoreoFeature::EVENT), Description(ChoreoFeature::EVENT)},
-        {STR(ChoreoFeature::BARRIER), Description(ChoreoFeature::BARRIER)},
-        {STR(ChoreoFeature::FENCE), Description(ChoreoFeature::FENCE)},
-        {STR(ChoreoFeature::COOPERATIVE_LAUNCH),
-         Description(ChoreoFeature::COOPERATIVE_LAUNCH)},
     };
   }
 
   const std::set<BaseType> SupportedScalarTypes(const ArchId&) const override {
     return {
-        BaseType::F64,  BaseType::F32, BaseType::F16, BaseType::BF16,
-        BaseType::S64,  BaseType::U64, BaseType::S32, BaseType::U32,
-        BaseType::S16,  BaseType::U16, BaseType::S8,  BaseType::U8,
-        BaseType::BOOL,
+        BaseType::F64, BaseType::F32, BaseType::F16, BaseType::BF16,
+        BaseType::S64, BaseType::U64, BaseType::S32, BaseType::U32,
+        BaseType::S16, BaseType::U16, BaseType::S8,  BaseType::U8,
     };
   }
 
@@ -113,10 +82,8 @@ public:
     caps.push_back(
         {AtomicOp::ADD,
          {BaseType::S32, BaseType::U32, BaseType::U64, BaseType::F32}});
-    caps.push_back({AtomicOp::SUB, {BaseType::S32, BaseType::U32}});
     caps.push_back(
-        {AtomicOp::EXCH,
-         {BaseType::S32, BaseType::U32, BaseType::U64, BaseType::F32}});
+        {AtomicOp::EXCH, {BaseType::S32, BaseType::U32, BaseType::U64}});
     caps.push_back(
         {AtomicOp::MIN,
          {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
@@ -133,8 +100,7 @@ public:
         {AtomicOp::XOR,
          {BaseType::S32, BaseType::U32, BaseType::S64, BaseType::U64}});
     caps.push_back(
-        {AtomicOp::CAS,
-         {BaseType::S32, BaseType::U32, BaseType::U64, BaseType::U16}});
+        {AtomicOp::CAS, {BaseType::S32, BaseType::U32, BaseType::U64}});
     return caps;
   }
 
@@ -167,16 +133,10 @@ public:
     };
   }
 
-  bool PlanPreCodegenStages(ASTPipeline& p) const override {
-    p.AddStage<CodegenPrepare>();
-    p.AddStage<AMDGPUAdaptor>();
-    return true;
-  }
-
   bool PlanCodeGenStages(ASTPipeline& p) const override {
     errs() << "warning: AMDGPU target is experimental and not yet fully "
               "supported.\n";
-    p.AddStage<AMDGPUAdaptor>();
+    p.AddStage<GPUAdaptor>();
     p.AddStage<HIP::HIPDMAPlan>();
     p.AddStage<MemUsageCheck>();
     p.AddStage<AssertSite>();

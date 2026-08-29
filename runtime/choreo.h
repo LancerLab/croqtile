@@ -7,38 +7,19 @@
 
 #include <algorithm>
 #include <assert.h>
-#include <cmath> // For fp16
-#include <condition_variable>
+#include <cmath>   // For fp16
 #include <cstdint> // For fixed-width integer types
 #include <cstdlib>
-#include <functional>
-#include <future>
 #include <initializer_list> // for std::initializer_list
 #include <iostream>         // report error
 #include <map>
 #include <memory>
-#include <mutex>
-#include <queue>
 #include <random>
 #include <sstream>
 #include <string>
-#include <thread>
-#include <type_traits>
-#include <vector>
-
-#if __has_include(<ATen/core/ScalarType.h>) &&                                \
-    __has_include(<ATen/core/TensorBody.h>)
-  #include <ATen/core/ScalarType.h>
-  #include <ATen/core/TensorBody.h>
-  #define __CHOREO_HAS_ATEN_TENSOR__
-#endif
 
 #if __has_include("private_target0_defines.h")
   #include "private_target0_defines.h"
-#endif
-
-#ifndef __co_abort__
-  #define __co_abort__() __builtin_trap()
 #endif
 
 #ifdef __CHOREO_PRIVATE_TGT0__
@@ -50,11 +31,9 @@
   #define __co_any__ __device__ __host__
 
 #elif defined(__CHOREO_TARGET_AMDGPU__)
-  // clang-format off
-  #include <hip/hip_runtime.h>
-  #include <hip/hip_fp16.h>
   #include <hip/hip_bfloat16.h>
-  // clang-format on
+  #include <hip/hip_fp16.h>
+  #include <hip/hip_runtime.h>
   #define __CHOREO_TARGET_NATIVE_F16_SUPPORT__
   #define __CHOREO_TARGET_NATIVE_BF16_SUPPORT__
   #define __co_device__ __device__
@@ -220,24 +199,16 @@ inline void __co_any__ choreo_assert(bool p, const char* msg,
                                      const char* file = __FILE__,
                                      int line = __LINE__) {
   if (!p) {
-#if defined(__CHOREO_PRIVATE_TGT0__)
-    // Private target: abort via target-provided macro; private_target0_*.h
-    // defines __co_abort__ for both host and device.
-    __co_abort__();
-#elif defined(__CUDA_ARCH__)
-    // CUDA device: printf + trap works on device.
-    printf("%s:%d: choreo assertion failed: %s\n", file, line, msg);
-    __builtin_trap();
-#elif defined(__HIP_DEVICE_COMPILE__)
-    // AMDGPU device: printf + trap works on device.
-    printf("%s:%d: choreo assertion failed: %s\n", file, line, msg);
-    __builtin_trap();
+#ifdef __CHOREO_PRIVATE_TGT0__
+    std::cerr << file << ":" << line << ": choreo assertion abort: " << msg
+              << std::endl;
+    std::abort();
 #else
-    // Host or CPU-only target.
-    printf("%s:%d: choreo assertion failed: %s\n", file, line, msg);
-    abort();
+    printf("%s:%d: choreo assertion abort: %s\n", file, line, msg);
+    assert(false);
 #endif
   }
+  return;
 }
 
 inline void runtime_check(bool p, const char* msg) {
@@ -990,73 +961,6 @@ make_spanview(const void* ptr, std::initializer_list<size_t> init) {
   return spanned_view<U, Rank>(const_cast<U*>(reinterpret_cast<const U*>(ptr)),
                                make_mdspan<Rank>(init));
 }
-
-#ifdef __CHOREO_HAS_ATEN_TENSOR__
-namespace detail {
-
-template <typename>
-struct always_false : std::false_type {};
-
-template <typename T>
-inline at::ScalarType aten_scalar_type_for() {
-  using U = typename std::remove_cv<T>::type;
-  if constexpr (std::is_same<U, f64>::value) {
-    return at::kDouble;
-  } else if constexpr (std::is_same<U, f32>::value) {
-    return at::kFloat;
-  } else if constexpr (std::is_same<U, f16>::value) {
-    return at::kHalf;
-  } else if constexpr (std::is_same<U, bf16>::value) {
-    return at::kBFloat16;
-  } else if constexpr (std::is_same<U, bool>::value) {
-    return at::kBool;
-  } else if constexpr (std::is_same<U, int8_t>::value ||
-                       std::is_same<U, char>::value) {
-    return at::kChar;
-  } else if constexpr (std::is_same<U, uint8_t>::value ||
-                       std::is_same<U, unsigned char>::value) {
-    return at::kByte;
-  } else if constexpr (std::is_same<U, int16_t>::value ||
-                       std::is_same<U, short>::value) {
-    return at::kShort;
-  } else if constexpr (std::is_same<U, int32_t>::value ||
-                       std::is_same<U, int>::value) {
-    return at::kInt;
-  } else if constexpr (std::is_same<U, int64_t>::value ||
-                       std::is_same<U, long long>::value) {
-    return at::kLong;
-  } else {
-    static_assert(always_false<U>::value,
-                  "Unsupported at::Tensor element type for make_spanview.");
-  }
-}
-
-} // namespace detail
-
-template <typename T, size_t Rank>
-__co_host__ spanned_view<typename std::remove_const<T>::type, Rank>
-make_spanview(const at::Tensor& tensor) {
-  static_assert(Rank != 0, "unexpected 0-dims.");
-  using U = typename std::remove_const<T>::type;
-
-  runtime_check(tensor.defined(), "at::Tensor is undefined.");
-  #ifdef __CHOREO_TARGET_CUTE__
-  runtime_check(tensor.is_cuda(), "at::Tensor must be a CUDA tensor.");
-  #endif
-  runtime_check(static_cast<size_t>(tensor.dim()) == Rank,
-                "at::Tensor rank mismatch: expect " + std::to_string(Rank) +
-                    ", but got " + std::to_string(tensor.dim()) + ".");
-  runtime_check(tensor.scalar_type() == detail::aten_scalar_type_for<U>(),
-                "at::Tensor dtype mismatch.");
-  runtime_check(tensor.is_contiguous(), "at::Tensor must be contiguous.");
-
-  mdspan<Rank> shape({1});
-  for (size_t i = 0; i < Rank; ++i)
-    shape[i] = static_cast<size_t>(tensor.size(static_cast<int64_t>(i)));
-
-  return spanned_view<U, Rank>(reinterpret_cast<U*>(tensor.data_ptr()), shape);
-}
-#endif // __CHOREO_HAS_ATEN_TENSOR__
 
 template <typename T, size_t N>
 __co_any__ spanned_view<T, 1> make_spanview(T (&arr)[N]) {
@@ -1923,101 +1827,6 @@ struct HeapSimulator {
   Result Allocate(const std::vector<Chunk>& chunks, int64_t alignment = 0) {
     return GlobalDecreasingSizeBestFitAllocate(chunks, alignment);
   }
-
-  // Overload accepting a pre-computed interference matrix (flat NxN, row-major,
-  // indexed in the same order as `chunks`). When provided, the matrix replaces
-  // the liveness-range-based interference computation, allowing compile-time
-  // HB analysis to be applied at runtime.
-  Result Allocate(const std::vector<Chunk>& chunks, int64_t alignment,
-                  const std::vector<bool>& interference_matrix) {
-    Result result;
-    result.heap_size = 0;
-
-    size_t length = chunks.size();
-
-    auto AlignUp = [alignment](size_t x) -> size_t {
-      if (alignment == 0) return x;
-      return (x + alignment - 1) / alignment * alignment;
-    };
-
-    // Build index mapping: sorted_idx -> original_idx
-    std::vector<size_t> order(length);
-    for (size_t i = 0; i < length; ++i) order[i] = i;
-    std::sort(order.begin(), order.end(), [&chunks](size_t a, size_t b) {
-      return chunks[a].size > chunks[b].size;
-    });
-
-    // Remap interference matrix to sorted order
-    std::vector<std::vector<bool>> interference_graph(
-        length, std::vector<bool>(length, false));
-    for (size_t si = 0; si < length; ++si)
-      for (size_t sj = si + 1; sj < length; ++sj) {
-        size_t oi = order[si], oj = order[sj];
-        bool val = interference_matrix[oi * length + oj];
-        interference_graph[si][sj] = val;
-        interference_graph[sj][si] = val;
-      }
-
-    std::map<size_t, size_t> assigned_offsets;
-    using Range = std::pair<size_t, size_t>;
-
-    for (size_t i = 0; i < length; ++i) {
-      const Chunk& chunk = chunks[order[i]];
-
-      std::vector<Range> forbidden_ranges;
-      for (size_t j = 0; j < i; ++j) {
-        if (interference_graph[i][j] && assigned_offsets.count(j)) {
-          forbidden_ranges.push_back(
-              {assigned_offsets[j],
-               assigned_offsets[j] + chunks[order[j]].size});
-        }
-      }
-
-      std::sort(forbidden_ranges.begin(), forbidden_ranges.end());
-
-      if (!forbidden_ranges.empty()) {
-        std::vector<Range> merged_ranges;
-        merged_ranges.push_back(forbidden_ranges[0]);
-        for (size_t j = 1; j < forbidden_ranges.size(); ++j) {
-          auto& last = merged_ranges.back();
-          const auto& current = forbidden_ranges[j];
-          if (current.first <= last.second)
-            last.second = std::max(last.second, current.second);
-          else
-            merged_ranges.push_back(current);
-        }
-        forbidden_ranges = std::move(merged_ranges);
-      }
-
-      size_t pos = AlignUp(0);
-      bool found_valid_position = false;
-      for (size_t j = 0; j <= forbidden_ranges.size(); ++j) {
-        if (j == forbidden_ranges.size() ||
-            pos + chunk.size <= forbidden_ranges[j].first) {
-          found_valid_position = true;
-          break;
-        }
-        pos = forbidden_ranges[j].second;
-        pos = AlignUp(pos);
-      }
-
-      if (!found_valid_position) {
-        std::cerr << "Error: Could not find valid position for buffer "
-                  << chunk.buffer_id << std::endl;
-        result.chunk_offsets[chunk.buffer_id] = (size_t)-1;
-        continue;
-      }
-
-      size_t aligned_offset = pos;
-      assigned_offsets.emplace(i, aligned_offset);
-      result.chunk_offsets[chunk.buffer_id] = aligned_offset;
-      result.heap_size =
-          std::max(result.heap_size, aligned_offset + chunk.size);
-    }
-
-    result.heap_size = AlignUp(result.heap_size);
-    return result;
-  }
 };
 
 // For API check: abend on failures
@@ -2042,74 +1851,6 @@ static __attribute__((always_inline)) inline void abend_true(int p) {
     std::abort();
   }
 }
-
-class thread_pool {
-  std::vector<std::thread> workers;
-  std::queue<std::function<void()>> tasks;
-  std::mutex mtx;
-  std::condition_variable cv;
-  bool stopped = false;
-
-public:
-  explicit thread_pool(size_t n) {
-    for (size_t i = 0; i < n; ++i)
-      workers.emplace_back([this] {
-        for (;;) {
-          std::function<void()> task;
-          {
-            std::unique_lock<std::mutex> lk(mtx);
-            cv.wait(lk, [this] { return stopped || !tasks.empty(); });
-            if (stopped && tasks.empty()) return;
-            task = std::move(tasks.front());
-            tasks.pop();
-          }
-          task();
-        }
-      });
-  }
-
-  ~thread_pool() {
-    {
-      std::lock_guard<std::mutex> lk(mtx);
-      stopped = true;
-    }
-    cv.notify_all();
-    for (auto& w : workers) w.join();
-  }
-
-  template <typename F>
-  std::future<void> submit(F&& f) {
-    auto task =
-        std::make_shared<std::packaged_task<void()>>(std::forward<F>(f));
-    auto fut = task->get_future();
-    {
-      std::lock_guard<std::mutex> lk(mtx);
-      tasks.push([task] { (*task)(); });
-    }
-    cv.notify_one();
-    return fut;
-  }
-
-  template <typename F>
-  void parallel_for(int begin, int end, F&& body) {
-    int n = static_cast<int>(workers.size());
-    if (n == 0 || begin >= end) {
-      for (int i = begin; i < end; ++i) body(i);
-      return;
-    }
-    int total = end - begin;
-    int chunk = (total + n - 1) / n;
-    std::vector<std::future<void>> futs;
-    for (int t = 0; t < n && begin + t * chunk < end; ++t) {
-      int lo = begin + t * chunk;
-      int hi = std::min(lo + chunk, end);
-      futs.push_back(submit([lo, hi, &body] {
-        for (int i = lo; i < hi; ++i) body(i);
-      }));
-    }
-    for (auto& f : futs) f.get();
-  }
-};
 
 static __attribute__((always_inline)) inline void verify_device_status() {
 #ifdef __CUDA__
@@ -2314,41 +2055,6 @@ inline bool profile(F&& matmul, ProfilerOption& opt, Args&&... args) {
 }
 
 #endif // __CHOREO_TARGET_CUTE__
-
-#ifdef __CHOREO_TARGET_AMDGPU__
-
-struct TimerOption {
-  int warmup = 10;
-  int repeat = 100;
-  bool sync = true;
-};
-
-template <typename F, typename... Args>
-inline double timing(F&& kernel, const TimerOption& opt, Args&&... args) {
-  int warmup = std::max(0, opt.warmup);
-  int repeat = std::max(1, opt.repeat);
-
-  for (int i = 0; i < warmup; ++i) kernel(std::forward<Args>(args)...);
-
-  if (opt.sync) abend_true(hipDeviceSynchronize());
-
-  hipEvent_t start = nullptr;
-  hipEvent_t stop = nullptr;
-  abend_true(hipEventCreate(&start));
-  abend_true(hipEventCreate(&stop));
-  abend_true(hipEventRecord(start));
-  for (int i = 0; i < repeat; ++i) kernel(std::forward<Args>(args)...);
-  abend_true(hipEventRecord(stop));
-  abend_true(hipEventSynchronize(stop));
-
-  float elapsed_ms = 0.0f;
-  abend_true(hipEventElapsedTime(&elapsed_ms, start, stop));
-  abend_true(hipEventDestroy(start));
-  abend_true(hipEventDestroy(stop));
-  return static_cast<double>(elapsed_ms) / static_cast<double>(repeat);
-}
-
-#endif // __CHOREO_TARGET_AMDGPU__
 
 // target specific definations
 #ifdef __CHOREO_PRIVATE_TGT0__

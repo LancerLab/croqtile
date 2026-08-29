@@ -4,9 +4,7 @@
 #include "types.hpp"
 #include <cstdint>
 #include <cstring>
-#include <future>
 #include <memory>
-#include <mutex>
 #include <stack>
 #include <string>
 #include <unordered_map>
@@ -29,21 +27,8 @@ struct Allocation {
   const void* RawPtr() const { return data.data(); }
 };
 
-struct FutureInfo {
-  std::shared_future<void> handle;
-  std::string src_name;
-  std::string dst_name;
-  size_t bytes = 0;
-
-  bool IsReady() const {
-    return handle.valid() &&
-           handle.wait_for(std::chrono::seconds(0)) ==
-               std::future_status::ready;
-  }
-};
-
 struct Value {
-  enum Kind { Scalar, Pointer, Future, String };
+  enum Kind { Scalar, Pointer, Future };
   Kind kind = Scalar;
 
   BaseType base_type = BaseType::S32;
@@ -59,8 +44,6 @@ struct Value {
 
   std::shared_ptr<Allocation> alloc;
   size_t offset = 0;
-  std::shared_ptr<FutureInfo> future_info;
-  std::string str_val;
 
   Value() = default;
 
@@ -71,10 +54,6 @@ struct Value {
   static Value MakeBool(bool v);
   static Value MakePointer(std::shared_ptr<Allocation> a, BaseType bt,
                            size_t off = 0);
-  static Value MakeFuture(std::shared_future<void> f,
-                          const std::string& src = "",
-                          const std::string& dst = "", size_t bytes = 0);
-  static Value MakeString(const std::string& s);
 
   int64_t AsInt() const;
   uint64_t AsUInt() const;
@@ -88,15 +67,8 @@ struct Value {
   Value ReadFromAlloc(size_t byte_offset, BaseType ty) const;
 };
 
-struct ThreadInfo {
-  std::string pv_name;
-  int64_t index;
-};
-
 class MockMemory {
   std::vector<std::unordered_map<std::string, Value>> scopes;
-  std::vector<ThreadInfo> thread_stack_;
-  std::unique_ptr<std::mutex> alloc_mutex_;
 
 public:
   MockMemory();
@@ -112,14 +84,6 @@ public:
   std::shared_ptr<Allocation> Allocate(BaseType elem_type,
                                        const std::vector<size_t>& shape,
                                        Storage storage);
-
-  // Fork a child memory for parallel threads: inherits all current scopes
-  // (snapshot) but shares Allocation objects via shared_ptr.
-  MockMemory Fork() const;
-
-  void PushThread(const std::string& pv_name, int64_t index);
-  void PopThread();
-  const std::vector<ThreadInfo>& ThreadStack() const { return thread_stack_; }
 
   const std::unordered_map<std::string, Value>& CurrentScope() const {
     return scopes.back();

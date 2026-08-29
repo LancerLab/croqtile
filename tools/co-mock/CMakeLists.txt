@@ -1,8 +1,3 @@
-if(EMSCRIPTEN)
-  message(STATUS "co-mock: skipped (not supported under Emscripten)")
-  return()
-endif()
-
 add_executable(co-mock
   mock_main.cpp
   mock_interp.cpp
@@ -13,8 +8,6 @@ add_executable(co-mock
 set_target_properties(co-mock PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
-
-add_dependencies(co-mock parser_deps)
 
 target_include_directories(co-mock PRIVATE
   ${CMAKE_SOURCE_DIR}/lib

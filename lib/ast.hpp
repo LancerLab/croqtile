@@ -510,24 +510,6 @@ struct IntLiteral : public Node, public TypeIDProvider<IntLiteral> {
       : Node(l, MakeScalarIntegerType(BaseType::S64)), value(v) {}
   IntLiteral(const location& l, uint64_t v)
       : Node(l, MakeScalarIntegerType(BaseType::U64)), value(v) {}
-#ifdef __EMSCRIPTEN__
-  IntLiteral(const location& l, unsigned long v)
-      : Node(l,
-             MakeScalarIntegerType(sizeof(unsigned long) == 4 ? BaseType::U32
-                                                              : BaseType::U64)),
-        value(
-            sizeof(unsigned long) == 4
-                ? std::variant<int, uint32_t, int64_t, uint64_t>(uint32_t(v))
-                : std::variant<int, uint32_t, int64_t, uint64_t>(uint64_t(v))) {
-  }
-  IntLiteral(const location& l, long v)
-      : Node(l, MakeScalarIntegerType(sizeof(long) == 4 ? BaseType::S32
-                                                        : BaseType::S64)),
-        value(
-            sizeof(long) == 4
-                ? std::variant<int, uint32_t, int64_t, uint64_t>(int(v))
-                : std::variant<int, uint32_t, int64_t, uint64_t>(int64_t(v))) {}
-#endif
   IntLiteral(const location& l,
              const std::variant<int, uint32_t, int64_t, uint64_t>& v)
       : Node(l, MakeScalarIntegerType(BaseType::UNKNOWN)), value(v) {}
@@ -1871,10 +1853,6 @@ private:
   bool enforced = false;
   ptr<Expr> stream_expr = nullptr;
   bool device_entry = false;
-  std::string device_target_name;
-  ptr<MultiValues> launch_bounds_args = nullptr;
-  ptr<Expr> maxnreg_arg = nullptr;
-  bool cooperative = false;
 
 public:
   ParallelBy(const location& l, const ptr<Identifier>& pv,
@@ -1982,25 +1960,6 @@ public:
   bool IsDeviceEntry() const { return device_entry; }
   void SetDeviceEntry(bool v = true) { device_entry = v; }
 
-  bool HasDeviceTarget() const { return !device_target_name.empty(); }
-  const std::string& DeviceTargetName() const { return device_target_name; }
-  void SetDeviceTargetName(const std::string& n) { device_target_name = n; }
-
-  bool HasLaunchBounds() const { return launch_bounds_args != nullptr; }
-  const ptr<MultiValues>& GetLaunchBoundsArgs() const {
-    return launch_bounds_args;
-  }
-  void SetLaunchBoundsArgs(const ptr<MultiValues>& args) {
-    launch_bounds_args = args;
-  }
-
-  bool HasMaxnreg() const { return maxnreg_arg != nullptr; }
-  const ptr<Expr>& GetMaxnregArg() const { return maxnreg_arg; }
-  void SetMaxnregArg(const ptr<Expr>& arg) { maxnreg_arg = arg; }
-
-  bool IsCooperative() const { return cooperative; }
-  void SetCooperative(bool c = true) { cooperative = c; }
-
   ptr<Node> CloneImpl() const override {
     auto pb = Make<ParallelBy>(LOC(), CloneP(bpv), CloneP(bound_expr),
                                CloneP(cmpt_bpvs), CloneP(cmpt_bounds),
@@ -2012,27 +1971,12 @@ public:
     pb->SetEnforced(IsEnforced());
     if (stream_expr) pb->SetStream(CloneP(stream_expr));
     pb->SetDeviceEntry(IsDeviceEntry());
-    if (HasDeviceTarget()) pb->SetDeviceTargetName(DeviceTargetName());
-    if (HasLaunchBounds()) pb->SetLaunchBoundsArgs(CloneP(launch_bounds_args));
-    if (HasMaxnreg()) pb->SetMaxnregArg(CloneP(maxnreg_arg));
-    pb->SetCooperative(IsCooperative());
     return pb;
   }
 
   void InlinePrint(std::ostream& os, const std::string& prefix = {},
                    bool with_type = false) const override {
-    bool has_attr = HasLaunchBounds() || HasMaxnreg();
-    if (HasLaunchBounds()) {
-      os << prefix << "[[launch_bounds(";
-      launch_bounds_args->InlinePrint(os, "", with_type);
-      os << ")]] ";
-    }
-    if (HasMaxnreg()) {
-      os << (HasLaunchBounds() ? "" : prefix) << "[[maxnreg(";
-      maxnreg_arg->InlinePrint(os, "", with_type);
-      os << ")]] ";
-    }
-    os << (has_attr ? "" : prefix) << "parallel";
+    os << prefix << "parallel";
     if (stream_expr) {
       os << "(";
       stream_expr->InlinePrint(os);
@@ -2049,11 +1993,7 @@ public:
     os << " by [";
     PrintBounds(os);
     os << "]";
-    if (GetLevel() != ParallelLevel::NONE) {
-      os << " : " << STR(GetLevel());
-      if (HasDeviceTarget()) os << "(" << DeviceTargetName() << ")";
-    }
-    if (IsCooperative()) os << ", cooperative";
+    if (GetLevel() != ParallelLevel::NONE) os << " : " << STR(GetLevel());
   }
 
   void PrintBound(std::ostream& os) const {
@@ -2072,11 +2012,7 @@ public:
   void PrintWithoutStmts(std::ostream& os, const std::string& prefix,
                          bool = false) const {
     os << "\n" << prefix << "`- ";
-    if (GetLevel() != ParallelLevel::NONE) {
-      os << STR(GetLevel());
-      if (HasDeviceTarget()) os << "(" << DeviceTargetName() << ")";
-      os << " ";
-    }
+    if (GetLevel() != ParallelLevel::NONE) os << STR(GetLevel()) << " ";
     os << "Parallelization" << (IsOuter() ? "(o)" : "") << ":";
     if (stream_expr) {
       os << " stream(";
@@ -2843,7 +2779,7 @@ public:
 
 struct MMAOperation {
 public:
-  enum Kind { Fill, Load, LoadR, Desc, Exec, Store, Commit, Scale, Wait };
+  enum Kind { Fill, Load, LoadR, LoadS, Exec, Store, Commit, Scale, Wait };
   enum ExecMethod { ROW_ROW, ROW_COL, COL_ROW, COL_COL };
 
   // NOTE: acc, lhs, rhs are not accepted in ast.cpp.
@@ -2909,16 +2845,17 @@ public:
       : tag(Load), info(LoadInfo{e, fu, a, swizzle, explicit_swizzle}) {}
 
   struct LoadRTag {};
+  struct LoadSTag {};
+
   explicit MMAOperation(LoadRTag, const ptr<ChunkAt>& e, const ptr<Expr>& fu,
                         bool a = false, SwizMode swizzle = SwizMode::NONE,
                         bool explicit_swizzle = false)
       : tag(LoadR), info(LoadInfo{e, fu, a, swizzle, explicit_swizzle}) {}
 
-  struct DescTag {};
-  explicit MMAOperation(DescTag, const ptr<ChunkAt>& source,
-                        const ptr<Expr>& operand)
-      : tag(Desc),
-        info(LoadInfo{source, operand, false, SwizMode::NONE, false}) {}
+  explicit MMAOperation(LoadSTag, const ptr<ChunkAt>& e, const ptr<Expr>& fu,
+                        bool a = false, SwizMode swizzle = SwizMode::NONE,
+                        bool explicit_swizzle = false)
+      : tag(LoadS), info(LoadInfo{e, fu, a, swizzle, explicit_swizzle}) {}
 
   MMAOperation(ExecMethod m, const ptr<Expr>& o, const ptr<Expr>& l,
                const ptr<Expr>& r, bool sp = false)
@@ -2952,9 +2889,9 @@ public:
 
 public:
   bool IsKind(Kind k) const { return k == tag; }
-  bool IsLoad() const { return tag == Load || tag == LoadR; }
+  bool IsLoad() const { return tag == Load || tag == LoadR || tag == LoadS; }
   bool IsLoadR() const { return tag == LoadR; }
-  bool IsDesc() const { return tag == Desc; }
+  bool IsLoadS() const { return tag == LoadS || tag == Load; }
 
   const ptr<Expr> FillingTo() const {
     if (tag != Fill) choreo_unreachable("not a mma fill operation.");
@@ -2975,10 +2912,6 @@ public:
   bool FillingIsDecl() const {
     if (tag != Fill) choreo_unreachable("not a mma fill operation.");
     return std::get<0>(info).is_decl;
-  }
-  void SetFillingIsDecl(bool v) {
-    if (tag != Fill) choreo_unreachable("not a mma fill operation.");
-    std::get<0>(info).is_decl = v;
   }
   void SetFillingArrayDims(ptr<MultiValues> d) {
     if (tag != Fill) choreo_unreachable("not a mma fill operation.");
@@ -3003,19 +2936,6 @@ public:
     if (!IsLoad()) choreo_unreachable("not a mma load operation.");
     auto l_info = std::get<1>(info);
     return l_info.future;
-  }
-
-  ptr<ChunkAt> DescFrom() {
-    if (!IsDesc()) choreo_unreachable("not a mma desc operation.");
-    return std::get<1>(info).ld_expr;
-  }
-  const ptr<ChunkAt> DescFrom() const {
-    if (!IsDesc()) choreo_unreachable("not a mma desc operation.");
-    return std::get<1>(info).ld_expr;
-  }
-  const ptr<Expr> DescTo() const {
-    if (!IsDesc()) choreo_unreachable("not a mma desc operation.");
-    return std::get<1>(info).future;
   }
 
   ptr<ChunkAt> StoreTo() {
@@ -3137,7 +3057,6 @@ public:
   const ptr<Expr> GetFrag() const {
     if (tag == Fill) return FillingTo();
     if (IsLoad()) return LoadTo();
-    if (tag == Desc) return DescTo();
     if (tag == Exec) return ExecOperand(0);
     if (tag == Store) return StoreFrom();
     if (tag == Commit) return nullptr;
@@ -3184,9 +3103,12 @@ public:
                                 CloneP(l_info.future), l_info.async,
                                 l_info.swiz_mode, l_info.explicit_swizzle);
     }
-    case Desc:
-      return Make<MMAOperation>(DescTag{}, CloneP(DescFrom()),
-                                CloneP(DescTo()));
+    case LoadS: {
+      auto l_info = std::get<1>(info);
+      return Make<MMAOperation>(LoadSTag{}, CloneP(l_info.ld_expr),
+                                CloneP(l_info.future), l_info.async,
+                                l_info.swiz_mode, l_info.explicit_swizzle);
+    }
     case Exec: {
       auto e_info = std::get<2>(info);
       if (e_info.scale)
@@ -3225,9 +3147,17 @@ public:
       os << "MMA.LOAD" << ((l_info.async) ? ".ASYNC" : "") << " "
          << PSTR(l_info.ld_expr);
     } break;
-    case Desc:
-      os << PSTR(DescTo()) << " = MMA.DESC " << PSTR(DescFrom());
-      break;
+    case LoadR: {
+      auto l_info = std::get<1>(info);
+      os << "MMA.LOADR " << PSTR(l_info.ld_expr);
+      if (l_info.future) os << ", " << PSTR(l_info.future);
+    } break;
+    case LoadS: {
+      auto l_info = std::get<1>(info);
+      if (l_info.future) os << PSTR(l_info.future) << " = ";
+      os << "MMA.LOADS" << ((l_info.async) ? ".ASYNC" : "") << " "
+         << PSTR(l_info.ld_expr);
+    } break;
     case Exec: {
       auto e_info = std::get<2>(info);
       os << "MMA.EXEC";
@@ -3289,47 +3219,43 @@ public:
   __UDT_TYPE_INFO__(Node, MMA)
 };
 
-// apply {i, j} in frag.span { stmts }
-// Collective element-wise operation over a fragment's logical span.
-// Multi-statement body with row-hoisting semantics:
-//   - Statements referencing only outer iterators execute once per row.
-//   - Statements referencing inner iterators execute per element.
-// ApplyBlock is
-// imperative with multiple assignment statements in the body.
-struct ApplyBlock : public Node, public TypeIDProvider<ApplyBlock> {
-  ptr<Expr> span_expr;
-  std::vector<std::string> iterators;
-  ptr<MultiNodes> body;
+// frag.apply target, [](i, j) { return expr; };
+// Element-wise transform over a fragment's register elements.
+// Desugars to a register-direct loop identical to automap codegen.
+struct FragApply : public Node, public TypeIDProvider<FragApply> {
+  ptr<Expr> target;
+  std::vector<std::string> params;
+  ptr<Node> body;
 
-  ApplyBlock(const location& l, const ptr<Expr>& span,
-             std::vector<std::string> iters, const ptr<MultiNodes>& b)
-      : Node(l), span_expr(span), iterators(std::move(iters)), body(b) {}
+  FragApply(const location& l, const ptr<Expr>& t, std::vector<std::string> p,
+            const ptr<Node>& b)
+      : Node(l), target(t), params(std::move(p)), body(b) {}
 
   ptr<Node> CloneImpl() const override {
-    return Make<ApplyBlock>(LOC(), CloneP(span_expr), iterators, CloneP(body));
+    return Make<FragApply>(LOC(), CloneP(target), params, CloneP(body));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
-    os << prefix << "apply {";
-    for (size_t i = 0; i < iterators.size(); ++i) {
+    os << prefix << "frag.apply ";
+    target->Print(os, "", with_type);
+    os << ", [](";
+    for (size_t i = 0; i < params.size(); ++i) {
       if (i > 0) os << ", ";
-      os << iterators[i];
+      os << params[i];
     }
-    os << "} in ";
-    span_expr->Print(os, "", with_type);
-    os << " { ... }";
+    os << ") { return ...; }";
   }
 
-  const std::string& SpanFragmentName() const {
-    auto id = GetIdentifier(*span_expr);
-    assert(id && "apply span must reference a fragment");
+  const std::string& TargetName() const {
+    auto id = GetIdentifier(*target);
+    assert(id && "frag.apply target must be an identifier");
     return id->name;
   }
 
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__(Node, ApplyBlock)
+  __UDT_TYPE_INFO__(Node, FragApply)
 };
 
 enum class FragTransferKind { STORE, LOAD, COPY };
@@ -3602,10 +3528,6 @@ struct Rotate : public Node, public TypeIDProvider<Rotate> {
   __UDT_TYPE_INFO__(Node, Rotate)
 };
 
-// DEPRECATED: Use Barrier (sync.barrier) or Fence (sync.fence) instead.
-// Synchronize only scopes to a storage level without naming the entities
-// that synchronize, which is ambiguous.  Kept for backward compatibility
-// but triggers a warning.
 struct Synchronize : public Node, public TypeIDProvider<Synchronize> {
   Storage buf_ty;
   std::vector<int> wg_ids;
@@ -3616,10 +3538,13 @@ struct Synchronize : public Node, public TypeIDProvider<Synchronize> {
 
   bool IsWarpGroupSync() const { return !wg_ids.empty(); }
   const std::vector<int>& WarpGroupIds() const { return wg_ids; }
-  int NumWarpGroupThreads() const { return static_cast<int>(wg_ids.size()) * 128; }
+  int NumWarpGroupThreads() const {
+    return static_cast<int>(wg_ids.size()) * 128;
+  }
 
   ptr<Node> CloneImpl() const override {
-    if (IsWarpGroupSync()) return Make<Synchronize>(LOC(), wg_ids);
+    if (IsWarpGroupSync())
+      return Make<Synchronize>(LOC(), wg_ids);
     return Make<Synchronize>(LOC(), buf_ty);
   }
 
@@ -3629,64 +3554,19 @@ struct Synchronize : public Node, public TypeIDProvider<Synchronize> {
              bool = false) const override {
     if (IsWarpGroupSync()) {
       os << "\n" << prefix << "`- " << "Synchronize: wg";
-      for (size_t i = 0; i < wg_ids.size(); ++i) os << (i ? ", " : " ") << wg_ids[i];
+      for (size_t i = 0; i < wg_ids.size(); ++i)
+        os << (i ? ", " : " ") << wg_ids[i];
     } else {
       os << "\n" << prefix << "`- " << "Synchronize: " << STR(buf_ty);
     }
   }
   void accept(Visitor&) override;
+
   __UDT_TYPE_INFO__(Node, Synchronize)
 };
 
-struct Barrier : public Node, public TypeIDProvider<Barrier> {
-  ParallelLevel level;
-
-  Barrier(const location& loc, ParallelLevel l) : Node(loc), level(l) {}
-
-  ptr<Node> CloneImpl() const override { return Make<Barrier>(LOC(), level); }
-
-  ParallelLevel GetLevel() const { return level; }
-
-  void Print(std::ostream& os, const std::string& prefix = {},
-             bool = false) const override {
-    os << "\n" << prefix << "`- " << "Barrier: " << STR(level);
-  }
-  void accept(Visitor&) override;
-
-  __UDT_TYPE_INFO__(Node, Barrier)
-};
-
-struct Fence : public Node, public TypeIDProvider<Fence> {
-  ParallelLevel visibility;
-  Storage memory;
-
-  Fence(const location& loc, ParallelLevel v, Storage m = Storage::NONE)
-      : Node(loc), visibility(v), memory(m) {}
-
-  ptr<Node> CloneImpl() const override {
-    return Make<Fence>(LOC(), visibility, memory);
-  }
-
-  ParallelLevel GetVisibility() const { return visibility; }
-  Storage GetMemory() const { return memory; }
-
-  void Print(std::ostream& os, const std::string& prefix = {},
-             bool = false) const override {
-    os << "\n" << prefix << "`- " << "Fence: " << STR(visibility);
-    if (memory != Storage::NONE) os << "<" << STR(memory) << ">";
-  }
-  void accept(Visitor&) override;
-
-  __UDT_TYPE_INFO__(Node, Fence)
-};
-
 struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
-  // rv: the range-source variable (a within-declared bounded variable whose
-  // bounds define this range). Not directly visible inside the foreach body.
-  ptr<Identifier> rv;
-  // iv: the iteration variable visible inside the foreach body.
-  // Only set when the parser saw an explicit local name: foreach local=source.
-  ptr<Identifier> iv;
+  ptr<Identifier> iv; // induction variable
   // both will be normalized to Expr which ref to anon_x
   ptr<Node> lbound = nullptr;
   ptr<Node> ubound = nullptr;
@@ -3694,47 +3574,28 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   ValueItem scope_predicate = GetInvalidValueItem();
 
   LoopRange(const location& l, const ptr<Identifier>& i)
-      : Node(l), rv(i), iv(nullptr) {} // the cmpt_bounds are yet to be inferred
+      : Node(l), iv(i) {} // the cmpt_bounds are yet to be inferred
   LoopRange(const location& l, const ptr<Identifier>& i, const ptr<Node>& lb,
             const ptr<Node>& ub, int s = 1)
-      : Node(l), rv(i), iv(nullptr), lbound(lb), ubound(ub), step(s) {}
-  // Constructor for explicit local name: foreach local=source(lb:ub[:step])
-  LoopRange(const location& l, const ptr<Identifier>& local,
-            const ptr<Identifier>& source, const ptr<Node>& lb,
-            const ptr<Node>& ub, int s = 1)
-      : Node(l), rv(source), iv(local), lbound(lb), ubound(ub), step(s) {}
+      : Node(l), iv(i), lbound(lb), ubound(ub), step(s) {}
 
-  // Range source variable (the within-declared bounded variable).
-  const std::string GetRVName() const { return rv->name; }
-  const ptr<Identifier> GetRV() const { return rv; }
-
-  // Iteration variable visible inside the foreach body.
-  const std::string GetIVName() const { return GetIV()->name; }
-  const ptr<Identifier> GetIV() const { return iv ? iv : rv; }
-
-  // True when an explicit local name was written: foreach local=source(...)
-  bool HasExplicitIV() const { return iv && iv.get() != rv.get(); }
+  const std::string IVName() const { return iv->name; }
+  const ptr<Identifier> IV() const { return iv; }
 
   bool BoundIsMutated() const {
     return (lbound != nullptr) || (ubound != nullptr);
   }
 
   ptr<Node> CloneImpl() const override {
-    auto cloned_rv = (!rv) ? nullptr : CloneP(rv);
-    auto cloned_iv = (!iv) ? nullptr : CloneP(iv);
-    auto copied =
-        Make<LoopRange>(LOC(), cloned_rv, CloneP(lbound), CloneP(ubound), step);
-    copied->iv = cloned_iv;
+    auto copied = Make<LoopRange>(LOC(), (!iv) ? nullptr : CloneP(iv),
+                                  CloneP(lbound), CloneP(ubound), step);
     copied->scope_predicate = scope_predicate;
     return copied;
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool = false) const override {
-    // iv is the iteration variable the body sees.
-    // rv is the range source (within-declared) that provides bounds.
-    os << "\n" << prefix << "`- Iteration variables: " << GetIVName();
-    if (HasExplicitIV()) os << " (source: " << GetRVName() << ")";
+    os << "\n" << prefix << "`- Iteration variables: " << iv->name;
 
     if (!lbound && !ubound && !IsValidStep(step)) return;
 
@@ -3814,10 +3675,10 @@ struct ForeachBlock : public Block, public TypeIDProvider<ForeachBlock> {
 
   bool IsNorm() const { return loop != nullptr; }
 
-  ptr<Identifier> GetRV() const {
+  ptr<Identifier> GetIV() const {
     if (ranges->Count() == 1) {
       auto range = dyn_cast<AST::LoopRange>(ranges->ValueAt(0));
-      return range->GetRV();
+      return range->IV();
     }
     return nullptr;
   }
@@ -4322,6 +4183,26 @@ inline bool HasAutomapHint(const ForeachBlock& n,
 inline bool HasAutomapHint(const ForeachBlock& n) {
   ptr<AST::AttributeExpr> attr;
   return HasAutomapHint(n, attr);
+}
+
+inline bool HasCausalSplitHint(const ForeachBlock& n,
+                               ptr<AST::AttributeExpr>& attr) {
+  attr = nullptr;
+  if (!n.suffixs) return false;
+  for (auto suffix : n.suffixs->values) {
+    if (auto a = dyn_cast<AttributeExpr>(suffix)) {
+      if (a->AttrName() == "causal_split") {
+        attr = a;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+inline bool HasCausalSplitHint(const ForeachBlock& n) {
+  ptr<AST::AttributeExpr> attr;
+  return HasCausalSplitHint(n, attr);
 }
 
 inline ptr<Identifier> GetAutomapParallelVar(const ForeachBlock& n) {
