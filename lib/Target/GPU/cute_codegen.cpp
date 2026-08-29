@@ -9247,12 +9247,13 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
                   ? ub_it->second
                   : UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()));
           IndStream() << "for (" << SSMName(iv_name, IsHost()) << " = "
-                      << (rng->lbound
-                              ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
+                      << (rng->lb_mutator
+                              ? ("(" + ExprSTR(rng->lb_mutator, IsHost()) + ")")
                               : "0")
                       << "; " << SSMName(iv_name, IsHost()) << " < " << ub_expr
-                      << (rng->ubound ? (" + " + ExprSTR(rng->ubound, IsHost()))
-                                      : "")
+                      << (rng->ub_mutator
+                              ? (" + " + ExprSTR(rng->ub_mutator, IsHost()))
+                              : "")
                       << "; ++" << SSMName(iv_name, IsHost()) << ") {\n";
           IncrIndent();
         }

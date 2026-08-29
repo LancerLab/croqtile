@@ -977,12 +977,12 @@ bool CCCodeGen::Visit(AST::ForeachBlock& n) {
       auto mapped = ssm.HostName(iv_name);
       if (vectorizable) IndStream() << "#pragma omp simd\n";
       IndStream() << "for (" << mapped << " = "
-                  << (rng->lbound ? ("(" + ExprSTR(rng->lbound) + ")")
-                                  : std::string("0"))
+                  << (rng->lb_mutator ? ("(" + ExprSTR(rng->lb_mutator) + ")")
+                                      : std::string("0"))
                   << "; " << mapped << " < "
                   << UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()))
-                  << (rng->ubound ? (" + " + ExprSTR(rng->ubound))
-                                  : std::string(""))
+                  << (rng->ub_mutator ? (" + " + ExprSTR(rng->ub_mutator))
+                                      : std::string(""))
                   << "; ++" << mapped << ") {\n";
       IncrIndent();
     }
