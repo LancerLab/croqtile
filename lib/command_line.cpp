@@ -200,6 +200,9 @@ Option<bool> dump_ast(OptionKind::User, "--dump-ast", "-e", false,
                       "Dump the Abstract Syntax Tree (AST) after parsing.");
 Option<bool> dump_hb(OptionKind::User, "--dump-hb", "", false,
                      "Dump Happens-Before graph in DOT (Graphviz) format.");
+Option<std::string> dump_ledger(
+    OptionKind::Hidden, "--dump-ledger", "", "" /*default empty*/,
+    "Dump the safety ledger (all assessed obligations with outcomes) as JSON.");
 Option<bool> print_vn(OptionKind::Hidden, "--print-valno", "-vn", false,
                       "Trace the value numbering process.");
 Option<bool> disable_vn_share(
@@ -459,6 +462,7 @@ bool CommandLine::Parse(int argc, char** argv) {
                             target_generate_debug_info.GetValue());
   CCtx().SetDumpAst(dump_ast.GetValue());
   CCtx().SetDumpHB(dump_hb.GetValue());
+  CCtx().SetDumpLedgerPath(dump_ledger.GetValue());
   CCtx().SetNoCodegen(ncodegen.GetValue());
   CCtx().SetPrintPassNames(prt_pass.GetValue());
   CCtx().SetTimePasses(time_passes.GetValue());
