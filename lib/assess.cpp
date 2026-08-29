@@ -47,26 +47,6 @@ inline const std::string STR(const AssessRelation& ar) {
   return "";
 }
 
-inline const std::string STR(const AssessOutcome& o) {
-  switch (o) {
-  case AssessOutcome::STATIC_TRUE: return "static-true";
-  case AssessOutcome::STATIC_FALSE: return "static-false";
-  case AssessOutcome::RUNTIME: return "runtime";
-  }
-  return "?";
-}
-
-inline const std::string STR(const UsageType& ut) {
-  switch (ut) {
-  case UsageType::UnClassified: return "unclassified";
-  case UsageType::ShapeCompatibility: return "shape-compat";
-  case UsageType::ElementAccess: return "elem-access";
-  case UsageType::LoopBound: return "loop-bound";
-  case UsageType::HardwareConstraint: return "hw-constraint";
-  }
-  choreo_unreachable("unsupported usage type.");
-  return "";
-}
 } // namespace Choreo
 
 void Assessor::LogAssessment(const std::string& msg, const location& l,

@@ -9946,17 +9946,26 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
     for (size_t i = 1; i < entries.size(); ++i) {
       auto& entry0 = entries[i - 1];
       auto& entry1 = entries[i];
+      std::string msg = "The shapes of the " + Ordinal(entry0.para_ordinal) +
+                        " parameter (dim: " + std::to_string(entry0.dim) +
+                        ") and the " + Ordinal(entry1.para_ordinal) +
+                        " parameter (dim: " + std::to_string(entry1.dim) +
+                        ") are inconsistent.";
       hs << h_indent << "choreo::runtime_check(" << entry0.elem_name
          << " == " << entry1.elem_name;
-      hs << ", \"The shapes of the " << Ordinal(entry0.para_ordinal)
-         << " parameter (dim: " << entry0.dim << ") and the "
-         << Ordinal(entry1.para_ordinal) << " parameter (dim: " << entry1.dim
-         << ") are inconsistent.\");\n";
+      hs << ", \"" << msg << "\");\n";
       ++stats.total;
       ++stats.shape_compat_total;
       ++stats.runtime_total;
       ++stats.shape_compat_runtime;
       ++stats.runtime_entry;
+      // Record in the safety ledger: these obligations are generated and
+      // materialized directly at codegen; parameter dims are host-visible
+      // scalars, hence scalar-symbolic dependence. Stats aggregation already
+      // happened (assert-site pass), so this does not double-count.
+      FCtx(fname).GetAssessor().RecordExternalObligation(
+          msg, location(), AssessOutcome::RUNTIME, UsageType::ShapeCompatibility,
+          AssessDependence::SCALAR_SYMBOLIC);
     }
   }
 

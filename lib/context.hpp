@@ -519,6 +519,7 @@ private:
   bool debug_symtab = false;
   bool dump_ast = false;            // dump the AST after parsing
   bool dump_hb = false;             // dump HB graph in DOT format
+  std::string dump_ledger_path;     // dump the safety ledger as JSON
   bool no_codegen = false;          // stop before code generation
   bool print_pass_names = false;    // print pass name before pass run
   bool time_passes = false;         // measure time per compiler pass
@@ -780,6 +781,7 @@ public:
   // Getters of compiler configurations
   bool DumpAst() const { return dump_ast; }
   bool DumpHB() const { return dump_hb; }
+  const std::string& DumpLedgerPath() const { return dump_ledger_path; }
   bool NoCodegen() const { return no_codegen; }
   bool PrintPassNames() const { return print_pass_names; }
   bool TimePasses() const { return time_passes; }
@@ -841,6 +843,7 @@ public:
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }
   void SetDumpHB(bool value) { dump_hb = value; }
+  void SetDumpLedgerPath(const std::string& path) { dump_ledger_path = path; }
   void SetNoCodegen(bool value) { no_codegen = value; }
   void SetPrintPassNames(bool value) { print_pass_names = value; }
   void SetTimePasses(bool value) { time_passes = value; }
