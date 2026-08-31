@@ -1,8 +1,8 @@
 // RUN: co2ir %s | FileCheck %s
 
 // IRGen: the explicit sync.fence order axis lowers to the coir.fence
-// space / entity / order / scope attributes. The omitted order resolves to
-// the target's preferred default (seq_cst on the GPU target), and a
+// space / entity / order / scope attributes. The omitted order is
+// target-dependent, so the first fence spells acq_rel explicitly; a
 // storage-only fence derives its scope from the space.
 
 // CHECK: coir.kernel @fence_order
@@ -10,8 +10,8 @@
 __co__ s32 [128] fence_order(s32 [128] a, s32 [128] b) {
   s32[128] c;
   parallel p by 2 {
-    // CHECK: coir.fence <global> <all> <seq_cst> <block>
-    sync.fence<global> : block;
+    // CHECK: coir.fence <global> <all> <acq_rel> <block>
+    sync.fence.acq_rel<global> : block;
 
     // CHECK: coir.fence <shared> <all> <release> <group>
     sync.fence.rel<shared>;
