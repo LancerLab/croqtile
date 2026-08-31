@@ -10,6 +10,8 @@
 #include "symvals.hpp"
 #include "llvm/ADT/StringSet.h"
 
+#include <cstdlib>
+
 using namespace Choreo;
 using namespace CoIR;
 
@@ -2802,9 +2804,7 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl& nvd) {
           reuseOffset = builder.getI64IntegerAttr(-1);
         } else {
           int64_t off = 0;
-          try {
-            off = std::stoll(offStr);
-          } catch (...) {}
+          off = std::strtoll(offStr.c_str(), nullptr, 10);
           reuseOffset = builder.getI64IntegerAttr(off);
         }
       }
@@ -4106,7 +4106,7 @@ bool ASTCoIRGen::Visit(AST::AsmStmt& asmStmt) {
     auto val = EmitExpr(*op->expression->GetR());
     if (!val) {
       if (auto* id =
-              dynamic_cast<AST::Identifier*>(op->expression->GetR().get()))
+              dyn_cast<AST::Identifier>(op->expression->GetR().get()))
         val = LookupValue(id->name);
     }
     if (val) {
@@ -4129,7 +4129,7 @@ bool ASTCoIRGen::Visit(AST::AsmStmt& asmStmt) {
     auto val = EmitExpr(*op->expression->GetR());
     if (!val) {
       if (auto* id =
-              dynamic_cast<AST::Identifier*>(op->expression->GetR().get()))
+              dyn_cast<AST::Identifier>(op->expression->GetR().get()))
         val = LookupValue(id->name);
     }
     if (!val && op->constraint[0] == '=' && !inVals.empty()) {
@@ -4180,10 +4180,10 @@ bool ASTCoIRGen::Visit(AST::AsmStmt& asmStmt) {
   // Update value mappings for output operands
   for (unsigned i = 0; i < asmStmt.outputOperands.size() && i < outVals.size();
        ++i) {
-    if (auto* id = dynamic_cast<AST::Identifier*>(
+    if (auto* id = dyn_cast<AST::Identifier>(
             asmStmt.outputOperands[i]->expression->GetR().get())) {
       UpdateValue(id->name, asmOp.getResult(i));
-    } else if (auto* da = dynamic_cast<AST::DataAccess*>(
+    } else if (auto* da = dyn_cast<AST::DataAccess>(
                    asmStmt.outputOperands[i]->expression->GetR().get())) {
       // Non-identifier output operand (e.g., lz.at(i)):
       // write the asm result back to the array element.

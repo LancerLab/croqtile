@@ -44,6 +44,8 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     pl_depths.push_back(pl_depth);
     inthreads_levels.push_back(0);
     assert(inthreads_levels.size() == (unsigned)pl_depth + 1);
+    if (pb->GetLevel() != ParallelLevel::NONE)
+      explicit_pl_stk.push(pb->GetLevel());
     if (pb->HasLaunchBounds()) {
       auto& lb_args = pb->GetLaunchBoundsArgs();
       for (size_t i = 0; i < lb_args->Count(); ++i) {
@@ -120,7 +122,8 @@ bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
     assert(pl_depth > 0);
     assert(inthreads_levels.size() == (unsigned)pl_depth + 1);
     inthreads_levels.pop_back();
-    if (n.GetLevel() != ParallelLevel::NONE) explicit_pl_stk.pop();
+    if (n.GetLevel() != ParallelLevel::NONE && !explicit_pl_stk.empty())
+      explicit_pl_stk.pop();
     pl_depth--;
     if (pl_depth == 0) explicit_pl = false;
   } else if (isa<AST::InThreadsBlock>(&n)) {

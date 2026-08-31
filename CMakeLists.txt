@@ -492,6 +492,12 @@ endif()
 
 add_compile_options(-Wall -Wextra)
 
+# LLVM/MLIR is prebuilt with RTTI and exceptions disabled (see
+# extern/llvm-project/bin/llvm-config --cxxflags). Compile project code with
+# the same settings so the CoIR tools link against the prebuilt bitcode
+# libraries without typeinfo/exception symbol mismatches.
+add_compile_options(-fno-rtti -fno-exceptions)
+
 if(EMSCRIPTEN)
   # Choreo is developed against GCC; suppress Clang-specific pedantic warnings
   # that do not indicate actual bugs when cross-compiling to WASM.
@@ -544,7 +550,9 @@ include(${CMAKE_SOURCE_DIR}/cmake/FileCheckBootstrap.cmake)
 if(NOT EMSCRIPTEN)
 
 set(EXTERN_LIBS
-  stdc++fs
+  # stdc++fs was previously required for GCC/libstdc++'s std::filesystem.
+  # With the clang++/libc++ toolchain, std::filesystem is provided by libc++
+  # itself, and libstdc++fs is neither available nor ABI-compatible.
 )
 
 if(ENABLE_CUDA)
@@ -571,6 +579,10 @@ if(CHOREO_BUILD_CHOREO)
 
   add_dependencies(choreo parser_deps)
   add_dependencies(copp parser_deps)
+
+  # choreo_main.cpp drives the bison-generated parser directly (Scanner/Parser),
+  # which requires RTTI + exceptions; the rest of the target stays -fno-rtti.
+  target_compile_options(choreo PRIVATE -frtti -fexceptions)
 
   target_link_libraries(choreo PRIVATE
     parse core codegen support pp
