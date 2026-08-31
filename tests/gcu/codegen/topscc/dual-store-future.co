@@ -1,0 +1,34 @@
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+
+__co__ auto dual_store_future(f32[2, 4] input) {
+  f32[4, 4] output;
+
+  parallel p by 1 : thread {
+    local f32[1, 4] l0;
+    local f32[1, 4] l1;
+    dma.copy input.view(1, 4).from(0, 0) => l0;
+    dma.copy input.view(1, 4).from(1, 0) => l1;
+
+    store0 = dma.any;
+    store1 = dma.any;
+    foreach i in [2] {
+      if (i > 0) wait store0;
+      store0 = dma.copy.async l0 => output.view(1, 4).from(i, 0);
+      if (i > 0) wait store1;
+      store1 = dma.copy.async l1 => output.view(1, 4).from(i + 2, 0);
+    }
+    wait store0, store1;
+  }
+
+  return output;
+}
+
+// CHECK-LABEL: __global__ void __choreo_device_dual_store_future(
+// CHECK: choreo::future store0({{.*}}, "store0", {{[0-9]+}}, {{[0-9]+}}, output);
+// CHECK: choreo::future store1({{.*}}, "store1", {{[0-9]+}}, {{[0-9]+}}, output);
+// CHECK-NOT: tops::mdspan {{.*}}(tops::Global, (float*)store0.data()
+// CHECK-NOT: tops::mdspan {{.*}}(tops::Global, (float*)store1.data()
+// CHECK: tops::mdspan [[DST0:__mds[0-9]+_output]](tops::Global, (float*)output, 4, 4);
+// CHECK: tops::event store0__event__ = tops::{{.*}}_async(*store0.get_ctx(), [[DST0]],
+// CHECK: tops::mdspan [[DST1:__mds[0-9]+_output]](tops::Global, (float*)output, 4, 4);
+// CHECK: tops::event store1__event__ = tops::{{.*}}_async(*store1.get_ctx(), [[DST1]],

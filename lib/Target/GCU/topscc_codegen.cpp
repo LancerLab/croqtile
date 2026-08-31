@@ -1914,7 +1914,8 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
   if (auto ph = dyn_cast<PlaceHolderType>(nty)) {
     assert(ph->GetBaseType() == BaseType::FUTURE);
     // must set the buffer
-    auto buf_name = FBInfo().at(InScopeName(n.future)).buffer;
+    const auto& buf_info = FBInfo().at(InScopeName(n.future));
+    auto buf_name = buf_info.buffer;
 
     // Handle placeholder checks that need to postpone after all lv processed
     // Currently, the only case is the plder tied to global buffer
@@ -1933,18 +1934,27 @@ bool TopsccCodeGen::Visit(AST::DMA& n) {
     auto ph_buf_ty = GetSymbolType(UnScopedName(buf_name));
     if (auto sty = GetSpannedType(ph_buf_ty)) ph_sto = sty->GetStorage();
     EmitFutureClaim(UnScopedName(buf_name), ph_sto);
-    // For auto-alloc (DOK_SYMBOL), redirect buffer references through
-    // future.data() so that rotate() transparently updates the pointer.
-    // For explicit buffer chunks (DOK_CHUNK), the user manages buffers
-    // via l_xbuf[idx] directly; remapping would break after rotate()
-    // because future.data() no longer points to the array base.
-    // For auto-alloc (DOK_SYMBOL), redirect buffer references through
-    // future.data() so that rotate() transparently updates the pointer.
-    // For explicit buffer arrays (ArrayType), the user manages buffers
-    // via l_xbuf[idx] directly; remapping would break after rotate()
-    // because future.data() no longer points to the array base.
+    // Late normalization may record the resolved DMA in an enclosing scope,
+    // while this placeholder retains an unresolved entry in the current
+    // scope. Recover the resolved destination kind by future name.
+    auto to_kind = buf_info.to_kind;
+    size_t buffer_bindings = 0;
+    for (const auto& item : FBInfo()) {
+      if (item.second.buffer != buf_name || item.second.to_kind == DOK_UNKNOWN)
+        continue;
+      ++buffer_bindings;
+      if (UnScopedName(item.first) == n.future) to_kind = item.second.to_kind;
+    }
+    if (to_kind == DOK_UNKNOWN) to_kind = DOK_SYMBOL;
+    if (buffer_bindings == 0) buffer_bindings = 1;
+
+    // Redirect a direct buffer through future.data() only when this future
+    // owns the mapping. Explicit chunks must retain their original base, and
+    // a symbol shared by multiple futures cannot be represented by the
+    // single-entry symbol map without one future overwriting another.
     auto buf_ty = GetSymbolType(UnScopedName(buf_name));
-    if (!isa<ArrayType>(buf_ty)) {
+    if (to_kind == DOK_SYMBOL && buffer_bindings == 1 &&
+        !isa<ArrayType>(buf_ty)) {
       if (no_future_mode && nofuture_vars.count(InScopeName(n.future)))
         ssm.RemapDeviceSymbol(buf_name, n.future + "_data");
       else

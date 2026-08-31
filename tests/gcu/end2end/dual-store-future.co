@@ -1,0 +1,45 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+
+__co__ auto dual_store_future(f32[2, 4] input) {
+  f32[4, 4] output;
+
+  parallel p by 1 {
+    local f32[1, 4] l0;
+    local f32[1, 4] l1;
+    dma.copy input.view(1, 4).from(0, 0) => l0;
+    dma.copy input.view(1, 4).from(1, 0) => l1;
+
+    store0 = dma.any;
+    store1 = dma.any;
+    foreach i in [2] {
+      if (i > 0) wait store0;
+      store0 = dma.copy.async l0 => output.view(1, 4).from(i, 0);
+      if (i > 0) wait store1;
+      store1 = dma.copy.async l1 => output.view(1, 4).from(i + 2, 0);
+    }
+    wait store0, store1;
+  }
+
+  return output;
+}
+
+int main() {
+  choreo::f32 input[2][4] = {
+      {1.0, 2.0, 3.0, 4.0},
+      {5.0, 6.0, 7.0, 8.0},
+  };
+  auto input_data =
+      choreo::make_spanview<2, choreo::f32>((float*)input, {2, 4});
+  auto result = dual_store_future(input_data);
+
+  for (size_t row = 0; row < 4; ++row) {
+    size_t input_row = row < 2 ? 0 : 1;
+    for (size_t col = 0; col < 4; ++col)
+      choreo::choreo_assert(result[row][col] == input[input_row][col],
+                            "inconsistent result");
+  }
+  std::cout << "Test Passed" << std::endl;
+}
+
+// CHECK: Test Passed
