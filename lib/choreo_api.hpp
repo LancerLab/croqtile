@@ -3,10 +3,10 @@
 
 #include "context.hpp"
 #include "io.hpp"
+#include "loc.hpp"
 #include "options.hpp"
 #include "pipeline.hpp"
 #include "preprocess.hpp"
-#include "scanner.hpp"
 
 #include <fstream>
 #include <sstream>
@@ -57,19 +57,9 @@ struct CompilerAPI {
   }
 
   /// Parse the preprocessed source into the AST.
-  bool Parse(std::stringstream& preprocessed) {
-    Scanner s;
-    PContext pctx;
-    Parser p(pctx, s);
-    Scanner::SetRemoveComments();
-    Scanner::SetLocationUpdate(true);
-    s.yyrestart(preprocessed);
-    if (p.parse() != 0 || pctx.HasError()) {
-      errs() << "error: parsing failed\n";
-      return false;
-    }
-    return true;
-  }
+  /// Defined in choreo_api.cpp so this header does not pull in the
+  /// bison-generated parser (which requires RTTI + exceptions).
+  bool Parse(std::stringstream& preprocessed);
 
   /// Run semantic analysis pipeline on the AST.
   int RunSema() {

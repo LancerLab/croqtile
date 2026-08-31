@@ -437,8 +437,7 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
           else if constexpr (std::is_same_v<decltype(buffer.size), size_t>)
             buffer_size = UnScopedExpr(std::to_string(buffer.size));
           else
-            choreo_unreachable("Unexpected type of buffer.size: " +
-                               std::string(typeid(buffer.size).name()) +
+            choreo_unreachable("Unexpected type of buffer.size "
                                "\n\twith buffer " + buffer.buffer_id);
           infos[sto].chunks.push_back(
               std::string("{") + buffer_size + ", " + "{" +

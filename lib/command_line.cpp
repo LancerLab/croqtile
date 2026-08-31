@@ -1,5 +1,6 @@
 #include "command_line.hpp"
 #include "context.hpp"
+#include <cstdlib>
 #include <fstream>
 #include <sys/stat.h>
 
@@ -340,13 +341,15 @@ bool CommandLine::Parse(int argc, char** argv) {
       CCtx().SetOptimizationLevel(level);
     } else if (arg.substr(0, 2) == "-j" && arg.size() > 2) {
       // GCC-style -jN: parse concatenated job count
-      try {
-        parallel_jobs = (size_t)std::stoul(arg.substr(2));
-      } catch (...) {
+      const std::string job_str = arg.substr(2);
+      char* end = nullptr;
+      unsigned long val = std::strtoul(job_str.c_str(), &end, 10);
+      if (end == job_str.c_str() || *end != '\0') {
         std::cerr << "Invalid job count: " << arg << ".\n";
         ret_code = 1;
         return false;
       }
+      parallel_jobs = (size_t)val;
     } else if (!r.Parse(argc, argv, i)) {
       if (!r.Message().empty()) errs() << r.Message() << "\n";
       exit(r.ReturnCode());

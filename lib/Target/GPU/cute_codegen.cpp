@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <numeric>
@@ -1216,7 +1217,7 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
 
           // Emit each row-only statement directly.
           for (auto* stmt : row_only_stmts) {
-            if (auto asgn = dynamic_cast<AST::Assignment*>(stmt)) {
+            if (auto asgn = dyn_cast<AST::Assignment>(stmt)) {
               if (asgn->AssignToDataElement()) {
                 auto lhs = ExprSTR(asgn->da, false);
                 auto rhs = ExprSTR(asgn->value, false);
@@ -2169,9 +2170,7 @@ void CuteCodeGen::emitPrepackedV2TileLoadSnippet(
     const std::string& tileAddr, const std::string& rowStride,
     const std::string& tileOffset) {
   int sval = 0, log2s = 0;
-  try {
-    sval = std::stoi(rowStride);
-  } catch (...) {}
+  sval = static_cast<int>(std::strtol(rowStride.c_str(), nullptr, 10));
   bool pow2 = sval > 0 && (sval & (sval - 1)) == 0;
   if (pow2) {
     int t = sval;
@@ -2234,9 +2233,7 @@ void CuteCodeGen::emitFp8PrepackedV2TileLoadSnippet(
     const std::string& tileAddr, const std::string& rowStride,
     const std::string& /*colStride*/) {
   int sval = 0, log2s = 0;
-  try {
-    sval = std::stoi(rowStride);
-  } catch (...) {}
+  sval = static_cast<int>(std::strtol(rowStride.c_str(), nullptr, 10));
   bool pow2 = sval > 0 && (sval & (sval - 1)) == 0;
   if (pow2) {
     int t = sval;
