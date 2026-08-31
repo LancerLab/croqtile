@@ -199,6 +199,18 @@ void CoIRKernelLoweringBase::convertOp(OpBuilder& builder, Location loc,
 
   if (isa<AsyncUndefOp>(op)) { return; }
 
+  // Tensor values become memrefs in target lowering.  Clone select with
+  // its mapped operands so the result type is inferred from those memrefs;
+  // cloning it generically would retain the original coir.tensor result type.
+  if (auto select = dyn_cast<arith::SelectOp>(op)) {
+    auto converted = builder.create<arith::SelectOp>(
+        loc, ctx.mapping.lookup(select.getCondition()),
+        ctx.mapping.lookup(select.getTrueValue()),
+        ctx.mapping.lookup(select.getFalseValue()));
+    ctx.mapping.map(select.getResult(), converted.getResult());
+    return;
+  }
+
   if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
     Value cond = ctx.mapping.lookup(ifOp.getCondition());
     SmallVector<Type> resultTypes;

@@ -1,0 +1,46 @@
+// REQUIRES: TARGET-GCUALL
+// RUN: choreo -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN: cocc -t topscc -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+// RUN-COCR: cocc -t gcu -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+
+#include "choreo.h"
+
+__co__ s32 [16] select_buffer(s32 which, s32 [16] lhs, s32 [16] rhs) {
+  s32 [16] output;
+
+  parallel p by 1 {
+    local s32 [16] l_lhs, l_rhs;
+    dma.copy lhs => l_lhs;
+    dma.copy rhs => l_rhs;
+
+    z = select(which, l_lhs, l_rhs);
+    dma.copy z => output;
+  }
+
+  return output;
+}
+
+int main() {
+  auto lhs = choreo::make_spandata<choreo::s32>(16);
+  auto rhs = choreo::make_spandata<choreo::s32>(16);
+  for (int i = 0; i < 16; ++i) {
+    lhs.data()[i] = 100 + i;
+    rhs.data()[i] = 200 + i;
+  }
+
+  auto selected_lhs = select_buffer(0, lhs.view(), rhs.view());
+  auto selected_rhs = select_buffer(1, lhs.view(), rhs.view());
+
+  bool passed = true;
+  for (int i = 0; i < 16; ++i) {
+    if (selected_lhs.data()[i] != lhs.data()[i]) passed = false;
+    if (selected_rhs.data()[i] != rhs.data()[i]) passed = false;
+  }
+
+  if (passed)
+    std::cout << "PASS: select-buffer" << std::endl;
+  else
+    std::cout << "FAIL: select-buffer" << std::endl;
+}
+
+// CHECK: PASS: select-buffer

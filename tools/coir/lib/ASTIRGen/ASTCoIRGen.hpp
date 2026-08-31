@@ -38,6 +38,7 @@ private:
   mlir::Type LowerBaseType(BaseType bt);
   coir::TensorType LowerSpannedType(const ptr<SpannedType>& sty);
   coir::ParallelLevelAttr LowerParallelLevel(ParallelLevel pl);
+  mlir::Value EmitSelect(AST::Select& select, llvm::StringRef valueSuffix = {});
 
   llvm::SmallVector<llvm::StringMap<mlir::Value>> value_stack;
   void PushScope() {

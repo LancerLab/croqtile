@@ -1,4 +1,5 @@
-// RUN: choreo -t topscc -es %s -o - | FileCheck %s
+// RUN: choreo -t topscc -es %s -o - | FileCheck %s --check-prefix=CLASSIC
+// RUN: cocc -t topscc -es %s -o - | FileCheck %s --check-prefix=COIR
 
 __co__ void select_func(f32 [32, 4] a, f32 [32, 4] b) {
   parallel p by 1 {
@@ -8,5 +9,33 @@ __co__ void select_func(f32 [32, 4] a, f32 [32, 4] b) {
   }
 }
 
-// CHECK:   future * c_select_array__[] = {&f, &h};
-// CHECK:   future & c = *c_select_array__[1];
+__co__ void select_buffer(s32 which) {
+  parallel p by 1 {
+    local f32[4, 8] a, b;
+    z = select(which, a, b);
+    z.at(0, 0) = 1.0f;
+  }
+}
+
+__co__ void select_future(s32 which, f32 [15] input) {
+  parallel p by 1 {
+    f0 = dma.copy.async input => local;
+    f1 = dma.copy.async input => local;
+    f2 = select(which, f0, f1);
+    wait f2;
+  }
+}
+
+// CLASSIC: future * c_select_array__[] = {&f, &h};
+// CLASSIC: future & c = *c_select_array__[1];
+// CLASSIC: float * z_select_array__[] = {a, b};
+// CLASSIC: float * z = z_select_array__[which];
+// CLASSIC: *((float*)z + 0) = 1.000000f;
+// CLASSIC: future * f2_select_array__[] = {&f0, &f1};
+// CLASSIC: future & f2 = *f2_select_array__[which];
+// CLASSIC: f2.wait();
+
+// COIR: bool [[COND:v[0-9]+]] = (arg0 == {{v[0-9]+}});
+// COIR: float* [[SELECTED:v[0-9]+]] = [[COND]] ? {{v[0-9]+}} : {{v[0-9]+}};
+// COIR: [[SELECTED]][{{.*}}] = {{.*}};
+// COIR: ({{v[0-9]+}} ? __fut_{{[0-9]+}} : __fut_{{[0-9]+}}).wait();

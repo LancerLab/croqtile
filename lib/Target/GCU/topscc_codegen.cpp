@@ -1061,6 +1061,17 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       // make symbol a reference
       ds << d_indent << "future & " << sym << " = *" << array_sym << "["
          << ExprSTR(s->select_factor, false) << "];\n";
+    } else if (auto sty = dyn_cast<SpannedType>(NodeType(*s))) {
+      auto bts = NameBaseType(sty->ElementType());
+      ds << d_indent << bts << " * " << array_sym << "[] = {";
+      for (size_t i = 0; i < val_count; i++) {
+        if (i > 0) ds << ", ";
+        ds << ExprSTR(s->expr_list->ValueAt(i), false);
+      }
+      ds << "};\n";
+      ds << d_indent << bts << " * " << sym << " = " << array_sym << "["
+         << ExprSTR(s->select_factor, false) << "];\n";
+      ssm.MapDeviceSymbolIfNotExist(sname, sym);
     } else
       choreo_unreachable("select of " + PSTR(NodeType(*s)) +
                          " is yet to implement.");
@@ -1448,9 +1459,9 @@ bool TopsccCodeGen::Visit(AST::Assignment& n) {
         ds << ExprSTR(s->expr_list->ValueAt(i), false);
       }
       ds << "};\n";
-      // make symbol a reference
-      ds << d_indent << bts << " & " << n.GetName() << " = *" << array_sym
-         << "[" << ExprSTR(s->select_factor, false) << "];\n";
+      ds << d_indent << bts << " * " << n.GetName() << " = " << array_sym << "["
+         << ExprSTR(s->select_factor, false) << "];\n";
+      ssm.MapDeviceSymbolIfNotExist(InScopeName(n.GetName()), n.GetName());
     } else
       choreo_unreachable("select of " + PSTR(NodeType(*s)) +
                          " is yet to implement.");
@@ -1758,8 +1769,9 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
         auto oname = UnScopedName(item.name);
         if (item.attr != ParamAttr::GLOBAL_INPUT && item.IsReference())
           hs << h_indent << "choreo::abend_true(topsMemcpy(" << oname
-             << ".data(), " << oname + "__device" << ", "
-             << UnScopedSizeExpr(*item.type) << ", topsMemcpyDeviceToHost));\n";
+             << ".data(), " << oname + "__device"
+             << ", " << UnScopedSizeExpr(*item.type)
+             << ", topsMemcpyDeviceToHost));\n";
       }
     }
   }

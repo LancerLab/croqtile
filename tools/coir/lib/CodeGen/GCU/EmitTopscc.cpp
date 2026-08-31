@@ -2677,6 +2677,20 @@ private:
   DenseMap<Value, std::string> dmaCtxNames;
   DenseMap<Value, std::string> asyncFutures;
 
+  void emitSelect(arith::SelectOp op) override {
+    if (!mlir::isa<coir::AsyncTokenType>(op.getResult().getType())) {
+      CoIREmitterBase::emitSelect(op);
+      return;
+    }
+
+    auto trueIt = asyncFutures.find(op.getTrueValue());
+    auto falseIt = asyncFutures.find(op.getFalseValue());
+    if (trueIt == asyncFutures.end() || falseIt == asyncFutures.end()) return;
+    asyncFutures[op.getResult()] =
+        "(" + getName(op.getCondition()) + " ? " + trueIt->second + " : " +
+        falseIt->second + ")";
+  }
+
   // Persistent SDTE pool for Private-level async DMA. Mirrors the reference
   // topscc codegen's --use-dte-pool: the SDTE context for each DMA site is
   // allocated once at device-function scope and survives loop iterations so
