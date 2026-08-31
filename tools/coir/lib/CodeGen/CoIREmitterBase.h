@@ -100,7 +100,7 @@ protected:
   void emitIfOp(mlir::scf::IfOp op);
   void emitBreak(coir::CoIRBreakOp op);
   void emitContinue(coir::CoIRContinueOp op);
-  void emitSelect(mlir::arith::SelectOp op);
+  virtual void emitSelect(mlir::arith::SelectOp op);
   void emitTensorLoadElem(TensorLoadElemOp op);
   void emitTensorStoreElem(TensorStoreElemOp op);
 

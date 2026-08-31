@@ -94,7 +94,38 @@ void BufferAccessAnalyzer::RecordAll(AccessKind kind, AST::Node* stmt,
 
 // ---------- Visit handlers ----------
 
+void BufferAccessAnalyzer::HandleSelect(AST::Node& n, AST::Select& select) {
+  std::string name;
+  if (auto nvd = dyn_cast<AST::NamedVariableDecl>(&n))
+    name = nvd->name_str;
+  else if (auto assignment = dyn_cast<AST::Assignment>(&n))
+    name = assignment->GetName();
+  else
+    choreo_unreachable("select binding requires a declaration or assignment");
+
+  for (const auto& item : select.expr_list->AllValues()) {
+    VarSet operands;
+    if (auto id = AST::GetIdentifier(*item))
+      operands.insert(id->name);
+    else
+      operands = GetAllSymbolicOperands(item.get());
+
+    for (const auto& operand : operands) {
+      tracker_.AddBinding(name, operand);
+      auto scoped_operand = Scoped(operand);
+      auto future_it = tracker_.future_buffers.find(scoped_operand);
+      if (future_it == tracker_.future_buffers.end()) continue;
+      for (const auto& buffer_info : future_it->second)
+        tracker_.AddFut2Buffers(name, buffer_info);
+    }
+  }
+}
+
 bool BufferAccessAnalyzer::Visit(AST::NamedVariableDecl& n) {
+  if (auto select = dyn_cast<AST::Select>(n.init_expr)) {
+    HandleSelect(n, *select);
+    return true;
+  }
   auto ty = GetSymbolType(n.name_str);
   if (auto sty = dyn_cast<SpannedType>(ty)) {
     if (!IsRef(n)) {
@@ -117,6 +148,10 @@ bool BufferAccessAnalyzer::Visit(AST::NamedVariableDecl& n) {
 }
 
 bool BufferAccessAnalyzer::Visit(AST::Assignment& n) {
+  if (auto select = dyn_cast<AST::Select>(n.value)) {
+    HandleSelect(n, *select);
+    return true;
+  }
   if (auto sa = dyn_cast<AST::SpanAs>(n.value)) {
     tracker_.AddAlias(n.GetName(), sa->id->name);
     return true;

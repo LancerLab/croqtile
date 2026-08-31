@@ -1754,6 +1754,8 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock& fb) {
 mlir::Value ASTCoIRGen::EmitExpr(AST::Node& n) {
   auto loc = Loc(n);
 
+  if (auto* select = dyn_cast<AST::Select>(&n)) return EmitSelect(*select);
+
   if (auto* id = dyn_cast<AST::Identifier>(&n)) {
     return LookupValue(id->name);
   }
@@ -2483,6 +2485,43 @@ mlir::Value ASTCoIRGen::EmitExpr(AST::Node& n) {
   return nullptr;
 }
 
+mlir::Value ASTCoIRGen::EmitSelect(AST::Select& select,
+                                   llvm::StringRef valueSuffix) {
+  auto loc = Loc(select);
+  auto selector = EmitExpr(*select.select_factor);
+  if (!selector) return nullptr;
+
+  llvm::SmallVector<mlir::Value> candidates;
+  for (const auto& item : select.expr_list->AllValues()) {
+    mlir::Value candidate;
+    if (valueSuffix.empty()) {
+      candidate = EmitExpr(*item);
+    } else if (auto id = AST::GetIdentifier(*item)) {
+      candidate = LookupValue(id->name + valueSuffix.str());
+    }
+    if (!candidate) return nullptr;
+    if (!candidates.empty() &&
+        candidate.getType() != candidates.front().getType())
+      return nullptr;
+    candidates.push_back(candidate);
+  }
+  if (candidates.empty()) return nullptr;
+
+  mlir::Value result = candidates.back();
+  for (size_t i = candidates.size() - 1; i-- > 0;) {
+    mlir::Value index;
+    if (mlir::isa<mlir::IndexType>(selector.getType()))
+      index = builder.create<mlir::arith::ConstantIndexOp>(loc, i);
+    else
+      index = COIR_CONSTANT_INT(builder, loc, i, selector.getType());
+    auto condition = builder.create<mlir::arith::CmpIOp>(
+        loc, mlir::arith::CmpIPredicate::eq, selector, index);
+    result = builder.create<mlir::arith::SelectOp>(loc, condition,
+                                                   candidates[i], result);
+  }
+  return result;
+}
+
 bool ASTCoIRGen::Visit(AST::Assignment& asgn) {
   if (!asgn.AssignToDataElement()) {
     auto rhs = EmitExpr(*asgn.value);
@@ -2491,6 +2530,16 @@ bool ASTCoIRGen::Visit(AST::Assignment& asgn) {
         MapValue(asgn.GetName(), rhs);
       else
         UpdateValue(asgn.GetName(), rhs);
+      if (auto select = dyn_cast<AST::Select>(asgn.value);
+          select && mlir::isa<coir::AsyncTokenType>(rhs.getType())) {
+        auto data = EmitSelect(*select, ".data");
+        if (data) {
+          if (asgn.IsDecl())
+            MapValue(asgn.GetName() + ".data", data);
+          else
+            UpdateValue(asgn.GetName() + ".data", data);
+        }
+      }
     }
     return true;
   }
@@ -2560,6 +2609,18 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl& nvd) {
 
   auto symType = GetSymbolType(nvd.GetName());
   if (!symType) return true;
+
+  if (auto select = dyn_cast<AST::Select>(nvd.init_expr)) {
+    auto val = EmitSelect(*select);
+    if (val) {
+      MapValue(nvd.GetName(), val);
+      if (mlir::isa<coir::AsyncTokenType>(val.getType())) {
+        auto data = EmitSelect(*select, ".data");
+        if (data) MapValue(nvd.GetName() + ".data", data);
+      }
+    }
+    return true;
+  }
 
   if (auto sty = dyn_cast<SpannedType>(symType)) {
     auto loc = Loc(nvd);

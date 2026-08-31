@@ -70,6 +70,10 @@ private:
   // is not a storage-bearing buffer.
   Storage StorageOf(const std::string& scoped_name) const;
 
+  // Record the one-to-many binding introduced by select.  A later access
+  // through the selected name must conservatively resolve to every candidate.
+  void HandleSelect(AST::Node& n, AST::Select& select);
+
   // Record one access, resolving the name to its underlying buffer(s).
   void Record(AccessKind kind, AST::Node* stmt, const std::string& name,
               AccessEntity entity);
