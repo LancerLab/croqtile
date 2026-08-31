@@ -3384,12 +3384,14 @@ bool TopsccCodeGen::Visit(AST::ForeachBlock& n) {
       auto width = iv_bty->GetWidth(0);
       int increment = step * width;
       IndStream() << "for (" << SSMName(iv_name, IsHost()) << " = "
-                  << (rng->lbound ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
-                                  : "0")
+                  << (rng->lb_mutator
+                          ? ("(" + ExprSTR(rng->lb_mutator, IsHost()) + ")")
+                          : "0")
                   << "; " << SSMName(iv_name, IsHost()) << " < "
                   << UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()))
-                  << (rng->ubound ? (" + " + ExprSTR(rng->ubound, IsHost()))
-                                  : "")
+                  << (rng->ub_mutator
+                          ? (" + " + ExprSTR(rng->ub_mutator, IsHost()))
+                          : "")
                   << "; "
                   << (increment != 1 ? (SSMName(iv_name, IsHost()) +
                                         " += " + std::to_string(increment))
