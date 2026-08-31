@@ -22,13 +22,15 @@ bool IsEnabledAtThreshold(AssertionCost cost, AssertionCost threshold) {
 } // namespace
 
 void AssertSite::ResetFunction() {
+  // Reset only per-function, symbol-keyed state. The scope stack (`scopes`)
+  // and the node-keyed maps (`scope_map`, `scope_level`, `block_cost`) mirror
+  // the AST block nesting and must stay balanced across the whole program:
+  // the enclosing `Program` block legitimately sits above every function, so
+  // clearing them here would corrupt the push/pop balance and break the scope
+  // chain that EstimateAssertionCost walks up to `Program`.
   def_map.clear();
-  scope_map.clear();
   barrier_map.clear();
   node_order.clear();
-  scope_level.clear();
-  block_cost.clear();
-  scopes.clear();
   walk_order = 0;
   body_order = 0;
 }
