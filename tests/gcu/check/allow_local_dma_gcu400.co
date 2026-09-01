@@ -1,0 +1,18 @@
+// RUN: not choreo -t topscc -arch=gcu400 --allow-local %s 2>&1 | FileCheck %s
+
+#include "choreo.h"
+
+// Even with --allow-local, `local` is per-thread private stack and cannot be a
+// DTE source or sink, so DMA in either direction is still rejected.
+__co__ auto foo(s32[4] a) {
+  s32[a.span] c;
+  parallel p by 4 : group {
+    local f32[4] tmp;
+    l1 = dma.copy a.chunkat(p) => local;
+    dma.copy l1 => c.chunkat(p);
+  }
+  return c;
+}
+
+// CHECK: error: 'local' is not supported by the current target
+// CHECK: error: 'local' is not supported by the current target

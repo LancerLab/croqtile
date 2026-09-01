@@ -253,6 +253,9 @@ Option<size_t> max_local_mem_capacity(
     OptionKind::Hidden, "--max-local-mem-capacity", "-fmax-local", 0,
     "Set the max local memory capacity (in bytes) per thread. 0 means use "
     "default value.");
+Option<bool> allow_local(OptionKind::User, "--allow-local", "", false,
+                         "Allow `local` (per-thread private stack) storage on "
+                         "targets that reject it by default.");
 Option<size_t> shared_mem_alignment(OptionKind::Hidden,
                                     "--shared-mem-alignment", "-fsmem-align",
                                     true,
@@ -477,6 +480,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetDMADiagnosis(diag_dma.GetValue());
   CCtx().SetLoopNorm(loop_norm.GetValue());
   CCtx().SetMaxLocalMemCapacityPerThread(max_local_mem_capacity.GetValue());
+  CCtx().SetAllowLocal(allow_local.GetValue());
   CCtx().SetSharedMemAlignment(shared_mem_alignment.GetValue());
   if (use_target_lib.WasExplicitlySet())
     CCtx().SetUseTargetLib(use_target_lib.GetValue());

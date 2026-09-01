@@ -1,18 +1,14 @@
 // RUN: choreo --target topscc -dv=muchk -sa=muchk -arch=gcu400 --mem-reuse=false %s 2>&1 | FileCheck %s
 
-// `local` and `shared<group>` alias the same per-SIP VDMEM heap, so they are
-// jointly budgeted against the 7 MiB on-chip pool. Memory reuse is disabled so
-// the two buffers are accounted separately (with reuse, `shared<group>` merges
-// into the `local` heap). `local` is private to a THREAD (lane), replicated
-// 4 lanes x 8 SIPs = 32x; `shared<group>` is per-GROUP (x 8 SIPs). The 224 KiB
-// `local` (x 32 = 7 MiB) plus the 4 KiB `shared<group>` (x 8 = 32 KiB) pushes
-// the joint total over the budget.
+// `shared<group>` is budgeted per-GROUP (per SIP) against the 896 KiB L1 VDMEM
+// limit. `local` is rejected on gcu400+, so on-chip scratchpad is expressed as
+// `shared<group>`. A single 896 KiB + 4 B buffer exceeds the per-GROUP limit
+// (and, multiplied by 8 SIPs, also the 7 MiB joint pool).
 __co__ auto mem_usage_check_group_shared(s32 [128, 128] i0) {
   s32 [i0.span] output;
 
   parallel p by 1 {
-    local f32[57344] l;        // 229376 B = 224 KiB (per-lane LOCAL limit)
-    shared<group> f32[1024] g;  // 4096 B = 4 KiB (GROUP_SHARED)
+    shared<group> f32[229377] g; // 917508 B = 896 KiB + 4 B (over per-GROUP limit)
   }
 
   return output;
@@ -20,7 +16,6 @@ __co__ auto mem_usage_check_group_shared(s32 [128, 128] i0) {
 
 // CHECK: [MemUsage] Memory usage limit of architecture GCU400 is:
 // CHECK: 0x0000e0000 bytes(896 KB)
-// CHECK: groupshared( 0%):               0x0000e0000 bytes(896 KB)
-// CHECK: error: LOCAL+shared<group>+SHARED memory OUT OF BOUND!
-// CHECK: LOCAL (per-thread) * 8 groups * 4 threads + shared<group> (per-group) * 8 groups + SHARED:
-// CHECK: Used: 7340032 + 32768 + 0 = 7372800 bytes, Limit: 7340032 bytes.
+// CHECK: error: groupshared memory OUT OF BOUND!
+// CHECK: compile-time groupshared memory:
+// CHECK: Used: 917508 bytes, Limit: 917504 bytes.

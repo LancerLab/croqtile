@@ -20,14 +20,14 @@ __co_device__ extern "C" void relu_kernel(float* input, float* out, int n) {
 __co__ f32 [128, 256] relu(f32 [128, 256] input) { /// device program
   f32[input.span(0), input.span(1)] output; // use same shape as input
 
-  // Keep per-instance local buffers small (<= 8KB) to respect the gcu400
-  // local-memory budget. Split into enough tiles so anon_0 stays tiny.
-  parallel p by 8 {
-    parallel q by 4 {
-      input_load = dma.copy.async input.chunkat(p, q) => local;
-      local f32[input_load.span] l1_out;
+  // Keep per-instance on-chip buffers small (<= 8KB) to respect the gcu400
+  // shared<group> memory budget. Split into enough tiles so anon_0 stays tiny.
+  parallel p by 8 : block {
+    parallel q by 4 : group {
+      input_load = dma.copy.async input.chunkat(p, q) => shared<group>;
+      shared<group> f32[input_load.span] l1_out;
       wait input_load;
-      parallel r by 4 {
+      parallel r by 4 : thread {
         call relu_kernel(input_load.data.chunkat(r, _), l1_out.chunkat(r, _), |input_load.span| / #r);
       }
       out_store = dma.copy.async l1_out => output.chunkat(p, q);

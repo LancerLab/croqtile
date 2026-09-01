@@ -66,16 +66,16 @@ public:
     return ArchNum(arch) >= 400 ? 4 : 1;
   }
 
-  Target::LocalSharedPool
-  GetLocalSharedPool(const ArchId& arch) const override {
+  Target::SharedScratchpadPool
+  GetSharedScratchpadPool(const ArchId& arch) const override {
     // gcu400+ (gcu400/gcu450/gcu500 and sim variants) have no dedicated L2
-    // SRAM: DSM (SHARED) is a cross-SIP view of the same L1 VDMEM (LOCAL).
-    // Per topsop tiered_memory_alloc, "L1 + L2 share a fixed pool =
-    // vdmem_size * sip_num", i.e. 8 SIPs x 896 KiB = 7 MiB per block. The
-    // joint budget is:
-    //   local_per_thread * max_group_dim * replicas_per_pool
-    // + group_shared * replicas_per_pool + shared <= pool_bytes
-    // where max_group_dim == 4 (THREADs per GROUP) for gcu400+.
+    // SRAM: DSM (SHARED) is a cross-SIP view of the same L1 VDMEM that backs
+    // `shared<group>` (GROUP_SHARED). Per topsop tiered_memory_alloc,
+    // "L1 + L2 share a fixed pool = vdmem_size * sip_num", i.e. 8 SIPs x
+    // 896 KiB = 7 MiB per block. The joint budget is:
+    //   group_shared * replicas_per_pool + shared <= pool_bytes
+    // (`local` is rejected by default on gcu400+; the on-chip scratchpad is
+    // exposed as `shared<group>` instead.)
     if (ArchNum(arch) >= 400)
       return {true, /*replicas_per_pool=*/8,
               /*pool_bytes=*/7ull * 1024 * 1024};
@@ -85,6 +85,7 @@ public:
   size_t GetMemAlignmentByte(const Storage& sto, const ArchId&) const override {
     switch (sto) {
     case Storage::LOCAL:
+    case Storage::GROUP_SHARED:
     case Storage::SHARED: return 512;
     default: choreo_unreachable("Unsupported mem level.");
     }
@@ -158,6 +159,15 @@ public:
 
   bool IsGroupSharedStorageSupported(const ArchId& arch) const override {
     return ArchNum(arch) >= 400;
+  }
+
+  // gcu400+ exposes its on-chip scratchpad (L1 VDMEM) as `shared<group>`;
+  // `local` would map to per-thread `__private__` stack, which the hardware
+  // DTE cannot source/sink. Reject `local` by default on those arches (the
+  // `--allow-local` opt-in overrides this for declarations); gcu300 and below
+  // keep the classic per-thread L1 VDMEM `local` tier.
+  bool IsLocalStorageSupported(const ArchId& arch) const override {
+    return ArchNum(arch) < 400;
   }
 
   bool IsLibCallSupported(const std::string& name) const override {

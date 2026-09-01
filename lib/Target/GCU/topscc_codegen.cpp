@@ -79,6 +79,13 @@ inline const char* TopsMdsStorage(Storage st) {
   case Storage::DEFAULT:
   case Storage::GLOBAL: return "tops::Global";
   case Storage::SHARED: return "tops::Shared";
+  // `shared<group>` is L1 VDMEM, which the mdspan address-space model calls
+  // `tops::Private` (see get_addrspace(): is_L1_memory -> Private).
+  case Storage::GROUP_SHARED: return "tops::Private";
+  // `local` is rejected by default on gcu400+ and, when opted in via
+  // `--allow-local`, maps to per-thread `__private__` stack that never reaches
+  // this path. Kept here for gcu300 and below, where the per-thread L1 tier
+  // is also `Private`.
   case Storage::LOCAL: return "tops::Private";
   default: choreo_unreachable("storage type is not supported.");
   }
@@ -88,7 +95,13 @@ inline const char* TopsMdsStorage(Storage st) {
 inline const char* TopsDeviceMemory(Storage st) {
   switch (st) {
   case Storage::SHARED: return "__shared__";
-  case Storage::LOCAL: return "__local__";
+  case Storage::GROUP_SHARED: return "__local__";
+  // `local` is rejected on gcu400+ by default; when opted in via
+  // `--allow-local` it is per-thread private stack (`__private__`), since the
+  // DTE cannot source/sink stack. On gcu300 and below it remains the classic
+  // per-thread L1 VDMEM (`__local__`) tier.
+  case Storage::LOCAL:
+    return CCtx().ArchNum() >= 400 ? "__private__" : "__local__";
   default: choreo_unreachable("device storage type is not supported.");
   }
   return "";
@@ -97,6 +110,7 @@ inline const char* TopsDeviceMemory(Storage st) {
 inline std::string TopsParamStorage(Storage st) {
   switch (st) {
   case Storage::SHARED: return "__shared__";
+  case Storage::GROUP_SHARED: return "__local__";
   case Storage::LOCAL: return "__private__";
   default: return "";
   }
@@ -221,20 +235,23 @@ TopsccCodeGen::VectorTypeSTR(const ptr<Type>& ty) const {
 const std::string TopsccCodeGen::DMATypeSTR(Storage sto,
                                             bool block_level) const {
   if (CCtx().GetArch() == "gcu400") {
-    if (sto == Storage::GLOBAL)
-      return "tops::shared_dte"; // to confirm
-    else if (sto == Storage::SHARED)
-      return "tops::shared_dte";
-    else if (sto == Storage::LOCAL)
-      return "tops::local_dte";
-    else
-      choreo_unreachable("unsupported storage for DMA context.");
+    switch (sto) {
+    case Storage::GLOBAL: return "tops::shared_dte"; // to confirm
+    case Storage::SHARED: return "tops::shared_dte";
+    case Storage::GROUP_SHARED: return "tops::local_dte";
+    // `local` cannot be a DMA source/sink on gcu400+ (a stack-backed `local`
+    // is not DTE-addressable); on-chip scratchpad is `shared<group>`, mapped
+    // to tops::local_dte above.
+    default: choreo_unreachable("unsupported storage for DMA context.");
+    }
   } else if (CCtx().GetArch() == "gcu300") {
     // GCU300 CDTE type selection:
     //   block_level=true  -> choreo_cdte (shared_dte): block-shared,
     //   single-thread init block_level=false -> choreo_cdte_priv
     //   (private_cdte): per-thread, RAII init
     // SDTE always uses choreo_sdte (private_dte)
+    if (sto == Storage::GROUP_SHARED)
+      choreo_unreachable("shared<group> is not supported on gcu300.");
     if (sto == Storage::SHARED)
       return block_level ? "choreo::choreo_cdte" : "choreo::choreo_cdte_priv";
     else
@@ -1183,8 +1200,13 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
         choreo_unreachable(
             "error: shared/local buffer cannot be Choreo output.");
 
-      auto type_modifiers =
-          (sto == Storage::SHARED ? "__shared__ " : "__local__ __valigned__ ");
+      // `shared` is DSM, `shared<group>` is L1 VDMEM. An opted-in `local` on
+      // gcu400+ is per-thread private stack (`__private__`); on gcu300 and
+      // below `local` is the per-thread L1 VDMEM (`__local__ __valigned__`).
+      auto type_modifiers = sto == Storage::SHARED ? "__shared__ "
+                            : (sto == Storage::LOCAL && CCtx().ArchNum() >= 400)
+                                ? "__private__ "
+                                : "__local__ __valigned__ ";
       std::string alignment_specifier;
       if (n.HasNote("alignment") &&
           (!n.HasNote("spm") || n.HasNote("explicit_alignment")))
@@ -1240,7 +1262,8 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       ssm.MapHostSymbol(InScopeName(sym), buf_sym);
       ssm.MapDeviceSymbolIfNotExist(InScopeName(sym), sym);
       global_buffers.insert(buf_sym);
-    } else if (sto == Storage::SHARED || sto == Storage::LOCAL) {
+    } else if (sto == Storage::SHARED || sto == Storage::GROUP_SHARED ||
+               sto == Storage::LOCAL) {
       if (IsHost()) choreo_unreachable("error: shared/local var decl in host.");
       sym = UniqueDeviceName(n.name_str);
       HandleSharedLocal();
@@ -1251,9 +1274,23 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
 
     // initialize the spm buffer if needed
     if (spmem && n.init_value) {
-      if (sto != Storage::SHARED && sto != Storage::LOCAL)
+      if (sto != Storage::SHARED && sto != Storage::GROUP_SHARED &&
+          sto != Storage::LOCAL)
         choreo_unreachable(
             "error: unexpected storage type in spm initialization.");
+
+      if (sto == Storage::LOCAL && CCtx().ArchNum() >= 400) {
+        // Stack-backed `local` (opt-in) cannot be a DTE target; initialize
+        // each subthread's own copy with a plain per-element loop.
+        ds << d_indent << "for (int _i = 0; _i < "
+           << UnScopedExpr(ElemCountExprOf(*sty)) << "; ++_i) " << sym
+           << "[_i] = "
+           << ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
+                          GetBaseType(*n.init_value->GetType()), false)
+           << ";\n";
+        return true;
+      }
+
       ds << d_indent << BufferInitPred(sto) << "{\n";
       IncrDeviceIndent();
       if (sto == Storage::LOCAL) {
@@ -1372,6 +1409,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       global_buffers.insert(buf_sym);
     } break;
     case Storage::SHARED:
+    case Storage::GROUP_SHARED:
     case Storage::LOCAL: {
       assert(!IsHost());
       ds << d_indent << TopsDeviceMemory(ety->GetStorage())
@@ -1404,6 +1442,7 @@ bool TopsccCodeGen::Visit(AST::NamedVariableDecl& n) {
       global_buffers.insert(buf_sym);
     } break;
     case Storage::SHARED:
+    case Storage::GROUP_SHARED:
     case Storage::LOCAL: {
       assert(!IsHost());
       ds << d_indent << TopsDeviceMemory(ety->GetStorage())
@@ -1769,9 +1808,8 @@ bool TopsccCodeGen::Visit(AST::ParallelBy& n) {
         auto oname = UnScopedName(item.name);
         if (item.attr != ParamAttr::GLOBAL_INPUT && item.IsReference())
           hs << h_indent << "choreo::abend_true(topsMemcpy(" << oname
-             << ".data(), " << oname + "__device"
-             << ", " << UnScopedSizeExpr(*item.type)
-             << ", topsMemcpyDeviceToHost));\n";
+             << ".data(), " << oname + "__device" << ", "
+             << UnScopedSizeExpr(*item.type) << ", topsMemcpyDeviceToHost));\n";
       }
     }
   }
@@ -2921,6 +2959,7 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
       switch (ety->GetStorage()) {
       case Storage::GLOBAL:
       case Storage::SHARED:
+      case Storage::GROUP_SHARED:
       case Storage::LOCAL: {
         ds << d_indent << "// wait event " << PSTR(f) << "\n";
         ds << d_indent << "while (";
@@ -2958,6 +2997,7 @@ bool TopsccCodeGen::Visit(AST::Wait& n) {
       switch (ety->GetStorage()) {
       case Storage::GLOBAL:
       case Storage::SHARED:
+      case Storage::GROUP_SHARED:
       case Storage::LOCAL: {
         ds << d_indent << "while (" << ExprSTR(f, false)
            << " == false) continue; // spinlock\n";
@@ -3143,6 +3183,7 @@ bool TopsccCodeGen::Visit(AST::Trigger& n) {
         switch (ety->GetStorage()) {
         case Storage::GLOBAL:
         case Storage::SHARED:
+        case Storage::GROUP_SHARED:
         case Storage::LOCAL:
           ds << d_indent << "// trigger event " << PSTR(f) << "\n";
           if (is_array_ref) {
@@ -3172,6 +3213,7 @@ bool TopsccCodeGen::Visit(AST::Trigger& n) {
         switch (ety->GetStorage()) {
         case Storage::GLOBAL:
         case Storage::SHARED:
+        case Storage::GROUP_SHARED:
         case Storage::LOCAL:
           if (is_array_ref) {
             ds << d_indent << "// trigger event " << PSTR(f) << "\n";

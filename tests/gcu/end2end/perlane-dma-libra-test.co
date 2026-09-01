@@ -1,0 +1,32 @@
+// REQUIRES: TARGET-GCU400 ALLOW-SIM-GCU400
+// RUN: choreo -gs -t topscc %gcu_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
+#include "choreo.h"
+
+// Group-shared DMA: each GROUP (SIP) copies its own chunk into a
+// `shared<group>` buffer and back out. `local` is rejected on gcu400+
+// (its per-thread `__private__` stack cannot be sourced/sunk by the DTE),
+// so on-chip scratchpad is expressed as `shared<group>` (L1 VDMEM, driven
+// by tops::local_dte).
+__co__ auto copy_groups(s32[4] a) {
+  s32[a.span] c;
+  parallel p by 4 : group {
+    l1 = dma.copy a.chunkat(p) => shared<group>;
+    dma.copy l1 => c.chunkat(p);
+  }
+  return c;
+}
+
+int main() {
+  auto input = choreo::make_spandata<choreo::s32>(4);
+  // Distinct per-lane values so a lane-crossing slice/deslice bug is caught.
+  for (int i = 0; i < 4; ++i)
+    input[i] = i + 1;
+
+  auto r = copy_groups(input.view());
+  for (int i = 0; i < 4; ++i)
+    choreo::choreo_assert(r[i] == input[i], "group-shared copy mismatch");
+
+  std::cout << "Test Passed" << std::endl;
+}
+
+// CHECK: Test Passed

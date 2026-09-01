@@ -19,10 +19,10 @@ __co__ f32 [32, 512] relu(f32 [32, 512] input) { /// device program
       with {n_tile} in [2] {  // decl your tiled spans
         parallel r by 3 {  // p is sip_index
           r1 = r #- 1; // r1 = [0, 2), r = [0, 3)
-          local event ep[2], ec[2];
+          shared<group> event ep[2], ec[2];
           trigger ec;
-          local f32 [input.span / {#q, #n_tile} ] l1_input;
-          local f32 [input.span / {#q, #n_tile} ] l1_out;
+          shared<group> f32 [input.span / {#q, #n_tile} ] l1_input;
+          shared<group> f32 [input.span / {#q, #n_tile} ] l1_out;
           foreach n_tile {
             inthreads.async (r == #r1) {
               wait ec;

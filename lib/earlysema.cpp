@@ -1012,6 +1012,19 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
            "'shared<group>' is not supported by the current target; it "
            "requires a target with a GROUP storage tier.");
 
+  // `local` (Storage::LOCAL) maps to per-thread private stack. Targets whose
+  // DMA engines cannot source/sink stack reject it here (mirroring the
+  // `shared<group>` gate) so downstream codegen can treat LOCAL as
+  // unreachable on those targets. The opt-in flag relaxes this for
+  // declarations only; DMA involving `local` is still rejected below.
+  if (auto mem = n.GetMemory();
+      mem && mem->Get() == Storage::LOCAL &&
+      !CCtx().GetTarget().IsLocalStorageSupported(CCtx().GetArch()) &&
+      !CCtx().AllowLocal())
+    Error1(n.LOC(),
+           "'local' is not supported by the current target; use stack (no "
+           "storage specifier) or 'shared<group>' for on-chip scratchpad.");
+
   ptr<Type> tty = nullptr; // type from the annotation
   ptr<Type> ety = nullptr; // type from the initialization expression
 
@@ -1893,6 +1906,15 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   const auto dst_storage = isa<AST::Memory>(n.to)
                                ? cast<AST::Memory>(n.to)->Get()
                                : tty->GetStorage();
+  // Reject DMA with a `local` source or destination on targets without a
+  // native `local` tier (mirrors the declaration gate in
+  // Visit(NamedVariableDecl)). This is unconditional: even when `--allow-local`
+  // permits a stack-backed `local`, the DTE cannot source/sink stack.
+  if ((src_storage == Storage::LOCAL || dst_storage == Storage::LOCAL) &&
+      !CCtx().GetTarget().IsLocalStorageSupported(CCtx().GetArch()))
+    Error1(n.LOC(),
+           "'local' is not supported by the current target; use stack (no "
+           "storage specifier) or 'shared<group>' for on-chip scratchpad.");
   const auto is_global = [](Storage storage) {
     return storage == Storage::GLOBAL || storage == Storage::DEFAULT;
   };

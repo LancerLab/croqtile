@@ -1,25 +1,25 @@
-// RUN: choreo --target topscc -dv=muchk -sa=muchk -arch=gcu400 %s 2>&1 | FileCheck %s
+// RUN: choreo --target topscc -dv=muchk -sa=muchk -arch=gcu400 --mem-reuse=false %s 2>&1 | FileCheck %s
 
-// gcu400+ have a DSM (no dedicated L2 SRAM): LOCAL (per-THREAD L1 VDMEM) and
-// SHARED (DSM) alias the same on-chip pool. `local` is private to a THREAD
-// (lane), so it is replicated 4 lanes x 8 SIPs = 32x; `shared` is per-block.
-// The two buffers below are each within their per-storage limits, but jointly
-// exceed the pool budget: 224 KiB (per-lane) x 32 + 4 KiB = 7 MiB + 4 KiB > 7 MiB.
+// gcu400+ have no dedicated L2 SRAM: shared<group> (per-GROUP L1 VDMEM) and
+// SHARED (DSM) alias the same on-chip pool. `shared<group>` is per-GROUP
+// (replicated 8 SIPs); `shared` is per-block. The two buffers below are each
+// within their per-storage limits, but jointly exceed the pool budget:
+// 896 KiB (per-group) x 8 + 4 KiB = 7 MiB + 4 KiB > 7 MiB.
 __co__ auto mem_usage_check_dsm(s32 [128, 128] i0) {
   s32 [i0.span] output;
 
   parallel p by 1 {
-    local f32[57344] l; // 229376 B = 224 KiB (per-lane LOCAL limit)
-    shared f32[1024] s;  // 4096 B = 4 KiB (under the 6 MiB SHARED limit)
+    shared<group> f32[229376] g; // 917504 B = 896 KiB (per-GROUP limit)
+    shared f32[1024] s;          // 4096 B = 4 KiB (under 6 MiB SHARED limit)
   }
 
   return output;
 }
 
 // CHECK: [MemUsage] Memory usage limit of architecture GCU400 is:
-// CHECK: 0x0000e0000 bytes(896 KB)
 // CHECK: 0x000600000 bytes(6 MB)
+// CHECK: 0x0000e0000 bytes(896 KB)
 // CHECK: 0x2400000000 bytes(144 GB)
-// CHECK: error: LOCAL+shared<group>+SHARED memory OUT OF BOUND!
-// CHECK: LOCAL (per-thread) * 8 groups * 4 threads + shared<group> (per-group) * 8 groups + SHARED:
-// CHECK: Used: 7340032 + 0 + 4096 = 7344128 bytes, Limit: 7340032 bytes.
+// CHECK: error: shared<group>+SHARED memory OUT OF BOUND!
+// CHECK: shared<group> (per-group) * 8 groups + SHARED:
+// CHECK: Used: 7340032 + 4096 = 7344128 bytes, Limit: 7340032 bytes.

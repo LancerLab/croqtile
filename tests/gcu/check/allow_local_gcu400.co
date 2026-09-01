@@ -1,0 +1,20 @@
+// RUN: not choreo -t topscc -arch=gcu400 %s 2>&1 | FileCheck %s --check-prefix=REJECT
+// RUN: choreo -t topscc -arch=gcu400 --allow-local -es %s 2>&1 | FileCheck %s --check-prefix=ALLOW
+
+#include "choreo.h"
+
+// `local` is rejected on gcu400+ by default. With --allow-local it is accepted
+// as per-thread private stack (`__private__`), initialized with a plain loop
+// because the DTE cannot source/sink stack.
+__co__ auto foo(s32[4] a) {
+  s32[a.span] c;
+  parallel p by 4 : thread {
+    local f32[4] tmp{0.0f};
+  }
+  return c;
+}
+
+// REJECT: error: 'local' is not supported by the current target
+
+// ALLOW: __private__ float tmp[4];
+// ALLOW: for (int _i = 0; _i < 4; ++_i) tmp[_i]

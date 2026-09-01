@@ -10,9 +10,14 @@ using namespace Choreo;
 
 namespace {
 
-// `shared<group>` (Storage::GROUP_SHARED) lives in the same per-thread VDMEM
-// heap as `local` (Storage::LOCAL). Route GROUP_SHARED buffers into the LOCAL
-// allocation pool while keeping their Storage value intact for codegen.
+// On targets without a per-THREAD VDMEM tier: `local` is rejected by
+// default (the `--allow-local` opt-in maps it to per-thread `__private__`
+// stack, which is not pooled here). The on-chip per-SIP VDMEM scratchpad is
+// exposed as `shared<group>` (Storage::GROUP_SHARED). mem_reuse keys its two
+// on-chip pools on LOCAL (per-SIP/per-thread scratchpad) and SHARED (block
+// DSM), so route GROUP_SHARED buffers into the LOCAL pool slot -- whose
+// GetMemCapacity equals the per-SIP VDMEM size -- while keeping their Storage
+// value intact for codegen.
 Storage AllocPoolOf(Storage sto) {
   return sto == Storage::GROUP_SHARED ? Storage::LOCAL : sto;
 }
@@ -96,7 +101,7 @@ MemReuse::RequestedAlignmentForDevFunc(Storage sto,
                                        const std::string& df_name) const {
   size_t alignment = 0;
   for (const auto& [buffer_id, requested] : ma.buf_alignment) {
-    if (ma.buf_sto.at(buffer_id) != sto) continue;
+    if (AllocPoolOf(ma.buf_sto.at(buffer_id)) != sto) continue;
     if (GetDeclDevFuncOfBuffer(buffer_id) != df_name) continue;
     alignment = std::max(alignment, requested);
   }
@@ -272,9 +277,17 @@ bool MemReuse::Visit(AST::NamedVariableDecl& n) {
 
 bool MemReuse::ShouldReuseStorage(Storage sto,
                                   const std::string& dev_func_name) const {
+  const Storage orig = sto;
   sto = AllocPoolOf(sto);
   if (sto == Storage::SHARED) return true;
   if (sto != Storage::LOCAL) return false;
+  // On targets without a native `local` tier, an opted-in `local` is
+  // per-thread private stack rather than the pooled on-chip tier
+  // (`shared<group>`), so it must not be reused. `shared<group>` still
+  // reuses: it reaches here via AllocPoolOf but keeps orig != LOCAL.
+  if (orig == Storage::LOCAL &&
+      !CCtx().GetTarget().IsLocalStorageSupported(CCtx().GetArch()))
+    return false;
   if (CCtx().TargetName() != "cute") return true;
 
   // For CUTE local buffers:
