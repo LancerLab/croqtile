@@ -16,6 +16,7 @@
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
 #include "Dialect/CoIR/Passes.h"
+#include "Dialect/CoIR/TileOffset.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/PatternMatch.h"
@@ -105,15 +106,19 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
             op.getLoc(), tileDim);
         return rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, tileSize);
       }
+      // Anchor tile (dim <= 1): scale by the counterpart's per-dim extent,
+      // which may be dynamic. effectiveChunkSize encodes the static rule; a
+      // non-constant extent is resolved as a runtime index value.
       auto cTy = llvm::dyn_cast<coir::TensorType>(counterpart.getType());
       if (!cTy || i >= cTy.getShape().size())
         return idx;
       Value extent = materializeDimExtent(counterpart, i);
       if (!extent)
         return idx;
-      if (auto c = extent.getDefiningOp<mlir::arith::ConstantIndexOp>())
-        if (c.value() == 1)
+      if (auto c = extent.getDefiningOp<mlir::arith::ConstantIndexOp>()) {
+        if (effectiveChunkSize(tileDim, c.value()) == 1)
           return idx;
+      }
       return rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, extent);
     };
 
@@ -123,10 +128,10 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
       unsigned rank = tileTy.getRank();
       auto tileShape = tileTy.getShape();
       auto allIdx = tileOp.getIndices();
-      bool elementOffset = tileOp->hasAttr("coir.element_offset");
+      bool elementOffset = isElementOffsetTile(tileOp);
       for (unsigned i = 0; i < std::min((unsigned)allIdx.size(), rank); ++i) {
         Value idx = allIdx[i];
-        // Element-offset tiles (chained subspan/modspan) carry the offset
+        // Element-offset tiles (chained subspan/modspan/view) carry the offset
         // already multiplied by the strides, so pass through unchanged.
         if (elementOffset) {
           srcOffsets.push_back(idx);
@@ -144,7 +149,7 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
       unsigned rank = tileTy.getRank();
       auto tileShape = tileTy.getShape();
       auto allIdx = tileOp.getIndices();
-      bool elementOffset = tileOp->hasAttr("coir.element_offset");
+      bool elementOffset = isElementOffsetTile(tileOp);
       for (unsigned i = 0; i < std::min((unsigned)allIdx.size(), rank); ++i) {
         Value idx = allIdx[i];
         if (elementOffset) {

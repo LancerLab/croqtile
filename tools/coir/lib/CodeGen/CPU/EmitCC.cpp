@@ -12,6 +12,7 @@
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
 #include "Dialect/CoIR/Passes.h"
+#include "Dialect/CoIR/TileOffset.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -1263,12 +1264,27 @@ private:
     auto srcShape = srcTy.getShape();
     os() << getIndent() << "auto " << name << " = " << getName(op.getSource());
     os() << " + (";
-    for (unsigned i = 0; i < indices.size(); ++i) {
-      if (i > 0) os() << " + ";
-      os() << getName(indices[i]);
-      int64_t stride = 1;
-      for (unsigned j = i + 1; j < srcShape.size(); ++j) stride *= srcShape[j];
-      os() << " * " << stride;
+    if (isElementOffsetTile(op)) {
+      // Element-offset tiles carry pre-multiplied element offsets in their
+      // leading rank indices (trailing indices are dynamic shape values). Sum
+      // them as a flat pointer offset instead of re-scaling by strides.
+      auto tileTy = dyn_cast<coir::TensorType>(op.getResult().getType());
+      unsigned rank = tileTy ? tileTy.getRank() : indices.size();
+      bool first = true;
+      for (unsigned i = 0; i < std::min((unsigned)indices.size(), rank); ++i) {
+        if (!first) os() << " + ";
+        os() << getName(indices[i]);
+        first = false;
+      }
+      if (first) os() << "0";
+    } else {
+      for (unsigned i = 0; i < indices.size(); ++i) {
+        if (i > 0) os() << " + ";
+        os() << getName(indices[i]);
+        int64_t stride = 1;
+        for (unsigned j = i + 1; j < srcShape.size(); ++j) stride *= srcShape[j];
+        os() << " * " << stride;
+      }
     }
     os() << ");\n";
   }
