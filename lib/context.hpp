@@ -97,6 +97,8 @@ struct DMABufferInfo {
   std::string buffer; // buffer name, if explicitly named
   DMABufferKind from_kind = DOK_UNKNOWN;
   DMABufferKind to_kind = DOK_UNKNOWN;
+  Storage from_sto = Storage::DEFAULT; // source buffer storage tier
+  Storage to_sto = Storage::DEFAULT;   // destination buffer storage tier
 };
 
 // per-function(name) future-buffer info

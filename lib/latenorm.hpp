@@ -547,6 +547,16 @@ public:
 
       auto& buf_info = FBInfo()[InScopeName(n.future)];
       buf_info.buffer = InScopeName(buf_name);
+      // Record source/destination storage tiers so that codegen can pick the
+      // DTE context that matches the actual DMA a dma.any placeholder will be
+      // bound to (e.g. a shared -> global deslice lowers to the SHARED tier,
+      // not the destination's GLOBAL tier).
+      if (auto f_ca = dyn_cast<AST::ChunkAt>(n.from)) {
+        if (auto f_sty = GetSpannedType(GetSymbolType(f_ca->data->name)))
+          buf_info.from_sto = f_sty->GetStorage();
+      }
+      if (auto t_sty = GetSpannedType(GetSymbolType(buf_name)))
+        buf_info.to_sto = t_sty->GetStorage();
       VST_DEBUG(dbgs() << "[MapFutureBuffer] " << n.future << " -> " << buf_name
                        << " - from: " << STR(buf_info.from_kind)
                        << ", to: " << STR(buf_info.to_kind) << ".\n");
