@@ -83,6 +83,10 @@ inline const std::string LevelPred(ParallelLevel pl = ParallelLevel::BLOCK,
 inline const std::string BufferInitPred(Storage s) {
   switch (s) {
   case Storage::SHARED: return LevelPred(ParallelLevel::BLOCK);
+  case Storage::GROUP_SHARED:
+    assert(TargetHasLevel(ParallelLevel::GROUP) &&
+           "shared<group> requires a GROUP parallel level.");
+    return LevelPred(ParallelLevel::GROUP);
   case Storage::LOCAL:
     if (TargetHasLevel(ParallelLevel::GROUP))
       return LevelPred(ParallelLevel::GROUP);
@@ -96,6 +100,7 @@ inline const std::string BufferInitPred(Storage s) {
 inline const char* EmitSync(Storage s) {
   switch (s) {
   case Storage::SHARED: return "__syncthreads()";
+  case Storage::GROUP_SHARED:
   case Storage::LOCAL: return "__syncsubthreads()";
   default:
     choreo_unreachable("unsupported storage location for the synchronization.");

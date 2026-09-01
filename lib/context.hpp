@@ -537,6 +537,8 @@ private:
   bool vectorize = false;         // enable loop vectorization
   size_t max_local_mem_capacity =
       0; // max local memory capacity per thread (0: use default)
+  bool allow_local = false; // allow `local` (per-thread private stack) on
+                            // targets that reject it by default
   size_t shared_mem_alignment = 0; // alignment of shared memory set by user
   bool inhibit_warning = false;    // Inhibit all warning messages.
   bool warning_as_error = false;   // Make all warnings into errors.
@@ -754,8 +756,8 @@ public:
     return GetTarget().GetMaxBufferMapBytes(GetArch());
   }
 
-  Target::LocalSharedPool GetLocalSharedPool() const {
-    return GetTarget().GetLocalSharedPool(GetArch());
+  Target::SharedScratchpadPool GetSharedScratchpadPool() const {
+    return GetTarget().GetSharedScratchpadPool(GetArch());
   }
 
   size_t GetMaxGroupDim() const {
@@ -805,6 +807,7 @@ public:
   bool NoMapHoist() const { return no_map_hoist; }
   bool Vectorize() const { return vectorize; }
   size_t MaxLocalMemCapacity() const { return max_local_mem_capacity; }
+  bool AllowLocal() const { return allow_local; }
   size_t SharedMemAlignment() const { return shared_mem_alignment; }
   bool InhibitWarning() const { return inhibit_warning; }
   bool WarningAsError() const { return warning_as_error; }
@@ -870,6 +873,7 @@ public:
   void SetMaxLocalMemCapacityPerThread(size_t sz) {
     max_local_mem_capacity = sz;
   }
+  void SetAllowLocal(bool value) { allow_local = value; }
   void SetDeviceOnly(bool value) { device_only = value; }
   void SetFastCompile(bool value) { fast_compile = value; }
   void SetUseFastMath(bool value) { use_fast_math = value; }

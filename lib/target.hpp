@@ -420,20 +420,20 @@ public:
   virtual size_t GetMaxGroupDim(const ArchId& /*arch*/) const { return 1; }
 
   // Some targets have no dedicated shared-memory level: SHARED memory aliases
-  // the same physical per-thread local memory that backs LOCAL. For such
-  // targets LOCAL and SHARED cannot be budgeted independently; the memcheck
+  // the same physical on-chip scratchpad that backs the per-GROUP
+  // `shared<group>` tier (Storage::GROUP_SHARED). For such targets
+  // shared<group> and SHARED cannot be budgeted independently; the memcheck
   // pass enforces them jointly as
-  //     local_per_thread * max_group_dim * replicas_per_pool
-  //   + group_shared * replicas_per_pool
-  //   + shared <= pool_bytes
-  // where replicas_per_pool is the number of GROUPs sharing one pool and
-  // max_group_dim is the number of THREADs (lanes) per GROUP.
-  struct LocalSharedPool {
-    bool aliased = false;         // whether LOCAL and SHARED alias one pool
+  //     group_shared * replicas_per_pool + shared <= pool_bytes
+  // where replicas_per_pool is the number of GROUPs sharing one pool.
+  struct SharedScratchpadPool {
+    bool aliased = false; // whether GROUP_SHARED and SHARED alias one pool
     size_t replicas_per_pool = 0; // GROUPs sharing one pool
-    size_t pool_bytes = 0; // total combined on-chip pool (LOCAL + SHARED)
+    size_t pool_bytes =
+        0; // total combined on-chip pool (shared<group> + SHARED)
   };
-  virtual LocalSharedPool GetLocalSharedPool(const ArchId& arch) const {
+  virtual SharedScratchpadPool
+  GetSharedScratchpadPool(const ArchId& arch) const {
     (void)arch;
     return {};
   }
@@ -444,6 +444,17 @@ public:
   // without a group tier reject it in early semantic analysis.
   virtual bool IsGroupSharedStorageSupported(const ArchId& /*arch*/) const {
     return false;
+  }
+
+  // Whether `local` (Storage::LOCAL) is a valid storage tier for the given
+  // architecture. Most targets keep `local` as a per-thread private
+  // (register/stack) tier. Targets whose DMA engines cannot source/sink
+  // per-thread stack (e.g. targets whose on-chip scratchpad is instead
+  // exposed as `shared<group>`) override this to false so `local`
+  // declarations are rejected by default in early semantic analysis (the
+  // `--allow-local` opt-in relaxes this for declarations only).
+  virtual bool IsLocalStorageSupported(const ArchId& /*arch*/) const {
+    return true;
   }
 
   // Whether the target's code generation only produces binaries (no text
