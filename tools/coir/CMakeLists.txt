@@ -246,7 +246,7 @@ target_link_libraries(co2ir PRIVATE
   -Wl,--whole-archive targets -Wl,--no-whole-archive
   MLIRCoIRDialect MLIRCoIRTransforms MLIRCoIRDriver
   ${COIR_MLIR_LIBS}
-  Threads::Threads
+  stdc++fs Threads::Threads
 )
 # Link codegen libs for emission support
 foreach(_lib ${COIR_CODEGEN_LIBS})
@@ -283,7 +283,7 @@ target_link_libraries(cocc PRIVATE
   -Wl,--whole-archive targets -Wl,--no-whole-archive
   MLIRCoIRDialect MLIRCoIRTransforms MLIRCoIRDriver
   ${COIR_MLIR_LIBS}
-  Threads::Threads
+  stdc++fs Threads::Threads
 )
 # Link all codegen libs (whole-archive for static registrations)
 foreach(_lib ${COIR_CODEGEN_LIBS})
