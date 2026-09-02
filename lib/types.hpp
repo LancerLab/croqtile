@@ -300,18 +300,39 @@ inline static BaseType BaseTypeFromString(const std::string& input) {
 // map from common device type string to BaseType
 inline static BaseType DSTR2BT(std::string type_name) {
   static const std::map<std::string, BaseType> known_types = {
-      {"char", BaseType::S8},          {"short", BaseType::S16},
-      {"int", BaseType::S32},          {"long long", BaseType::S64},
-      {"long long", BaseType::S64},    {"bool", BaseType::BOOL},
-      {"unsigned char", BaseType::U8}, {"unsigned short", BaseType::U16},
-      {"unsigned int", BaseType::U32}, {"unsigned long long", BaseType::U64},
-      {"int8_t", BaseType::S16},       {"int16_t", BaseType::S16},
-      {"int32_t", BaseType::S32},      {"int64_t", BaseType::S64},
-      {"uint8_t", BaseType::U16},      {"uint16_t", BaseType::U16},
-      {"uint32_t", BaseType::U32},     {"size_t", BaseType::U32},
-      {"uint64_t", BaseType::U64},     {"float", BaseType::F32},
-      {"double", BaseType::F64},       {"__bf16", BaseType::BF16},
-      {"__fp16", BaseType::F16}};
+      {"char", BaseType::S8},
+      {"short", BaseType::S16},
+      {"int", BaseType::S32},
+      {"long long", BaseType::S64},
+      {"long long", BaseType::S64},
+      {"bool", BaseType::BOOL},
+      {"unsigned char", BaseType::U8},
+      {"unsigned short", BaseType::U16},
+      {"unsigned int", BaseType::U32},
+      {"unsigned long long", BaseType::U64},
+      {"int8_t", BaseType::S16},
+      {"int16_t", BaseType::S16},
+      {"int32_t", BaseType::S32},
+      {"int64_t", BaseType::S64},
+      {"uint8_t", BaseType::U16},
+      {"uint16_t", BaseType::U16},
+      {"uint32_t", BaseType::U32},
+      {"size_t", BaseType::U32},
+      {"uint64_t", BaseType::U64},
+      {"float", BaseType::F32},
+      {"double", BaseType::F64},
+      {"__bf16", BaseType::BF16},
+      {"__fp16", BaseType::F16},
+      {"f16", BaseType::F16},
+      {"half", BaseType::F16},
+      {"choreo::f16", BaseType::F16},
+      {"choreo::half", BaseType::F16},
+      {"bf16", BaseType::BF16},
+      {"bfp16", BaseType::BF16},
+      {"bfloat16", BaseType::BF16},
+      {"choreo::bf16", BaseType::BF16},
+      {"choreo::bfp16", BaseType::BF16},
+      {"choreo::bfloat16", BaseType::BF16}};
 
   if (known_types.find(type_name) != known_types.end()) {
     return known_types.at(type_name);
@@ -2092,6 +2113,7 @@ struct DeviceDataType final : public Type,
 
   const std::string GetTypeStr() { return name; }
   void SetTypeStr(std::string s) { name = s; }
+  void SetPlainName(std::string s) { plain_name = s; }
 
   BaseType GetDataType() { return data_type; }
   void SetDataType(BaseType bt) { data_type = bt; }

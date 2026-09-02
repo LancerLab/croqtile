@@ -389,6 +389,7 @@ device_nested_type
     : IDENTIFIER LT device_nested_type_list GT {
         auto type_str = $1 + "<" + $3->GetTypeStr() + ">";
         $3->SetTypeStr(type_str);
+        $3->SetPlainName(type_str);
         $3->SetDataType(BaseType::UNKNOWN);
         $$ = $3;
       }
@@ -411,7 +412,9 @@ device_nested_type_list
 device_complex_type
     :  device_complex_type DCOLS device_nested_type  {
         auto type_str = $1->GetTypeStr() + "::" + $3->GetTypeStr();
+        auto plain_name = $1->PlainName() + "::" + $3->PlainName();
         $1->SetTypeStr(type_str);
+        $1->SetPlainName(plain_name);
         $1->SetDataType(BaseType::UNKNOWN);
         $$ = $1;
       }
