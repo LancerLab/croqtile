@@ -144,7 +144,7 @@ struct TargetInfo {
 
 class Target {
 public:
-  virtual ~Target() {};
+  virtual ~Target(){};
 
   // Target hooks -- keep these abstract
   virtual const std::string Name() const = 0;
@@ -455,6 +455,14 @@ public:
   // `--allow-local` opt-in relaxes this for declarations only).
   virtual bool IsLocalStorageSupported(const ArchId& /*arch*/) const {
     return true;
+  }
+
+  // Whether static local-memory reuse should expose physically disjoint
+  // ranges as independent target allocation roots. This lets source-emitting
+  // targets preserve alias-analysis boundaries without changing the reuse
+  // layout or dynamic-allocation path.
+  virtual bool UseDistinctLocalAllocationRoots(const ArchId& /*arch*/) const {
+    return false;
   }
 
   // Whether the target's code generation only produces binaries (no text

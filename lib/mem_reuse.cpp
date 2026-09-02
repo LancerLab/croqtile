@@ -116,6 +116,18 @@ size_t MemReuse::AlignmentForDevFunc(Storage sto,
   return std::max(alignment, RequestedAlignmentForDevFunc(sto, df_name));
 }
 
+bool MemReuse::UseDistinctLocalRoots(const std::string& df_name) const {
+  bool has_dynamic_local = false;
+  if (auto func = ma.sto_have_dyn.find(df_name);
+      func != ma.sto_have_dyn.end()) {
+    if (auto local = func->second.find(Storage::LOCAL);
+        local != func->second.end())
+      has_dynamic_local = local->second;
+  }
+  return CCtx().GetTarget().UseDistinctLocalAllocationRoots(CCtx().GetArch()) &&
+         !has_dynamic_local;
+}
+
 bool MemAnalyzer::BeforeVisitImpl(AST::Node& n) {
   if (auto cf = dyn_cast<AST::ChoreoFunction>(&n)) {
     parallel_level = 0;
@@ -228,7 +240,28 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
                          << PSTR(shared_spm) << ", type: " << PSTR(ssty)
                          << ".\n");
       }
-      if (DFCtx().local_spm_size != 0) {
+      if (!DFCtx().local_root_sizes.empty()) {
+        size_t local_alignment =
+            AlignmentForDevFunc(Storage::LOCAL, cur_dev_fname);
+        for (size_t root_size : DFCtx().local_root_sizes) {
+          auto root_name = SymbolTable::GetAnonName();
+          auto local_root =
+              AST::Make<AST::NamedVariableDecl>(n.LOC(), root_name);
+          auto root_ty = MakeDenseSpannedType(
+              BaseType::U8, Shape(1, Size_t2Int(root_size)), Storage::LOCAL);
+          local_root->SetType(root_ty);
+          local_root->AddNote("spm");
+          local_root->AddNote("alignment", std::to_string(local_alignment));
+          if (RequestedAlignmentForDevFunc(Storage::LOCAL, cur_dev_fname) != 0)
+            local_root->AddNote("explicit_alignment");
+          pb->stmts->values.insert(pb->stmts->values.begin(), local_root);
+          SSTab().DefineSymbol(root_name, root_ty);
+          DFCtx().local_root_names.push_back(root_name);
+          VST_DEBUG(dbgs() << "Defined local allocation root: "
+                           << PSTR(local_root) << ", type: " << PSTR(root_ty)
+                           << ".\n");
+        }
+      } else if (DFCtx().local_spm_size != 0) {
         DFCtx().local_spm_name = SymbolTable::GetAnonName();
         auto local_spm =
             AST::Make<AST::NamedVariableDecl>(n.LOC(), DFCtx().local_spm_name);
@@ -267,6 +300,11 @@ bool MemReuse::Visit(AST::NamedVariableDecl& n) {
   if (isa<AST::Select>(n.init_expr)) return true;
   if (n.HasNote("spm")) return true;
   if (n.HasNote("ref")) return true;
+  // Storage legality is diagnosed after memory reuse. Leave declarations
+  // outside a parallel region untouched so an invalid local/shared buffer
+  // cannot reference an allocation root that is only materialized at a
+  // device-entry parallel region.
+  if (parallel_level == 0) return true;
   auto ty = GetSymbolType(n.name_str);
   if (auto sty = dyn_cast<SpannedType>(ty)) {
     auto sto = sty->GetStorage();
@@ -438,7 +476,8 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
             buffer_size = UnScopedExpr(std::to_string(buffer.size));
           else
             choreo_unreachable("Unexpected type of buffer.size "
-                               "\n\twith buffer " + buffer.buffer_id);
+                               "\n\twith buffer " +
+                               buffer.buffer_id);
           infos[sto].chunks.push_back(
               std::string("{") + buffer_size + ", " + "{" +
               RangesSTR(buffer.ranges, '{', '}') + "}" + ", \"" +
@@ -666,14 +705,30 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
       }
       auto& ctx_spm_size =
           (sto == Storage::LOCAL ? ctx.local_spm_size : ctx.shared_spm_size);
-      ctx_spm_size = result.heap_size;
-      mri->infos[sto].spm_size = result.heap_size;
-      CCtx().GetMemReuseStats().total_static_heap_bytes += result.heap_size;
-      for (const auto& [buffer_id, offset] : result.chunk_offsets)
-        ctx.mem_offset.emplace(buffer_id, offset);
+      size_t allocated_size = result.heap_size;
+      if (sto == Storage::LOCAL && UseDistinctLocalRoots(df_name)) {
+        // Named buffers are logical allocations and their liveness ranges are
+        // their lifetimes. Keep the byte-offset coloring, but materialize each
+        // physically disjoint component as a separate target allocation root
+        // so backend alias analysis does not collapse every local into one
+        // byte-array object.
+        auto roots =
+            simulator.PartitionAllocationRoots(chunks, result, alignment);
+        ctx.local_root_sizes = std::move(roots.root_sizes);
+        ctx.local_buffer_roots = std::move(roots.chunk_roots);
+        allocated_size = roots.heap_size;
+        for (const auto& [buffer_id, offset] : roots.chunk_offsets)
+          ctx.mem_offset.emplace(buffer_id, offset);
+      } else {
+        for (const auto& [buffer_id, offset] : result.chunk_offsets)
+          ctx.mem_offset.emplace(buffer_id, offset);
+      }
+      ctx_spm_size = allocated_size;
+      mri->infos[sto].spm_size = allocated_size;
+      CCtx().GetMemReuseStats().total_static_heap_bytes += allocated_size;
       VST_DEBUG({
         dbgs() << "For '" << df_name << "'\n\t" << STR(sto)
-               << " memory usage: " << result.heap_size << " bytes\n";
+               << " memory usage: " << allocated_size << " bytes\n";
         if (!hb_overlapped_pairs.empty() && result.heap_size < baseline_size) {
           dbgs() << "info: HB analysis: shared memory reduced from "
                  << baseline_size << " to " << result.heap_size << " bytes ("
@@ -750,8 +805,16 @@ void MemReuse::ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto) {
     return;
   }
 
-  std::string spm_name = (sto == Storage::LOCAL ? DFCtx().local_spm_name
-                                                : DFCtx().shared_spm_name);
+  std::string spm_name;
+  if (!dynamic && sto == Storage::LOCAL &&
+      DFCtx().local_buffer_roots.count(sname)) {
+    size_t root = DFCtx().local_buffer_roots.at(sname);
+    assert(root < DFCtx().local_root_names.size());
+    spm_name = DFCtx().local_root_names[root];
+  } else {
+    spm_name = sto == Storage::LOCAL ? DFCtx().local_spm_name
+                                     : DFCtx().shared_spm_name;
+  }
   std::string offset = dynamic ? "mr_offset" + RegexReplaceAll(sname, "::", "_")
                                : std::to_string(DFCtx().mem_offset.at(sname));
   VST_DEBUG({

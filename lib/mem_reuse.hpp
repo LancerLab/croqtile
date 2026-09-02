@@ -71,6 +71,9 @@ private:
     std::vector<Buffer> buffers;
     std::vector<DBuffer> dynamic_buffers;
     std::map<std::string, size_t> mem_offset;
+    std::vector<size_t> local_root_sizes;
+    std::vector<std::string> local_root_names;
+    std::map<std::string, size_t> local_buffer_roots;
     void SortBuffers() {
       for (auto& b : buffers) b.Sort();
       for (auto& b : dynamic_buffers) b.Sort();
@@ -126,6 +129,7 @@ private:
   size_t RequestedAlignmentForDevFunc(Storage sto,
                                       const std::string& df_name) const;
   size_t AlignmentForDevFunc(Storage sto, const std::string& df_name) const;
+  bool UseDistinctLocalRoots(const std::string& df_name) const;
 
 public:
   MemReuse() : VisitorWithSymTab("memreuse") {

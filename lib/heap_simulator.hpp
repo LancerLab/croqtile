@@ -13,6 +13,7 @@
 #include "liveness_analysis.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -58,6 +59,16 @@ struct HeapSimulator {
     // must use std::map for string keys to keep the order buffer_id!
     std::map<std::string, size_t> chunk_offsets; // offset of each buffer
     size_t heap_size;                            // total memory size
+  };
+
+  // Partition an offset allocation into independent roots. Chunks whose
+  // physical byte ranges overlap remain in the same root; disjoint connected
+  // components can be emitted as separate target allocations.
+  struct RootResult {
+    std::map<std::string, size_t> chunk_roots;
+    std::map<std::string, size_t> chunk_offsets;
+    std::vector<size_t> root_sizes;
+    size_t heap_size = 0;
   };
 
   using HBOverride =
@@ -202,6 +213,88 @@ struct HeapSimulator {
                   HBMustInterfere hb_must_interfere = nullptr) {
     return GlobalDecreasingSizeBestFitAllocate(chunks, alignment, hb_override,
                                                hb_must_interfere);
+  }
+
+  RootResult PartitionAllocationRoots(const std::vector<Chunk>& chunks,
+                                      const Result& allocation,
+                                      int64_t alignment = 0) {
+    RootResult result;
+    const size_t count = chunks.size();
+    std::vector<size_t> parent(count);
+    for (size_t i = 0; i < count; ++i) parent[i] = i;
+
+    auto Find = [&](size_t value) {
+      size_t root = value;
+      while (parent[root] != root) root = parent[root];
+      while (parent[value] != value) {
+        size_t next = parent[value];
+        parent[value] = root;
+        value = next;
+      }
+      return root;
+    };
+    auto Unite = [&](size_t lhs, size_t rhs) {
+      lhs = Find(lhs);
+      rhs = Find(rhs);
+      if (lhs != rhs) parent[rhs] = lhs;
+    };
+
+    for (size_t i = 0; i < count; ++i) {
+      size_t i_begin = allocation.chunk_offsets.at(chunks[i].buffer_id);
+      size_t i_end = i_begin + chunks[i].size;
+      for (size_t j = i + 1; j < count; ++j) {
+        size_t j_begin = allocation.chunk_offsets.at(chunks[j].buffer_id);
+        size_t j_end = j_begin + chunks[j].size;
+        if (i_begin < j_end && j_begin < i_end) Unite(i, j);
+      }
+    }
+
+    struct Component {
+      size_t parent;
+      size_t begin;
+      size_t end;
+    };
+    std::map<size_t, Component> components;
+    for (size_t i = 0; i < count; ++i) {
+      size_t root = Find(i);
+      size_t begin = allocation.chunk_offsets.at(chunks[i].buffer_id);
+      size_t end = begin + chunks[i].size;
+      auto [it, inserted] =
+          components.emplace(root, Component{root, begin, end});
+      if (!inserted) {
+        it->second.begin = std::min(it->second.begin, begin);
+        it->second.end = std::max(it->second.end, end);
+      }
+    }
+
+    std::vector<Component> ordered;
+    for (const auto& [_, component] : components) ordered.push_back(component);
+    std::sort(ordered.begin(), ordered.end(),
+              [](const Component& lhs, const Component& rhs) {
+                return lhs.begin < rhs.begin;
+              });
+
+    std::map<size_t, size_t> component_roots;
+    std::map<size_t, size_t> component_begins;
+    for (size_t root = 0; root < ordered.size(); ++root) {
+      const auto& component = ordered[root];
+      component_roots.emplace(component.parent, root);
+      component_begins.emplace(component.parent, component.begin);
+      result.root_sizes.push_back(
+          AlignUp(component.end - component.begin, alignment));
+      result.heap_size += result.root_sizes.back();
+    }
+
+    for (size_t i = 0; i < count; ++i) {
+      size_t component = Find(i);
+      const auto& id = chunks[i].buffer_id;
+      result.chunk_roots.emplace(id, component_roots.at(component));
+      result.chunk_offsets.emplace(id, allocation.chunk_offsets.at(id) -
+                                           component_begins.at(component));
+    }
+    assert(result.heap_size <= allocation.heap_size &&
+           "allocation-root partition must not increase heap size");
+    return result;
   }
 
 private:
