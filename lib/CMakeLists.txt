@@ -57,7 +57,8 @@ add_custom_target(
 set(PARSER_SOURCES
   ${CMAKE_BINARY_DIR}/parser.tab.cc
   ${CMAKE_BINARY_DIR}/scanner.yy.cc
-  # choreo_api.cpp hosts CompilerAPI::Parse, which drives the bison parser.
+  # choreo_api.cpp hosts CompilerAPI::Parse, which drives the bison parser and
+  # therefore needs RTTI + exceptions (compiled as part of the parse library).
   choreo_api.cpp
 )
 
@@ -105,6 +106,12 @@ set(PP_SOURCES
 
 # Add the libraries
 add_library(parse OBJECT ${PARSER_SOURCES})
+# Bison's variant-based semantic values (api.value.type variant) use typeid for
+# runtime type checking, and its error recovery uses try/catch, so the generated
+# parser needs RTTI and exceptions even though the rest of the project compiles
+# with -fno-rtti -fno-exceptions. This only affects the auto-generated
+# parser.tab.cc / scanner.yy.cc translation units.
+target_compile_options(parse PRIVATE -frtti -fexceptions)
 add_library(core OBJECT ${CORE_SOURCES})
 add_library(codegen OBJECT ${CODEGEN_SOURCES})
 add_library(support OBJECT ${CL_SOURCES})
