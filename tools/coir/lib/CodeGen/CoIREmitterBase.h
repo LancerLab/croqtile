@@ -97,7 +97,7 @@ protected:
   void emitConstant(mlir::arith::ConstantOp op);
   bool emitArithBinOp(mlir::Operation* op);
   bool emitCmpOp(mlir::Operation* op);
-  void emitIfOp(mlir::scf::IfOp op);
+  virtual void emitIfOp(mlir::scf::IfOp op);
   void emitBreak(coir::CoIRBreakOp op);
   void emitContinue(coir::CoIRContinueOp op);
   virtual void emitSelect(mlir::arith::SelectOp op);

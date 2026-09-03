@@ -1284,11 +1284,39 @@ void collectScalarIterArgs(AST::Node* node,
   }
 }
 
+// Collect the future names carried by standalone DMA nodes (e.g.
+// `store = dma.copy.async ...`), which the AST represents as a DMA node with a
+// `future` field rather than an Assignment. Only the `if` lowering threads
+// these through an `scf.if` join; loops must not collect them as iter_args.
+void collectDmaFutures(AST::Node* node,
+                       llvm::SmallVectorImpl<std::string>& names,
+                       llvm::StringSet<>& seen) {
+  if (!node) return;
+  if (auto* dma = dyn_cast<AST::DMA>(node)) {
+    if (!dma->future.empty() && !seen.count(dma->future)) {
+      names.push_back(dma->future);
+      seen.insert(dma->future);
+    }
+    return;
+  }
+  if (auto* mn = dyn_cast<AST::MultiNodes>(node)) {
+    for (auto& child : mn->values)
+      if (child) collectDmaFutures(child.get(), names, seen);
+    return;
+  }
+  if (node->HasBody()) {
+    auto body = node->GetBody();
+    if (body) collectDmaFutures(body.get(), names, seen);
+  }
+}
+
 void collectIfModifiedScalars(AST::Node* thenBody, AST::Node* elseBody,
                               llvm::SmallVectorImpl<std::string>& names,
                               llvm::StringSet<>& seen) {
   if (thenBody) collectScalarIterArgs(thenBody, names, seen);
   if (elseBody) collectScalarIterArgs(elseBody, names, seen);
+  if (thenBody) collectDmaFutures(thenBody, names, seen);
+  if (elseBody) collectDmaFutures(elseBody, names, seen);
 }
 
 void collectRotateIterArgs(AST::Node* node,
@@ -3397,6 +3425,9 @@ bool ASTCoIRGen::Visit(AST::DMA& dma) {
     auto bufVal = LookupValue(dma.future + "__buf__");
     if (bufVal && mlir::isa<coir::TensorType>(bufVal.getType()))
       MapValue(dma.future + ".data", bufVal);
+    auto asyncTy = coir::AsyncTokenType::get(&IRContext());
+    MapValue(dma.future,
+             builder.create<coir::AsyncUndefOp>(Loc(dma), asyncTy).getResult());
     return true;
   }
 
