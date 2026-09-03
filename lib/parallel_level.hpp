@@ -29,6 +29,15 @@ enum class ParallelLevel {
   NONE /*bottom*/,
   UNKNOWN /*top*/
 };
+// The data-movement engine class of a DMA statement. DMA is the generic
+// (sync/async) copy engine; TMA is the tensor-memory bulk-copy engine whose
+// reachable storage tiers differ (it only moves global <-> shared). Targets
+// use this to declare per-type storage-pair legality via
+// Target::IsDMAStorageSupported.
+enum class DMAKind {
+  DMA,
+  TMA,
+};
 } // namespace Choreo
 
 #endif // __CHOREO_PARALLEL_LEVEL_HPP__

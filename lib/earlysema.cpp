@@ -1911,6 +1911,7 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   const auto dst_storage = isa<AST::Memory>(n.to)
                                ? cast<AST::Memory>(n.to)->Get()
                                : tty->GetStorage();
+  const auto dma_kind = n.IsTMA() ? DMAKind::TMA : DMAKind::DMA;
   // Reject DMA with a `local` source or destination on targets without a
   // native `local` tier (mirrors the declaration gate in
   // Visit(NamedVariableDecl)). This is unconditional: even when `--allow-local`
@@ -1920,6 +1921,14 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     Error1(n.LOC(),
            "'local' is not supported by the current target; use stack (no "
            "storage specifier) or 'shared<group>' for on-chip scratchpad.");
+  // Reject data-movement edges the target's engines cannot route (e.g. TMA
+  // only bridges global <-> shared; a target whose on-chip L1 tier has no
+  // direct path to its L2 tier must stage such moves through global).
+  if (!CCtx().GetTarget().IsDMAStorageSupported(CCtx().GetArch(), dma_kind,
+                                                src_storage, dst_storage))
+    Error1(n.LOC(), "direct " + STR(dma_kind) + " data movement between '" +
+                        STR(src_storage) + "' and '" + STR(dst_storage) +
+                        "' is not supported by the current target.");
   const auto is_global = [](Storage storage) {
     return storage == Storage::GLOBAL || storage == Storage::DEFAULT;
   };

@@ -2,6 +2,7 @@
 #define __CHOREO_TARGET_HPP__
 
 #include "aux.hpp"
+#include "parallel_level.hpp"
 #include "preprocess.hpp"
 #include <memory>
 #include <set>
@@ -454,6 +455,26 @@ public:
   // declarations are rejected by default in early semantic analysis (the
   // `--allow-local` opt-in relaxes this for declarations only).
   virtual bool IsLocalStorageSupported(const ArchId& /*arch*/) const {
+    return true;
+  }
+
+  // Whether the given (kind, src -> dst) data movement is a valid direct edge
+  // on the given architecture. kind is the data-movement engine class (DMA or
+  // TMA). TMA only moves between the global and shared tiers, so it never
+  // reaches local/group-shared. Targets whose engines only route between
+  // specific tiers (e.g. an on-chip L1 tier with no direct path to the
+  // block-shared L2 tier, which must stage through global) override this to
+  // false for unsupported pairs.
+  // The default accepts every DMA edge and restricts TMA to global <-> shared.
+  virtual bool IsDMAStorageSupported(const ArchId& /*arch*/, DMAKind kind,
+                                     Storage src, Storage dst) const {
+    if (kind == DMAKind::TMA) {
+      const auto is_global = [](Storage s) {
+        return s == Storage::GLOBAL || s == Storage::DEFAULT;
+      };
+      return (is_global(src) && dst == Storage::SHARED) ||
+             (src == Storage::SHARED && is_global(dst));
+    }
     return true;
   }
 

@@ -430,6 +430,18 @@ inline static std::string GetStringFrom(ParallelLevel st) {
   return it->second;
 }
 
+inline static std::string GetStringFrom(DMAKind kind) {
+  static const std::unordered_map<DMAKind, std::string> enumToString = {
+      {DMAKind::DMA, "DMA"},
+      {DMAKind::TMA, "TMA"},
+  };
+
+  auto it = enumToString.find(kind);
+  assert(it != enumToString.end() && "unsupported DMA kind.");
+
+  return it->second;
+}
+
 } // end namespace __internal__
 
 /// Convert BaseType to its C++ type name for use in template arguments.
@@ -481,6 +493,9 @@ inline static const std::string STR(Storage st) {
 }
 inline static const std::string STR(ParallelLevel pl) {
   return __internal__::GetStringFrom(pl);
+}
+inline static const std::string STR(DMAKind kind) {
+  return __internal__::GetStringFrom(kind);
 }
 
 /// The agent whose memory accesses a fence orders. THREADS is the executing
