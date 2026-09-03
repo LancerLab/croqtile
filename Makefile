@@ -2,6 +2,10 @@ SHELL:=/bin/bash
 
 WORK_DIR:=$(CURDIR)
 TOOLCHAIN_DIR=$(WORK_DIR)/extern
+LLVM_BIN_DIR=$(TOOLCHAIN_DIR)/llvm-project/bin
+LLVM_CC=$(LLVM_BIN_DIR)/clang
+LLVM_CXX=$(LLVM_BIN_DIR)/clang++
+LLVM_LIBCXX_DIR=$(TOOLCHAIN_DIR)/llvm-project/lib/x86_64-unknown-linux-gnu
 TOOLS_DIR=$(WORK_DIR)/tools
 SCRIPT_DIR=$(WORK_DIR)/scripts
 RT_DIR=$(WORK_DIR)/runtime
@@ -107,9 +111,13 @@ symlink-coir:
 
 define build-croqtile
 	@echo "=== Building CoIR tools ($(1)) ==="
-	$(CMAKE) -S $(WORK_DIR) -B $(2) \
+	PATH=$(LLVM_BIN_DIR):$$PATH $(CMAKE) -S $(WORK_DIR) -B $(2) \
 		-G Ninja \
 		-DCMAKE_BUILD_TYPE=$(1) \
+		-DCMAKE_C_COMPILER=$(LLVM_CC) \
+		-DCMAKE_CXX_COMPILER=$(LLVM_CXX) \
+		'-DCMAKE_CXX_FLAGS=-stdlib=libc++' \
+		'-DCMAKE_EXE_LINKER_FLAGS=-stdlib=libc++ -fuse-ld=lld -Wl,-rpath,$(LLVM_LIBCXX_DIR)' \
 		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) \
 		'-DCROQ_PROJECT=$(CROQ_PROJECT)' \
 		'-DCROQ_TARGET=$(CROQ_TARGET)'
@@ -153,9 +161,13 @@ endef
 # ---- coir-only (no CoIR) ----
 define build-coir-only
 	@echo "=== Building CoIR tools ($(1)) ==="
-	$(CMAKE) -S $(WORK_DIR) -B $(2) \
+	PATH=$(LLVM_BIN_DIR):$$PATH $(CMAKE) -S $(WORK_DIR) -B $(2) \
 		-G Ninja \
 		-DCMAKE_BUILD_TYPE=$(1) \
+		-DCMAKE_C_COMPILER=$(LLVM_CC) \
+		-DCMAKE_CXX_COMPILER=$(LLVM_CXX) \
+		'-DCMAKE_CXX_FLAGS=-stdlib=libc++' \
+		'-DCMAKE_EXE_LINKER_FLAGS=-stdlib=libc++ -fuse-ld=lld -Wl,-rpath,$(LLVM_LIBCXX_DIR)' \
 		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) \
 		'-DCROQ_PROJECT=coir' \
 		'-DCROQ_TARGET=$(CROQ_TARGET)'
@@ -263,8 +275,12 @@ CROQ_TARGET  ?= all
 build-with-cmake-ninja:
 	@echo "Starting build with CMake..."
 	@if [ ! -d $(CMAKE_BUILD_DIR) ]; then mkdir -p $(CMAKE_BUILD_DIR); fi
-	$(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja \
+	PATH=$(LLVM_BIN_DIR):$$PATH $(CMAKE) -S . -B $(CMAKE_BUILD_DIR) -G Ninja \
 		-DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
+		-DCMAKE_C_COMPILER=$(LLVM_CC) \
+		-DCMAKE_CXX_COMPILER=$(LLVM_CXX) \
+		'-DCMAKE_CXX_FLAGS=-stdlib=libc++' \
+		'-DCMAKE_EXE_LINKER_FLAGS=-stdlib=libc++ -fuse-ld=lld -Wl,-rpath,$(LLVM_LIBCXX_DIR)' \
 		-DPUBLIC_PACKAGE=$(PUBLIC_PACKAGE) \
 		-DSTANDALONE=$(STANDALONE) \
 		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) \
