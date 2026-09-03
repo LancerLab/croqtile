@@ -4306,17 +4306,22 @@ void ASTCoIRGen::emitFenceKinds(llvm::StringRef joined, mlir::Location loc) {
   if (kinds.empty()) return;
 
   // Emit one coir.fence per four-fold kind, carrying every axis
-  // (space, entity, order, scope) explicitly. Engine/proxy fences keep the
-  // auto scope (NONE), which codegen derives from `space`.
+  // (space, entity, order, scope) explicitly. An AUTO scope (NONE) resolves to
+  // the space's natural coherence level (GLOBAL -> DEVICE, SHARED -> GROUP,
+  // ...), mirroring the explicit sync.fence path in the parser. The backend
+  // (EmitCUDA/EmitHIP) requires a concrete scope, so resolve before lowering.
   for (const auto& kind : kinds) {
     if (kind.IsNone()) continue;
+    ParallelLevel scope = kind.scope;
+    if (scope == ParallelLevel::NONE)
+      scope = DefaultLevelForStorage(kind.space);
     builder.create<coir::FenceOp>(
         loc,
         coir::TensorMemorySpaceAttr::get(&IRContext(),
                                          lowerFenceSpace(kind.space)),
         coir::FenceEntityAttr::get(&IRContext(), lowerFenceEntity(kind.entity)),
         coir::FenceOrderAttr::get(&IRContext(), lowerFenceOrder(kind.order)),
-        LowerParallelLevel(kind.scope));
+        LowerParallelLevel(scope));
   }
 }
 

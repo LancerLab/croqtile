@@ -1,0 +1,40 @@
+// RUN: co2ir %s | FileCheck %s
+
+// B1: DMA edges emit coir.fence ops via the NVGPUTarget::SelectDMAFences
+// override. A GLOBAL -> SHARED copy emits a producer GLOBAL release (before
+// the copy) and a consumer SHARED acquire (after the wait, before threads
+// read the shared data). A SHARED -> GLOBAL copy after a thread write emits
+// a producer SHARED release. AUTO scope resolves from the space (GLOBAL ->
+// device, SHARED -> group).
+
+__co__ auto g2s_read(f32 [1024] input) {
+  f32 [input.span(0)] output;
+  parallel p by 1 {
+    fa = dma.copy.async input.chunkat(p) => shared;
+    wait fa;
+    foreach idx in [1024] {
+      output.at(idx) = fa.data.at(idx);
+    }
+  }
+  return output;
+}
+// CHECK: coir.kernel @g2s_read
+// CHECK: coir.fence <global> <threads> <release> <device>
+// CHECK: coir.dma.copy
+// CHECK: coir.wait
+// CHECK: coir.fence <shared> <threads> <acquire> <group>
+
+__co__ auto s2g_write(f32 [1024] input) {
+  f32 [input.span(0)] output;
+  parallel p by 1 {
+    shared f32 [1024] sbuf;
+    sbuf.at(0) = 1.0;
+    dma.copy sbuf => output.chunkat(p);
+  }
+  return output;
+}
+// CHECK: coir.kernel @s2g_write
+// CHECK: coir.fence <shared> <threads> <release> <group>
+// CHECK: coir.dma.copy
+// CHECK: coir.wait
+// CHECK: coir.return
