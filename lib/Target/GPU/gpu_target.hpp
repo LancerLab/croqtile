@@ -205,6 +205,13 @@ public:
   // default fence order is seq_cst and `sync.fence.seq_cst` is accepted.
   bool SupportsSeqCstFence(const ArchId&) const override { return true; }
 
+  // Fence requirements for DMA edges (B1 conservative table, storage-direction
+  // keyed). A global->shared edge releases global at the producer and acquires
+  // shared at the consumer; a shared->global edge releases shared at the
+  // producer. See the MARA fence-placement plan (Phase B1).
+  FenceSelection SelectDMAFences(const ArchId& arch, Storage src,
+                                 Storage dst) const override;
+
   ArchId ResolveNativeArch() const override;
 };
 

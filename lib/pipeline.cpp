@@ -315,9 +315,13 @@ ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
   // so the checker can validate events with thread count info)
   AddStage<ActiveThreadsAnalysis>();
 
-  // record the ordered (READ | WRITE) buffer access log consumed by
-  // FenceInsertion during codegen.
+  // record the ordered (READ | WRITE) buffer access log.
   AddStage<BufferAccessAnalyzer>();
+
+  // compute and annotate DMA producer/consumer fences from the buffer access
+  // log. Runs in the semantic routine (not codegen) so that co2ir's
+  // RunFrontend path (NoCodegen=true) still gets the fence annotations.
+  AddStage<FenceInsertion>();
 
   // apply the semantic check
   AddStage<SemaChecker>();
@@ -329,10 +333,6 @@ ASTPipeline& ASTPipeline::PlanCodeGenRoutine() {
   if (CCtx().NoCodegen()) AddAction([](ASTPipeline& p) { p.SetAbend(); });
 
   AddStage<CodegenPrepare>();
-
-  // compute and annotate DMA producer/consumer fences from the buffer access
-  // log recorded during the semantic routine.
-  AddStage<FenceInsertion>();
 
   // delegate to target for codegen plan
   if (!CCtx().GetTarget().PlanCodeGenStages(*this)) {
