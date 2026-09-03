@@ -1,0 +1,10 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ void source_exceeds_destination(f32 [9, 4] input) {
+  parallel p by 1 {
+    local f32 [8, 4] tile;
+    dma.copy input => tile;
+  }
+}
+
+// CHECK: error: 1st DMA source dimension exceeds the destination (9 > 8)

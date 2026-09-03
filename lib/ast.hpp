@@ -2485,16 +2485,18 @@ struct View : public SpannedOperation, public TypeIDProvider<View> {
 
 struct Reshape : public SpannedOperation, public TypeIDProvider<Reshape> {
   ptr<MultiValues> newspan = nullptr; // new shape
-  Reshape(const location& l, const ptr<MultiValues>& s)
-      : SpannedOperation(l), newspan(s) {
+  bool from_squeeze = false;
+  Reshape(const location& l, const ptr<MultiValues>& s, bool sqz = false)
+      : SpannedOperation(l), newspan(s), from_squeeze(sqz) {
     if (s == nullptr) choreo_unreachable("must provide the sub-span.");
   }
   const ptr<MultiValues> GetNewSpan() const { return newspan; }
+  bool IsSqueeze() const { return from_squeeze; }
   const NodeList ReferredNodes() const override {
     return MakeNodeList(newspan);
   }
   const ptr<SpannedOperation> CloneImpl() const override {
-    return Make<Reshape>(LOC(), CloneP(newspan));
+    return Make<Reshape>(LOC(), CloneP(newspan), from_squeeze);
   }
 
   void accept(Visitor& v) override;
