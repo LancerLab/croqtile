@@ -92,8 +92,11 @@ bool FenceInsertion::Visit(AST::DMA& n) {
   const BufferAccessEvent* dst_ev = nullptr;
   if (auto it = dma_dst_.find(&n); it != dma_dst_.end()) dst_ev = it->second;
 
-  const Storage src_storage = src_ev->storage;
-  const Storage dst_storage = dst_ev ? dst_ev->storage : Storage::NONE;
+  // Unannotated buffers default to global storage; normalize so the target's
+  // storage-directional table sees canonical GLOBAL (mirrors dma_plan.cpp).
+  const Storage src_storage = ProjectStorage(src_ev->storage);
+  const Storage dst_storage =
+      dst_ev ? ProjectStorage(dst_ev->storage) : Storage::NONE;
 
   FenceSelection sel = CCtx().GetTarget().SelectDMAFences(
       CCtx().GetArch(), src_storage, dst_storage);
