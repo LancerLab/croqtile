@@ -14,5 +14,5 @@ __co__ void foo() {
 }
 
 // HELP: --insert-dma-fences
-// HELP: default: true
+// HELP: default: false
 // BADVAL: Invalid value for boolean option '--insert-dma-fences'

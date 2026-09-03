@@ -112,9 +112,10 @@ Option<bool>
                 "Utilize native bf16 type when target platform support.");
 
 Option<bool> insert_dma_fences(
-    OptionKind::User, "--insert-dma-fences", "", true,
+    OptionKind::User, "--insert-dma-fences", "", false,
     "Insert memory fences between DMA producer and consumer sites "
-    "(default: true). Disable with --insert-dma-fences=false.");
+    "(default: false; experimental, not yet minimal). Enable with "
+    "--insert-dma-fences=true.");
 
 Option<bool> dump_fence_insertion(
     OptionKind::User, "--dump-fence-insertion", "", false,
