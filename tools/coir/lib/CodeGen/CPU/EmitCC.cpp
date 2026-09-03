@@ -1210,8 +1210,8 @@ private:
     switch (op.getOrder()) {
     case FenceOrder::Release: order = "release"; break;
     case FenceOrder::Acquire: order = "acquire"; break;
-    case FenceOrder::AcqRel:  order = "acq_rel";  break;
-    case FenceOrder::SeqCst:  order = "seq_cst";  break;
+    case FenceOrder::AcqRel: order = "acq_rel"; break;
+    case FenceOrder::SeqCst: order = "seq_cst"; break;
     }
     os() << getIndent() << "std::atomic_thread_fence(std::memory_order_"
          << order << ");\n";
@@ -1282,7 +1282,8 @@ private:
         if (i > 0) os() << " + ";
         os() << getName(indices[i]);
         int64_t stride = 1;
-        for (unsigned j = i + 1; j < srcShape.size(); ++j) stride *= srcShape[j];
+        for (unsigned j = i + 1; j < srcShape.size(); ++j)
+          stride *= srcShape[j];
         os() << " * " << stride;
       }
     }

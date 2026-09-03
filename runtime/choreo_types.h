@@ -84,7 +84,7 @@ __co_any__ inline static T __f32_to_f16(F value) {
     if (hm == 0x400u) {
       hm = 0u;
       ++halfExp;
-    }                       // mantissa overflow carry
+    } // mantissa overflow carry
     if (halfExp >= 0x1Fu) { // rounded up past max finite -> inf
       bits = (uint16_t)(sign | 0x7C00u);
       return detail::bitCopy<T>(bits);

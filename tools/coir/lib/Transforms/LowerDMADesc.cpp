@@ -81,10 +81,8 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
       auto resolve = [&](mlir::OperandRange dynDims) -> Value {
         unsigned dynIdx = 0;
         for (unsigned i = 0; i < tty.getShape().size(); ++i) {
-          if (!tty.isDynamicDim(i))
-            continue;
-          if (i == dim)
-            return dynDims[dynIdx];
+          if (!tty.isDynamicDim(i)) continue;
+          if (i == dim) return dynDims[dynIdx];
           ++dynIdx;
         }
         llvm_unreachable("dynamic dim not found in operands");
@@ -102,22 +100,19 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
     auto scaleTileIndex = [&](Value idx, int64_t tileDim, Value counterpart,
                               unsigned i) -> Value {
       if (tileDim > 1) {
-        auto tileSize = rewriter.create<mlir::arith::ConstantIndexOp>(
-            op.getLoc(), tileDim);
+        auto tileSize =
+            rewriter.create<mlir::arith::ConstantIndexOp>(op.getLoc(), tileDim);
         return rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, tileSize);
       }
       // Anchor tile (dim <= 1): scale by the counterpart's per-dim extent,
       // which may be dynamic. effectiveChunkSize encodes the static rule; a
       // non-constant extent is resolved as a runtime index value.
       auto cTy = llvm::dyn_cast<coir::TensorType>(counterpart.getType());
-      if (!cTy || i >= cTy.getShape().size())
-        return idx;
+      if (!cTy || i >= cTy.getShape().size()) return idx;
       Value extent = materializeDimExtent(counterpart, i);
-      if (!extent)
-        return idx;
+      if (!extent) return idx;
       if (auto c = extent.getDefiningOp<mlir::arith::ConstantIndexOp>()) {
-        if (effectiveChunkSize(tileDim, c.value()) == 1)
-          return idx;
+        if (effectiveChunkSize(tileDim, c.value()) == 1) return idx;
       }
       return rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, extent);
     };

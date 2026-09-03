@@ -7564,12 +7564,12 @@ bool CuteCodeGen::Visit(AST::Fence& n) {
 
   if (n.GetOrder() == FenceOrder::SEQ_CST) {
     // Sequentially-consistent fence: PTX fence.sc at the CTA or GPU scope.
-    ds << d_indent << "asm volatile(\"fence.sc."
-       << (cta_scope ? "cta" : "gpu") << ";\" ::: \"memory\");\n";
+    ds << d_indent << "asm volatile(\"fence.sc." << (cta_scope ? "cta" : "gpu")
+       << ";\" ::: \"memory\");\n";
   } else {
     // Full (acq_rel) fence, covering release / acquire / acq_rel.
-    ds << d_indent << (cta_scope ? "__threadfence_block();\n"
-                                 : "__threadfence();\n");
+    ds << d_indent
+       << (cta_scope ? "__threadfence_block();\n" : "__threadfence();\n");
   }
 
   return true;

@@ -832,8 +832,7 @@ ParseResult TensorBindDimsOp::parse(OpAsmParser& parser,
   SmallVector<int64_t> strides;
   while (succeeded(parser.parseOptionalComma())) {
     StringRef kw;
-    if (parser.parseKeyword(&kw))
-      return failure();
+    if (parser.parseKeyword(&kw)) return failure();
     if (kw == "unsigned") {
       isUnsigned = true;
     } else if (kw == "strides") {
@@ -921,8 +920,7 @@ void TensorBindDimsOp::print(OpAsmPrinter& printer) {
     case TensorMemorySpace::Register: printer << "register"; break;
     }
   }
-  if (resultTy.getIsUnsigned())
-    printer << ", unsigned";
+  if (resultTy.getIsUnsigned()) printer << ", unsigned";
   auto stridesArr = resultTy.getStrides();
   if (!stridesArr.empty()) {
     printer << ", strides: [";

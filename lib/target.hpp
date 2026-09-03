@@ -144,7 +144,7 @@ struct TargetInfo {
 
 class Target {
 public:
-  virtual ~Target(){};
+  virtual ~Target() {};
 
   // Target hooks -- keep these abstract
   virtual const std::string Name() const = 0;

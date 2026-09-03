@@ -68,8 +68,7 @@ mlir::Type coir::TensorType::parse(mlir::AsmParser& parser) {
     if (kw == "unsigned") {
       isUnsigned = true;
     } else if (kw == "strides") {
-      if (parser.parseColon() || parser.parseLSquare())
-        return {};
+      if (parser.parseColon() || parser.parseLSquare()) return {};
       int64_t s;
       auto res = parser.parseOptionalInteger(s);
       if (res.has_value() && succeeded(*res)) {
@@ -118,8 +117,7 @@ void coir::TensorType::print(mlir::AsmPrinter& printer) const {
     case coir::TensorMemorySpace::Register: printer << "register"; break;
     }
   }
-  if (getIsUnsigned())
-    printer << ", unsigned";
+  if (getIsUnsigned()) printer << ", unsigned";
   auto stridesArr = getStrides();
   if (!stridesArr.empty()) {
     printer << ", strides: [";

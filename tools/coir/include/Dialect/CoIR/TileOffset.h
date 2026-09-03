@@ -1,4 +1,5 @@
-//===- TileOffset.h - Shared tensor-tile offset helpers ----------*- C++ -*-===//
+//===- TileOffset.h - Shared tensor-tile offset helpers ----------*- C++
+//-*-===//
 //
 // Centralizes the coir.element_offset concept so every lowering pass and
 // codegen backend interprets tensor-tile indices consistently.
@@ -32,8 +33,7 @@ inline bool isElementOffsetTile(TensorTileOp tile) {
 /// extent themselves (never pass ShapedType::kDynamic here). Returns 1 when no
 /// scaling is required, otherwise the value the index must be multiplied by.
 inline int64_t effectiveChunkSize(int64_t tileDim, int64_t counterpartExtent) {
-  if (tileDim > 1)
-    return tileDim;
+  if (tileDim > 1) return tileDim;
   return counterpartExtent;
 }
 
