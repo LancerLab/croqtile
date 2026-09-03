@@ -179,7 +179,9 @@ bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
     levels.pop();
     cooperative_stack_.pop();
     // ds: device kernel. hs: target launch entry (__hetero_* shim for hetero).
-    code_segments.back() += ds.str() + hs.str();
+    code_segments.back() +=
+        WrapDeviceCodeInNamespace(ds.str(), CCtx().GetDeviceNamespace()) +
+        hs.str();
     ds.str("");
     hs.str("");
     return_stream.str("");
@@ -1027,10 +1029,12 @@ bool HIPCodeGen::Visit(AST::ParallelBy& n) {
     }
     hs << "};\n";
     hs << h_indent << "choreo::abend_true(hipLaunchCooperativeKernel((void*)"
-       << device_fn << ", __grid, __block, __" << fname
+       << QualifyDeviceFn(device_fn, CCtx().GetDeviceNamespace())
+       << ", __grid, __block, __" << fname
        << "_coop_args, 0, 0));\n";
   } else {
-    hs << h_indent << device_fn << "<<<__grid, __block>>>";
+    hs << h_indent << QualifyDeviceFn(device_fn, CCtx().GetDeviceNamespace())
+       << "<<<__grid, __block>>>";
     hs << "(";
     first = true;
     for (auto& item : cgi.GetDeviceAllIns(fname)) {

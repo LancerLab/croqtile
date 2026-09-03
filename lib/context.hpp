@@ -563,6 +563,7 @@ private:
                                // and named DMAs to prevent resource exhaustion.
   std::string debug_file_dir;  // directory for compiler debug artifacts
   std::string api_mode = "cffi"; // API mode for generated code
+  std::string device_namespace;  // namespace wrapping generated device kernels
   DebugLinePathMode debug_line_path_mode = DebugLinePathMode::WorkspaceRelative;
 
 private:
@@ -842,6 +843,8 @@ public:
   void SetDebugFileDir(const std::string& dir) { debug_file_dir = dir; }
   const std::string& GetApiMode() const { return api_mode; }
   void SetApiMode(const std::string& mode) { api_mode = mode; }
+  const std::string& GetDeviceNamespace() const { return device_namespace; }
+  void SetDeviceNamespace(const std::string& ns) { device_namespace = ns; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }

@@ -1356,7 +1356,9 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (isa<AST::ChoreoFunction>(&n)) {
     PLDCheck();
     ssm.LeaveScope();
-    code_segments.back() += ds.str() + hs.str();
+    code_segments.back() +=
+        WrapDeviceCodeInNamespace(ds.str(), CCtx().GetDeviceNamespace()) +
+        hs.str();
     ds.str(""); // reset the streams
     hs.str("");
     return_stream.str("");
@@ -3652,7 +3654,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     - the sum <= the capacity of arch
     */
     auto EmitCudaFuncAttributeMaxDynamicSharedMemorySize = [&]() -> void {
-      hs << h_indent << "cudaFuncSetAttribute(" << device_fn
+      hs << h_indent << "cudaFuncSetAttribute("
+         << QualifyDeviceFn(device_fn, CCtx().GetDeviceNamespace())
          << ", cudaFuncAttributeMaxDynamicSharedMemorySize, "
          << ValueSTR(shared_spm_size) << " + (" << required_shared_align
          << " - 1));\n";
@@ -3747,13 +3750,15 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       }
       hs << "};\n";
       hs << h_indent << "choreo::abend_true(cudaLaunchCooperativeKernel("
-         << "(const void*)" << device_fn << ", __" << fname << "_gdims"
-         << parallel_idx << ", __" << fname << "_bdims" << parallel_idx
-         << ", __" << fname << "_coop_args, " << smem_str << ", " << stream_str
-         << "));\n";
+         << "(const void*)"
+         << QualifyDeviceFn(device_fn, CCtx().GetDeviceNamespace()) << ", __"
+         << fname << "_gdims" << parallel_idx << ", __" << fname << "_bdims"
+         << parallel_idx << ", __" << fname << "_coop_args, " << smem_str
+         << ", " << stream_str << "));\n";
     } else {
-      hs << h_indent << device_fn << "<<<__" << fname << "_gdims"
-         << parallel_idx << ", __" << fname << "_bdims" << parallel_idx;
+      hs << h_indent << QualifyDeviceFn(device_fn, CCtx().GetDeviceNamespace())
+         << "<<<__" << fname << "_gdims" << parallel_idx << ", __" << fname
+         << "_bdims" << parallel_idx;
 
       bool explicit_smem = false;
       if (!sbe::ceq(shared_spm_size, sbe::nu(0))) {

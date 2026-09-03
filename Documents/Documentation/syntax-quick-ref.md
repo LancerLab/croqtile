@@ -204,5 +204,6 @@
 | `-gs` | Generate work-script |
 | `-t TARGET` | Set target platform |
 | `-arch=ARCH` | Set architecture |
+| `--device-namespace=NS` | Wrap generated device kernels in `namespace NS` (empty = global) |
 | `--runtime-check=LEVEL` | Set assertion level (none/entry/low/medium/high/all) |
 | `--disable-runtime-check` | Disable all runtime assertions |

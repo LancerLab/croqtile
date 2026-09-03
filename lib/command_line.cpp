@@ -27,6 +27,11 @@ Option<std::string>
     api_mode(OptionKind::User, "--api", "-api", "cffi",
              "Select API mode for generated code (cffi|sglang).",
              "--api=<mode>", true);
+Option<std::string> device_namespace(
+    OptionKind::User, "--device-namespace", "", "",
+    "Wrap generated device kernels in <namespace>. An empty value (default) "
+    "emits kernels in the global namespace.",
+    "--device-namespace=<namespace>", true);
 
 Option<std::string>
     debug_file_dir(OptionKind::User, "-ddir", "", "./build/",
@@ -538,6 +543,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetFastCompile(fast_compile.GetValue());
   CCtx().SetUseFastMath(use_fast_math.GetValue());
   CCtx().SetDebugFileDir(debug_file_dir.GetValue());
+  CCtx().SetDeviceNamespace(device_namespace.GetValue());
 
   if (!trace_visit.GetValue().empty())
     setenv("CHOREO_TRACE_VISITOR", ToUpper(trace_visit.GetValue()).c_str(), 1);

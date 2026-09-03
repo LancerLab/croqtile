@@ -1,0 +1,22 @@
+// RUN: choreo -t cute -es --device-namespace=op %s | FileCheck %s
+// RUN: choreo -t cute -es %s | FileCheck %s --check-prefix=GLOBAL
+
+// Test that --device-namespace wraps generated kernels in a namespace and
+// qualifies the host-side launch with the same namespace.
+
+__co__ void foo(f32 [64, 32] a) {
+  parallel p by 2 : block {
+    b = a.view(16, 8: 12, 3).from(17, 18);
+    c = b.chunkat(p, p);
+    d = dma.copy c => shared;
+  }
+}
+
+// CHECK: namespace op {
+// CHECK: __global__ void __choreo_device_foo(float * a) {
+// CHECK: } // namespace op
+// CHECK: op::__choreo_device_foo<<<
+
+// GLOBAL-NOT: namespace op
+// GLOBAL: __global__ void __choreo_device_foo(float * a) {
+// GLOBAL-NOT: op::__choreo_device_foo

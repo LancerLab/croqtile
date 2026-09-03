@@ -818,6 +818,23 @@ std::string PinLineDirectivePerGeneratedLine(const std::string& code);
 ///  Util functions shared between targets
 /////////////////////////////////////////////////////////////
 
+// Wrap generated device code in a user-specified namespace so emitted kernels
+// land in that namespace (e.g. KERNEL_NAMESPACE) instead of the global
+// namespace. An empty namespace string is a no-op.
+inline static std::string WrapDeviceCodeInNamespace(const std::string& code,
+                                                    const std::string& ns) {
+  if (ns.empty()) return code;
+  return "namespace " + ns + " {\n" + code + "} // namespace " + ns + "\n";
+}
+
+// Qualify a kernel symbol reference with the device namespace for host-side
+// launch references. An empty namespace string is a no-op.
+inline static std::string QualifyDeviceFn(const std::string& device_fn,
+                                          const std::string& ns) {
+  if (ns.empty()) return device_fn;
+  return ns + "::" + device_fn;
+}
+
 inline static std::string CreateUniquePath() {
   // Get a high-resolution timestamp
   auto now = std::chrono::high_resolution_clock::now();
