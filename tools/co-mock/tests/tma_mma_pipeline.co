@@ -3,9 +3,9 @@
 
 __co__ void tma_mma_pipeline() {
   parallel t by 1 : thread {
-    s32[2, 3] global_A;
-    s32[3, 2] global_B;
-    s32[2, 2] global_C;
+    global s32[2, 3] global_A;
+    global s32[3, 2] global_B;
+    global s32[2, 2] global_C;
 
     foreach i in 2
       foreach j in 3
@@ -14,9 +14,9 @@ __co__ void tma_mma_pipeline() {
       foreach j in 2
         global_B.at(i, j) = i * 2 + j + 1;
 
-    s32[2, 3] shared_A;
-    s32[3, 2] shared_B;
-    s32[2, 2] shared_C;
+    shared s32[2, 3] shared_A;
+    shared s32[3, 2] shared_B;
+    shared s32[2, 2] shared_C;
 
     fa = tma.copy.async global_A => shared_A;
     fb = tma.copy.async global_B => shared_B;

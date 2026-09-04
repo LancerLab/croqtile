@@ -2,27 +2,35 @@
 // Test TMA (Tensor Memory Accelerator) copy operations.
 
 __co__ void test_tma_sync() {
-  s32[4] src;
-  s32[4] dst;
+  global s32[4] src;
+  global s32[4] dst;
 
   foreach i in 4
     src.at(i) = (i + 1) * 10;
 
-  f = tma.copy src => dst;
+  parallel by 1 : thread {
+    shared s32[4] tmp;
+    tma.copy src => tmp;
+    tma.copy tmp => dst;
+  }
 
   println(dst.at(0), dst.at(1), dst.at(2), dst.at(3));
 }
 // CHECK: 10 20 30 40
 
 __co__ void test_tma_2d() {
-  s32[3, 3] A;
-  s32[3, 3] B;
+  global s32[3, 3] A;
+  global s32[3, 3] B;
 
   foreach i in 3
     foreach j in 3
       A.at(i, j) = i * 3 + j;
 
-  f = tma.copy A => B;
+  parallel by 1 : thread {
+    shared s32[3, 3] tmp;
+    tma.copy A => tmp;
+    tma.copy tmp => B;
+  }
 
   println(B.at(0, 0), B.at(1, 1), B.at(2, 2));
 }
