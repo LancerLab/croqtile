@@ -873,13 +873,10 @@ bool EarlySemantics::Visit(AST::CastExpr& n) {
   auto r_type = n.GetR()->GetType() ? n.GetR()->GetType() : NodeType(*n.GetR());
   if (auto spty = dyn_cast<SpannedType>(r_type))
     r_type = MakeScalarType(spty->ElementType(), true);
-  BaseType from_type = BaseType::UNKNOWN;
+  BaseType from_type = ScalarOrVectorElementType(r_type);
   size_t element_count = 1;
   if (auto vty = dyn_cast<VectorType>(r_type)) {
-    from_type = vty->ElemType();
     element_count = vty->ElemCount();
-  } else if (auto sty = dyn_cast<ScalarType>(r_type)) {
-    from_type = sty->GetBaseType();
   }
   if (from_type != BaseType::UNKNOWN) {
     n.SetFrom(from_type);
@@ -1235,7 +1232,10 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
 
     // check for type consistency between annotation and init expr.
     if (!isa<UnknownType>(tty) && !tty->ApprxEqual(*ety)) {
-      if (!n.IsMutable())
+      // Mutable numeric scalars can use implicit numeric conversions, but
+      // predicates do not participate in those conversions. Diagnose this
+      // here rather than constructing a bool-to-numeric cast in normalization.
+      if (!n.IsMutable() || isa<BooleanType>(tty) || isa<BooleanType>(ety))
         Error1(n.LOC(), "`" + n.name_str + "' is declared as \"" +
                             PSTR(n.type->GetType()) +
                             "\" but initialized as \"" +

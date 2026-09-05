@@ -1,0 +1,21 @@
+// RUN: choreo -t cc -pa=SEMA -es %s -o - 2>&1 | FileCheck %s
+
+// A one-dimensional bounded tuple and a destructured loop index both yield
+// s32 values. Cast source types must be resolved before liveness prints them.
+__co__ void explicit_bounded_cast() {
+  parallel by 1 {
+    local f32[64] output;
+    foreach row in [64] {
+      value = __to<f32>(row);
+      output.at(row) = value;
+    }
+    foreach {column} in [64] {
+      value = __to<f32>(column);
+      output.at(column) = value;
+    }
+  }
+}
+
+// CHECK: EXPLICIT_CAST(s32=>f32:
+// CHECK: EXPLICIT_CAST(s32=>f32:
+// CHECK-NOT: EXPLICIT_CAST(unknown

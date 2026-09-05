@@ -1,0 +1,18 @@
+// RUN: not choreo -t cc -es %s -o - 2>&1 | FileCheck %s
+
+// Numeric declarations are mutable and permit numeric conversions. A bool
+// initializer must still be rejected before normalization creates a cast
+// that the target emitter cannot handle.
+__co__ void bool_numeric_initializer(s32 value) {
+  parallel by 1 {
+    s32 enabled = value > 0;
+    f32 factor = value > 0;
+    bool predicate = value > 0;
+    s32 numeric = 1;
+  }
+}
+
+// CHECK: error: `enabled' is declared as "mutable s32" but initialized as "bool".
+// CHECK: error: `factor' is declared as "mutable f32" but initialized as "bool".
+// CHECK-NOT: Assertion failed
+// CHECK: Totally 2 errors have been detected

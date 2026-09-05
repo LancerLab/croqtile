@@ -960,8 +960,8 @@ public:
 
 struct CastExpr : public Expr, public TypeIDProvider<CastExpr> {
 private:
-  BaseType from;
-  BaseType to;
+  BaseType from = BaseType::UNKNOWN;
+  BaseType to = BaseType::UNKNOWN;
   size_t element_count = 1;
   bool is_explicit = false;
   std::string foreign_type;
