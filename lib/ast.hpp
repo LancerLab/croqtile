@@ -3109,6 +3109,7 @@ public:
     ptr<Expr> scale_b;
     std::vector<int> issue_order;
     ptr<Expr> future;
+    bool buffer_form = false;
   };
   struct StoreInfo {
     ptr<Expr> buffer;
@@ -3341,6 +3342,15 @@ public:
     std::get<2>(info).future = future;
   }
 
+  bool IsBufferForm() const {
+    return tag == Exec && std::get<2>(info).buffer_form;
+  }
+
+  void SetBufferForm(bool value = true) {
+    if (tag != Exec) choreo_unreachable("not a mma exec operation.");
+    std::get<2>(info).buffer_form = value;
+  }
+
   ptr<ChunkAt> ScaleA() const {
     if (tag == Exec) {
       auto e_info = std::get<2>(info);
@@ -3440,6 +3450,7 @@ public:
       }
       copied->SetIssueOrder(e_info.issue_order);
       if (e_info.future) copied->SetExecFuture(CloneP(e_info.future));
+      copied->SetBufferForm(e_info.buffer_form);
       return copied;
     }
     case Store: {

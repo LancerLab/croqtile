@@ -51,6 +51,27 @@ There is no source-level `mma.desc` operation. Loading a WGMMA shared B operand
 into a register fragment is rejected because it obscures the actual hardware
 operand mode.
 
+### Buffer-form overwrite
+
+When the first operand is a memory buffer or view, the synchronous dense form
+is an overwrite shorthand:
+
+```choreo
+mma.row.row output, lhs, rhs;
+```
+
+It is equivalent to creating a zero-filled accumulator whose element type is
+the destination element type, loading both inputs, executing the MMA, and
+storing the result to `output`. In other words, buffer form computes
+`output = lhs * rhs`; it does not accumulate the previous contents of
+`output`.
+
+When the first operand is a fragment, the existing accumulate semantics remain
+unchanged, including direct shared-memory inputs. When the destination is a
+buffer, both inputs must also be buffers or views. Use the explicit fragment
+sequence for accumulation, fragment reuse, asynchronous MMA, sparse MMA,
+scaling, or custom scheduling.
+
 ## Layouts
 
 The layout suffix names A and B memory layouts:

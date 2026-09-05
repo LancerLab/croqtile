@@ -241,6 +241,47 @@ private:
     return ce;
   }
 
+  AST::NodeList DesugarMMABufferForm(AST::MMA& mma) {
+    auto& op = *mma.GetOperation();
+    assert(op.IsBufferForm());
+
+    auto to_chunk = [](const ptr<AST::Expr>& operand) {
+      auto ref = operand->GetReference();
+      if (auto chunk = dyn_cast<AST::ChunkAt>(ref))
+        return cast<AST::ChunkAt>(chunk->Clone());
+      auto id = cast<AST::Identifier>(ref);
+      return AST::Make<AST::ChunkAt>(operand->LOC(),
+                                     cast<AST::Identifier>(id->Clone()));
+    };
+
+    auto acc_name = SymbolTable::GetAnonName() + "__mma_acc";
+    auto lhs_name = SymbolTable::GetAnonName() + "__mma_lhs";
+    auto rhs_name = SymbolTable::GetAnonName() + "__mma_rhs";
+    auto acc = AST::MakeIdExpr(mma.LOC(), acc_name);
+    auto lhs = AST::MakeIdExpr(mma.LOC(), lhs_name);
+    auto rhs = AST::MakeIdExpr(mma.LOC(), rhs_name);
+
+    auto dst_type = cast<SpannedType>(op.ExecOperand(0)->GetType());
+    auto fill_op = AST::Make<AST::MMAOperation>(
+        acc, AST::MakeIntExpr(mma.LOC(), 0), true, dst_type->ElementType());
+    auto lhs_load_op =
+        AST::Make<AST::MMAOperation>(to_chunk(op.ExecOperand(1)), lhs);
+    auto rhs_load_op =
+        AST::Make<AST::MMAOperation>(to_chunk(op.ExecOperand(2)), rhs);
+    auto exec_op = AST::Make<AST::MMAOperation>(op.GetMethod(), acc, lhs, rhs);
+    exec_op->SetIssueOrder(op.IssueOrder());
+    auto store_op =
+        AST::Make<AST::MMAOperation>(acc, to_chunk(op.ExecOperand(0)));
+
+    AST::NodeList expanded = {AST::Make<AST::MMA>(mma.LOC(), fill_op),
+                              AST::Make<AST::MMA>(mma.LOC(), lhs_load_op),
+                              AST::Make<AST::MMA>(mma.LOC(), rhs_load_op),
+                              AST::Make<AST::MMA>(mma.LOC(), exec_op),
+                              AST::Make<AST::MMA>(mma.LOC(), store_op)};
+    for (auto& node : expanded) node->AddNote("mma_buffer_form");
+    return expanded;
+  }
+
   void TraceEachVisit(const AST::Node& n) {
     if (trace_visit) {
       dbgs() << n.TypeNameString();
@@ -333,6 +374,19 @@ public:
       n.values.insert(n.values.begin() + index, pnode);
       VST_DEBUG(dbgs() << "Hoisted: " << PSTR(pnode) << "\n");
     }
+
+    AST::NodeList desugared;
+    for (auto& node : n.values) {
+      auto mma = dyn_cast<AST::MMA>(node);
+      if (!mma || !mma->GetOperation()->IsBufferForm()) {
+        desugared.push_back(node);
+        continue;
+      }
+      auto expanded = DesugarMMABufferForm(*mma);
+      desugared.insert(desugared.end(), expanded.begin(), expanded.end());
+      VST_DEBUG(dbgs() << "Desugared buffer-form MMA: " << PSTR(node) << "\n";);
+    }
+    n.values = std::move(desugared);
 
     mnodes_insertions.erase(&n);
     multi_nodes.pop();

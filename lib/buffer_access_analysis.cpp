@@ -222,6 +222,11 @@ bool BufferAccessAnalyzer::Visit(AST::MMA& n) {
               AccessEntity::MMA);
   } break;
   case AST::MMAOperation::Exec: {
+    if (CCtx().TargetSupportMMAUKernel() && n.HasNote("mma_buffer_form")) {
+      auto acc = AST::FragName(op->ExecOperand(0));
+      tracker_.AddBinding(acc, AST::FragName(op->ExecOperand(1)));
+      tracker_.AddBinding(acc, AST::FragName(op->ExecOperand(2)));
+    }
     RecordAll(AccessKind::READ, &n,
               GetAllSymbolicOperands(op->ExecOperand(1).get()),
               AccessEntity::MMA);
@@ -230,11 +235,18 @@ bool BufferAccessAnalyzer::Visit(AST::MMA& n) {
               AccessEntity::MMA);
   } break;
   case AST::MMAOperation::Store: {
+    if (CCtx().TargetSupportMMAUKernel() && n.HasNote("mma_buffer_form"))
+      Record(AccessKind::READ, &n, AST::FragName(op->StoreFrom()),
+             AccessEntity::MMA);
     RecordAll(AccessKind::WRITE, &n,
               GetAllSymbolicOperands(op->StoreTo().get()), AccessEntity::MMA);
   } break;
   case AST::MMAOperation::Load:
   case AST::MMAOperation::LoadR: {
+    if (CCtx().TargetSupportMMAUKernel() && n.HasNote("mma_buffer_form") &&
+        op->LoadTo())
+      tracker_.AddNoStorageAlias(AST::FragName(op->LoadTo()),
+                                 op->LoadFrom()->RefSymbol());
     RecordAll(AccessKind::READ, &n,
               GetAllSymbolicOperands(op->LoadFrom().get()), AccessEntity::MMA);
   } break;

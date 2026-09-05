@@ -129,6 +129,7 @@
 | `mc = mma.fill 0` | Initialize accumulator |
 | `mma.fill mc, 0.0f` | Re-initialize |
 | `ma = mma.load data.chunkat(...)` | Load operand |
+| `mma.row.row out, a, b` | Buffer overwrite shorthand: out = a * b |
 | `mma.row.row mc, shared_a, shared_b` | Direct WGMMA shared operands |
 | `mma.row.col mc, ma, mb` | D = A * B + C (A row, B col) |
 | `mma.row.row mc, ma, mb` | D = A * B + C (A row, B row) |

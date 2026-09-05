@@ -192,7 +192,7 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   // Resource classes used by the DMA resource allocator.  BUFFER is handled by
   // MemReuse; FUTURE and EVENT are the finite completion slots this allocator
   // colors.
-  enum class ResourceClass { BUFFER, FUTURE, EVENT };
+  enum class ResourceClass { BUFFER, FUTURE, EVENT, ACCUMULATOR };
 
   // Scoped names of DMA futures and event variables, in declaration order of
   // their first appearance.
@@ -321,6 +321,7 @@ private:
   std::unordered_map<std::string, Ranges> var_ranges;
 
   // Scoped names of DMA futures and event variables (resource-class handles).
+  std::set<std::string> accumulator_vars;
   std::set<std::string> future_vars;
   std::set<std::string> event_vars;
 

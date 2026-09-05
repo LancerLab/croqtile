@@ -816,6 +816,7 @@ LivenessAnalyzer::ResourceRanges(ResourceClass rc) const {
   case ResourceClass::FUTURE: handles = &future_vars; break;
   case ResourceClass::EVENT: handles = &event_vars; break;
   case ResourceClass::BUFFER: handles = &buffers; break;
+  case ResourceClass::ACCUMULATOR: handles = &accumulator_vars; break;
   }
   for (const auto& [name, ranges] : var_ranges) {
     if (handles->count(name)) result.emplace(name, ranges);
@@ -1963,11 +1964,22 @@ bool LivenessAnalyzer::Visit(AST::MMA& n) {
   stmt_linfo[current_stmt].buffer_related = true;
   auto op = n.GetOperation();
   switch (op->Tag()) {
+  case AST::MMAOperation::Fill: {
+    auto name = AST::FragName(op->FillingTo());
+    accumulator_vars.insert(InScopeName(name));
+    AddDef(current_stmt, name);
+  } break;
   case AST::MMAOperation::Scale: {
     AddUse(current_stmt, GetAllSymbolicOperands(op->ScaleA().get()));
     AddUse(current_stmt, GetAllSymbolicOperands(op->ScaleB().get()));
   } break;
   case AST::MMAOperation::Exec: {
+    if (CCtx().TargetSupportMMAUKernel() && n.HasNote("mma_buffer_form")) {
+      auto acc = AST::FragName(op->ExecOperand(0));
+      tracker_.AddBinding(acc, AST::FragName(op->ExecOperand(1)));
+      tracker_.AddBinding(acc, AST::FragName(op->ExecOperand(2)));
+    }
+    AddUse(current_stmt, AST::FragName(op->ExecOperand(0)));
     AddUse(current_stmt, GetAllSymbolicOperands(op->ExecOperand(1).get()));
     AddUse(current_stmt, GetAllSymbolicOperands(op->ExecOperand(2).get()));
     if (op->HasExecFuture()) {
@@ -1977,10 +1989,15 @@ bool LivenessAnalyzer::Visit(AST::MMA& n) {
     }
   } break;
   case AST::MMAOperation::Store: {
+    AddUse(current_stmt, AST::FragName(op->StoreFrom()));
     AddUse(current_stmt, GetAllSymbolicOperands(op->StoreTo().get()));
   } break;
   case AST::MMAOperation::Load:
   case AST::MMAOperation::LoadR: {
+    if (CCtx().TargetSupportMMAUKernel() && n.HasNote("mma_buffer_form") &&
+        op->LoadTo())
+      tracker_.AddNoStorageAlias(AST::FragName(op->LoadTo()),
+                                 op->LoadFrom()->RefSymbol());
     AddUse(current_stmt, GetAllSymbolicOperands(op->LoadFrom().get()));
   } break;
   default: break;

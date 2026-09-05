@@ -64,6 +64,16 @@ private:
       rt_mem_usage_list.push(RtMemUsageMap{});
       ct_mem_alloc_inst_sets.push_back(/*empty map*/ {});
     }
+    // Target lowering may introduce fixed-size scratch arrays that have no
+    // source declaration. They live in the enclosing lexical storage scope.
+    if (n.HasNote("codegen_local_bytes")) {
+      auto size = std::stoull(n.GetNote("codegen_local_bytes"));
+      ct_mem_usage_list.top()[Storage::LOCAL] += size;
+      ct_tot_mem_usage[Storage::LOCAL] += size;
+      std::ostringstream allocation;
+      allocation << "target scratch at " << n.LOC();
+      ct_mem_alloc_inst_sets.back()[Storage::LOCAL].push_back(allocation.str());
+    }
     return true;
   }
 

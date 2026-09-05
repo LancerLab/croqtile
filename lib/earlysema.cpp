@@ -39,6 +39,7 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     inthreads_levels.clear();
     inthreads_levels.push_back(0);
     vector_patterns.clear();
+    mma_fragment_symbols.clear();
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     if (pl_depth == 0) pb->SetOuter(true);
     pl_depth++;
@@ -2508,6 +2509,7 @@ bool EarlySemantics::Visit(AST::MMA& n) {
         }
         ReportErrorWhenViolateODR(n.LOC(), fill_sym + ".span", __FILE__,
                                   __LINE__, MakeRankedMDSpanType(2));
+        mma_fragment_symbols.insert(SSTab().InScopeName(fill_sym));
         if (!isa<ScalarType>(op.FillingValue()->GetType()))
           Error1(n.LOC(), "Expect a scalar value for MMA fill.");
       }
@@ -2526,6 +2528,7 @@ bool EarlySemantics::Visit(AST::MMA& n) {
         MakeFutureType(cast<SpannedType>(sty->Clone()), op.IsAsync()));
     ReportErrorWhenViolateODR(n.LOC(), fut_sym + ".span", __FILE__, __LINE__,
                               cast<SpannedType>(sty->Clone()));
+    mma_fragment_symbols.insert(SSTab().InScopeName(fut_sym));
   } break;
   case AST::MMAOperation::LoadR: {
     auto sty = dyn_cast<SpannedType>(op.LoadFrom()->GetType());
@@ -2536,6 +2539,38 @@ bool EarlySemantics::Visit(AST::MMA& n) {
   } break;
   case AST::MMAOperation::Exec: {
     std::string op0_sym = AST::FragName(op.ExecOperand(0));
+    auto op0_ty = op.ExecOperand(0)->GetType();
+    auto op0_sty = dyn_cast<SpannedType>(op0_ty);
+    auto op0_scoped = SSTab().InScopeName(op0_sym);
+    bool fragment_accumulator =
+        mma_fragment_symbols.count(op0_scoped) ||
+        (op0_sty && op0_sty->GetStorage() == Storage::REG);
+    bool buffer_accumulator = op0_sty && !fragment_accumulator;
+
+    if (buffer_accumulator) {
+      auto is_buffer_operand = [](const ptr<AST::Expr>& operand) {
+        if (!isa<SpannedType>(operand->GetType())) return false;
+        auto ref = operand->GetReference();
+        return isa<AST::Identifier>(ref) || isa<AST::ChunkAt>(ref);
+      };
+
+      if (op.IsSparse() || op.HasScale() || op.HasExecFuture() ||
+          op.HasIssueOrder()) {
+        Error1(n.LOC(), "buffer-form MMA does not support async, sparse, "
+                        "scale, or schedule modifiers.");
+      } else if (!is_buffer_operand(op.ExecOperand(0)) ||
+                 !is_buffer_operand(op.ExecOperand(1)) ||
+                 !is_buffer_operand(op.ExecOperand(2))) {
+        Error1(n.LOC(), "buffer-form MMA requires the destination and both "
+                        "inputs to be spanned buffers or views; a buffer "
+                        "destination cannot be combined with fragment "
+                        "inputs.");
+      } else {
+        op.SetBufferForm();
+      }
+      break;
+    }
+
     std::string op1_sym = AST::FragName(op.ExecOperand(1));
     std::string op2_sym = AST::FragName(op.ExecOperand(2));
     ReportErrorWhenUseBeforeDefine(n.LOC(), op0_sym);
