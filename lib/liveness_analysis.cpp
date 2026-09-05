@@ -1786,6 +1786,14 @@ bool LivenessAnalyzer::Visit(AST::Assignment& n) {
   return true;
 }
 
+bool LivenessAnalyzer::Visit(AST::VectorMemory& n) {
+  TraceEachVisit(n);
+  stmt_linfo[current_stmt].buffer_related = true;
+  AddUse(current_stmt, n.Address()->GetDataName());
+  AddUse(current_stmt, GetAllSymbolicOperands(&n));
+  return true;
+}
+
 bool LivenessAnalyzer::Visit(AST::ParallelBy& n) {
   TraceEachVisit(n);
   assert(n.HasSubPVs() && "expecting the parallel-by has bpv and cmpt_bpvs.");

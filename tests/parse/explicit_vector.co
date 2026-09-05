@@ -1,0 +1,15 @@
+// RUN: choreo -e %s | FileCheck %s
+
+__co__ void explicit_vector(s32 [64] indices, f32 [64] input,
+                            f32 [64] output) {
+  lane = vec.index<64>;
+  offsets = vec.load indices.at(lane);
+  mask = lane < 64;
+  values = vec.load input.at(offsets), mask, 0.0f;
+  vec.store output.at(offsets), values, mask;
+}
+
+// CHECK: Var Decl (unknown): lane =  VEC.INDEX<64>
+// CHECK: Var Decl (unknown): offsets =  VEC.LOAD indices[lane]
+// CHECK: Var Decl (unknown): values =  VEC.LOAD input[offsets], mask, 0.000000f
+// CHECK: `- VEC.STORE output[offsets], values, mask

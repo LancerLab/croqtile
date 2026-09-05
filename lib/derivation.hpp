@@ -59,10 +59,17 @@ public:
     else if (auto sl = dyn_cast<AST::Select>(n))
       return nodes.count(sl.get());
     else if (AST::IsLiteral(*n) || isa<AST::IntIndex>(n) ||
-             isa<AST::SpanAs>(n) || isa<AST::ChunkAt>(n) ||
-             isa<AST::NoValue>(n) || isa<AST::DataType>(n) || isa<AST::MMA>(n))
+             isa<AST::VectorIndex>(n) || isa<AST::SpanAs>(n) ||
+             isa<AST::ChunkAt>(n) || isa<AST::NoValue>(n) ||
+             isa<AST::DataType>(n) || isa<AST::MMA>(n))
       return false;
-    else if (auto c = dyn_cast<AST::Call>(n))
+    else if (auto vm = dyn_cast<AST::VectorMemory>(n)) {
+      bool result = Contains(vm->Address());
+      result |= Contains(vm->Value());
+      result |= Contains(vm->Mask());
+      result |= Contains(vm->Other());
+      return result;
+    } else if (auto c = dyn_cast<AST::Call>(n))
       return nodes.count(c.get());
     else if (auto mv = dyn_cast<AST::MultiValues>(n)) {
       bool res = false;

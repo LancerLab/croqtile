@@ -7,6 +7,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "parallel_level.hpp"
@@ -3608,6 +3609,103 @@ inline PromoteResult PromoteType(BaseType lty, BaseType rty) {
     assert(false);
     return res;
   }
+}
+
+// Shared type result for explicit vectors and loop-vectorized expressions.
+// A null type with an empty error means neither operand is an explicit vector.
+struct VectorInferenceResult {
+  ptr<VectorType> type;
+  std::string error;
+
+  bool Applies() const { return type || !error.empty(); }
+};
+
+inline BaseType ScalarOrVectorElementType(const ptr<Type>& ty) {
+  if (auto vty = dyn_cast<VectorType>(ty)) return vty->ElemType();
+  if (auto sty = dyn_cast<ScalarType>(ty)) return sty->GetBaseType();
+  if (IsActualBoundedIntegerType(ty)) return BaseType::S32;
+  return BaseType::UNKNOWN;
+}
+
+inline VectorInferenceResult InferNumericVectorType(const ptr<Type>& lhs,
+                                                    const ptr<Type>& rhs,
+                                                    bool comparison = false) {
+  auto lhs_vty = dyn_cast<VectorType>(lhs);
+  auto rhs_vty = dyn_cast<VectorType>(rhs);
+  if (!lhs_vty && !rhs_vty) return {};
+
+  size_t lanes = lhs_vty ? lhs_vty->ElemCount() : rhs_vty->ElemCount();
+  if (lhs_vty && rhs_vty && lhs_vty->ElemCount() != rhs_vty->ElemCount())
+    return {nullptr, "vector operands have mismatched lane counts (" +
+                         std::to_string(lhs_vty->ElemCount()) + " vs. " +
+                         std::to_string(rhs_vty->ElemCount()) + ")."};
+
+  BaseType lhs_elem = ScalarOrVectorElementType(lhs);
+  BaseType rhs_elem = ScalarOrVectorElementType(rhs);
+  if ((!IsIntegerType(lhs_elem) && !IsFloatType(lhs_elem)) ||
+      (!IsIntegerType(rhs_elem) && !IsFloatType(rhs_elem)))
+    return {nullptr, "vector numeric operands must have scalar numeric "
+                     "element types."};
+
+  auto promoted = PromoteType(lhs_elem, rhs_elem);
+  if (promoted.lty != promoted.rty)
+    return {nullptr, "unable to determine a common vector element type."};
+  return {MakeVectorType(comparison ? BaseType::BOOL : promoted.lty, lanes),
+          {}};
+}
+
+inline VectorInferenceResult InferBooleanVectorType(const ptr<Type>& lhs,
+                                                    const ptr<Type>& rhs) {
+  auto lhs_vty = dyn_cast<VectorType>(lhs);
+  auto rhs_vty = dyn_cast<VectorType>(rhs);
+  if (!lhs_vty && !rhs_vty) return {};
+
+  size_t lanes = lhs_vty ? lhs_vty->ElemCount() : rhs_vty->ElemCount();
+  if (lhs_vty && rhs_vty && lhs_vty->ElemCount() != rhs_vty->ElemCount())
+    return {nullptr, "vector operands have mismatched lane counts (" +
+                         std::to_string(lhs_vty->ElemCount()) + " vs. " +
+                         std::to_string(rhs_vty->ElemCount()) + ")."};
+
+  if (ScalarOrVectorElementType(lhs) != BaseType::BOOL ||
+      ScalarOrVectorElementType(rhs) != BaseType::BOOL)
+    return {nullptr, "vector mask operands must have bool element type."};
+  return {MakeVectorType(BaseType::BOOL, lanes), {}};
+}
+
+inline VectorInferenceResult InferVectorSelectType(const ptr<Type>& condition,
+                                                   const ptr<Type>& lhs,
+                                                   const ptr<Type>& rhs) {
+  auto condition_vty = dyn_cast<VectorType>(condition);
+  auto lhs_vty = dyn_cast<VectorType>(lhs);
+  auto rhs_vty = dyn_cast<VectorType>(rhs);
+  if (!condition_vty && !lhs_vty && !rhs_vty) return {};
+
+  if (condition_vty && condition_vty->ElemType() != BaseType::BOOL)
+    return {nullptr, "vector select condition must have bool element type."};
+  if (!condition_vty && !isa<BooleanType>(condition))
+    return {nullptr, "vector select condition must be bool."};
+
+  size_t lanes = condition_vty
+                     ? condition_vty->ElemCount()
+                     : (lhs_vty ? lhs_vty->ElemCount() : rhs_vty->ElemCount());
+  for (auto vty : {lhs_vty, rhs_vty})
+    if (vty && vty->ElemCount() != lanes)
+      return {nullptr, "vector select operands have mismatched lane counts."};
+
+  BaseType lhs_elem = ScalarOrVectorElementType(lhs);
+  BaseType rhs_elem = ScalarOrVectorElementType(rhs);
+  if (lhs_elem == BaseType::BOOL && rhs_elem == BaseType::BOOL)
+    return {MakeVectorType(BaseType::BOOL, lanes), {}};
+  if ((!IsIntegerType(lhs_elem) && !IsFloatType(lhs_elem)) ||
+      (!IsIntegerType(rhs_elem) && !IsFloatType(rhs_elem)))
+    return {nullptr, "vector select values must have compatible scalar "
+                     "element types."};
+
+  auto promoted = PromoteType(lhs_elem, rhs_elem);
+  if (promoted.lty != promoted.rty)
+    return {nullptr,
+            "unable to determine a common vector select element type."};
+  return {MakeVectorType(promoted.lty, lanes), {}};
 }
 
 inline static ptr<Type> MutateType(const ptr<Type>& ty) {

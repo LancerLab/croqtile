@@ -224,9 +224,20 @@ private:
   ptr<AST::CastExpr> GenCastExprNode(BaseType to, BaseType from,
                                      ptr<AST::Node> to_cast) {
     auto ce = AST::Make<AST::CastExpr>(to_cast->LOC(), to_cast);
-    ce->SetType(MakeScalarType(to, true));
-    ce->SetFrom(from);
-    ce->SetTo(to);
+    if (auto vty = dyn_cast<VectorType>(to_cast->GetType())) {
+      ce->SetType(MakeVectorType(to, vty->ElemCount()));
+      ce->SetFrom(from, vty->ElemCount());
+      ce->SetTo(to, vty->ElemCount());
+    } else {
+      ce->SetType(MakeScalarType(to, true));
+      ce->SetFrom(from);
+      ce->SetTo(to);
+    }
+    // Broadcast the converted scalar, never the input of a scalar cast.
+    if (to_cast->HasNote("broadcast")) {
+      ce->AddNote("broadcast", to_cast->GetNote("broadcast"));
+      to_cast->DelNote("broadcast");
+    }
     return ce;
   }
 
@@ -441,6 +452,21 @@ public:
         }
       }
     } else if (n.IsBinary() || n.IsTernary()) {
+      // Explicit vector inference chooses the common operand element type.
+      // Materialize that conversion before either target pipeline consumes it;
+      // comparisons retain their boolean result type.
+      auto lhs_elem = ScalarOrVectorElementType(n.GetL()->GetType());
+      auto rhs_elem = ScalarOrVectorElementType(n.GetR()->GetType());
+      if (isa<VectorType>(n.GetType()) &&
+          (IsIntegerType(lhs_elem) || IsFloatType(lhs_elem)) &&
+          (IsIntegerType(rhs_elem) || IsFloatType(rhs_elem))) {
+        auto promoted = PromoteType(lhs_elem, rhs_elem);
+        if (lhs_elem != promoted.lty)
+          n.SetL(GenCastExprNode(promoted.lty, lhs_elem, n.GetL()));
+        if (rhs_elem != promoted.rty)
+          n.SetR(GenCastExprNode(promoted.rty, rhs_elem, n.GetR()));
+        return true;
+      }
       if (n.IsBinary())
         if (!(n.IsArith() && !n.IsUBArith())) return true;
 
@@ -476,6 +502,19 @@ public:
       }
     }
 
+    return true;
+  }
+
+  bool Visit(AST::VectorMemory& n) override {
+    auto elem = ScalarOrVectorElementType(n.Address()->GetType());
+    if (n.Value()) {
+      auto from = ScalarOrVectorElementType(n.Value()->GetType());
+      if (from != elem) n.SetValue(GenCastExprNode(elem, from, n.Value()));
+    }
+    if (n.Other()) {
+      auto from = ScalarOrVectorElementType(n.Other()->GetType());
+      if (from != elem) n.SetOther(GenCastExprNode(elem, from, n.Other()));
+    }
     return true;
   }
 
@@ -771,33 +810,45 @@ public:
           AST::Make<AST::MultiValues>(n.arguments->LOC(), ", ");
       bool normalized = false;
       ptr<Type> normalized_ty = nullptr;
+      BaseType normalized_base = BaseType::UNKNOWN;
+      size_t vector_lanes = 0;
       for (size_t i = 0; i < n.arguments->Count(); ++i) {
         auto arg = n.arguments->ValueAt(i);
         auto arg_ty = arg->GetType();
+        if (auto vty = dyn_cast<VectorType>(arg_ty)) {
+          assert((!vector_lanes || vector_lanes == vty->ElemCount()) &&
+                 "vector lane mismatch should fail in early semantics");
+          vector_lanes = vty->ElemCount();
+        }
 
-        if (isa<ScalarFloatType>(arg_ty)) {
-          if (!normalized_ty) {
-            normalized_ty = arg_ty->Clone();
+        auto arg_base = ScalarOrVectorElementType(arg_ty);
+        if (IsFloatType(arg_base)) {
+          if (normalized_base == BaseType::UNKNOWN) {
+            normalized_base = arg_base;
             continue;
           }
-          auto bty_f = arg_ty->GetBaseType();
-          auto bty_t = normalized_ty->GetBaseType();
-          if (bty_f != bty_t && IsLossyCast(bty_f, bty_t))
-            normalized_ty = arg_ty->Clone();
+          if (arg_base != normalized_base &&
+              IsLossyCast(arg_base, normalized_base))
+            normalized_base = arg_base;
         } else
-          normalized_ty = MakeScalarFloatType(BaseType::F32);
+          normalized_base = BaseType::F32;
       }
 
-      assert(normalized_ty && "must have a type to normalize to");
+      assert(normalized_base != BaseType::UNKNOWN &&
+             "must have a type to normalize to");
+      if (vector_lanes)
+        normalized_ty = MakeVectorType(normalized_base, vector_lanes);
+      else
+        normalized_ty = MakeScalarFloatType(normalized_base);
       for (size_t i = 0; i < n.arguments->Count(); ++i) {
         auto arg = n.arguments->ValueAt(i);
         auto arg_ty = arg->GetType();
-        if (arg_ty == normalized_ty) {
+        auto arg_base = ScalarOrVectorElementType(arg_ty);
+        if (arg_base == normalized_base) {
           normalized_args->Append(arg->Clone());
           continue;
         }
-        if (auto casted = GenCastExprNode(normalized_ty->GetBaseType(),
-                                          arg_ty->GetBaseType(), arg)) {
+        if (auto casted = GenCastExprNode(normalized_base, arg_base, arg)) {
           normalized_args->Append(casted);
           normalized = true;
         } else

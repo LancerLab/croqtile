@@ -1,0 +1,7 @@
+// RUN: not choreo -e %s 2>&1 | FileCheck %s
+
+__co__ void explicit_vector_index_parens() {
+  lane = vec.index<64>();
+}
+
+// CHECK: error:

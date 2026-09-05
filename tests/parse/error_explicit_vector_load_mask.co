@@ -1,0 +1,9 @@
+// RUN: not choreo -e %s 2>&1 | FileCheck %s
+
+__co__ void explicit_vector_load_mask(f32 [64] input) {
+  lane = vec.index<64>;
+  mask = lane < 64;
+  values = vec.load input.at(lane), mask;
+}
+
+// CHECK: error:

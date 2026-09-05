@@ -47,6 +47,8 @@ struct DataType;
 struct MultiNodes;
 struct CompilerDirective;
 struct Node;
+struct VectorIndex;
+struct VectorMemory;
 
 using NodeList = std::vector<ptr<Node>>;
 
@@ -993,6 +995,7 @@ public:
     auto n = Make<CastExpr>(LOC(), CloneP(GetR()));
     n->from = from;
     n->to = to;
+    n->element_count = element_count;
     n->is_explicit = is_explicit;
     n->foreign_type = foreign_type;
     return n;
@@ -1322,6 +1325,107 @@ public:
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, DataAccess)
+};
+
+// A logical lane index [0, 1, ..., lane_count - 1]. The source spelling is
+// `vec.index<N>`; N is a compile-time value and is not a runtime operand.
+struct VectorIndex : public Node, public TypeIDProvider<VectorIndex> {
+private:
+  size_t lane_count;
+
+public:
+  VectorIndex(const location& l, size_t n) : Node(l), lane_count(n) {
+    assert(n > 0 && "vector lane count must be positive.");
+  }
+
+  size_t LaneCount() const { return lane_count; }
+
+  ptr<Node> CloneImpl() const override {
+    return Make<VectorIndex>(LOC(), lane_count);
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << prefix << "VEC.INDEX<" << lane_count << ">";
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, VectorIndex)
+};
+
+// Explicit synchronous vector memory access. The address remains a ranked
+// DataAccess so existing shape and symbol machinery can inspect it, while the
+// parent node owns the read/write and mask semantics.
+struct VectorMemory : public Node, public TypeIDProvider<VectorMemory> {
+public:
+  enum class Kind { Load, Store };
+
+private:
+  Kind kind;
+  ptr<DataAccess> address;
+  ptr<Node> value = nullptr;
+  ptr<Expr> mask = nullptr;
+  ptr<Expr> other = nullptr;
+
+public:
+  VectorMemory(const location& l, Kind k, const ptr<DataAccess>& a,
+               const ptr<Node>& v = nullptr, const ptr<Expr>& m = nullptr,
+               const ptr<Expr>& o = nullptr)
+      : Node(l), kind(k), address(a), value(v), mask(m), other(o) {
+    assert(address && address->AccessElement() &&
+           "vector memory requires an element address.");
+    if (kind == Kind::Load) {
+      assert(!value && "vector load cannot have a store value.");
+      assert((!mask && !other) || (mask && other));
+    } else {
+      assert(value && "vector store requires a value.");
+      assert(!other && "vector store cannot have a load fallback value.");
+    }
+  }
+
+  bool IsLoad() const { return kind == Kind::Load; }
+  bool IsStore() const { return kind == Kind::Store; }
+  Kind GetKind() const { return kind; }
+  const ptr<DataAccess>& Address() const { return address; }
+  const ptr<Node>& Value() const { return value; }
+  const ptr<Expr>& Mask() const { return mask; }
+  const ptr<Expr>& Other() const { return other; }
+  void SetValue(const ptr<Node>& v) { value = v; }
+  void SetOther(const ptr<Expr>& o) { other = o; }
+  bool IsMasked() const { return mask != nullptr; }
+
+  ptr<Node> CloneImpl() const override {
+    return Make<VectorMemory>(LOC(), kind, CloneP(address), CloneP(value),
+                              CloneP(mask), CloneP(other));
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    if (IsStore())
+      os << "\n" << prefix << "`- VEC.STORE ";
+    else
+      os << prefix << "VEC.LOAD ";
+    address->Print(os, "", with_type);
+    if (IsStore()) {
+      os << ", ";
+      value->Print(os, "", with_type);
+    }
+    if (mask) {
+      os << ", ";
+      mask->Print(os, "", with_type);
+    }
+    if (other) {
+      os << ", ";
+      other->Print(os, "", with_type);
+    }
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, VectorMemory)
 };
 
 struct Assignment : public Node, public TypeIDProvider<Assignment> {

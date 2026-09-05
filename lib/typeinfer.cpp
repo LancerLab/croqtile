@@ -504,6 +504,35 @@ bool TypeInference::Visit(AST::DataAccess& n) {
   return true;
 }
 
+bool TypeInference::Visit(AST::VectorIndex& n) {
+  TraceEachVisit(n);
+  SetNodeType(n, MakeVectorType(BaseType::S32, n.LaneCount()));
+  cur_type = n.GetType();
+  return true;
+}
+
+bool TypeInference::Visit(AST::VectorMemory& n) {
+  TraceEachVisit(n);
+  if (n.IsStore()) {
+    SetNodeType(n, MakeNoValueType());
+    cur_type.reset();
+    return true;
+  }
+
+  size_t lane_count = 0;
+  for (auto& index : n.Address()->GetIndices())
+    if (auto vty = dyn_cast<VectorType>(NodeType(*index))) {
+      assert((!lane_count || lane_count == vty->ElemCount()) &&
+             "vector address lane mismatch should fail in early semantics.");
+      lane_count = vty->ElemCount();
+    }
+  assert(lane_count && "vector memory requires a vector coordinate.");
+  auto address_ty = cast<ScalarType>(NodeType(*n.Address()));
+  SetNodeType(n, MakeVectorType(address_ty->GetBaseType(), lane_count));
+  cur_type = n.GetType();
+  return true;
+}
+
 // ituple override operator "=" for definition
 bool TypeInference::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
@@ -652,6 +681,76 @@ bool TypeInference::Visit(AST::MultiDimSpans& n) {
 
 bool TypeInference::Visit(AST::Expr& n) {
   TraceEachVisit(n);
+
+  auto set_vector_result = [&](const VectorInferenceResult& result) {
+    if (!result.Applies()) return false;
+    if (!result.type) {
+      Error1(n.LOC(), result.error);
+      SetNodeType(n, MakeUnknownType());
+    } else {
+      SetNodeType(n, result.type);
+      cur_type = n.GetType();
+      if (n.IsBinary()) {
+        if (!isa<VectorType>(NodeType(*n.GetL())))
+          n.GetL()->AddNote("broadcast",
+                            std::to_string(result.type->ElemCount()));
+        if (!isa<VectorType>(NodeType(*n.GetR())))
+          n.GetR()->AddNote("broadcast",
+                            std::to_string(result.type->ElemCount()));
+      }
+    }
+    return true;
+  };
+
+  if (n.IsBinary()) {
+    auto lhs_ty = NodeType(*n.GetL());
+    auto rhs_ty = NodeType(*n.GetR());
+    if (n.IsCompare()) {
+      auto result = InferNumericVectorType(lhs_ty, rhs_ty, true);
+      if (set_vector_result(result)) return result.type != nullptr;
+    } else if (n.op == Op::Add || n.op == Op::Sub || n.op == Op::Mul ||
+               n.op == Op::Div || n.op == Op::Mod || n.op == Op::CeilDiv ||
+               n.op == "<<" || n.op == ">>") {
+      auto result = InferNumericVectorType(lhs_ty, rhs_ty);
+      if (set_vector_result(result)) return result.type != nullptr;
+    } else if (n.op == "&" || n.op == "|") {
+      auto lhs_elem = ScalarOrVectorElementType(lhs_ty);
+      auto rhs_elem = ScalarOrVectorElementType(rhs_ty);
+      auto result = (lhs_elem == BaseType::BOOL || rhs_elem == BaseType::BOOL)
+                        ? InferBooleanVectorType(lhs_ty, rhs_ty)
+                        : InferNumericVectorType(lhs_ty, rhs_ty);
+      if (set_vector_result(result)) return result.type != nullptr;
+    }
+  } else if (n.IsUnary()) {
+    if (auto rhs_vty = dyn_cast<VectorType>(NodeType(*n.GetR()))) {
+      if (n.op == "!" && rhs_vty->ElemType() == BaseType::BOOL) {
+        SetNodeType(n, MakeVectorType(BaseType::BOOL, rhs_vty->ElemCount()));
+        cur_type = n.GetType();
+        return true;
+      }
+      if (n.op == "~" && IsIntegerType(rhs_vty->ElemType())) {
+        SetNodeType(n,
+                    MakeVectorType(rhs_vty->ElemType(), rhs_vty->ElemCount()));
+        cur_type = n.GetType();
+        return true;
+      }
+    }
+  } else if (n.IsTernary() && n.op == "?") {
+    auto result = InferVectorSelectType(
+        NodeType(*n.GetC()), NodeType(*n.GetL()), NodeType(*n.GetR()));
+    if (set_vector_result(result)) {
+      if (result.type) {
+        if (!isa<VectorType>(NodeType(*n.GetL())))
+          n.GetL()->AddNote("broadcast",
+                            std::to_string(result.type->ElemCount()));
+        if (!isa<VectorType>(NodeType(*n.GetR())))
+          n.GetR()->AddNote("broadcast",
+                            std::to_string(result.type->ElemCount()));
+      }
+      return result.type != nullptr;
+    }
+  }
+
   if (auto ref = n.GetReference()) {
     if (auto id = dyn_cast<AST::Identifier>(ref)) {
       if (auto pty = GetSymbolType(n.LOC(), id->name)) {
@@ -950,7 +1049,13 @@ bool TypeInference::Visit(AST::CastExpr& n) {
     return true;
   }
   auto cast_from = NodeType(*n.GetR());
-  SetNodeType(n, MakeScalarType(n.ToType(), true));
+  if (auto vty = dyn_cast<VectorType>(cast_from)) {
+    n.SetFrom(vty->ElemType(), vty->ElemCount());
+    n.SetTo(n.ToType(), vty->ElemCount());
+    SetNodeType(n, MakeVectorType(n.ToType(), vty->ElemCount()));
+  } else {
+    SetNodeType(n, MakeScalarType(n.ToType(), true));
+  }
   VST_DEBUG(dbgs() << " |- type node cast: `" << PSTR(n.GetR()) << "`:\n\t`"
                    << PSTR(cast_from) << "` to `" << PSTR(n.GetType())
                    << "`\n");

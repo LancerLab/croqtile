@@ -976,6 +976,9 @@ public:
   bool TargetSupportVectorize() const {
     return HasFeature(ChoreoFeature::VECTORIZE, GetArch());
   }
+  bool TargetSupportsExplicitVector() const {
+    return GetTarget().SupportsExplicitVector(GetArch());
+  }
   bool TargetSupportAsyncDMA() const {
     return HasFeature(ChoreoFeature::ASYNC_DMA, GetArch());
   }

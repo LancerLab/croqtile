@@ -187,6 +187,16 @@ public:
   bool Visit(AST::NamedTypeDecl&) override { return true; }
   bool Visit(AST::IntTuple&) override { return true; }
   bool Visit(AST::DataAccess&) override { return true; }
+  bool Visit(AST::VectorIndex& n) override {
+    Error1(n.LOC(), "explicit vector syntax is not supported by the CoIR "
+                    "pipeline yet.");
+    return false;
+  }
+  bool Visit(AST::VectorMemory& n) override {
+    Error1(n.LOC(), "explicit vector syntax is not supported by the CoIR "
+                    "pipeline yet.");
+    return false;
+  }
   bool Visit(AST::IntIndex&) override { return true; }
   bool Visit(AST::DataType&) override { return true; }
   bool Visit(AST::Identifier&) override { return true; }

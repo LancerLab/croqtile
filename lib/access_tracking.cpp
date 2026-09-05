@@ -4,6 +4,8 @@
 #include "io.hpp"
 #include "types.hpp"
 
+#include <array>
+
 namespace Choreo {
 
 std::string AccessTracker::GetScopedName(const std::string& name) const {
@@ -32,7 +34,8 @@ AccessTracker::GetAllSymbolicOperands(const AST::Node* n) const {
     return res;
   }
   if (isa<AST::IntLiteral>(n) || isa<AST::FloatLiteral>(n) ||
-      isa<AST::StringLiteral>(n) || isa<AST::BoolLiteral>(n))
+      isa<AST::StringLiteral>(n) || isa<AST::BoolLiteral>(n) ||
+      isa<AST::VectorIndex>(n))
     return {};
   if (auto ii = dyn_cast<AST::IntIndex>(n))
     return GetAllSymbolicOperands(ii->value.get());
@@ -51,7 +54,23 @@ AccessTracker::GetAllSymbolicOperands(const AST::Node* n) const {
     }
     return res;
   }
-  if (auto da = dyn_cast<AST::DataAccess>(n)) return {da->GetDataName()};
+  if (auto da = dyn_cast<AST::DataAccess>(n))
+    return {sym_scoper(da->GetDataName())};
+  if (auto vm = dyn_cast<AST::VectorMemory>(n)) {
+    VarSet res{sym_scoper(vm->Address()->GetDataName())};
+    for (const auto& index : vm->Address()->GetIndices()) {
+      VarSet sub = GetAllSymbolicOperands(index.get());
+      res.insert(sub.begin(), sub.end());
+    }
+    std::array<AST::ptr<AST::Node>, 3> operands = {vm->Value(), vm->Mask(),
+                                                   vm->Other()};
+    for (const auto& operand : operands) {
+      if (!operand) continue;
+      VarSet sub = GetAllSymbolicOperands(operand.get());
+      res.insert(sub.begin(), sub.end());
+    }
+    return res;
+  }
   if (auto it = dyn_cast<AST::IntTuple>(n)) {
     VarSet res;
     for (const auto& v : it->GetValues()->AllValues()) {

@@ -38,6 +38,7 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     explicit_pl = false;
     inthreads_levels.clear();
     inthreads_levels.push_back(0);
+    vector_patterns.clear();
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     if (pl_depth == 0) pb->SetOuter(true);
     pl_depth++;
@@ -224,6 +225,98 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     return true;
   }
 
+  auto set_vector_result = [&](const VectorInferenceResult& result,
+                               const ptr<Type>& lhs_ty = nullptr,
+                               const ptr<Type>& rhs_ty = nullptr) {
+    if (!result.Applies()) return false;
+    if (!result.type) {
+      Error1(n.LOC(), "in operation \"" + n.op + "\": " + result.error);
+      SetNodeType(n, MakeUnknownType());
+      return true;
+    }
+    SetNodeType(n, result.type);
+    if (lhs_ty && !isa<VectorType>(lhs_ty))
+      n.GetL()->AddNote("broadcast", std::to_string(result.type->ElemCount()));
+    if (rhs_ty && !isa<VectorType>(rhs_ty))
+      n.GetR()->AddNote("broadcast", std::to_string(result.type->ElemCount()));
+    auto lhs_pattern = n.GetL() && n.GetL()->HasNote("vector_pattern")
+                           ? n.GetL()->GetNote("vector_pattern")
+                           : "";
+    auto rhs_pattern = n.GetR() && n.GetR()->HasNote("vector_pattern")
+                           ? n.GetR()->GetNote("vector_pattern")
+                           : "";
+    bool lhs_vector = lhs_ty && isa<VectorType>(lhs_ty);
+    bool rhs_vector = rhs_ty && isa<VectorType>(rhs_ty);
+    if ((n.op == Op::Add && ((lhs_pattern == "unit" && !rhs_vector) ||
+                             (rhs_pattern == "unit" && !lhs_vector))) ||
+        (n.op == Op::Sub && lhs_pattern == "unit" && !rhs_vector))
+      n.AddNote("vector_pattern", "unit");
+    else
+      n.AddNote("vector_pattern", "unknown");
+    return true;
+  };
+
+  if (n.IsBinary()) {
+    auto lhs_ty = NodeType(*n.GetL());
+    auto rhs_ty = NodeType(*n.GetR());
+    if (n.IsCompare()) {
+      auto result = InferNumericVectorType(lhs_ty, rhs_ty, true);
+      if (set_vector_result(result, lhs_ty, rhs_ty))
+        return result.type != nullptr;
+    } else if (n.op == Op::Add || n.op == Op::Sub || n.op == Op::Mul ||
+               n.op == Op::Div || n.op == Op::Mod || n.op == Op::CeilDiv ||
+               n.op == "<<" || n.op == ">>") {
+      auto result = InferNumericVectorType(lhs_ty, rhs_ty);
+      if (set_vector_result(result, lhs_ty, rhs_ty))
+        return result.type != nullptr;
+    } else if (n.op == "&" || n.op == "|") {
+      auto lhs_elem = ScalarOrVectorElementType(lhs_ty);
+      auto rhs_elem = ScalarOrVectorElementType(rhs_ty);
+      auto result = (lhs_elem == BaseType::BOOL || rhs_elem == BaseType::BOOL)
+                        ? InferBooleanVectorType(lhs_ty, rhs_ty)
+                        : InferNumericVectorType(lhs_ty, rhs_ty);
+      if (set_vector_result(result, lhs_ty, rhs_ty))
+        return result.type != nullptr;
+    } else if ((n.op == "&&" || n.op == "||") &&
+               (isa<VectorType>(lhs_ty) || isa<VectorType>(rhs_ty))) {
+      Error1(n.LOC(), "operators '&&' and '||' keep scalar short-circuit "
+                      "semantics; use '&' and '|' for vector masks.");
+      SetNodeType(n, MakeUnknownType());
+      return false;
+    }
+  } else if (n.IsUnary()) {
+    auto rhs_ty = NodeType(*n.GetR());
+    if (auto rhs_vty = dyn_cast<VectorType>(rhs_ty)) {
+      if (n.op == "!" && rhs_vty->ElemType() == BaseType::BOOL) {
+        SetNodeType(n, MakeVectorType(BaseType::BOOL, rhs_vty->ElemCount()));
+        return true;
+      }
+      if (n.op == "~" && IsIntegerType(rhs_vty->ElemType())) {
+        SetNodeType(n,
+                    MakeVectorType(rhs_vty->ElemType(), rhs_vty->ElemCount()));
+        return true;
+      }
+    }
+  } else if (n.IsTernary() && n.op == "?") {
+    auto result = InferVectorSelectType(
+        NodeType(*n.GetC()), NodeType(*n.GetL()), NodeType(*n.GetR()));
+    if (result.Applies()) {
+      if (!result.type) {
+        Error1(n.LOC(), "in operation \"?\": " + result.error);
+        SetNodeType(n, MakeUnknownType());
+        return false;
+      }
+      SetNodeType(n, result.type);
+      if (!isa<VectorType>(NodeType(*n.GetL())))
+        n.GetL()->AddNote("broadcast",
+                          std::to_string(result.type->ElemCount()));
+      if (!isa<VectorType>(NodeType(*n.GetR())))
+        n.GetR()->AddNote("broadcast",
+                          std::to_string(result.type->ElemCount()));
+      return true;
+    }
+  }
+
   if (auto ref = n.GetReference()) {
     auto rty = NodeType(*ref);
     if (isa<UnknownType>(rty)) {
@@ -233,6 +326,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         assert(false && "reference type is unknown.");
     }
     SetNodeType(n, rty);
+    if (ref->HasNote("vector_pattern"))
+      n.AddNote("vector_pattern", ref->GetNote("vector_pattern"));
     if (diverges.Contains(dyn_cast<AST::Identifier>(ref))) diverges.Add(n);
   } else if (n.op == Op::DataOf || n.op == Op::MDataOf) {
     auto ty = NodeType(*n.GetR());
@@ -777,8 +872,15 @@ bool EarlySemantics::Visit(AST::CastExpr& n) {
   auto r_type = n.GetR()->GetType() ? n.GetR()->GetType() : NodeType(*n.GetR());
   if (auto spty = dyn_cast<SpannedType>(r_type))
     r_type = MakeScalarType(spty->ElementType(), true);
-  if (auto sty = dyn_cast<ScalarType>(r_type)) {
-    auto from_type = sty->GetBaseType();
+  BaseType from_type = BaseType::UNKNOWN;
+  size_t element_count = 1;
+  if (auto vty = dyn_cast<VectorType>(r_type)) {
+    from_type = vty->ElemType();
+    element_count = vty->ElemCount();
+  } else if (auto sty = dyn_cast<ScalarType>(r_type)) {
+    from_type = sty->GetBaseType();
+  }
+  if (from_type != BaseType::UNKNOWN) {
     n.SetFrom(from_type);
     if (!supported.empty() && !supported.count(from_type))
       Error1(n.LOC(), "the source type '" + STR(from_type) +
@@ -791,7 +893,13 @@ bool EarlySemantics::Visit(AST::CastExpr& n) {
                           target.Name() + "' (arch: " + arch + ").");
   }
 
-  SetNodeType(n, MakeScalarType(to_type, true));
+  if (element_count > 1) {
+    n.SetFrom(from_type, element_count);
+    n.SetTo(to_type, element_count);
+    SetNodeType(n, MakeVectorType(to_type, element_count));
+  } else {
+    SetNodeType(n, MakeScalarType(to_type, true));
+  }
   return ec == error_count;
 }
 
@@ -1246,6 +1354,10 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
     }
   }
 
+  if (n.init_expr && n.init_expr->HasNote("vector_pattern"))
+    vector_patterns[InScopeName(n.name_str)] =
+        n.init_expr->GetNote("vector_pattern");
+
   return true;
 }
 
@@ -1300,7 +1412,12 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
   size_t idx_count = 0;
   for (auto idx : n.GetIndices()) {
     auto ity = NodeType(*idx);
-    if (!CanYieldIndex(ity)) {
+    auto vty = dyn_cast<VectorType>(ity);
+    if (vty && !IsIntegerType(vty->ElemType())) {
+      Error1(idx->LOC(), "vector coordinates must have an integer element "
+                         "type but got " +
+                             PSTR(ity) + ".");
+    } else if (!vty && !CanYieldIndex(ity)) {
       Error1(n.LOC(), "expect '" + PSTR(idx) + "' to yield indices but got " +
                           PSTR(ity) + ".");
     }
@@ -1316,6 +1433,139 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
   SetNodeType(n, MakeScalarType(sty->ElementType(), true, sty->GetStorage()));
 
   return true;
+}
+
+bool EarlySemantics::Visit(AST::VectorIndex& n) {
+  TraceEachVisit(n);
+  size_t error_count_before = error_count;
+  if (!CCtx().TargetSupportsExplicitVector())
+    Error1(n.LOC(), "explicit vector syntax is not supported by target '" +
+                        CCtx().GetTarget().Name() +
+                        "' (arch: " + CCtx().GetArch() + ").");
+  if (pl_depth == 0)
+    Error1(n.LOC(),
+           "explicit vector operations must be inside a parallel-by scope.");
+  SetNodeType(n, MakeVectorType(BaseType::S32, n.LaneCount()));
+  n.AddNote("vector_pattern", "unit");
+  return error_count_before == error_count;
+}
+
+bool EarlySemantics::Visit(AST::VectorMemory& n) {
+  TraceEachVisit(n);
+  size_t error_count_before = error_count;
+  if (!CCtx().TargetSupportsExplicitVector())
+    Error1(n.LOC(), "explicit vector syntax is not supported by target '" +
+                        CCtx().GetTarget().Name() +
+                        "' (arch: " + CCtx().GetArch() + ").");
+  if (pl_depth == 0)
+    Error1(n.LOC(),
+           "explicit vector operations must be inside a parallel-by scope.");
+
+  size_t lane_count = 0;
+  size_t vector_coordinate_count = 0;
+  size_t vector_coordinate_index = 0;
+  size_t coordinate_index = 0;
+  bool unit_stride_coordinate = false;
+  for (auto& index : n.Address()->GetIndices()) {
+    if (auto vty = dyn_cast<VectorType>(NodeType(*index))) {
+      if (lane_count && lane_count != vty->ElemCount())
+        Error1(index->LOC(), "vector address coordinates have mismatched lane "
+                             "counts (" +
+                                 std::to_string(lane_count) + " vs. " +
+                                 std::to_string(vty->ElemCount()) + ").");
+      lane_count = vty->ElemCount();
+      ++vector_coordinate_count;
+      vector_coordinate_index = coordinate_index;
+      unit_stride_coordinate = index->HasNote("vector_pattern") &&
+                               index->GetNote("vector_pattern") == "unit";
+    }
+    ++coordinate_index;
+  }
+  if (!lane_count) {
+    Error1(n.Address()->LOC(),
+           "explicit vector memory requires at least one vector coordinate.");
+    ptr<Type> result_ty = n.IsLoad() ? ptr<Type>(MakeUnknownType())
+                                     : ptr<Type>(MakeNoValueType());
+    SetNodeType(n, result_ty);
+    return false;
+  }
+
+  auto check_lanes = [&](const ptr<Type>& ty, const location& loc,
+                         const std::string& operand) {
+    if (auto vty = dyn_cast<VectorType>(ty)) {
+      if (vty->ElemCount() != lane_count) {
+        Error1(loc, operand + " has " + std::to_string(vty->ElemCount()) +
+                        " lanes but the address has " +
+                        std::to_string(lane_count) + ".");
+        return false;
+      }
+    }
+    return true;
+  };
+
+  if (n.Mask()) {
+    auto mask_ty = NodeType(*n.Mask());
+    check_lanes(mask_ty, n.Mask()->LOC(), "vector memory mask");
+    auto mask_vty = dyn_cast<VectorType>(mask_ty);
+    if ((!mask_vty && !isa<BooleanType>(mask_ty)) ||
+        (mask_vty && mask_vty->ElemType() != BaseType::BOOL))
+      Error1(n.Mask()->LOC(),
+             "vector memory mask must be bool or vector<bool, " +
+                 std::to_string(lane_count) + "> but got " + PSTR(mask_ty) +
+                 ".");
+  }
+
+  auto address_ty = NodeType(*n.Address());
+  auto address_scalar = dyn_cast<ScalarType>(address_ty);
+  if (!address_scalar) {
+    Error1(n.Address()->LOC(), "vector memory address must name a scalar "
+                               "element but got " +
+                                   PSTR(address_ty) + ".");
+    ptr<Type> result_ty = n.IsLoad() ? ptr<Type>(MakeUnknownType())
+                                     : ptr<Type>(MakeNoValueType());
+    SetNodeType(n, result_ty);
+    return false;
+  }
+
+  bool contiguous = vector_coordinate_count == 1 && unit_stride_coordinate &&
+                    vector_coordinate_index + 1 == coordinate_index;
+  if (contiguous) {
+    n.AddNote("vector_access", "contiguous");
+    n.Address()->AddNote("VLDST");
+  } else {
+    n.AddNote("vector_access", "indirect");
+    n.Address()->AddNote("VGZST");
+  }
+
+  auto check_value_type = [&](const ptr<Type>& ty, const location& loc,
+                              const std::string& operand) {
+    check_lanes(ty, loc, operand);
+    auto actual = ScalarOrVectorElementType(ty);
+    auto expected = address_scalar->GetBaseType();
+    bool compatible = actual == expected;
+    if (!compatible && (IsIntegerType(actual) || IsFloatType(actual)) &&
+        (IsIntegerType(expected) || IsFloatType(expected))) {
+      auto promoted = PromoteType(actual, expected);
+      compatible = promoted.lty == promoted.rty && promoted.lty == expected;
+    }
+    if (!compatible)
+      Error1(loc, operand + " element type '" + STR(actual) +
+                      "' is not convertible to buffer element type '" +
+                      STR(expected) + "'.");
+  };
+
+  if (n.IsLoad()) {
+    if (n.Other())
+      check_value_type(NodeType(*n.Other()), n.Other()->LOC(),
+                       "masked load fallback");
+    SetNodeType(n, MakeVectorType(address_scalar->GetBaseType(), lane_count));
+    n.AddNote("vector_pattern", "unknown");
+  } else {
+    check_value_type(NodeType(*n.Value()), n.Value()->LOC(),
+                     "vector store value");
+    SetNodeType(n, MakeNoValueType());
+  }
+  return error_count_before == error_count;
 }
 
 bool EarlySemantics::Visit(AST::Assignment& n) {
@@ -1411,6 +1661,10 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
 
     if (diverges.Contains(n.value)) diverges.Add(InScopeName(n.GetName()));
 
+    if (n.value->HasNote("vector_pattern"))
+      vector_patterns[InScopeName(n.GetName())] =
+          n.value->GetNote("vector_pattern");
+
     return true;
   }
 
@@ -1453,6 +1707,10 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
     SetNodeType(n, MakeUnknownType());
     return false;
   }
+
+  if (n.value->HasNote("vector_pattern"))
+    vector_patterns[InScopeName(n.GetName())] =
+        n.value->GetNote("vector_pattern");
 
   return true;
 }
@@ -1508,6 +1766,11 @@ bool EarlySemantics::Visit(AST::Identifier& n) {
       SetNodeType(n, MakeIntegerType());
     } else
       ReportErrorWhenUseBeforeDefine(n.LOC(), n.name);
+  }
+  if (SSTab().IsDeclared(n.name)) {
+    auto pattern = vector_patterns.find(InScopeName(n.name));
+    if (pattern != vector_patterns.end())
+      n.AddNote("vector_pattern", pattern->second);
   }
   return true;
 }
@@ -2632,8 +2895,35 @@ bool EarlySemantics::Visit(AST::Call& n) {
                                  "' is not supported for printing.");
       }
     } else if (n.IsArith()) {
-      auto pty = NodeType(*n.arguments->ValueAt(0));
-      SetNodeType(n, pty);
+      auto result_ty = NodeType(*n.arguments->ValueAt(0));
+      size_t lane_count = 0;
+      BaseType element_type = ScalarOrVectorElementType(result_ty);
+      for (auto& argument : n.GetArguments()) {
+        auto argument_ty = NodeType(*argument);
+        if (auto vty = dyn_cast<VectorType>(argument_ty)) {
+          if (lane_count && lane_count != vty->ElemCount())
+            Error1(argument->LOC(),
+                   "arithmetic builtin arguments have mismatched vector lane "
+                   "counts (" +
+                       std::to_string(lane_count) + " vs. " +
+                       std::to_string(vty->ElemCount()) + ").");
+          lane_count = vty->ElemCount();
+        }
+        auto argument_element = ScalarOrVectorElementType(argument_ty);
+        if (argument_element != element_type &&
+            (IsIntegerType(argument_element) ||
+             IsFloatType(argument_element))) {
+          auto promoted = PromoteType(element_type, argument_element);
+          if (promoted.lty == promoted.rty) element_type = promoted.lty;
+        }
+      }
+      if (lane_count) {
+        if (func_name == "__isfinite") element_type = BaseType::BOOL;
+        SetNodeType(n, MakeVectorType(element_type, lane_count));
+        n.AddNote("elementwise_vector", std::to_string(lane_count));
+      } else {
+        SetNodeType(n, result_ty);
+      }
     } else if (func_name == "__alignup" || func_name == "__aligndown") {
       if (n.arguments->Count() != 2)
         Error1(n.LOC(), "expect 2 arguments but got " +

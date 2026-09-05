@@ -1,0 +1,9 @@
+// RUN: not choreo -t cc -sa=SEMA %s 2>&1 | FileCheck %s
+
+__co__ void explicit_vector_target_gate() {
+  parallel p by 1 {
+    lane = vec.index<64>;
+  }
+}
+
+// CHECK: error: explicit vector syntax is not supported by target 'cc'

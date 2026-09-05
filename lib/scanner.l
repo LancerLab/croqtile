@@ -671,6 +671,8 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
   "=>"       return Choreo::Parser::make_TRANS(loc);
   "swap"     return Choreo::Parser::make_SWAP(yytext, loc);
   "rotate"   return Choreo::Parser::make_ROTATE(yytext, loc);
+  "vec"      return Choreo::Parser::make_VEC(yytext, loc);
+  ".index"   return Choreo::Parser::make_INDEX(yytext, loc);
   "mma"      return Choreo::Parser::make_MMA(yytext, loc);
   ".fill"    return Choreo::Parser::make_FILL(yytext, loc);
   ".load"    return Choreo::Parser::make_LOAD(yytext, loc);

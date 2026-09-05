@@ -202,6 +202,14 @@ public:
   virtual bool IsEventSupported() const { return false; }
   virtual bool IsMMASupported() const { return false; }
   virtual bool IsAsmSupported(const ArchId& /*arch*/) const { return false; }
+  virtual bool SupportsExplicitVector(const ArchId& /*arch*/) const {
+    return false;
+  }
+  virtual bool SupportsExplicitVectorType(const ArchId& /*arch*/,
+                                          BaseType /*element_type*/,
+                                          size_t /*lane_count*/) const {
+    return false;
+  }
   virtual std::string LowerAsmOperand(const std::string& varName) const {
     return varName;
   }

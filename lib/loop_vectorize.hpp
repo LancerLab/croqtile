@@ -96,6 +96,8 @@ public:
   bool Visit(AST::InThreadsBlock& n) override;
   bool Visit(AST::ParallelBy& n) override;
   bool Visit(AST::Call& n) override;
+  bool Visit(AST::VectorIndex& n) override;
+  bool Visit(AST::VectorMemory& n) override;
 
   // stmts
   bool Visit(AST::NamedVariableDecl& n) override;

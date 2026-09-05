@@ -36,6 +36,7 @@ struct BufferAccessAnalyzer : public VisitorWithSymTab {
 
   bool Visit(AST::NamedVariableDecl& n) override;
   bool Visit(AST::Assignment& n) override;
+  bool Visit(AST::VectorMemory& n) override;
   bool Visit(AST::DMA& n) override;
   bool Visit(AST::BufferMap& n) override;
   bool Visit(AST::MMA& n) override;

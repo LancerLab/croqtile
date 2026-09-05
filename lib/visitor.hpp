@@ -77,6 +77,8 @@ struct Visitor {
   virtual bool Visit(AST::NamedVariableDecl&) = 0;
   virtual bool Visit(AST::IntTuple&) = 0;
   virtual bool Visit(AST::DataAccess&) = 0;
+  virtual bool Visit(AST::VectorIndex&) = 0;
+  virtual bool Visit(AST::VectorMemory&) = 0;
   virtual bool Visit(AST::Assignment&) = 0;
   virtual bool Visit(AST::IntIndex&) = 0;
   virtual bool Visit(AST::DataType&) = 0;
@@ -629,6 +631,8 @@ public:
   bool Visit(AST::NamedVariableDecl&) override { return true; }
   bool Visit(AST::IntTuple&) override { return true; }
   bool Visit(AST::DataAccess&) override { return true; }
+  bool Visit(AST::VectorIndex&) override { return true; }
+  bool Visit(AST::VectorMemory&) override { return true; }
   bool Visit(AST::Assignment&) override { return true; }
   bool Visit(AST::IntIndex&) override { return true; }
   bool Visit(AST::DataType&) override { return true; }
@@ -827,6 +831,14 @@ public:
     TraceEachVisit(n);
     return VisitNode(n);
   }
+  bool Visit(AST::VectorIndex& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::VectorMemory& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
   bool Visit(AST::Assignment& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
@@ -991,6 +1003,8 @@ public:
   virtual bool VisitNode(AST::NamedVariableDecl&) { return true; }
   virtual bool VisitNode(AST::IntTuple&) { return true; }
   virtual bool VisitNode(AST::DataAccess&) { return true; }
+  virtual bool VisitNode(AST::VectorIndex&) { return true; }
+  virtual bool VisitNode(AST::VectorMemory&) { return true; }
   virtual bool VisitNode(AST::Assignment&) { return true; }
   virtual bool VisitNode(AST::IntIndex&) { return true; }
   virtual bool VisitNode(AST::DataType&) { return true; }
@@ -1129,6 +1143,8 @@ private:
   bool Visit(AST::NamedVariableDecl&) final { return true; }
   bool Visit(AST::IntTuple&) final { return true; }
   bool Visit(AST::DataAccess&) final { return true; }
+  bool Visit(AST::VectorIndex&) final { return true; }
+  bool Visit(AST::VectorMemory&) final { return true; }
   bool Visit(AST::Assignment&) final { return true; }
   bool Visit(AST::IntIndex&) final { return true; }
   bool Visit(AST::DataType&) final { return true; }
@@ -1222,6 +1238,16 @@ ReferredSymbols(AST::Node* n, const VisitorWithScope* v = nullptr) {
     res.insert(rd.begin(), rd.end());
     auto ri = ReferredSymbols(da->indices.get(), v);
     res.insert(ri.begin(), ri.end());
+  } else if (isa<AST::VectorIndex>(n)) {
+    return res;
+  } else if (auto vm = dyn_cast<AST::VectorMemory>(n)) {
+    for (auto* operand : {static_cast<AST::Node*>(vm->Address().get()),
+                          static_cast<AST::Node*>(vm->Value().get()),
+                          static_cast<AST::Node*>(vm->Mask().get()),
+                          static_cast<AST::Node*>(vm->Other().get())}) {
+      auto refs = ReferredSymbols(operand, v);
+      res.insert(refs.begin(), refs.end());
+    }
   } else if (auto ii = dyn_cast<AST::IntIndex>(n)) {
     auto rv = ReferredSymbols(ii->Val().get(), v);
     res.insert(rv.begin(), rv.end());

@@ -379,6 +379,17 @@ bool SemaChecker::VisitNode(AST::BoolLiteral& n) {
 }
 
 bool SemaChecker::VisitNode(AST::Expr& n) {
+  if (auto vty = dyn_cast<VectorType>(NodeType(n));
+      vty && CCtx().TargetSupportsExplicitVector() &&
+      !CCtx().GetTarget().SupportsExplicitVectorType(
+          CCtx().GetArch(), vty->ElemType(), vty->ElemCount())) {
+    Error1(n.LOC(), "vector<" + STR(vty->ElemType()) + ", " +
+                        std::to_string(vty->ElemCount()) +
+                        "> has no legal representation on target '" +
+                        CCtx().GetTarget().Name() +
+                        "' (arch: " + CCtx().GetArch() + ").");
+    return false;
+  }
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
 
   if (input_deps.Contains(n.GetR()))

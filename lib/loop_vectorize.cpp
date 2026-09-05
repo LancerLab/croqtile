@@ -242,6 +242,26 @@ bool LoopVectorizeSimpleChecker::Visit(AST::Call& n) {
   return true;
 }
 
+bool LoopVectorizeSimpleChecker::Visit(AST::VectorIndex& n) {
+  TraceEachVisit(n);
+  if (!NeedCheck()) return true;
+  if (cur_loop->HasVectorizationHint())
+    Error1(n.LOC(), "a loop containing explicit vector operations cannot be "
+                    "vectorized again.");
+  SetLoopVectorizationFailed();
+  return true;
+}
+
+bool LoopVectorizeSimpleChecker::Visit(AST::VectorMemory& n) {
+  TraceEachVisit(n);
+  if (!NeedCheck()) return true;
+  if (cur_loop->HasVectorizationHint())
+    Error1(n.LOC(), "a loop containing explicit vector operations cannot be "
+                    "vectorized again.");
+  SetLoopVectorizationFailed();
+  return true;
+}
+
 void LoopVectorizeSimpleChecker::AddLoopUse(std::string sym, location loc) {
   if (loop_uses.find(sym) == loop_uses.end()) {
     loop_uses.emplace(sym, std::vector<location>{loc});

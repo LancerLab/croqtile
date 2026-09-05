@@ -168,6 +168,15 @@ bool BufferAccessAnalyzer::Visit(AST::Assignment& n) {
   return true;
 }
 
+bool BufferAccessAnalyzer::Visit(AST::VectorMemory& n) {
+  auto operands = GetAllSymbolicOperands(&n);
+  operands.erase(Scoped(n.Address()->GetDataName()));
+  RecordAll(AccessKind::READ, &n, operands, AccessEntity::THREADS);
+  Record(n.IsLoad() ? AccessKind::READ : AccessKind::WRITE, &n,
+         n.Address()->GetDataName(), AccessEntity::THREADS);
+  return true;
+}
+
 bool BufferAccessAnalyzer::Visit(AST::DMA& n) {
   if (n.IsDummy()) return true; // `.any` future has no source/destination.
 
