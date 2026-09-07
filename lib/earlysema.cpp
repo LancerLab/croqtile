@@ -3058,6 +3058,17 @@ bool EarlySemantics::Visit(AST::Call& n) {
       } else {
         SetNodeType(n, result_ty);
       }
+
+      // The vector/scalar distinction matters beyond the result type: the two
+      // forms of a builtin may be spelled with different device entry points
+      // and hence have different arch requirements, so it is passed on to the
+      // target instead of being encoded here.
+      auto& tgt = CCtx().GetTarget();
+      auto arch = CCtx().GetArch();
+      if (!tgt.IsArithBuiltinSupported(arch, func_name, lane_count > 0))
+        Error1(n.LOC(), "'" + func_name +
+                            "' is not supported by the current target '" +
+                            tgt.Name() + "' (arch: " + arch + ").");
     } else if (func_name == "__alignup" || func_name == "__aligndown") {
       if (n.arguments->Count() != 2)
         Error1(n.LOC(), "expect 2 arguments but got " +
@@ -3142,7 +3153,7 @@ bool EarlySemantics::Visit(AST::Call& n) {
       }
     } else if (n.IsLibCall()) {
       auto& tgt = CCtx().GetTarget();
-      if (!tgt.IsLibCallSupported(func_name))
+      if (!tgt.IsLibCallSupported(CCtx().GetArch(), func_name))
         Error1(n.LOC(), "'" + func_name +
                             "' is not supported by the current target '" +
                             tgt.Name() + "'.");

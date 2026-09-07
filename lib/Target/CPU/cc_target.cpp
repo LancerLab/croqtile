@@ -58,7 +58,6 @@ public:
         {STR(ChoreoFeature::BARRIER), Description(ChoreoFeature::BARRIER)},
         {STR(ChoreoFeature::MMA), Description(ChoreoFeature::MMA)},
         {STR(ChoreoFeature::MEMALLOC), Description(ChoreoFeature::MEMALLOC)},
-        {STR(ChoreoFeature::LIBCALL), Description(ChoreoFeature::LIBCALL)},
         {STR(ChoreoFeature::VECTORIZE), Description(ChoreoFeature::VECTORIZE)},
     };
   }
@@ -70,7 +69,8 @@ public:
     return {BaseType::F32, BaseType::F64, BaseType::S32, BaseType::S64};
   }
 
-  bool IsLibCallSupported(const std::string& name) const override {
+  bool IsLibCallSupported(const ArchId& /*arch*/,
+                          const std::string& name) const override {
     static const std::set<std::string> supported = {
         "__lib_gemm",        "__lib_add",        "__lib_sub",
         "__lib_mul",         "__lib_div",        "__lib_max",

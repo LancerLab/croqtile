@@ -36,7 +36,6 @@ enum class ChoreoFeature {
   MGM,
   VECTORIZE,
   HDRPARSE,
-  LIBCALL,
   MMA_UKERNEL,
   BARRIER,
   FENCE,
@@ -62,7 +61,6 @@ inline static const std::string STR(ChoreoFeature cf) {
   case ChoreoFeature::MGM: return "mgm";
   case ChoreoFeature::VECTORIZE: return "vectorize";
   case ChoreoFeature::HDRPARSE: return "hdrparse";
-  case ChoreoFeature::LIBCALL: return "libcall";
   case ChoreoFeature::MMA_UKERNEL: return "mma_ukernel";
   case ChoreoFeature::BARRIER: return "barrier";
   case ChoreoFeature::FENCE: return "fence";
@@ -97,8 +95,6 @@ inline static const std::string Description(ChoreoFeature cf) {
   case ChoreoFeature::VECTORIZE: return "Choreo Scalar Code Vectorization.";
   case ChoreoFeature::HDRPARSE:
     return "Parse C++ Header Files Included by Choreo Source.";
-  case ChoreoFeature::LIBCALL:
-    return "Target Library (__lib_*) Builtin Support.";
   case ChoreoFeature::MMA_UKERNEL:
     return "Micro-kernel based MMA via target library calls.";
   case ChoreoFeature::BARRIER:
@@ -386,15 +382,35 @@ public:
   }
 
   // Library call support -- targets override to declare which __lib_* builtins
-  // they support and the expected argument counts for early sema validation.
-  // name is the full builtin name, e.g. "__lib_gemm".
-  virtual bool IsLibCallSupported(const std::string& /*name*/) const {
+  // they support on a given architecture, and the expected argument counts,
+  // for early sema validation.  name is the full builtin name, e.g.
+  // "__lib_gemm".
+  virtual bool IsLibCallSupported(const ArchId& /*arch*/,
+                                  const std::string& /*name*/) const {
     return false;
   }
   // Returns {min_args, max_args} for the given lib call.  {-1,-1} = unknown.
   virtual std::pair<int, int>
   LibCallArgRange(const std::string& /*name*/) const {
     return {-1, -1};
+  }
+  // Arch gate for the elementwise ("arithmetic") builtins.  Some of them only
+  // have a device entry point from a later architecture on, so naming them for
+  // an older one cannot work and has to be rejected rather than lowered to a
+  // function the device headers never declare.  is_vector distinguishes the
+  // vector form of the call from the scalar one, since the two may be spelled
+  // with different device entry points and can therefore have different arch
+  // requirements.
+  //
+  // Note this is the mirror image of IsLibCallSupported: the set of
+  // arithmetic builtins is open-ended (each code generator maps the names it
+  // knows and passes the rest through), so a target declares only the names it
+  // actually gates and leaves every other name allowed by default.  Targets
+  // without arch-gated builtins keep the default.
+  virtual bool IsArithBuiltinSupported(const ArchId& /*arch*/,
+                                       const std::string& /*name*/,
+                                       bool /*is_vector*/) const {
+    return true;
   }
   // Whether this target enables target-library lowering by default.
   virtual bool DefaultUseTargetLib() const { return false; }
