@@ -14,6 +14,7 @@ static ptr<Type> PreserveDeclaredMutability(const ptr<Type>& inferred,
     return pty;
   }
   if (IsActualBoundedIntegerType(inferred)) return MakeIntegerType(true);
+  if (isa<VectorType>(inferred)) return MutateType(inferred);
 
   return inferred;
 }
@@ -127,6 +128,11 @@ bool ShapeInference::BeforeVisitImpl(AST::Node& n) {
     gen_values = false;
   } else if (isa<AST::Parameter>(&n)) {
     allow_named_dim = true;
+  } else if (isa<AST::NamedVariableDecl>(&n)) {
+    // Only this declaration's type and initializer may supply its value
+    // numbers. In particular, an uninitialized scalar must not inherit the
+    // final expression visited in a preceding statement or branch.
+    InvalidateVisitorValNOs();
   } else if (isa<AST::MultiNodes>(&n))
     InvalidateVisitorValNOs();
 

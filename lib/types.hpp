@@ -1445,7 +1445,9 @@ struct VectorType final : public Type, public TypeIDProvider<VectorType> {
   }
   const std::string Name() const override { return "vector"; }
   const ptr<Type> CloneImpl() const override {
-    return std::make_shared<VectorType>(e_type, ec);
+    auto ty = std::make_shared<VectorType>(e_type, ec);
+    ty->is_mutable = is_mutable;
+    return ty;
   }
   bool operator==(const Type& ty) const override {
     if (auto vt = dyn_cast<VectorType>(&ty)) {
@@ -3709,12 +3711,18 @@ inline VectorInferenceResult InferVectorSelectType(const ptr<Type>& condition,
 }
 
 inline static ptr<Type> MutateType(const ptr<Type>& ty) {
+  if (auto vty = dyn_cast<VectorType>(ty)) {
+    auto result = CloneP(vty);
+    result->is_mutable = true;
+    return result;
+  }
   auto sty = dyn_cast<ScalarType>(ty);
   if (!sty) return ty->Clone();
   return MakeScalarType(sty->GetBaseType(), true);
 }
 
 inline bool IsMutable(const Type& ty) {
+  if (auto vty = dyn_cast<VectorType>(&ty)) return vty->is_mutable;
   auto sty = dyn_cast<ScalarType>(&ty);
   if (!sty) {
     // spanned are always mutable

@@ -1252,6 +1252,8 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       } else if (IsActualBoundedIntegerType(ety)) {
         // decay a bounded integer to be integer when it is mutable
         ety = MakeIntegerType(true);
+      } else if (isa<VectorType>(ety)) {
+        ety = MutateType(ety);
       } else {
         Error1(n.LOC(), "`" + n.name_str + "' with a type of \"" + PSTR(ety) +
                             "\" can not be declared as 'mutable'.");
