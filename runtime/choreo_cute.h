@@ -517,6 +517,14 @@ struct TMAAtom {
 
 using AsyncCopyAtom = cute::AutoCopyAsync;
 
+// choreo.h defines `#define __co_abort__() __builtin_trap()` as a host-side
+// fallback. Left in place, that macro would also expand this *device* function
+// definition into `choreo::__builtin_trap()`, which then makes every kernel
+// assertion call to `__co_abort__()` ambiguous between the global builtin and
+// the accidental `choreo::__builtin_trap()`. Undefine it here so the device
+// function keeps its real name; host-side users of the macro appear earlier in
+// choreo.h and are unaffected.
+#undef __co_abort__
 __device__ __attribute__((always_inline)) static inline void __co_abort__() {
   __trap();
 }

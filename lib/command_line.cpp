@@ -204,8 +204,9 @@ Option<bool> dump_ast(OptionKind::User, "--dump-ast", "-e", false,
 Option<bool> dump_hb(OptionKind::User, "--dump-hb", "", false,
                      "Dump Happens-Before graph in DOT (Graphviz) format.");
 Option<std::string> dump_ledger(
-    OptionKind::Hidden, "--dump-ledger", "", "" /*default empty*/,
-    "Dump the safety ledger (all assessed obligations with outcomes) as JSON.");
+    OptionKind::User, "--dump-ledger", "", "" /*default empty*/,
+    "Dump the safety ledger (all assessed obligations with outcomes) as JSON.",
+    "--dump-ledger=<path>");
 Option<bool> print_vn(OptionKind::Hidden, "--print-valno", "-vn", false,
                       "Trace the value numbering process.");
 Option<bool> disable_vn_share(
