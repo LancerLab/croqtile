@@ -1,0 +1,42 @@
+// REQUIRES: TARGET-CPU
+// RUN: choreo -t cc -gs %s | bash -s -- --execute | FileCheck %s
+
+// Keep memory-derived offsets inside the loop and after the preceding write.
+__co__ auto view_memory_offset(s32 [4, 16] input, s32 [4] indices) {
+  s32 [8, 16] output;
+  parallel p by 1 : block {
+    shared s32 [4] lut;
+    shared s32 [1, 16] tile;
+    dma.copy indices => lut;
+    foreach i in [4] {
+      load = dma.copy.async input.view(1, 16).from(lut.at(i), 0) => tile;
+      wait load;
+      dma.copy tile => output.view(1, 16).from(i, 0);
+      lut.at(i) = 3 - lut.at(i);
+      reload = dma.copy.async input.view(1, 16).from(lut.at(i) + 0, 0) => tile;
+      wait reload;
+      store = dma.copy.async tile => output.view(1, 16).from(lut.at(i) + 4, 0);
+      wait store;
+    }
+  }
+  return output;
+}
+
+int main() {
+  auto input = choreo::make_spandata<choreo::s32>(4, 16);
+  auto indices = choreo::make_spandata<choreo::s32>(4);
+  int order[] = {2, 0, 3, 1};
+  for (int r = 0; r < 4; ++r) {
+    indices[r] = order[r];
+    for (int c = 0; c < 16; ++c) input[r][c] = 100 * r + c + 1;
+  }
+  auto result = view_memory_offset(input.view(), indices.view());
+  for (int r = 0; r < 8; ++r)
+    for (int c = 0; c < 16; ++c) {
+      int source_row = r < 4 ? order[r] : r - 4;
+      choreo::choreo_assert(result[r][c] == input[source_row][c],
+                            "memory-derived view offset mismatch");
+    }
+  std::cout << "Test Passed" << std::endl;
+}
+// CHECK: Test Passed

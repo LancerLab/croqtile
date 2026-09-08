@@ -316,7 +316,8 @@ def TensorStoreTileOp : CoIR_Op<"tensor.store_tile", []> {
 // Tier 1: Scalar compute (for simple matmul.co-style kernels)
 //===----------------------------------------------------------------------===//
 
-def TensorLoadElemOp : CoIR_Op<"tensor.load_elem", [NoMemoryEffect]> {
+// Tensor storage is mutable: a load must not be CSE'd across a write or DMA.
+def TensorLoadElemOp : CoIR_Op<"tensor.load_elem", [MemoryEffects<[MemRead]>]> {
   let summary = "Load a scalar element from a tensor at indices";
   let arguments = (ins
     CoIR_TensorTypeC:$source,

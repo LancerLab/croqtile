@@ -787,11 +787,14 @@ public:
       n.sa.reset();
     }
 
-    // hoist any arith inside of chunkat positions
+    // Hoist index and view-offset expressions into statement-local scalars.
+    // Memory reads cannot be value-numbered directly by shape inference.
     for (auto tsi : n.AllOperations()) {
+      auto offsets = tsi->GetOffsets();
+      auto positions = offsets ? offsets : tsi->GetIndices();
       std::vector<std::pair<int, ptr<AST::Node>>> repls;
       int i = -1;
-      for (auto& v : tsi->IndexNodes()) {
+      for (auto& v : offsets ? tsi->OffsetNodes() : tsi->IndexNodes()) {
         ++i;
         auto expr = cast<AST::Expr>(v);
         if (expr->op == Op::GetIth) {
@@ -837,12 +840,11 @@ public:
       }
       for (auto& repl : repls) {
         VST_DEBUG(dbgs() << n.TypeNameString() << ": replace "
-                         << PSTR(tsi->GetIndices()->ValueAt(repl.first))
-                         << " with ");
+                         << PSTR(positions->ValueAt(repl.first)) << " with ");
 
-        tsi->GetIndices()->SetValueAt(repl.first, repl.second);
+        positions->SetValueAt(repl.first, repl.second);
 
-        VST_DEBUG(dbgs() << PSTR(tsi->GetIndices()->ValueAt(repl.first)) << "("
+        VST_DEBUG(dbgs() << PSTR(positions->ValueAt(repl.first)) << "("
                          << PSTR(repl.second->GetType()) << ").\n");
       }
     }
