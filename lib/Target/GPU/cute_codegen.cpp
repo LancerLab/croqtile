@@ -4131,10 +4131,33 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     //
     // When batch_dims is set the outer tensors are unused -- the batch loop
     // creates its own sub-tensors with per-iteration pointer offsets.
+    //
+    // Exception: `.pad` needs the full destination tensor (t_mds_name) to
+    // (a) fill the padded region with the pad value via cooperative_fill and
+    // (b) compute the inner data sub-tensor offset via t_mds_name.layout().
+    // Without it, codegen emits `cooperative_fill(, val)` and `.layout()` on an
+    // empty name. The batch loop below still overrides copy_dst with its own
+    // per-iteration sub-tensor, so the outer decl is used only for fill+offset.
     std::string f_mds_name, t_mds_name;
-    if (dma_plan->batch_dims.empty() && !dma_plan->dyn_box) {
+    if ((dma_plan->batch_dims.empty() && !dma_plan->dyn_box) ||
+        n.operation == ".pad") {
       // Skip outer tensor decls when batch_dims or dyn_box is set -- those
-      // paths create their own sub-tensors with per-iteration offsets.
+      // paths create their own sub-tensors with per-iteration offsets --
+      // except for `.pad`, which requires the full destination tensor.
+      //
+      // For `.pad` with batch_dims the destination shape is the *full* padded
+      // block shape (rank = #batch_dims + 2), while `to_strides` only holds the
+      // inner 2-D strides.  Prepend the per-batch-dim destination strides so the
+      // emitted layout has matching shape/stride ranks; otherwise cute's
+      // crd2idx fires "Mismatched Ranks" when the pad offset coord is applied.
+      ValueList t_stride_outer = t_stride;
+      if (n.operation == ".pad" && !dma_plan->batch_dims.empty()) {
+        t_stride_outer.clear();
+        for (const auto& bd : dma_plan->batch_dims)
+          t_stride_outer.push_back(bd.to_stride);
+        for (const auto& s : t_stride)
+          t_stride_outer.push_back(s);
+      }
       const auto f_mds = GenTensorDecl(
           RemoveSuffix(f_buf_name, ".data()"), f_buf.second,
           f_sty->GetStorage(), f_sty->ElementType(), f_mds_shape, false,
@@ -4142,8 +4165,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       const auto t_mds =
           GenTensorDecl(RemoveSuffix(t_buf_name, ".data()"), t_buf.second,
                         t_sty->GetStorage(), t_sty->ElementType(), t_mds_shape,
-                        false, t_mds_offset, ValueSTR(t_stride, false, true),
-                        {}, use_wgmma_layout_t, swizzle_mode);
+                        false, t_mds_offset,
+                        ValueSTR(t_stride_outer, false, true), {},
+                        use_wgmma_layout_t, swizzle_mode);
       f_mds_name = f_mds.first;
       t_mds_name = t_mds.first;
       ds << f_mds.second;
