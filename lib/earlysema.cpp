@@ -3677,7 +3677,7 @@ bool EarlySemantics::Visit(AST::Return& n) {
   return true;
 }
 
-bool EarlySemantics::Visit(AST::LoopRange& n) {
+bool EarlySemantics::Visit(AST::RangeExpr& n) {
   TraceEachVisit(n);
 
   if (n.lb_mutator && !isa<ScalarIntegerType>(NodeType(*n.lb_mutator)))
@@ -3695,7 +3695,7 @@ bool EarlySemantics::Visit(AST::ForeachBlock& n) {
   std::unordered_set<std::string> local_names_seen;
 
   for (auto& i : n.GetRanges()) {
-    auto rng = dyn_cast<AST::LoopRange>(i);
+    auto rng = dyn_cast<AST::RangeExpr>(i);
 
     // Validate explicit local name (the iteration variable "c" in c=b(...)).
     if (rng->HasExplicitIV()) {

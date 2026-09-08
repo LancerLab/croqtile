@@ -143,12 +143,14 @@ const std::string CCCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
   std::ostringstream oss;
 
   if (auto id = dyn_cast<AST::Identifier>(e)) {
-    if (within_map.count(InScopeNameForRef(id->name))) {
+    auto scoped = InScopeNameForRef(id->name);
+    auto matchers = within_map.find(scoped);
+    if (matchers != within_map.end() && matchers->second.size() > 1) {
       size_t i = 0;
-      for (auto iv_name : within_map.at(InScopeNameForRef(id->name)))
+      for (auto iv_name : matchers->second)
         oss << ((i++ == 0) ? "" : ", ") << UnScopedName(ssm.HostName(iv_name));
     } else {
-      oss << UnScopedName(ssm.HostName(InScopeNameForRef(id->name)));
+      oss << UnScopedName(ssm.HostName(scoped));
     }
   } else if (auto np = dyn_cast<AST::Nullptr>(e)) {
     (void)np;
@@ -182,7 +184,8 @@ const std::string CCCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
       for (auto item : da->GetIndices()) {
         auto offset_vi = sbe::nu(0);
         if (auto id_node = AST::GetIdentifier(item)) {
-          if (within_map.count(InScopeNameForRef(id_node->name))) {
+          if (within_map.count(InScopeNameForRef(id_node->name)) &&
+              within_map.at(InScopeNameForRef(id_node->name)).size() > 1) {
             auto ivs = within_map.at(InScopeNameForRef(id_node->name));
             for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr) {
               offset_vi = sbe::sym(*iv_itr);
@@ -736,8 +739,18 @@ bool CCCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
     const auto& ranges = fb->GetRangeNodes();
     for (int j = ranges->Count() - 1; j >= 0; --j) {
-      auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
-      auto cname = rng->GetIVName();
+      auto rng = cast<AST::RangeExpr>(ranges->ValueAt(j));
+
+      if (IsActualBoundedIntegerType(rng->GetIV()->GetType())) {
+        // Scalar canonicalized `foreach __iv_a = a(..)` or explicit local
+        // `foreach c = a(..)`: the prologue emitted the loop directly over
+        // the iteration variable, so close it here (no matcher reset).
+        DecrIndent();
+        IndStream() << "}\n";
+        continue;
+      }
+
+      auto cname = rng->GetRVName();
       auto ivs = within_map.at(InScopeName(cname));
       for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
         DecrIndent();
@@ -926,20 +939,26 @@ bool CCCodeGen::Visit(AST::ChoreoFunction& n) {
 bool CCCodeGen::Visit(AST::WithIn& n) {
   TraceEachVisit(n);
 
+  const bool has_scalar_matcher =
+      n.with && n.GetMatchers().size() == 1 &&
+      IsActualBoundedIntegerType(
+          cast<AST::Identifier>(n.GetMatchers()[0])->GetType());
+
   if (n.with)
     ssm.MapHostSymbol(InScopeName(n.with->name), "__iv_" + n.with->name);
 
   assert(n.with_matchers && "expected matchers exist.");
 
+  // A single-matcher `with` source (e.g. the desugared `foreach j in [N]`)
+  // is scalar: keep the source mapped to its canonical `__iv_<source>` IV and
+  // skip the synthetic matcher initializer; the foreach emits the loop
+  // directly over `__iv_<source>`.
+  if (has_scalar_matcher) return true;
+
   for (auto& v : n.GetMatchers()) {
     auto id = cast<AST::Identifier>(v);
     ssm.RemapHostSymbol(InScopeName(id->name), "__iv_" + id->name);
     os << indent << "int __iv_" << id->name << " = 0;\n";
-  }
-
-  if (n.with && (n.GetMatchers().size() == 1)) {
-    auto m1 = cast<AST::Identifier>(n.GetMatchers()[0]);
-    ssm.RemapHostSymbol(InScopeName(n.with->name), "__iv_" + m1->name);
   }
 
   return true;
@@ -961,8 +980,35 @@ bool CCCodeGen::Visit(AST::ForeachBlock& n) {
   bool vectorizable = n.loop && n.loop->CanVectorize();
 
   for (auto& rn : n.GetRanges()) {
-    auto rng = cast<AST::LoopRange>(rn);
-    auto cname = rng->GetIVName();
+    auto rng = cast<AST::RangeExpr>(rn);
+
+    if (IsActualBoundedIntegerType(rng->GetIV()->GetType())) {
+      auto iv_scoped = InScopeName(rng->GetIVName());
+      // Scalar canonicalized `foreach __iv_a = a(..)` or explicit local
+      // `foreach c = a(..)`: the iteration variable's bounded type carries
+      // the exact (lb, ub, step). Emit the loop directly over it; body
+      // references already resolve to this name, so no matcher remap needed.
+      assert(rng->iv && "foreach range must carry a canonical iteration "
+                        "variable after normalization.");
+      auto iv_bty = cast<BoundedType>(rng->GetIV()->GetType());
+      auto iv_name = UnScopedName(iv_scoped);
+      ssm.RemapHostSymbol(iv_scoped, iv_name);
+      auto lb = UnScopedExpr(ValueSTR(iv_bty->GetLowerBound()));
+      auto ub = UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()));
+      auto step = iv_bty->GetStep();
+      if (vectorizable) IndStream() << "#pragma omp simd\n";
+      IndStream() << "for (int " << iv_name << " = " << lb << "; " << iv_name
+                  << (step != 1 ? " <= " : " < ") << ub << "; "
+                  << (step != 1 ? (iv_name + " += " + std::to_string(step))
+                                : ("++" + iv_name))
+                  << ") {\n";
+      IncrIndent();
+      continue;
+    }
+    // Multi-dim source (e.g. `foreach index` over a tuple with-name): fall
+    // through to the matcher path below, which expands nested scalar loops.
+
+    auto cname = rng->GetRVName();
     for (auto iv_name : within_map.at(InScopeName(cname))) {
       auto iv_ty = GetSymbolType(UnScopedName(iv_name));
       auto iv_bty = dyn_cast<BoundedType>(iv_ty);

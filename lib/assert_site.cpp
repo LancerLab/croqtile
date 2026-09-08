@@ -77,7 +77,7 @@ size_t AssertSite::EstimateLoopTripCount(AST::Node* n) const {
   if (auto fb = dyn_cast<AST::ForeachBlock>(n)) {
     size_t trip = 1;
     for (auto range_node : fb->GetRanges()) {
-      auto range = cast<AST::LoopRange>(range_node);
+      auto range = cast<AST::RangeExpr>(range_node);
       auto sty = GetSymbolType(range->GetRVName());
       int64_t span = 100; // default trip count
       if (IsActualBoundedIntegerType(sty)) {
@@ -233,7 +233,7 @@ bool AssertSite::Visit(AST::WithBlock& n) {
   return true;
 }
 
-bool AssertSite::Visit(AST::LoopRange& n) {
+bool AssertSite::Visit(AST::RangeExpr& n) {
   if (n.BoundIsMutated() && scope_map.count(&n)) {
     // Record a barrier only if the IV is findable in the symbol table.
     // Synthetic iteration variables (e.g. `foreach i in [K]` where `i`

@@ -1,0 +1,19 @@
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - | FileCheck %s
+//
+// Verify step-aware foreach range lowering:
+//  - `a(:-1:2)` over `with {a} in [6]` lowers to the inclusive last index
+//    [0, 4]:2 and is emitted as `__iv_a <= 4` with a stride of 2.
+//  - Dense (step == 1) ranges keep the exclusive upper bound `__iv < ub`.
+
+__co__ void test_stepped_range(f32 [6, 4] x) {
+  parallel p by 1 : block {
+    with {a} in [6] {
+      foreach a(:-1:2) {
+        dma.copy x.chunkat(a, _) => local;
+      }
+    }
+  }
+}
+
+// CHECK-LABEL: __global__{{.*}}test_stepped_range
+// CHECK: for (int __iv_a = 0; __iv_a <= 4; __iv_a += 2) {

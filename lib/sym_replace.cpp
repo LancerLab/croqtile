@@ -140,7 +140,7 @@ void SymReplace::InitializeNode(ptr<AST::Node> n) {
   } else if (isa<AST::FloatLiteral>(n) || isa<AST::StringLiteral>(n)) {
     // currently, float-point number is only used as literal.
     // no need to symbolize it.
-  } else if (isa<AST::LoopRange>(n)) {
+  } else if (isa<AST::RangeExpr>(n)) {
   } else if (isa<AST::IntTuple>(n)) {
     // since there may be AST::Expr in AST::MultiValues,
     // deal with AST::IntTuple in SymbolizeExprNode() rather than here.

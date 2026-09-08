@@ -3034,6 +3034,18 @@ inline int GetSingleWidth(const ptr<Type>& ty) {
   return cast<BoundedType>(ty)->GetWidth();
 }
 
+// Compute the inclusive last index of a stepped range, i.e. the largest value
+// `lb + k * step` (k >= 0) that is strictly less than the exclusive `ub`.
+// Stepped loops store this inclusive upper bound in the iteration variable's
+// bounded type and are emitted with `iv <= ub`; dense (step == 1) ranges keep
+// the exclusive upper bound and are emitted with `iv < ub`.
+inline ValueItem StepAlignedUpperBound(const ValueItem& lb, const ValueItem& ub,
+                                       int step) {
+  if (step <= 1) return ub;
+  return (lb + ((ub - lb - sbe::nu(1)) / sbe::nu(step)) * sbe::nu(step))
+      ->Normalize();
+}
+
 // utility functions to generate types
 // Note: should always use utility functions
 inline Shape GenInvalidShape() { return Shape(); }
@@ -3233,6 +3245,12 @@ inline ptr<BoundedIntegerType> MakeBoundedIntegerType(const std::string& ub) {
 
 inline ptr<BoundedIntegerType> MakeBoundedIntegerType(const ValueItem& ub) {
   return std::make_shared<BoundedIntegerType>(sbe::nu(0), ub);
+}
+
+inline ptr<BoundedIntegerType> MakeBoundedIntegerType(const ValueItem& lb,
+                                                      const ValueItem& ub,
+                                                      int step = 1) {
+  return std::make_shared<BoundedIntegerType>(lb, ub, step);
 }
 
 inline ptr<BoundedIntegerType> MakeUnknownBoundedIntegerType() {

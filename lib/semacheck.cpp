@@ -219,7 +219,7 @@ bool SemaChecker::ExpressionIsConstrained(const ValueItem& expr) const {
 static int64_t GetForeachStaticExtent(const AST::ForeachBlock& fe) {
   auto& ranges = fe.GetRanges();
   if (ranges.empty()) return -1;
-  auto rng = dyn_cast<AST::LoopRange>(ranges.front());
+  auto rng = dyn_cast<AST::RangeExpr>(ranges.front());
   if (!rng || !rng->GetRV()) return -1;
   auto iv_ty = dyn_cast<BoundedType>(rng->GetRV()->GetType());
   if (!iv_ty) return -1;
@@ -619,14 +619,38 @@ bool SemaChecker::VisitNode(AST::DataAccess& n) {
 
           if (isa<BoundedType>(nty)) {
             auto c = ExpressionIsConstrained(index_val);
-            if (IsValidValueItem(expr_bounds.ub) && !c)
+            // Decide between the loop-invariant bound-based check and the
+            // in-loop variable-based check:
+            //  - Not constrained (no scope predicate mentions the index): the
+            //    type-declared bound is exact, so emit the bound check
+            //    expr_bounds.ub < dim_bound (loop-invariant, hoistable).
+            //  - Constrained: prefer the variable-based check index < dim_bound,
+            //    which interval analysis proves statically when the scope
+            //    predicate tightens a numeric bound (e.g. if (p < 4)).  When
+            //    interval analysis cannot decide it (a symbolic loop bound such
+            //    as foreach [0:N]), fall back to the bound-based check so the
+            //    loop-invariant bound is hoisted instead of a per-iteration
+            //    check on the loop variable.
+            bool use_bound_based = false;
+            if (IsValidValueItem(expr_bounds.ub)) {
+              if (!c) {
+                use_bound_based = true;
+              } else {
+                auto proven = TryProveWithIntervals(
+                    this, sbe::oc_lt(index_val, dim_bound)->Normalize(),
+                    ActiveScopePredicate());
+                use_bound_based = !proven.has_value();
+              }
+            }
+
+            if (use_bound_based) {
               CreateAssessment(
                   sbe::oc_lt(expr_bounds.ub, dim_bound)->Normalize(),
                   "The " + Ordinal(d + 1) + " index `" + idx_str +
                       "` of element access '" + data_str +
                       "' should be less than " + STR(dim_bound),
                   val_node->LOC(), class_node, UsageType::ElementAccess, &n);
-            else {
+            } else {
               CreateAssessment(sbe::oc_ge(index_val, sbe::nu(0))->Normalize(),
                                "The " + Ordinal(d + 1) + " index `" + idx_str +
                                    "` of element access '" + data_str +

@@ -1919,10 +1919,10 @@ within_block
             assert(wi->with_matchers != nullptr);
             for (auto wm : wi->with_matchers->AllValues()) {
               auto id = cast<AST::Identifier>(wm);
-              mn->Append(AST::Make<AST::LoopRange>(id->LOC(), id));
+              mn->Append(AST::Make<AST::RangeExpr>(id->LOC(), id));
             }
           } else
-            mn->Append(AST::Make<AST::LoopRange>(wi->LOC(), wi->with));
+            mn->Append(AST::Make<AST::RangeExpr>(wi->LOC(), wi->with));
         }
         auto fe = AST::Make<AST::ForeachBlock>(@1, mn, $3);
         $$->stmts = AST::Make<AST::MultiNodes>(@3);
@@ -1939,10 +1939,10 @@ within_block
             assert(wi->with_matchers != nullptr);
             for (auto wm : wi->with_matchers->AllValues()) {
               auto id = cast<AST::Identifier>(wm);
-              mv->Append(AST::Make<AST::LoopRange>(id->LOC(), id));
+              mv->Append(AST::Make<AST::RangeExpr>(id->LOC(), id));
             }
           } else
-            mv->Append(AST::Make<AST::LoopRange>(wi->LOC(), wi->with));
+            mv->Append(AST::Make<AST::RangeExpr>(wi->LOC(), wi->with));
         }
         auto fe = AST::Make<AST::ForeachBlock>(@1, mv, $4, $5);
         $$->stmts = AST::Make<AST::MultiNodes>(@5);
@@ -2089,30 +2089,30 @@ bound_expr
 range_expr
     /* explicit local name: foreach c=b, foreach c=b(lb:ub), foreach c=b(lb:ub:step) */
     : IDENTIFIER ASSIGN IDENTIFIER {
-        $$ = AST::Make<AST::LoopRange>(@1,
+        $$ = AST::Make<AST::RangeExpr>(@1,
                AST::Make<AST::Identifier>(@1, $1),
                AST::Make<AST::Identifier>(@3, $3),
                nullptr, nullptr);
       }
     | IDENTIFIER ASSIGN IDENTIFIER LPAREN bound_expr COL bound_expr RPAREN {
-        $$ = AST::Make<AST::LoopRange>(@1,
+        $$ = AST::Make<AST::RangeExpr>(@1,
                AST::Make<AST::Identifier>(@1, $1),
                AST::Make<AST::Identifier>(@3, $3),
                $5, $7);
       }
     | IDENTIFIER ASSIGN IDENTIFIER LPAREN bound_expr COL bound_expr COL index_or_none RPAREN {
-        $$ = AST::Make<AST::LoopRange>(@1,
+        $$ = AST::Make<AST::RangeExpr>(@1,
                AST::Make<AST::Identifier>(@1, $1),
                AST::Make<AST::Identifier>(@3, $3),
                $5, $7, $9);
       }
     /* existing forms (sugar: iv == range_var) */
-    | IDENTIFIER { $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1)); }
+    | IDENTIFIER { $$ = AST::Make<AST::RangeExpr>(@1, AST::Make<AST::Identifier>(@1, $1)); }
     | IDENTIFIER LPAREN bound_expr COL bound_expr RPAREN {
-        $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1), $3, $5);
+        $$ = AST::Make<AST::RangeExpr>(@1, AST::Make<AST::Identifier>(@1, $1), $3, $5);
       }
     | IDENTIFIER LPAREN bound_expr COL bound_expr COL index_or_none RPAREN {
-        $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1), $3, $5, $7);
+        $$ = AST::Make<AST::RangeExpr>(@1, AST::Make<AST::Identifier>(@1, $1), $3, $5, $7);
       }
     ;
 

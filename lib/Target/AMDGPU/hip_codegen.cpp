@@ -219,8 +219,18 @@ bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
     const auto& ranges = fb->GetRangeNodes();
     for (int j = ranges->Count() - 1; j >= 0; --j) {
-      auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
-      auto cname = rng->GetIVName();
+      auto rng = cast<AST::RangeExpr>(ranges->ValueAt(j));
+
+      if (IsActualBoundedIntegerType(rng->GetIV()->GetType())) {
+        // Scalar canonicalized `foreach __iv_a = a(..)` or explicit local
+        // `foreach c = a(..)`: the prologue emitted the loop directly over
+        // the iteration variable, so close it here (no matcher reset).
+        DecrIndent();
+        IndStream() << "}\n";
+        continue;
+      }
+
+      auto cname = rng->GetRVName();
       auto ivs = within_map.at(InScopeName(cname));
       for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
         DecrIndent();
@@ -260,8 +270,20 @@ bool HIPCodeGen::Visit(AST::ParamList& n) {
 }
 bool HIPCodeGen::Visit(AST::WithIn& n) {
   TraceEachVisit(n);
+
+  const bool has_scalar_matcher =
+      n.with && n.GetMatchers().size() == 1 &&
+      IsActualBoundedIntegerType(
+          cast<AST::Identifier>(n.GetMatchers()[0])->GetType());
+
   if (n.with)
     ssm.MapDeviceSymbol(InScopeName(n.with->name), "__iv_" + n.with->name);
+
+  // A single-matcher `with` source (e.g. the desugared `foreach j in [N]`)
+  // is scalar: keep the source mapped to its canonical `__iv_<source>` IV and
+  // skip the synthetic matcher initializer; the foreach emits the loop
+  // directly over `__iv_<source>`.
+  if (has_scalar_matcher) return true;
 
   for (auto& v : n.GetMatchers()) {
     auto id = cast<AST::Identifier>(v);
@@ -271,11 +293,6 @@ bool HIPCodeGen::Visit(AST::WithIn& n) {
       hs << h_indent << "int __iv_" << id->name << " = 0;\n";
     else
       ds << d_indent << "int __iv_" << id->name << " = 0;\n";
-  }
-  if (n.with && (n.GetMatchers().size() == 1)) {
-    auto id = cast<AST::Identifier>(n.GetMatchers()[0]);
-    ssm.RemapDeviceSymbol(InScopeName(n.with->name), "__iv_" + id->name);
-    ssm.RemapHostSymbol(InScopeName(n.with->name), "__iv_" + id->name);
   }
   return true;
 }
@@ -1760,8 +1777,34 @@ bool HIPCodeGen::Visit(AST::ForeachBlock& n) {
   }
 
   for (auto& rn : n.GetRanges()) {
-    auto rng = cast<AST::LoopRange>(rn);
-    auto cname = rng->GetIVName();
+    auto rng = cast<AST::RangeExpr>(rn);
+
+    if (IsActualBoundedIntegerType(rng->GetIV()->GetType())) {
+      auto iv_scoped = InScopeName(rng->GetIVName());
+      // Scalar canonicalized `foreach __iv_a = a(..)` or explicit local
+      // `foreach c = a(..)`: emit the loop directly over the iteration
+      // variable; its bounded type carries the exact (lb, ub, step).
+      assert(rng->iv && "foreach range must carry a canonical iteration "
+                        "variable after normalization.");
+      auto iv_bty = cast<BoundedType>(rng->GetIV()->GetType());
+      auto iv_name = UnScopedName(iv_scoped);
+      ssm.RemapDeviceSymbol(iv_scoped, iv_name);
+      ssm.RemapHostSymbol(iv_scoped, iv_name);
+      auto lb = UnScopedExpr(ValueSTR(iv_bty->GetLowerBound()));
+      auto ub = UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()));
+      auto step = iv_bty->GetStep();
+      IndStream() << "for (int " << iv_name << " = " << lb << "; " << iv_name
+                  << (step != 1 ? " <= " : " < ") << ub << "; "
+                  << (step != 1 ? (iv_name + " += " + std::to_string(step))
+                                : ("++" + iv_name))
+                  << ") {\n";
+      IncrIndent();
+      continue;
+    }
+    // Multi-dim source (e.g. `foreach index` over a tuple with-name): fall
+    // through to the matcher path below, which expands nested scalar loops.
+
+    auto cname = rng->GetRVName();
     for (auto iv_name : within_map.at(InScopeName(cname))) {
       auto iv_ty = GetSymbolType(UnScopedName(iv_name));
       assert(IsActualBoundedIntegerType(iv_ty));
@@ -1983,7 +2026,7 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
   if (auto lit = dyn_cast<AST::FloatLiteral>(n)) { return lit->SourceSTR(); }
   if (auto id = dyn_cast<AST::Identifier>(n)) {
     auto sname = InScopeNameForRef(id->name);
-    if (within_map.count(sname)) {
+    if (within_map.count(sname) && within_map.at(sname).size() > 1) {
       std::string r;
       size_t i = 0;
       for (auto& iv_name : within_map.at(sname)) {
@@ -2119,7 +2162,8 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
         for (auto item : da->GetIndices()) {
           if (auto id_node = AST::GetIdentifier(item)) {
             auto id_sname = InScopeNameForRef(id_node->name);
-            if (within_map.count(id_sname)) {
+            if (within_map.count(id_sname) &&
+                within_map.at(id_sname).size() > 1) {
               for (auto& iv : within_map.at(id_sname)) {
                 auto offset_vi = sbe::sym(iv);
                 if (shape.Rank() > idx + 1)

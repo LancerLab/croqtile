@@ -802,6 +802,16 @@ public:
   const ptr<Node>& GetR() const { return value_r; }
   const ptr<Node>& GetL() const { return value_l; }
   const ptr<Expr>& GetC() const { return value_c; }
+  // The operand of a bound-access expression that carries the bound (the
+  // bounded-variable reference preserved by foreach canonicalization).
+  // Returns nullptr for non-bound-access expressions.
+  ptr<Node> GetBoundOperand() const {
+    switch (GetBoundOperandSide(op)) {
+    case BoundOperandSide::Left: return GetL();
+    case BoundOperandSide::Right: return GetR();
+    default: return nullptr;
+    }
+  }
   const Opcode& GetOp() const { return op; }
   Form GetForm() const { return t; }
   void SetForm(const Form& form) {
@@ -4034,7 +4044,7 @@ struct Fence : public Node, public TypeIDProvider<Fence> {
   __UDT_TYPE_INFO__(Node, Fence)
 };
 
-struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
+struct RangeExpr : public Node, public TypeIDProvider<RangeExpr> {
   // rv: the range-source variable (a within-declared bounded variable whose
   // bounds define this range). Not directly visible inside the foreach body.
   ptr<Identifier> rv;
@@ -4051,13 +4061,13 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   int step = GetInvalidStep();
   ValueItem scope_predicate = GetInvalidValueItem();
 
-  LoopRange(const location& l, const ptr<Identifier>& i)
+  RangeExpr(const location& l, const ptr<Identifier>& i)
       : Node(l), rv(i), iv(nullptr) {} // the cmpt_bounds are yet to be inferred
-  LoopRange(const location& l, const ptr<Identifier>& i, const ptr<Node>& lb,
+  RangeExpr(const location& l, const ptr<Identifier>& i, const ptr<Node>& lb,
             const ptr<Node>& ub, int s = 1)
       : Node(l), rv(i), iv(nullptr), lb_mutator(lb), ub_mutator(ub), step(s) {}
   // Constructor for explicit local name: foreach local=source(lb:ub[:step])
-  LoopRange(const location& l, const ptr<Identifier>& local,
+  RangeExpr(const location& l, const ptr<Identifier>& local,
             const ptr<Identifier>& source, const ptr<Node>& lb,
             const ptr<Node>& ub, int s = 1)
       : Node(l), rv(source), iv(local), lb_mutator(lb), ub_mutator(ub),
@@ -4081,7 +4091,7 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   ptr<Node> CloneImpl() const override {
     auto cloned_rv = (!rv) ? nullptr : CloneP(rv);
     auto cloned_iv = (!iv) ? nullptr : CloneP(iv);
-    auto copied = Make<LoopRange>(LOC(), cloned_rv, CloneP(lb_mutator),
+    auto copied = Make<RangeExpr>(LOC(), cloned_rv, CloneP(lb_mutator),
                                   CloneP(ub_mutator), step);
     copied->iv = cloned_iv;
     copied->scope_predicate = scope_predicate;
@@ -4110,7 +4120,7 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   const ValueItem GetScopePredicate() const { return scope_predicate; }
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__(Node, LoopRange)
+  __UDT_TYPE_INFO__(Node, RangeExpr)
 };
 
 ptr<Call> GetCall(const ptr<Node>& n);
@@ -4135,7 +4145,7 @@ struct ForeachBlock : public Block, public TypeIDProvider<ForeachBlock> {
   const ValueItem GetScopePredicate() const override {
     auto pred = sbe::bl(true);
     for (auto rng : ranges->AllValues())
-      pred = sbe::bl_and(cast<LoopRange>(rng)->GetScopePredicate(), pred);
+      pred = sbe::bl_and(cast<RangeExpr>(rng)->GetScopePredicate(), pred);
     return pred;
   }
 
@@ -4148,6 +4158,7 @@ struct ForeachBlock : public Block, public TypeIDProvider<ForeachBlock> {
     auto copied =
         Make<ForeachBlock>(LOC(), CloneP(ranges), CloneP(suffixs), stmts);
     copied->loop = loop;
+    CloneBlockStateTo(*copied);
     return copied;
   }
 
@@ -4175,8 +4186,16 @@ struct ForeachBlock : public Block, public TypeIDProvider<ForeachBlock> {
 
   ptr<Identifier> GetRV() const {
     if (ranges->Count() == 1) {
-      auto range = dyn_cast<AST::LoopRange>(ranges->ValueAt(0));
+      auto range = dyn_cast<AST::RangeExpr>(ranges->ValueAt(0));
       return range->GetRV();
+    }
+    return nullptr;
+  }
+
+  ptr<Identifier> GetIV() const {
+    if (ranges->Count() == 1) {
+      auto range = dyn_cast<AST::RangeExpr>(ranges->ValueAt(0));
+      return range->GetIV();
     }
     return nullptr;
   }

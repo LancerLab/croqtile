@@ -95,14 +95,19 @@ ValueItem BuildPredicate(TypeInference* ti, const ptr<AST::Node>& n) {
 
 } // namespace
 
-ValueItem TypeInference::BuildRangePredicate(AST::LoopRange& n) {
-  auto iv = sbe::sym(InScopeName(n.GetRVName()));
+ValueItem TypeInference::BuildRangePredicate(AST::RangeExpr& n) {
+  // The predicate is bound to the iteration variable (the canonicalized
+  // `__iv_<source>` or the explicit local name). Its `lb:ub:step` mutation is
+  // already applied to the iteration variable's bounded type in
+  // Visit(RangeExpr), so the bounds are read straight from that type.
+  auto iv = sbe::sym(InScopeName(n.GetIVName()));
 
-  auto iv_ty = GetSymbolType(n.LOC(), n.GetRVName());
+  auto iv_ty = GetSymbolType(n.LOC(), n.GetIVName());
   assert(isa<BoundedType>(iv_ty));
 
   if (!IsActualBoundedIntegerType(iv_ty)) {
-    // ituple can not be mutated for the range
+    // A multi-dim ituple cannot be mutated for a single range; flatten it to
+    // a single 0 <= iv < prod(upper bounds) interval.
     auto ity = cast<BoundedITupleType>(iv_ty);
     auto ub = MultiplyAll(ity->GetUpperBounds().Value());
     auto lb = sbe::nu(0);
@@ -113,16 +118,13 @@ ValueItem TypeInference::BuildRangePredicate(AST::LoopRange& n) {
   auto bty = cast<BoundedType>(iv_ty);
   auto ub = bty->GetUpperBound();
   auto lb = bty->GetLowerBound();
-
-  auto ub_addend = sbe::nu(0);
-  auto lb_addend = sbe::nu(0);
-  if (n.ub_mutator) ub_addend = BuildPredicate(this, n.ub_mutator);
-  if (n.lb_mutator) lb_addend = BuildPredicate(this, n.lb_mutator);
-  ub += ub_addend;
-  lb += lb_addend;
+  auto step = bty->GetStep();
   assert(IsValidValueItem(lb));
   assert(IsValidValueItem(ub));
-  return sbe::bl_and(sbe::oc_ge(iv, lb), sbe::oc_lt(iv, ub));
+  // Stepped ranges store the inclusive last index as the upper bound, so the
+  // predicate is `lb <= iv <= ub`; dense ranges use the exclusive `iv < ub`.
+  return sbe::bl_and(sbe::oc_ge(iv, lb),
+                     step != 1 ? sbe::oc_le(iv, ub) : sbe::oc_lt(iv, ub));
 }
 
 bool TypeInference::BeforeBeforeVisit(AST::Node& n) {
@@ -187,7 +189,7 @@ bool TypeInference::AfterVisitImpl(AST::Node& n) {
     allow_named_dim = false;
   } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
     for (auto& rn : fb->GetRanges()) {
-      auto range = cast<AST::LoopRange>(rn);
+      auto range = cast<AST::RangeExpr>(rn);
       auto sym_ty = GetSymbolType(n.LOC(), range->GetRVName());
       SetNodeType(*range->GetRV(), sym_ty);
     }
@@ -968,18 +970,40 @@ bool TypeInference::Visit(AST::Expr& n) {
         SetNodeType(n, MakeIntegerType(true));
       else
         SetNodeType(n, pty_rhs);
-    } else if (isa<BoundedITupleType>(pty_lhs) &&
-               isa<BoundedITupleType>(pty_rhs)) {
+    } else if (IsActualBoundedIntegerType(pty_lhs) &&
+               isa<ScalarIntegerType>(pty_rhs)) {
+      // scalar bounded integer op scalar integer (e.g. a canonicalized loop
+      // variable `__iv_x - 1`). Mirrors the BoundedITupleType cases above;
+      // keep the bounded operand's (now-resolved) type so the stale symbolic
+      // placeholder type from early sema is not reused.
+      if (n.op == "#-" || n.op == "#+")
+        SetNodeType(n, MakeBoundedITupleType(n.s));
+      else if (n.op == "#" || n.op == "#*" || n.op == "#/" || n.op == "#%") {
+        Error1(n.LOC(), "The operands of the expression cannot undergo '" +
+                            n.op + "' binary operation.");
+      } else if (n.op == "&" || n.op == "|" || n.op == "^" || n.op == "<<" ||
+                 n.op == ">>") {
+        SetNodeType(n, MakeIntegerType(true));
+      } else
+        SetNodeType(n, pty_lhs);
+    } else if (IsActualBoundedIntegerType(pty_rhs) &&
+               isa<ScalarIntegerType>(pty_lhs)) {
+      if (n.op == "#-" || n.op == "#+" || n.op == "#" || n.op == "#*" ||
+          n.op == "#/" || n.op == "#%")
+        Error1(n.LOC(), "The operands of the expression cannot undergo '" +
+                            n.op + "' binary operation.");
+      else if (n.op == "&" || n.op == "|" || n.op == "^" || n.op == "<<" ||
+               n.op == ">>")
+        SetNodeType(n, MakeIntegerType(true));
+      else
+        SetNodeType(n, pty_rhs);
+    } else if (IsActualBoundedIntegerType(pty_lhs) &&
+               IsActualBoundedIntegerType(pty_rhs)) {
       // to support `chunkat(x, y#z)`
       if (n.op == "#") {
-        auto bitt_lhs = cast<BoundedITupleType>(pty_lhs);
-        auto bitt_rhs = cast<BoundedITupleType>(pty_rhs);
         // bounded integer in within will be transformed to bounded ituple in
         // valno.hpp
-        assert(
-            bitt_lhs->Dims() == 1 && bitt_rhs->Dims() == 1 &&
-            "for now only support multiplication of one dim bounded ituples.");
-        auto ub = bitt_lhs->GetUpperBound(0) * bitt_rhs->GetUpperBound(0);
+        auto ub = GetSingleUpperBound(pty_lhs) * GetSingleUpperBound(pty_rhs);
         SetNodeType(n, MakeBoundedITupleType(Shape(1, ub)));
       }
       // else the type is decayed. use the type of earlysema's
@@ -1541,8 +1565,42 @@ bool TypeInference::Visit(AST::Return& n) {
   return true;
 }
 
-bool TypeInference::Visit(AST::LoopRange& n) {
+bool TypeInference::Visit(AST::RangeExpr& n) {
   TraceEachVisit(n);
+
+  // The iteration variable (canonicalized `__iv_<source>`, an explicit local,
+  // or the aliased range source for multi-dim) is always resolvable after
+  // canonicalization; ensure its symbol is declared so BuildRangePredicate and
+  // codegen can resolve it. A bare multi-dim source (`foreach index`) aliases
+  // the `within`-declared source itself (GetIV == GetRV), so it is already
+  // declared and must not be redefined here. A distinct name (canonical
+  // `__iv_<source>` or an explicit local) is defined in the current scope so
+  // nested sugar foreaches over the same source shadow correctly instead of
+  // resolving to an enclosing loop's variable.
+  if (n.HasExplicitIV() && !SSTab().DeclaredInScope(n.GetIVName()))
+    AssignSymbolWithType(n.LOC(), n.GetIVName(), n.GetIV()->GetType());
+
+  // Apply the `lb:ub:step` mutation to the iteration variable's bounded type so
+  // the type itself carries the loop bounds. Codegen and BuildRangePredicate
+  // read the bounds (and step) straight from this type, so no separate remap or
+  // bound tracking is needed at codegen time.
+  if (auto iv_ty = GetSymbolType(n.LOC(), n.GetIVName())) {
+    if (IsActualBoundedIntegerType(iv_ty)) {
+      auto bty = cast<BoundedType>(iv_ty);
+      auto lb = bty->GetLowerBound();
+      auto ub = bty->GetUpperBound();
+      if (n.lb_mutator) lb += BuildPredicate(this, n.lb_mutator);
+      if (n.ub_mutator) ub += BuildPredicate(this, n.ub_mutator);
+      auto step = IsValidStep(n.step) ? n.step : 1;
+      // Stepped ranges store the inclusive last index as the upper bound so
+      // codegen can emit `iv <= ub`; dense ranges keep the exclusive bound.
+      ub = StepAlignedUpperBound(lb, ub, step);
+      auto mutated = MakeBoundedIntegerType(lb, ub, step);
+      ModifySymbolType(n.LOC(), n.GetIVName(), mutated);
+      SetNodeType(*n.GetIV(), mutated);
+    }
+  }
+
   n.SetScopePredicate(BuildRangePredicate(n));
   if (debug_visit && IsValidValueItem(n.GetScopePredicate()))
     dbgs() << " |- scope-predicate(looprange): "

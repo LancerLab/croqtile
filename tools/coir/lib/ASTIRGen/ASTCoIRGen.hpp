@@ -152,8 +152,8 @@ private:
   // iteration extent by looking up bv_map -> MLIR values or BoundedType.
   int64_t ResolveBoundedVarExtent(llvm::StringRef rvName);
 
-  int64_t resolveRangeBound(AST::LoopRange* lr);
-  mlir::Value resolveRangeUBValue(AST::LoopRange* lr, int64_t bound);
+  int64_t resolveRangeBound(AST::RangeExpr* lr);
+  mlir::Value resolveRangeUBValue(AST::RangeExpr* lr, int64_t bound);
 
 public:
   ASTCoIRGen() : CodeGenerator("ast-coir-gen"), builder(&IRContext()) {}
@@ -224,7 +224,7 @@ public:
   bool Visit(AST::Fence&) override;
   bool Visit(AST::AsmStmt&) override;
   bool Visit(AST::Select&) override { return true; }
-  bool Visit(AST::LoopRange&) override { return true; }
+  bool Visit(AST::RangeExpr&) override { return true; }
   bool Visit(AST::InThreadsBlock&) override;
   // AfterVisit handled via AfterVisitImpl dispatch
   bool Visit(AST::WhileBlock&) override;

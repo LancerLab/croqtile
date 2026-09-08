@@ -63,7 +63,9 @@ __co__ void bounded_decls() {
 // CHKVALNO:       New VN #[[vn5:[0-9]+]]: '::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::n_tile__elem__0'
 // CHKVALNO:       New VN #[[vn6:[0-9]+]]: '::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::n_tile'
 // CHKVALNO:       Alias "::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::@n_tile" -> #[[vn4]]
-// CHKVALNO:        New VN #[[vn7:[0-9]+]]: '%:#[[vn6]]:#[[vn02:[0-9]+]]'
+// CHKVALNO:        New VN #[[vn6iv:[0-9]+]]: '::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::foreach_1::__iv_n_tile'
+// CHKVALNO:        Alias "::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::foreach_1::@__iv_n_tile" -> #[[vn4]]
+// CHKVALNO:        New VN #[[vn7:[0-9]+]]: '%:#[[vn6iv]]:#[[vn02:[0-9]+]]'
 // CHKVALNO:        Alias "::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::foreach_1::@a" -> #[[vn4]]
 // CHKVALNO:        Alias "::bounded_decls{{(::paraby_[0-9]+)*}}::within_1::foreach_1::a" -> #[[vn7]]
 // CHKVALNO:        New VN #[[vn8:[0-9]+]]: '+:#[[vn2]]:#{{[0-9]+}}'

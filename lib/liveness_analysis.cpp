@@ -1210,7 +1210,7 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
     os << "foreach ";
     for (size_t i = 0; i < fb->ranges->Count(); ++i) {
       if (i > 0) os << ", ";
-      auto lr = cast<AST::LoopRange>(fb->ranges->values[i]);
+      auto lr = cast<AST::RangeExpr>(fb->ranges->values[i]);
       os << lr->GetRV()->name << "(";
       os << (lr->lb_mutator ? PSTR(lr->lb_mutator) : "") << ":";
       os << (lr->ub_mutator ? PSTR(lr->ub_mutator) : "") << ":";
@@ -2284,16 +2284,17 @@ bool LivenessAnalyzer::Visit(AST::Return& n) {
 bool LivenessAnalyzer::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
   for (const auto& item : n.GetRanges()) {
-    auto range = cast<AST::LoopRange>(item);
+    auto range = cast<AST::RangeExpr>(item);
     // Although the range var is reset to zero, still treat it as a use.
     AddUse(current_stmt, range->GetRVName());
+    AddDef(current_stmt, range->GetIVName());
     for (const auto& offset : {range->lb_mutator, range->ub_mutator}) {
       if (!offset) continue;
       if (auto id = AST::GetIdentifier(*offset))
         AddUse(current_stmt, id->name);
       else
         choreo_unreachable(
-            "expecting the bound offset in LoopRange is an Identifier.");
+            "expecting the bound offset in RangeExpr is an Identifier.");
     }
   }
   return true;

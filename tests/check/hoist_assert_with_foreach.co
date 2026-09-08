@@ -7,10 +7,10 @@
 // equals 0 -- the bounds check 0 < 8 is trivially true, so NO assertion is
 // generated.
 //
-// Inside `foreach j in [N]` (N is a runtime value) the compiler introduces a
-// separate iteration variable __iv_j__elem__0 that ranges 0..N-1.  Because N
-// is not known at compile time, j may exceed the buffer bound 8, so an
-// assertion IS generated inside the loop body.
+// Inside `foreach j in [N]` (N is a runtime value) the loop is emitted directly
+// over the canonicalized iteration variable __iv_j, which shadows the with-body
+// accessor and ranges 0..N-1.  Because N is not known at compile time, j may
+// exceed the buffer bound 8, so an assertion IS generated inside the loop body.
 //
 // After the foreach j reverts to the static accessor (__iv_j = 0) and access
 // again requires no assertion.
@@ -32,7 +32,7 @@ __co__ void foo(int N) {
 // CHECK: int __iv_j = 0;
 // CHECK-NEXT: int x =
 
-// CHECK: for (__iv_j__elem__0 = 0; __iv_j__elem__0 < N; ++__iv_j__elem__0) {
+// CHECK: for (int __iv_j = 0; __iv_j < N; ++__iv_j) {
 // CHECK-NOT: choreo::assert{{.*}}"The 1st index `j` of element access 'buf'
 
 // After foreach, j reverts to __iv_j (=0); the z access generates no assert.

@@ -1421,8 +1421,19 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     } else {
       const auto& ranges = fb->GetRangeNodes();
       for (int j = ranges->Count() - 1; j >= 0; --j) {
-        auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
-        auto cname = rng->GetIVName();
+        auto rng = cast<AST::RangeExpr>(ranges->ValueAt(j));
+
+        if (IsActualBoundedIntegerType(rng->GetIV()->GetType())) {
+          // Scalar canonicalized `foreach __iv_a = a(..)` or explicit local
+          // `foreach c = a(..)`: the prologue emitted the loop directly over
+          // the iteration variable, so close it here (no matcher reset).
+          DecrIndent();
+          IndStream() << "} // " << UnScopedName(InScopeName(rng->GetIVName()))
+                      << "\n";
+          continue;
+        }
+
+        auto cname = rng->GetRVName();
         auto ivs = within_map.at(InScopeName(cname));
         for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
           DecrIndent();
@@ -8490,8 +8501,9 @@ bool CuteCodeGen::Visit(AST::Call& n) {
           print_format += "]";
           print_args += args + ", ";
         } else if (isa<BoundedIntegerType>(type)) {
-          choreo_unreachable("All the BoundedIntegerType vars should have been "
-                             "normed to BoundedITupleType vars.");
+          print_format += "%lld";
+          print_args +=
+              "static_cast<long long>(" + ExprSTR(arg, IsHost()) + "), ";
         } else if (auto bit = dyn_cast<BoundedITupleType>(type)) {
           print_format += "{";
           for (size_t i = 0; i < bit->Dims(); ++i) {
@@ -8559,6 +8571,28 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
     ssm.MapDeviceSymbol(InScopeName(n.with->name), "__iv_" + n.with->name);
 
   assert(n.with_matchers && "expected matchers exist.");
+
+  // A single-matcher `with` source is scalar: the foreach emits the loop
+  // directly, so the source and its matcher must resolve to the same
+  // canonical iteration variable. Synthetic matchers (`with a in [N]`) are
+  // named `<a>__elem__N` and the body references the source `<a>`, so the IV
+  // is `__iv_<a>`. Explicit matchers (`with a = {x}`) are referenced by their
+  // own name, so the IV is `__iv_<x>`.
+  if (n.with && n.GetMatchers().size() == 1 &&
+      IsActualBoundedIntegerType(
+          cast<AST::Identifier>(n.GetMatchers()[0])->GetType())) {
+    auto m1 = cast<AST::Identifier>(n.GetMatchers()[0]);
+    const std::string elem_prefix = n.with->name + "__elem__";
+    const std::string iv_suffix =
+        m1->name.compare(0, elem_prefix.size(), elem_prefix) == 0
+            ? n.with->name
+            : m1->name;
+    ssm.RemapDeviceSymbol(InScopeName(m1->name), "__iv_" + iv_suffix);
+    ssm.RemapHostSymbol(InScopeName(m1->name), "__iv_" + iv_suffix);
+    ssm.RemapDeviceSymbol(InScopeName(n.with->name), "__iv_" + iv_suffix);
+    ssm.RemapHostSymbol(InScopeName(n.with->name), "__iv_" + iv_suffix);
+    return true;
+  }
 
   for (auto& v : n.GetMatchers()) {
     auto id = cast<AST::Identifier>(v);
@@ -8633,12 +8667,6 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
     os << "}};\n";
     os << Indent() << "auto " << n.with->name << " = __iv_" << n.with->name
        << ";\n";
-  }
-
-  if (n.with && (n.GetMatchers().size() == 1)) {
-    auto m1 = cast<AST::Identifier>(n.GetMatchers()[0]);
-    ssm.RemapDeviceSymbol(InScopeName(n.with->name), "__iv_" + m1->name);
-    ssm.RemapHostSymbol(InScopeName(n.with->name), "__iv_" + m1->name);
   }
 
   return true;
@@ -8729,7 +8757,7 @@ AutomapStrategy CuteCodeGen::AnalyzeAutomap(const AST::ForeachBlock& n) {
   std::vector<std::string> iv_names;
   iv_names.reserve(num_ranges);
   for (size_t ri = 0; ri < num_ranges; ++ri) {
-    auto rng = cast<AST::LoopRange>(ranges->ValueAt(ri));
+    auto rng = cast<AST::RangeExpr>(ranges->ValueAt(ri));
     iv_names.push_back(InScopeName(rng->GetIVName()));
   }
 
@@ -8878,21 +8906,42 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
 
   std::vector<std::string> loop_refs;
   for (auto& rn : n.GetRanges()) {
-    auto rng = cast<AST::LoopRange>(rn);
-    auto cname = rng->GetIVName();
+    auto rng = cast<AST::RangeExpr>(rn);
+    auto cname = rng->GetRVName();
     loop_refs.push_back(cname);
     loop_refs.push_back(std::string("__iv_") + cname);
+    if (IsActualBoundedIntegerType(rng->GetIV()->GetType())) {
+      // Scalar canonicalized `foreach __iv_a = a(..)` or explicit local
+      // `foreach c = a(..)`: the loop is emitted directly over the iteration
+      // variable, so remap its scoped name to the plain loop-variable name.
+      assert(rng->iv && "foreach range must carry a canonical iteration "
+                        "variable after normalization.");
+      auto iv_scoped = InScopeName(rng->GetIVName());
+      auto iv_name = UnScopedName(iv_scoped);
+      ssm.RemapDeviceSymbol(iv_scoped, iv_name);
+      ssm.RemapHostSymbol(iv_scoped, iv_name);
+      loop_refs.push_back(SSMName(iv_scoped, false));
+      continue;
+    }
     for (auto iv_name : within_map.at(InScopeName(cname)))
       loop_refs.push_back(SSMName(iv_name, false));
   }
 
   if (!IsHost() && !n.GetRanges().empty()) {
-    auto rng0 = cast<AST::LoopRange>(n.GetRanges()[0]);
-    auto ivs0 = within_map.at(InScopeName(rng0->GetIVName()));
-    if (!ivs0.empty())
-      foreach_iv_stack_.push_back(SSMName(ivs0.front(), false));
-    else
-      foreach_iv_stack_.push_back("__iv_" + rng0->GetIVName());
+    auto rng0 = cast<AST::RangeExpr>(n.GetRanges()[0]);
+    bool pushed_direct = false;
+    if (IsActualBoundedIntegerType(rng0->GetIV()->GetType())) {
+      auto iv0_scoped = InScopeName(rng0->GetIVName());
+      foreach_iv_stack_.push_back(SSMName(iv0_scoped, false));
+      pushed_direct = true;
+    }
+    if (!pushed_direct) {
+      auto ivs0 = within_map.at(InScopeName(rng0->GetRVName()));
+      if (!ivs0.empty())
+        foreach_iv_stack_.push_back(SSMName(ivs0.front(), false));
+      else
+        foreach_iv_stack_.push_back("__iv_" + rng0->GetRVName());
+    }
   }
 
   if (!IsHost() && n.GetBody()) {
@@ -9174,19 +9223,19 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
           std::string tid_expr = ResolveAutomapThreadExpr(automap_attr);
           size_t num_ranges = ranges->Count();
           if (num_ranges == 1) {
-            auto rng = cast<AST::LoopRange>(ranges->ValueAt(0));
-            for (auto iv_name : within_map.at(InScopeName(rng->GetIVName())))
+            auto rng = cast<AST::RangeExpr>(ranges->ValueAt(0));
+            for (auto iv_name : within_map.at(InScopeName(rng->GetRVName())))
               ds << d_indent << ssm.DeviceName(iv_name) << " = "
                  << primary_layout->LogicalRowFromReg(reg_loop_var_, tid_expr)
                  << ";\n";
           } else if (num_ranges == 2) {
-            auto rng0 = cast<AST::LoopRange>(ranges->ValueAt(0));
-            auto rng1 = cast<AST::LoopRange>(ranges->ValueAt(1));
-            for (auto iv_name : within_map.at(InScopeName(rng0->GetIVName())))
+            auto rng0 = cast<AST::RangeExpr>(ranges->ValueAt(0));
+            auto rng1 = cast<AST::RangeExpr>(ranges->ValueAt(1));
+            for (auto iv_name : within_map.at(InScopeName(rng0->GetRVName())))
               ds << d_indent << ssm.DeviceName(iv_name) << " = "
                  << primary_layout->LogicalRowFromReg(reg_loop_var_, tid_expr)
                  << ";\n";
-            for (auto iv_name : within_map.at(InScopeName(rng1->GetIVName())))
+            for (auto iv_name : within_map.at(InScopeName(rng1->GetRVName())))
               ds << d_indent << ssm.DeviceName(iv_name) << " = "
                  << primary_layout->LogicalColFromReg(reg_loop_var_, tid_expr)
                  << ";\n";
@@ -9200,7 +9249,7 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
       std::vector<std::string> bound_exprs;
       bound_exprs.reserve(ranges->Count());
       for (size_t ri = 0; ri < ranges->Count(); ++ri) {
-        auto rng = cast<AST::LoopRange>(ranges->ValueAt(ri));
+        auto rng = cast<AST::RangeExpr>(ranges->ValueAt(ri));
         auto iv_ty = GetSymbolType(rng->GetIVName());
         auto bit = cast<BoundedType>(iv_ty);
         std::string bound = UnScopedExpr(ValueSTR(bit->GetUpperBound()));
@@ -9228,8 +9277,8 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
         }
       }
       for (size_t ri = 0; ri < ranges->Count(); ++ri) {
-        auto rng = cast<AST::LoopRange>(ranges->ValueAt(ri));
-        for (auto iv_name : within_map.at(InScopeName(rng->GetIVName())))
+        auto rng = cast<AST::RangeExpr>(ranges->ValueAt(ri));
+        for (auto iv_name : within_map.at(InScopeName(rng->GetRVName())))
           ds << d_indent << ssm.DeviceName(iv_name) << " = "
              << iv_value_exprs[ri] << ";\n";
       }
@@ -9237,8 +9286,29 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
   } else {
     {
       for (auto& rn : n.GetRanges()) {
-        auto rng = cast<AST::LoopRange>(rn);
-        auto cname = rng->GetIVName();
+        auto rng = cast<AST::RangeExpr>(rn);
+
+        if (IsActualBoundedIntegerType(rng->GetIV()->GetType())) {
+          auto iv_scoped = InScopeName(rng->GetIVName());
+          // Scalar canonicalized / explicit IV: emit the loop directly over
+          // the iteration variable; its bounded type has (lb, ub, step).
+          assert(rng->iv && "foreach range must carry a canonical iteration "
+                            "variable after normalization.");
+          auto iv_bty = cast<BoundedType>(rng->GetIV()->GetType());
+          auto iv_name = UnScopedName(iv_scoped);
+          auto lb = UnScopedExpr(ValueSTR(iv_bty->GetLowerBound()));
+          auto ub = UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()));
+          auto step = iv_bty->GetStep();
+          IndStream() << "for (int " << iv_name << " = " << lb << "; "
+                      << iv_name << (step != 1 ? " <= " : " < ") << ub << "; "
+                      << (step != 1 ? (iv_name + " += " + std::to_string(step))
+                                    : ("++" + iv_name))
+                      << ") {\n";
+          IncrIndent();
+          continue;
+        }
+
+        auto cname = rng->GetRVName();
         for (auto iv_name : within_map.at(InScopeName(cname))) {
           auto iv_ty = GetSymbolType(UnScopedName(iv_name));
           assert(IsActualBoundedIntegerType(iv_ty));
@@ -11165,7 +11235,8 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     }
     if (frag_apply_iv_map_.count(id->name)) {
       oss << frag_apply_iv_map_.at(id->name);
-    } else if (within_map.count(InScopeNameForRef(id->name)) && !is_host) {
+    } else if (within_map.count(InScopeNameForRef(id->name)) && !is_host &&
+               within_map.at(InScopeNameForRef(id->name)).size() > 1) {
       size_t i = 0;
       for (auto iv_name : within_map.at(InScopeNameForRef(id->name)))
         oss << ((i++ == 0) ? "" : ", ")
@@ -11231,7 +11302,8 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
             if (auto id = AST::GetIdentifier(item)) {
               if (frag_apply_iv_map_.count(id->name)) {
                 AppendLinear(sbe::sym(frag_apply_iv_map_.at(id->name)));
-              } else if (within_map.count(InScopeNameForRef(id->name))) {
+              } else if (within_map.count(InScopeNameForRef(id->name)) &&
+                         within_map.at(InScopeNameForRef(id->name)).size() > 1) {
                 auto ivs = within_map.at(InScopeNameForRef(id->name));
                 for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
                   AppendLinear(sbe::sym(*iv_itr));
@@ -11282,7 +11354,8 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
             if (auto id = AST::GetIdentifier(item)) {
               if (frag_apply_iv_map_.count(id->name)) {
                 AppendOffset(sbe::sym(frag_apply_iv_map_.at(id->name)));
-              } else if (within_map.count(InScopeNameForRef(id->name))) {
+              } else if (within_map.count(InScopeNameForRef(id->name)) &&
+                         within_map.at(InScopeNameForRef(id->name)).size() > 1) {
                 auto ivs = within_map.at(InScopeNameForRef(id->name));
                 for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
                   AppendOffset(sbe::sym(*iv_itr));
@@ -11322,7 +11395,8 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           if (auto id = AST::GetIdentifier(item)) {
             if (frag_apply_iv_map_.count(id->name)) {
               AppendLinear(sbe::sym(frag_apply_iv_map_.at(id->name)));
-            } else if (within_map.count(InScopeNameForRef(id->name))) {
+            } else if (within_map.count(InScopeNameForRef(id->name)) &&
+                       within_map.at(InScopeNameForRef(id->name)).size() > 1) {
               auto ivs = within_map.at(InScopeNameForRef(id->name));
               for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
                 AppendLinear(sbe::sym(*iv_itr));
@@ -11373,7 +11447,8 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           if (auto id = AST::GetIdentifier(item)) {
             if (frag_apply_iv_map_.count(id->name)) {
               AppendOffset(sbe::sym(frag_apply_iv_map_.at(id->name)));
-            } else if (within_map.count(InScopeNameForRef(id->name))) {
+            } else if (within_map.count(InScopeNameForRef(id->name)) &&
+                       within_map.at(InScopeNameForRef(id->name)).size() > 1) {
               auto ivs = within_map.at(InScopeNameForRef(id->name));
               for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
                 AppendOffset(sbe::sym(*iv_itr));

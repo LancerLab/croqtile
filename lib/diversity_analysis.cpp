@@ -313,13 +313,22 @@ bool DiversityAnalysis::Visit(AST::ForeachBlock& n) {
   if (di->AssignSymbolShape(iv_sym, DiversityShape(STRIDE, sbe::nu(stride)))) {
     changed = true;
   }
+  for (const auto& range : n.GetRanges()) {
+    auto rng = cast<AST::RangeExpr>(range);
+    if (InScopeName(rng->GetRVName()) == iv_sym) {
+      if (di->AssignSymbolShape(InScopeName(rng->GetIVName()),
+                                DiversityShape(STRIDE, sbe::nu(stride)))) {
+        changed = true;
+      }
+    }
+  }
 
   bool with_found = false;
   std::string with_sym;
   for (auto item : within_map) {
     if (with_syms.count(item.first) == 0) continue;
     auto ivs = item.second;
-    if (ivs[ivs.size() - 1] == iv_sym) {
+    if (ivs[ivs.size() - 1] == InScopeName(n.GetRV()->name)) {
       with_found = true;
       with_sym = item.first;
       break;

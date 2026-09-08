@@ -155,7 +155,7 @@ public:
   bool Visit(AST::Synchronize&) override;
   bool Visit(AST::Select&) override;
   bool Visit(AST::Return&) override;
-  bool Visit(AST::LoopRange&) override;
+  bool Visit(AST::RangeExpr&) override;
   bool Visit(AST::ForeachBlock&) override;
   bool Visit(AST::InThreadsBlock&) override;
   bool Visit(AST::WhileBlock&) override;

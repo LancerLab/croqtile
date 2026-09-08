@@ -110,7 +110,7 @@ struct Visitor {
   virtual bool Visit(AST::Fence&) = 0;
   virtual bool Visit(AST::Select&) = 0;
   virtual bool Visit(AST::Return&) = 0;
-  virtual bool Visit(AST::LoopRange&) = 0;
+  virtual bool Visit(AST::RangeExpr&) = 0;
   virtual bool Visit(AST::ForeachBlock&) = 0;
   virtual bool Visit(AST::AsmStmt&) { return true; }
   virtual bool Visit(AST::InThreadsBlock&) = 0;
@@ -664,7 +664,7 @@ public:
   bool Visit(AST::Fence&) override { return true; }
   bool Visit(AST::Select&) override { return true; }
   bool Visit(AST::Return&) override { return true; }
-  bool Visit(AST::LoopRange&) override { return true; }
+  bool Visit(AST::RangeExpr&) override { return true; }
   bool Visit(AST::ForeachBlock&) override { return true; }
   bool Visit(AST::InThreadsBlock&) override { return true; }
   bool Visit(AST::WhileBlock&) override { return true; }
@@ -947,7 +947,7 @@ public:
     TraceEachVisit(n);
     return VisitNode(n);
   }
-  bool Visit(AST::LoopRange& n) final {
+  bool Visit(AST::RangeExpr& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
   }
@@ -1033,7 +1033,7 @@ public:
   virtual bool VisitNode(AST::Fence&) { return true; }
   virtual bool VisitNode(AST::Select&) { return true; }
   virtual bool VisitNode(AST::Return&) { return true; }
-  virtual bool VisitNode(AST::LoopRange&) { return true; }
+  virtual bool VisitNode(AST::RangeExpr&) { return true; }
   virtual bool VisitNode(AST::ForeachBlock&) { return true; }
   virtual bool VisitNode(AST::InThreadsBlock&) { return true; }
   virtual bool VisitNode(AST::WhileBlock&) { return true; }
@@ -1176,7 +1176,7 @@ private:
   bool Visit(AST::Fence&) final { return true; }
   bool Visit(AST::Select&) final { return true; }
   bool Visit(AST::Return&) final { return true; }
-  bool Visit(AST::LoopRange&) final { return true; }
+  bool Visit(AST::RangeExpr&) final { return true; }
   bool Visit(AST::ForeachBlock&) final { return true; }
   bool Visit(AST::InThreadsBlock&) final { return true; }
   bool Visit(AST::WhileBlock&) final { return true; }

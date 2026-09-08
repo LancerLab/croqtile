@@ -43,7 +43,7 @@ before each commit.
 
 | Element | Convention | Example |
 |---------|------------|---------|
-| Classes / Structs / Types | PascalCase | `MultiNodes`, `LoopRange`, `ShapeInfer` |
+| Classes / Structs / Types | PascalCase | `MultiNodes`, `RangeExpr`, `ShapeInfer` |
 | Functions / Methods | camelCase | `accept()`, `getType()`, `inferShape()` |
 | Variables | snake_case | `init_expr`, `num_threads`, `loop_body` |
 | Constants | snake_case | `max_buffer_size`, `default_align` |

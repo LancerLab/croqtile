@@ -1375,7 +1375,7 @@ bool hasEarlyExit(AST::Node* node) {
 }
 } // namespace
 
-int64_t ASTCoIRGen::resolveRangeBound(AST::LoopRange* lr) {
+int64_t ASTCoIRGen::resolveRangeBound(AST::RangeExpr* lr) {
   // Keep unresolved bounds (e.g. `foreach y in X`) distinct from concrete 1.
   int64_t bound = mlir::ShapedType::kDynamic;
   if (lr->ub_mutator) {
@@ -1403,7 +1403,7 @@ int64_t ASTCoIRGen::resolveRangeBound(AST::LoopRange* lr) {
   return bound;
 }
 
-mlir::Value ASTCoIRGen::resolveRangeUBValue(AST::LoopRange* lr, int64_t bound) {
+mlir::Value ASTCoIRGen::resolveRangeUBValue(AST::RangeExpr* lr, int64_t bound) {
   auto loc = Loc(*lr);
   mlir::Value ubValue;
 
@@ -1550,10 +1550,10 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock& fb) {
   auto indexType = mlir::IndexType::get(&IRContext());
 
   // Collect all range bounds for multi-dim foreach.
-  llvm::SmallVector<std::pair<AST::LoopRange*, int64_t>> rangeBounds;
+  llvm::SmallVector<std::pair<AST::RangeExpr*, int64_t>> rangeBounds;
   if (fb.ranges && !fb.ranges->values.empty()) {
     for (auto& rng : fb.ranges->values) {
-      if (auto* lr = dyn_cast<AST::LoopRange>(rng.get())) {
+      if (auto* lr = dyn_cast<AST::RangeExpr>(rng.get())) {
         int64_t bound = resolveRangeBound(lr);
         // For multi-dim span, also check GetUpperBounds per dimension
         if (bound <= 1 && rangeBounds.empty()) {

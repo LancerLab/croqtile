@@ -104,7 +104,7 @@ void Interpreter::ExecForeach(AST::ForeachBlock& fb) {
     return;
   }
 
-  auto* range = dyn_cast<AST::LoopRange>(ranges_list[0].get());
+  auto* range = dyn_cast<AST::RangeExpr>(ranges_list[0].get());
   if (!range) {
     ExecBlock(fb);
     return;

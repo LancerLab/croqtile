@@ -21,11 +21,11 @@ __co__ void foo(int n) {
 }
 
 // The foreach loop body should contain only the assignment -- no assertion.
-// CHECK: for (__iv_i__elem__0 = 0;
+// CHECK: for (int __iv_i = 0;
 // CHECK-NEXT: j = (n + j);
-// CHECK-NEXT: } // i__elem__0
+// CHECK-NEXT: } // __iv_i
 
 // Immediately after the loop, the two bounds assertions for j must appear.
-// CHECK-NEXT: __iv_i__elem__0 = 0;
+// CHECK-NEXT: }
 // CHECK: choreo::choreo_assert({{.*}}j{{.*}}0
 // CHECK: choreo::choreo_assert({{.*}}j{{.*}}16
