@@ -272,32 +272,10 @@ private:
   }
 
   void emitForeach(ForeachOp op) override {
-    auto& body = op.getBody();
-    auto args = body.front().getArguments();
-    std::string iv = getName(args[0]);
-    std::string ub = getName(op.getUpperBound());
-
-    auto iterArgs = op.getIterArgs();
-    for (unsigned i = 0; i < iterArgs.size(); ++i) {
-      std::string iterName = getName(args[i + 1]);
-      os() << getIndent() << "auto " << iterName << " = "
-           << getName(iterArgs[i]) << ";\n";
-    }
-
-    if (iterArgs.empty()) os() << getIndent() << "#pragma omp simd\n";
-    os() << getIndent() << "for (int " << iv << " = 0; " << iv << " < " << ub
-         << "; ++" << iv << ") {\n";
-    incIndent();
-    for (auto& bodyOp : body.front().getOperations()) emitOp(&bodyOp);
-    decIndent();
-    os() << getIndent() << "}\n";
-
-    if (auto yieldOp = dyn_cast<YieldOp>(body.front().getTerminator())) {
-      auto results = yieldOp.getOperands();
-      auto opResults = op.getResults();
-      for (unsigned i = 0; i < results.size(); ++i)
-        valueNames[opResults[i]] = getName(results[i]);
-    }
+    if (op.getIterArgs().empty()) os() << getIndent() << "#pragma omp simd\n";
+    // The shared emitter maps results to the loop-carried variables declared
+    // outside the loop, not to the yielded temporaries inside its body.
+    CoIREmitterBase::emitForeach(op);
   }
 
   void emitKernelReturn(KernelReturnOp op) override {

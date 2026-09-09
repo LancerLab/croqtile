@@ -75,8 +75,9 @@ static bool accumulate_expr_buffer = false;
 id          [a-zA-Z_][a-zA-Z0-9_]*
 num         (0|[1-9][0-9]*)[uU]?[lL]{0,2}
 hex_num     0[xX][0-9a-fA-F]+[uU]?[lL]{0,2}
-fpnum       -?[0-9]+\.[0-9]+
-fpnum_f     -?[0-9]+\.[0-9]+[fF]
+exponent    [eE][+-]?[0-9]+
+fpnum       ([0-9]+\.[0-9]+({exponent})?|[0-9]+{exponent})
+fpnum_f     {fpnum}[fF]
 cstr        \"([^"\\]|\\.)*\"
 blank       [ \t\r]
 attr_id     (__{id}__|\[\[{blank}*{id}{blank}*(?:\({blank}*{cstr}{blank}*\){blank}*)?\]\])
@@ -505,8 +506,20 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
                  }
                }
              }
-  {fpnum}    return Choreo::Parser::make_DFPVAL(std::stod(yytext), loc);
-  {fpnum_f}  return Choreo::Parser::make_FPVAL(std::stof(yytext), loc);
+  {fpnum}    {
+               errno = 0;
+               double value = std::strtod(yytext, nullptr);
+               if (!std::isfinite(value) || (errno == ERANGE && value == 0))
+                 throw Choreo::Parser::syntax_error(loc, "f64 literal out of range");
+               return Choreo::Parser::make_DFPVAL(value, loc);
+             }
+  {fpnum_f}  {
+               errno = 0;
+               float value = std::strtof(yytext, nullptr);
+               if (!std::isfinite(value) || (errno == ERANGE && value == 0))
+                 throw Choreo::Parser::syntax_error(loc, "f32 literal out of range");
+               return Choreo::Parser::make_FPVAL(value, loc);
+             }
   {cstr}     { // Remove the surrounding quotes and unescape
                std::string str = yytext;
                str = str.substr(1, str.length() - 2); // Remove the quotes

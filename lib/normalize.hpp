@@ -433,6 +433,26 @@ public:
 
   bool Visit(AST::Expr& n) override {
     TraceEachVisit(n);
+    if (n.IsUnary() && n.op == Op::Sub) {
+      // Multiplication by a same-type -1 preserves signed zero, unlike 0 - x.
+      // Lower here so both classic codegen and CoIR reuse numeric arithmetic.
+      auto elem = ScalarOrVectorElementType(n.GetType());
+      ptr<AST::Node> factor = AST::Make<AST::IntLiteral>(n.LOC(), -1);
+      if (elem == BaseType::F32)
+        factor = AST::Make<AST::FloatLiteral>(n.LOC(), -1.0f);
+      else if (elem == BaseType::F64)
+        factor = AST::Make<AST::FloatLiteral>(n.LOC(), -1.0);
+      else if (elem != BaseType::S32) {
+        auto cast = GenCastExprNode(elem, BaseType::S32, factor);
+        cast->SetExplicit();
+        factor = cast;
+      }
+      if (auto vty = dyn_cast<VectorType>(n.GetType()))
+        factor->AddNote("broadcast", std::to_string(vty->ElemCount()));
+      n.SetL(factor);
+      n.SetForm(AST::Expr::Binary);
+      n.op = Op::Mul;
+    }
     if (list_ref) { // could be with syntax sugar
       auto Apply = [this](const ptr<AST::Expr>& expr) -> ptr<AST::Expr> {
         if (!expr) return nullptr;

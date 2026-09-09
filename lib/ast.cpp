@@ -119,6 +119,7 @@ void DataAccess::accept(Choreo::Visitor& v) {
 
 void VectorIndex::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
+  if (lane_count_expr) lane_count_expr->accept(v);
   v.Visit(*this);
   v.AfterVisit(*this);
 }

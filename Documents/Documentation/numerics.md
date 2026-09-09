@@ -13,6 +13,31 @@ Standard C++ arithmetic operators work on Croqtile scalar types (`int`, `bool`):
 - Logical: `&&`, `||`, `!`
 - Bitwise: `&`, `|`, `^`, `~`, `<<`, `>>`
 
+Unary `-` accepts numeric expressions, including `-__exp(x)` and
+`-(x + 1.0f)`. On targets with explicit vectors, it applies to each lane.
+
+Floating-point literals accept scientific notation: `1e-6f`, `1.0E+3F`, and
+`1e-100`. An `f` or `F` suffix selects `f32`; no suffix selects `f64`.
+Representable subnormal literals are supported. Out-of-range literals are
+rejected, and generated literals preserve the parsed precision.
+
+A one-dimensional `foreach` index can be assigned directly to a mutable
+integer scalar, for example `s32 last = 0; foreach t in [4] { last = t - 1; }`.
+Multi-dimensional indices require selecting a component first.
+
+## Explicit Vector Widths
+
+On targets supporting explicit vectors, `vec.index<N>` accepts positive
+compile-time integer constants and immutable aliases:
+
+```choreo
+width = 128;
+lane = vec.index<width / 2>;
+```
+
+Width expressions support `+`, `-`, `*`, `/`, `%`, parentheses, and native type
+sizes such as `|f32|`. Mutable scalars and runtime parameters are rejected.
+
 ## Built-in Numeric Functions
 
 Croqtile provides built-in numeric functions accessible in device code. These map to the target platform's optimized math library (e.g., CUDA fast math intrinsics).

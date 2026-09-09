@@ -24,6 +24,60 @@ static bool ContainsIncrementOrDecrement(const AST::ptr<AST::Node>& node) {
          ContainsIncrementOrDecrement(expr->GetR());
 }
 
+std::optional<int64_t>
+EarlySemantics::IntegerConstant(const ptr<AST::Node>& node) {
+  if (!node) return std::nullopt;
+  auto ty = NodeType(*node);
+  if (!isa<ScalarIntegerType>(ty) || IsMutable(*ty)) return std::nullopt;
+  if (auto lit = dyn_cast<AST::IntLiteral>(node)) {
+    if (lit->IsUint64() && lit->ValU64() > INT64_MAX) return std::nullopt;
+    return lit->Val();
+  }
+  if (auto id = dyn_cast<AST::Identifier>(node)) {
+    auto it = integer_constants.find(InScopeName(id->name));
+    if (it != integer_constants.end()) return it->second;
+    return std::nullopt;
+  }
+  auto expr = dyn_cast<AST::Expr>(node);
+  if (!expr) return std::nullopt;
+  if (expr->IsReference()) return IntegerConstant(expr->GetReference());
+  auto rhs = IntegerConstant(expr->GetR());
+  if (!rhs) return std::nullopt;
+  if (expr->IsUnary() && expr->op == Op::Sub) {
+    if (*rhs == INT64_MIN) return std::nullopt;
+    return -*rhs;
+  }
+  auto lhs = IntegerConstant(expr->GetL());
+  if (!lhs) return std::nullopt;
+  int64_t value;
+  if (expr->op == Op::Add) {
+    if (__builtin_add_overflow(*lhs, *rhs, &value)) return std::nullopt;
+  } else if (expr->op == Op::Sub) {
+    if (__builtin_sub_overflow(*lhs, *rhs, &value)) return std::nullopt;
+  } else if (expr->op == Op::Mul) {
+    if (__builtin_mul_overflow(*lhs, *rhs, &value)) return std::nullopt;
+  } else if (expr->op == Op::Div || expr->op == Op::Mod) {
+    if (!*rhs || (*lhs == INT64_MIN && *rhs == -1)) return std::nullopt;
+    value = expr->op == Op::Div ? *lhs / *rhs : *lhs % *rhs;
+  } else {
+    return std::nullopt;
+  }
+  // Do not turn overflowing s32 arithmetic into a valid wider constant.
+  if (ty->GetBaseType() == BaseType::S32 &&
+      (value < INT32_MIN || value > INT32_MAX))
+    return std::nullopt;
+  return value;
+}
+
+void EarlySemantics::RecordIntegerConstant(const std::string& name,
+                                           std::optional<int64_t> value) {
+  auto scoped = InScopeName(name);
+  integer_constants.erase(scoped);
+  auto ty = GetSymbolType(name);
+  if (value && isa<ScalarIntegerType>(ty) && !IsMutable(*ty))
+    integer_constants[scoped] = *value;
+}
+
 bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
   if (isa<AST::Program>(&n)) {
     type_equals.Reset();
@@ -38,6 +92,7 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     explicit_pl = false;
     inthreads_levels.clear();
     inthreads_levels.push_back(0);
+    integer_constants.clear();
     vector_patterns.clear();
     mma_fragment_symbols.clear();
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
@@ -287,6 +342,17 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     }
   } else if (n.IsUnary()) {
     auto rhs_ty = NodeType(*n.GetR());
+    if (n.op == Op::Sub) {
+      auto elem = ScalarOrVectorElementType(rhs_ty);
+      if (!IsIntegerType(elem) && !IsFloatType(elem)) {
+        Error1(n.LOC(), "unary '-' requires a numeric scalar or vector.");
+        SetNodeType(n, MakeUnknownType());
+        return false;
+      }
+      SetNodeType(n, rhs_ty->Clone());
+      if (diverges.Contains(n.GetR())) diverges.Add(n);
+      return true;
+    }
     if (auto rhs_vty = dyn_cast<VectorType>(rhs_ty)) {
       if (n.op == "!" && rhs_vty->ElemType() == BaseType::BOOL) {
         SetNodeType(n, MakeVectorType(BaseType::BOOL, rhs_vty->ElemCount()));
@@ -1111,6 +1177,8 @@ bool EarlySemantics::CheckInitializerType(const ptr<Type>& ty,
 
 bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
   TraceEachVisit(n);
+  // Resolve the initializer before installing a possibly shadowing binding.
+  auto constant_init = IntegerConstant(n.init_expr);
 
   // `shared<group>` (Storage::GROUP_SHARED) is only valid on targets with a
   // hardware GROUP tier between BLOCK and THREAD. Reject it early so
@@ -1361,6 +1429,7 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
     vector_patterns[InScopeName(n.name_str)] =
         n.init_expr->GetNote("vector_pattern");
 
+  RecordIntegerConstant(n.name_str, constant_init);
   return true;
 }
 
@@ -1448,6 +1517,19 @@ bool EarlySemantics::Visit(AST::VectorIndex& n) {
   if (pl_depth == 0)
     Error1(n.LOC(),
            "explicit vector operations must be inside a parallel-by scope.");
+  if (n.LaneCountExpr()) {
+    auto width = IntegerConstant(n.LaneCountExpr());
+    if (!width || *width <= 0 || *width > INT32_MAX) {
+      Error1(n.LOC(),
+             "vector lane count must be a positive compile-time integer");
+      // Keep later uses well-typed during error recovery. No code is emitted
+      // after a failed semantic pass.
+      n.SetLaneCount(1);
+      SetNodeType(n, MakeVectorType(BaseType::S32, 1));
+      return false;
+    }
+    n.SetLaneCount(static_cast<size_t>(*width));
+  }
   SetNodeType(n, MakeVectorType(BaseType::S32, n.LaneCount()));
   n.AddNote("vector_pattern", "unit");
   return error_count_before == error_count;
@@ -1573,6 +1655,7 @@ bool EarlySemantics::Visit(AST::VectorMemory& n) {
 
 bool EarlySemantics::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
+  auto constant_init = IntegerConstant(n.value);
 
   // assign to the array element
   if (n.AssignToDataElement()) {
@@ -1668,6 +1751,7 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
       vector_patterns[InScopeName(n.GetName())] =
           n.value->GetNote("vector_pattern");
 
+    RecordIntegerConstant(n.GetName(), constant_init);
     return true;
   }
 
@@ -1704,7 +1788,10 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
 
   if (isa<AST::Call>(n.value)) {
     SetNodeType(*n.value, vty);
-  } else if (!vty->ApprxEqual(*ety)) {
+  } else if (!vty->ApprxEqual(*ety) &&
+             !(isa<ScalarIntegerType>(vty) &&
+               (IsActualBoundedIntegerType(ety) ||
+                (isa<ITupleType>(ety) && ety->Dims() == 1)))) {
     Error1(n.LOC(), "`" + n.GetName() + "' of type \"" + STR(*vty) +
                         "\" can not be re-assigned as \"" + STR(*ety) + "\".");
     SetNodeType(n, MakeUnknownType());

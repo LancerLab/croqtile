@@ -1,0 +1,25 @@
+// RUN: cocc -t cc -gs %s | sed 's@/tmp/cocc_cc_@build/cocc_cc_@' | bash -s -- --execute | FileCheck %s
+
+#include <cmath>
+
+__co__ void scalar_numeric_expressions(f32[4] output, f32[1] input) {
+  parallel by 1 : thread {
+    f32 value = input.at(0);
+    output.at(0) = -__exp(value);
+    output.at(1) = -(value + 2.0f) * 3.0f;
+    output.at(2) = value + 1e-12f;
+    output.at(3) = -value;
+  }
+}
+
+int main() {
+  auto output = choreo::make_spandata<choreo::f32>(4);
+  auto input = choreo::make_spandata<choreo::f32>(1);
+  input[0] = 0.0f;
+  scalar_numeric_expressions(output.view(), input.view());
+  choreo::choreo_assert(output[0] == -1.0f && output[1] == -6.0f &&
+                        output[2] == 1e-12f && std::signbit(output[3]),
+                        "numeric expression semantics");
+  std::cout << "PASS: scalar numeric expressions\n";
+}
+// CHECK: PASS: scalar numeric expressions

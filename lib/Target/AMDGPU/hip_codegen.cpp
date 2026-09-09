@@ -1030,8 +1030,7 @@ bool HIPCodeGen::Visit(AST::ParallelBy& n) {
     hs << "};\n";
     hs << h_indent << "choreo::abend_true(hipLaunchCooperativeKernel((void*)"
        << QualifyDeviceFn(device_fn, CCtx().GetDeviceNamespace())
-       << ", __grid, __block, __" << fname
-       << "_coop_args, 0, 0));\n";
+       << ", __grid, __block, __" << fname << "_coop_args, 0, 0));\n";
   } else {
     hs << h_indent << QualifyDeviceFn(device_fn, CCtx().GetDeviceNamespace())
        << "<<<__grid, __block>>>";
@@ -1981,16 +1980,7 @@ const std::string HIPCodeGen::ExprSTR(AST::ptr<AST::Node> n,
 
   if (auto lit = dyn_cast<AST::IntLiteral>(n))
     return std::visit([](auto v) { return std::to_string(v); }, lit->value);
-  if (auto lit = dyn_cast<AST::FloatLiteral>(n)) {
-    std::ostringstream fp;
-    if (lit->IsFloat32())
-      fp << std::fixed << lit->Val_f32() << "f";
-    else if (lit->IsFloat64())
-      fp << std::fixed << lit->Val_f64();
-    else
-      return std::visit([](auto v) { return std::to_string(v); }, lit->value);
-    return fp.str();
-  }
+  if (auto lit = dyn_cast<AST::FloatLiteral>(n)) { return lit->SourceSTR(); }
   if (auto id = dyn_cast<AST::Identifier>(n)) {
     auto sname = InScopeNameForRef(id->name);
     if (within_map.count(sname)) {

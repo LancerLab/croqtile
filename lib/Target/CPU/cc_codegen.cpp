@@ -156,14 +156,7 @@ const std::string CCCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
     oss << il->ValAsString();
   } else if (auto fl = dyn_cast<AST::FloatLiteral>(e)) {
-    std::ostringstream fp_val;
-    if (fl->IsFloat32())
-      fp_val << std::fixed << fl->Val_f32() << "f";
-    else if (fl->IsFloat64())
-      fp_val << std::fixed << fl->Val_f64();
-    else
-      fp_val << "0.0f";
-    oss << fp_val.str();
+    oss << fl->SourceSTR();
   } else if (auto sl = dyn_cast<AST::StringLiteral>(e)) {
     oss << sl->EscapedVal();
   } else if (auto b = dyn_cast<AST::BoolLiteral>(e)) {

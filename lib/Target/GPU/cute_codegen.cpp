@@ -11178,27 +11178,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
     oss << il->ValAsString();
   } else if (auto fl = dyn_cast<AST::FloatLiteral>(e)) {
-    std::ostringstream fp_val;
-    if (fl->IsFloat32()) {
-      auto v = fl->Val_f32();
-      if (std::isinf(v))
-        fp_val << (v < 0 ? "(-INFINITY)" : "INFINITY");
-      else if (std::isnan(v))
-        fp_val << "NAN";
-      else
-        fp_val << std::fixed << v << "f";
-    } else if (fl->IsFloat64()) {
-      auto v = fl->Val_f64();
-      if (std::isinf(v))
-        fp_val << (v < 0 ? "(-INFINITY)" : "INFINITY");
-      else if (std::isnan(v))
-        fp_val << "NAN";
-      else
-        fp_val << std::fixed << v;
-    } else {
-      choreo_unreachable("unsupported float literal.");
-    }
-    oss << fp_val.str();
+    oss << fl->SourceSTR();
   } else if (auto sl = dyn_cast<AST::StringLiteral>(e)) {
     oss << sl->EscapedVal();
   } else if (auto b = dyn_cast<AST::BoolLiteral>(e)) {

@@ -2,10 +2,14 @@
 #define __CHOREO_AST_HPP__
 
 #include <cmath>
+#include <cstdlib>
+#include <iomanip>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "context.hpp"
@@ -657,6 +661,36 @@ struct FloatLiteral : public Node, public TypeIDProvider<FloatLiteral> {
         IsFloat64() &&
         "Cannot get f64 value from float-point number whose type is not f64.");
     return std::get<double>(value);
+  }
+
+  // Keep readable fixed literals when they round-trip exactly. Small values
+  // and values needing more precision use scientific notation instead.
+  std::string SourceSTR() const {
+    return std::visit(
+        [](auto v) {
+          using T = decltype(v);
+          if (std::isinf(v))
+            return std::string(v < 0 ? "(-INFINITY)" : "INFINITY");
+          if (std::isnan(v)) return std::string("NAN");
+          std::ostringstream text;
+          text << std::fixed << v;
+          auto fixed = text.str();
+          T parsed;
+          if constexpr (std::is_same_v<T, float>)
+            parsed = std::strtof(fixed.c_str(), nullptr);
+          else
+            parsed = std::strtod(fixed.c_str(), nullptr);
+          if (parsed != v) {
+            text.str("");
+            text.clear();
+            text << std::scientific
+                 << std::setprecision(std::numeric_limits<T>::max_digits10 - 1)
+                 << v;
+          }
+          if constexpr (std::is_same_v<T, float>) text << 'f';
+          return text.str();
+        },
+        value);
   }
 
   bool IsFloat32() const { return isa<F32Type>(GetType()); }
@@ -1331,22 +1365,38 @@ public:
 // `vec.index<N>`; N is a compile-time value and is not a runtime operand.
 struct VectorIndex : public Node, public TypeIDProvider<VectorIndex> {
 private:
-  size_t lane_count;
+  size_t lane_count = 0;
+  ptr<Expr> lane_count_expr;
 
 public:
   VectorIndex(const location& l, size_t n) : Node(l), lane_count(n) {
     assert(n > 0 && "vector lane count must be positive.");
   }
 
+  VectorIndex(const location& l, const ptr<Expr>& width)
+      : Node(l), lane_count_expr(width) {}
+
   size_t LaneCount() const { return lane_count; }
+  const ptr<Expr>& LaneCountExpr() const { return lane_count_expr; }
+  void SetLaneCount(size_t n) { lane_count = n; }
 
   ptr<Node> CloneImpl() const override {
+    if (lane_count_expr) {
+      auto copy = Make<VectorIndex>(LOC(), CloneP(lane_count_expr));
+      copy->SetLaneCount(lane_count);
+      return copy;
+    }
     return Make<VectorIndex>(LOC(), lane_count);
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
-    os << prefix << "VEC.INDEX<" << lane_count << ">";
+    os << prefix << "VEC.INDEX<";
+    if (lane_count)
+      os << lane_count;
+    else
+      os << PSTR(lane_count_expr);
+    os << ">";
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
   }
 

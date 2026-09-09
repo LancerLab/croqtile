@@ -2556,6 +2556,14 @@ bool ASTCoIRGen::Visit(AST::Assignment& asgn) {
   if (!asgn.AssignToDataElement()) {
     auto rhs = EmitExpr(*asgn.value);
     if (rhs) {
+      // A one-dimensional foreach coordinate is an MLIR index, while an
+      // existing scalar variable retains its declared integer type.
+      if (!asgn.IsDecl() && mlir::isa<mlir::IndexType>(rhs.getType())) {
+        auto previous = LookupValue(asgn.GetName());
+        if (previous && mlir::isa<mlir::IntegerType>(previous.getType()))
+          rhs = builder.create<mlir::arith::IndexCastOp>(
+              Loc(asgn), previous.getType(), rhs);
+      }
       if (asgn.IsDecl())
         MapValue(asgn.GetName(), rhs);
       else

@@ -258,11 +258,11 @@ extern int yylex();
 %nterm <AST::ptr<AST::Call>> call_stmt
 %nterm <PBAttributes> pb_attribute
 %nterm <AST::DMAAsync> tdma_async
-%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block apply_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt buffer_map_stmt mma_stmt frag_stmt vec_load_assignment vec_store_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt asm_stmt intrinsic_decl range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
+%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block apply_block simple_val signed_simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt buffer_map_stmt mma_stmt frag_stmt vec_load_assignment vec_store_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt asm_stmt intrinsic_decl range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls named_fragment_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims step_list opt_step_list opt_stride_list at_list opt_at_list opt_from_list
 %nterm <std::pair<AST::ptr<AST::MultiValues>, AST::ptr<AST::MultiValues>>> shape_stride
-%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr vec_index_expr vec_load_expr ituple_derivation internal_sizeof_expr sizeof_expr frag_expr mma_exec_operand_expr opt_stream_bind
+%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr vec_index_expr vec_load_expr ituple_derivation internal_sizeof_expr sizeof_expr frag_expr mma_exec_operand_expr opt_stream_bind vector_width_expr
 %nterm <AST::ptr<AST::AttributeExpr>> suffix_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type mdspan_as_type
 %nterm <AST::ptr<AST::DataAccess>> data_element
@@ -671,18 +671,24 @@ fundamental_type
     ;
 
 simple_val
-    : integer_value { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
+    : NUM { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | U32_LITERAL { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | S64_LITERAL { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | U64_LITERAL { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | bool_value { $$ = AST::Make<AST::BoolLiteral>(@1, $1); }
     | FPVAL  { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
-    | MINUS FPVAL  { $$ = AST::Make<AST::FloatLiteral>(@1, -$2); }
     | DFPVAL { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
-    | MINUS DFPVAL { $$ = AST::Make<AST::FloatLiteral>(@1, -$2); }
     | cstrings { $$ = AST::Make<AST::StringLiteral>(@1, $1); }
     | IDENTIFIER { $$ = AST::Make<AST::Identifier>(@1, $1); }
     | IDENTIFIER FNSPAN { $$ = AST::Make<AST::Identifier>(@1, $1 + $2); }
+    ;
+
+// DMA pad values are scalar leaves rather than general s_expr operands.
+signed_simple_val
+    : simple_val { $$ = $1; }
+    | MINUS NUM { $$ = AST::Make<AST::IntLiteral>(@1, -$2); }
+    | MINUS FPVAL { $$ = AST::Make<AST::FloatLiteral>(@1, -$2); }
+    | MINUS DFPVAL { $$ = AST::Make<AST::FloatLiteral>(@1, -$2); }
     ;
 
 int_or_id
@@ -1663,6 +1669,25 @@ s_expr
     | s_expr UBSTAR s_expr { $$ = AST::Make<AST::Expr>(@1, "#*", $1, $3); }
     | s_expr UBSLASH s_expr { $$ = AST::Make<AST::Expr>(@1, "#/", $1, $3); }
     | s_expr UBPECET s_expr { $$ = AST::Make<AST::Expr>(@1, "#%", $1, $3); }
+    | MINUS s_expr %prec NOT {
+        if (auto fp = $2->GetFloat()) {
+          auto literal = std::visit([&](auto value) {
+            return AST::Make<AST::FloatLiteral>(@1, -value);
+          }, fp->value);
+          $$ = AST::Make<AST::Expr>(@1, literal);
+        } else if (auto integer = $2->GetInt()) {
+          auto literal = std::visit([&](auto value) -> AST::ptr<AST::IntLiteral> {
+            using T = decltype(value);
+            if constexpr (std::is_signed_v<T>)
+              if (value == std::numeric_limits<T>::min()) return nullptr;
+            return AST::Make<AST::IntLiteral>(@1, static_cast<T>(-value));
+          }, integer->value);
+          $$ = literal ? AST::Make<AST::Expr>(@1, literal)
+                       : AST::Make<AST::Expr>(@1, "-", $2);
+        } else {
+          $$ = AST::Make<AST::Expr>(@1, "-", $2);
+        }
+      }
     | NOT s_expr { $$ = AST::Make<AST::Expr>(@1, "!", $2); }
     | TILDE s_expr { $$ = AST::Make<AST::Expr>(@1, "~", $2); }
     | LPAREN s_expr RPAREN {
@@ -2176,7 +2201,7 @@ dma_operation
     ;
 
 dma_config
-    : LT LBRACE value_list RBRACE COMMA LBRACE value_list RBRACE COMMA LBRACE value_list RBRACE COMMA simple_val GT {
+    : LT LBRACE value_list RBRACE COMMA LBRACE value_list RBRACE COMMA LBRACE value_list RBRACE COMMA signed_simple_val GT {
         auto pc = AST::Make<PadConfig>();
         $3->SetDelimiter(", ");
         pc->pad_low = $3;
@@ -2543,15 +2568,27 @@ frag_stmt
       }
     ;
 
+// Keep '>' out of the width expression grammar so it closes vec.index.
+vector_width_expr
+    : NUM { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::IntLiteral>(@1, $1)); }
+    | IDENTIFIER { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1)); }
+    | const_sizeof { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::IntLiteral>(@1, $1)); }
+    | vector_width_expr PLUS vector_width_expr { $$ = AST::Make<AST::Expr>(@1, "+", $1, $3); }
+    | vector_width_expr MINUS vector_width_expr { $$ = AST::Make<AST::Expr>(@1, "-", $1, $3); }
+    | vector_width_expr STAR vector_width_expr { $$ = AST::Make<AST::Expr>(@1, "*", $1, $3); }
+    | vector_width_expr SLASH vector_width_expr { $$ = AST::Make<AST::Expr>(@1, "/", $1, $3); }
+    | vector_width_expr PECET vector_width_expr { $$ = AST::Make<AST::Expr>(@1, "%", $1, $3); }
+    | MINUS vector_width_expr %prec NOT { $$ = AST::Make<AST::Expr>(@1, "-", $2); }
+    | LPAREN vector_width_expr RPAREN { $$ = $2; }
+    ;
+
 vec_index_expr
-    : VEC INDEX LT num_expr GT {
-        if ($4->Val() <= 0) {
-          error(@4,
-                "vector lane count must be a positive compile-time integer");
+    : VEC INDEX LT vector_width_expr GT {
+        if (auto literal = AST::GetIntLiteral($4); literal && literal->Val() <= 0) {
+          error(@4, "vector lane count must be a positive compile-time integer");
           YYERROR;
         }
-        auto index = AST::Make<AST::VectorIndex>(@1, $4->Val());
-        $$ = AST::Make<AST::Expr>(@1, index);
+        $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::VectorIndex>(@1, $4));
       }
     ;
 

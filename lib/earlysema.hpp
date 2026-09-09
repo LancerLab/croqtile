@@ -40,6 +40,11 @@ private:
 
   std::unordered_set<std::string>
       with_syms; // symbol defined in with-in statement
+  // Vector types need their width before shape inference. Track only immutable
+  // integer constant bindings; never treat a runtime scalar as a lane count.
+  std::unordered_map<std::string, int64_t> integer_constants;
+  std::optional<int64_t> IntegerConstant(const ptr<AST::Node>&);
+  void RecordIntegerConstant(const std::string&, std::optional<int64_t>);
   std::unordered_map<std::string, std::string> vector_patterns;
   std::unordered_set<std::string> mma_fragment_symbols;
 
