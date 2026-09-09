@@ -3743,6 +3743,13 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
         hs << kernel_arg_refs[j];
       }
       hs << ");\n";
+      // A `<<<...>>>` launch is asynchronous: if it is rejected (e.g. the
+      // per-thread local memory frame cannot be backed by the device) the
+      // error is only recorded in the thread-local CUDA error state.  Without
+      // an explicit check the kernel silently never runs and the output
+      // buffer keeps its initial contents, so the failure is invisible.
+      // Mirror the cooperative-launch path above and report it loudly.
+      hs << h_indent << "choreo::abend_true(cudaGetLastError());\n";
     }
 
     if (!n.IsAsync()) {
