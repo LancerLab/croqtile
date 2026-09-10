@@ -1692,6 +1692,11 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
             Error1(tfs->LOC(), "tiling factor exceeds data size (" + STR(tfi) +
                                    " > " + PSTR(shi) + ") in dimension " +
                                    std::to_string(index) + ".");
+          } else if (StaticFail(sbe::cne(shi % tfi, sbe::nu(0)))) {
+            Error1(tfs->LOC(), std::string("tiling factor does not evenly ") +
+                                   "partition data size (" + STR(shi) + " % " + STR(tfi) +
+                                   " != 0) in dimension " +
+                                   std::to_string(index) + ".");
           }
           sbs_vns.push_back(
               vn.MakeOpNum(Op::Div, cur_vns[index], tfs_vns[index]));
