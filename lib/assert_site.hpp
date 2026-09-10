@@ -81,7 +81,7 @@ private:
   bool Visit(AST::Assignment& n) override;
   bool Visit(AST::ParallelBy& n) override;
   bool Visit(AST::WithBlock& n) override;
-  bool Visit(AST::LoopRange& n) override;
+  bool Visit(AST::ForeachBlock& n) override;
   bool Visit(AST::IfElseBlock& n) override;
   bool Visit(AST::WhileBlock& n) override;
   bool Visit(AST::InThreadsBlock& n) override;

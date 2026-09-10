@@ -228,12 +228,12 @@ bool AssertSite::Visit(AST::WithBlock& n) {
   return true;
 }
 
-bool AssertSite::Visit(AST::LoopRange& n) {
-  if (n.BoundIsMutated() && scope_map.count(&n)) {
-    // Record a barrier only if the IV is findable in the symbol table.
-    // Synthetic iteration variables (e.g. `foreach i in [K]` where `i`
-    // is a fresh name) are not registered and InScopeName would abort.
-    auto iv = n.GetRVName();
+bool AssertSite::Visit(AST::ForeachBlock& n) {
+  if (n.ranges) {
+    for (auto value : n.ranges->AllValues()) {
+      auto range = dyn_cast<AST::LoopRange>(value);
+      if (!range) continue;
+      auto iv = range->GetRVName();
     std::string scoped_iv;
     std::string scope_name = scoped_symtab.ScopeName();
     while (true) {
@@ -248,7 +248,8 @@ bool AssertSite::Visit(AST::LoopRange& n) {
       if (prev == std::string::npos) break;
       scope_name = scope_name.substr(0, prev + 2);
     }
-    if (!scoped_iv.empty()) RecordBarrier(scoped_iv, scope_map[&n]);
+      if (!scoped_iv.empty()) RecordBarrier(scoped_iv, &n);
+    }
   }
   return true;
 }
@@ -290,6 +291,16 @@ void AssertSite::HoistAssertions(AST::ChoreoFunction* fnode) {
     assert(ar.node != nullptr);
     assert(node_order.count(ar.node));
     auto n_order = node_order[ar.node];
+
+    // A DMA element-access predicate protects this particular transfer.  It
+    // must execute before the copy, not after an enclosing parallel region
+    // merely because its tile coordinate is defined there.
+    if (ar.usage_type == UsageType::ElementAccess && isa<AST::DMA>(ar.node)) {
+      ar.type = AssessType::USE_SITE;
+      ar.emit_node = ar.node;
+      ar.emit_position = AssertionEmitPosition::BEFORE_NODE;
+      continue;
+    }
 
     // Collect all symbols referenced by the assertion expression.
     auto syms = GetSymbols(ar.expr);

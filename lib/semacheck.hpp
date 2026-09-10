@@ -52,6 +52,7 @@ private:
                         const ptr<AST::Node>&,
                         UsageType uty = UsageType::ShapeCompatibility,
                         AST::Node* emit_node = nullptr);
+  void CheckChunkAtTileBounds(AST::ChunkAt&, AST::DMA&);
   ValueItem ActiveScopePredicate() const;
   bool ExpressionIsConstrained(const ValueItem&) const;
 
