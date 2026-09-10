@@ -40,6 +40,15 @@ private:
   RtMemUsageMap rt_tot_mem_usage;
   std::vector<RtMemUsageCheckInfo> rt_mem_usage_check_list;
 
+  struct RtAliasCapacityCheck {
+    std::string alias_bytes;
+    std::string backing_bytes;
+    location loc;
+    std::string alias_name;
+    std::string backing_name;
+  };
+  std::vector<RtAliasCapacityCheck> rt_alias_capacity_check_list;
+
   // Joint shared<group>+SHARED budget check for aliased-pool targets. Captures
   // the compile-time/runtime usage totals for both storages at each
   // runtime-shaped allocation so the joint limit can be enforced at runtime.
@@ -54,9 +63,108 @@ private:
 
   CtMemUsageMap mem_usage_limit;
   std::unordered_set<Storage> tocheck_storage;
+  std::unordered_set<std::string> host_visible_symbols;
+  std::unordered_set<std::string> reassigned_values;
+  std::unordered_map<std::string, ValueItem> host_value_bindings;
+
+  std::optional<ValueItem>
+  ResolveHostValue(const ValueItem& value,
+                   std::unordered_set<std::string>& resolving,
+                   std::string& unresolved, unsigned depth = 0) {
+    if (!IsValidValueItem(value) || depth > 64) return std::nullopt;
+    if (VIIsNil(value) || VIIsInt(value) || VIIsBool(value)) return value;
+    if (auto name = VISym(value)) {
+      if (host_visible_symbols.count(*name)) return value;
+      if (resolving.count(*name)) {
+        unresolved = *name;
+        return std::nullopt;
+      }
+      ValueItem replacement = GetInvalidValueItem();
+      if (host_value_bindings.count(*name))
+        replacement = host_value_bindings.at(*name);
+      else if (FCtx(fname).HasSymbolValues(*name)) {
+        const auto& values = FCtx(fname).GetSymbolValues(*name);
+        if (values.HasVal()) replacement = values.GetVal();
+      }
+      if (!IsValidValueItem(replacement) || sbe::ceq(value, replacement)) {
+        unresolved = *name;
+        return std::nullopt;
+      }
+      resolving.insert(*name);
+      auto resolved =
+          ResolveHostValue(replacement, resolving, unresolved, depth + 1);
+      resolving.erase(*name);
+      return resolved;
+    }
+    if (auto op = VIUop(value)) {
+      auto operand =
+          ResolveHostValue(op->GetOperand(), resolving, unresolved, depth + 1);
+      if (!operand) return std::nullopt;
+      return sbe::uop(op->GetOpCode(), *operand)->Normalize();
+    }
+    if (auto op = VIBop(value)) {
+      auto left =
+          ResolveHostValue(op->GetLeft(), resolving, unresolved, depth + 1);
+      if (!left) return std::nullopt;
+      auto right =
+          ResolveHostValue(op->GetRight(), resolving, unresolved, depth + 1);
+      if (!right) return std::nullopt;
+      return sbe::bop(op->GetOpCode(), *left, *right)->Normalize();
+    }
+    if (auto op = VITop(value)) {
+      auto pred =
+          ResolveHostValue(op->GetPred(), resolving, unresolved, depth + 1);
+      if (!pred) return std::nullopt;
+      auto left =
+          ResolveHostValue(op->GetLeft(), resolving, unresolved, depth + 1);
+      if (!left) return std::nullopt;
+      auto right =
+          ResolveHostValue(op->GetRight(), resolving, unresolved, depth + 1);
+      if (!right) return std::nullopt;
+      return sbe::sel(*pred, *left, *right)->Normalize();
+    }
+    return std::nullopt;
+  }
+
+  std::optional<std::string> HostByteSizeExpression(const SpannedType& sty,
+                                                    const location& loc) {
+    if (!sty.RuntimeShaped()) return sty.ByteSizeExpression(true);
+
+    std::unordered_set<std::string> resolving;
+    std::string unresolved;
+    auto element_count =
+        ResolveHostValue(sty.ElementCountValue(), resolving, unresolved);
+    if (!element_count) {
+      Error1(loc, "runtime memory extent depends on device-only identifier `" +
+                      UnScopedName(unresolved) +
+                      "'; host-side memory checks require kernel parameters "
+                      "or expressions derived from them.");
+      return std::nullopt;
+    }
+    return "(" + (*element_count)->ToString("ULL") + ") * " +
+           std::to_string(SizeOf(sty.ElementType()));
+  }
 
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
+    if (isa<AST::Program>(&n)) {
+      struct ReassignedValues : VisitorWithSymTab {
+        std::unordered_set<std::string>& values;
+        ReassignedValues(std::unordered_set<std::string>& values)
+            : VisitorWithSymTab("memcheck-reassignments"), values(values) {}
+        bool BeforeVisitImpl(AST::Node&) override { return true; }
+        bool AfterVisitImpl(AST::Node&) override { return true; }
+        bool Visit(AST::Assignment& assignment) override {
+          if (!assignment.AssignToDataElement() && !assignment.IsDecl())
+            values.insert(InScopeName(assignment.GetName()));
+          return true;
+        }
+      } collector(reassigned_values);
+      reassigned_values.clear();
+      host_value_bindings.clear();
+      collector.SSTab().UpdateGlobal(SymTab());
+      collector.RunOnProgram(n);
+    }
     if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
         isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
       // generate the map of current ast node that corresponding to the scope
@@ -258,6 +366,17 @@ private:
   }
 
   void AppendRuntimeCheck(const std::string& fname) {
+    for (const auto& check : rt_alias_capacity_check_list) {
+      auto message = "span_as alias `" + check.alias_name +
+                     "' exceeds backing buffer `" + check.backing_name + "'";
+      FCtx(fname).AppendRtCheck({check.alias_bytes,
+                                 "<=",
+                                 check.backing_bytes,
+                                 check.loc,
+                                 message,
+                                 {}});
+    }
+
     for (const auto& [useds, loc, limit, sto] : rt_mem_usage_check_list) {
       std::string lhs, op, rhs, message;
 
@@ -304,6 +423,7 @@ private:
       FCtx(fname).AppendRtCheck({lhs, op, rhs, jc.loc, message, {}});
     }
 
+    rt_alias_capacity_check_list.clear();
     rt_mem_usage_check_list.clear();
     rt_joint_mem_usage_check_list.clear();
   }
@@ -335,6 +455,13 @@ public:
 
   bool Visit(AST::NamedVariableDecl& n) override {
     TraceEachVisit(n);
+    // Preserve immutable-in-practice scalar initializers so runtime memory
+    // extents can be expressed in terms of host-visible inputs.
+    auto scoped_name = InScopeName(n.name_str);
+    if (auto expr = dyn_cast<AST::Expr>(n.init_expr);
+        expr && expr->Opts().HasVal() && !reassigned_values.count(scoped_name))
+      host_value_bindings[scoped_name] = expr->Opts().GetVal();
+
     // mem alloc could happen here
     auto sym_ty = GetSymbolType(n.name_str);
     auto sty = dyn_cast<SpannedType>(sym_ty);
@@ -347,7 +474,26 @@ public:
     if (n.HasNote("offset")) {
       VST_DEBUG({
         dbgs() << "[MemUsage] The mem space of buffer " << n.name_str
-               << " reuses the space of self-defined SPM!\n";
+               << " aliases existing storage and is not a new allocation.\n";
+      });
+      return true;
+    }
+    if (n.HasNote("ref")) {
+      if (auto sa = dyn_cast<AST::SpanAs>(AST::Ref(n.init_expr))) {
+        auto backing = GetSpannedType(GetSymbolType(sa->id->name));
+        if (backing && (sty->RuntimeShaped() || backing->RuntimeShaped())) {
+          auto alias_bytes = HostByteSizeExpression(*sty, n.LOC());
+          if (!alias_bytes) return true;
+          auto backing_bytes = HostByteSizeExpression(*backing, n.LOC());
+          if (!backing_bytes) return true;
+          rt_alias_capacity_check_list.push_back({*alias_bytes, *backing_bytes,
+                                                  n.LOC(), n.name_str,
+                                                  sa->id->name});
+        }
+      }
+      VST_DEBUG({
+        dbgs() << "[MemUsage] The mem space of buffer " << n.name_str
+               << " aliases existing storage and is not a new allocation.\n";
       });
       return true;
     }
@@ -355,8 +501,12 @@ public:
     if (auto aty = dyn_cast<ArrayType>(sym_ty))
       array_dim_product = *VIInt(aty->ElemCount());
     if (sty->RuntimeShaped()) {
-      // runtime usage
-      std::string byte_size = sty->ByteSizeExpression(true);
+      // Runtime memory-limit checks are emitted in the host launcher. Resolve
+      // immutable extent bindings to host-visible inputs, and reject extents
+      // that fundamentally depend on a device-only value.
+      auto host_byte_size = HostByteSizeExpression(*sty, n.LOC());
+      if (!host_byte_size) return true;
+      std::string byte_size = *host_byte_size;
       if (array_dim_product != 1)
         byte_size =
             std::to_string(array_dim_product) + " * (" + byte_size + ")";
@@ -391,8 +541,27 @@ public:
 
     return true;
   }
+  bool Visit(AST::Assignment& n) override {
+    TraceEachVisit(n);
+    auto expr = dyn_cast<AST::Expr>(n.value);
+    if (!n.AssignToDataElement() && n.IsDecl() && expr &&
+        expr->Opts().HasVal()) {
+      auto scoped_name = InScopeName(n.GetName());
+      if (!reassigned_values.count(scoped_name))
+        host_value_bindings[scoped_name] = expr->Opts().GetVal();
+    }
+    return true;
+  }
   bool Visit(AST::FunctionDecl& n) override {
     TraceEachVisit(n);
+    host_visible_symbols.clear();
+    for (const auto& p : n.params->values) {
+      if (p->HasSymbol())
+        host_visible_symbols.insert("::" + n.name + "::" + p->sym->name);
+      if (auto pty = GetSpannedType(p->GetType()))
+        for (const auto& symbol : pty->GetShape().GetDynamicSymbols())
+          if (auto name = VISym(symbol)) host_visible_symbols.insert(*name);
+    }
     // special handling
     // Because AST::FunctionDecl.accept doesn't call BeforeVisit)
     ct_mem_usage_list.push(CtMemUsageMap{});
