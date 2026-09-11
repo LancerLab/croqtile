@@ -178,6 +178,12 @@ public:
 
 public:
   virtual size_t GetMemCapacity(const Storage&, const ArchId&) const = 0;
+  // Best-practice per-thread budget for `local`. Usage above this value (but
+  // at or below GetMemCapacity(LOCAL)) warns instead of erroring. Defaults to
+  // the hard capacity, i.e. no warning band, for targets that do not tune it.
+  virtual size_t GetLocalMemBudget(const ArchId& arch) const {
+    return GetMemCapacity(Storage::LOCAL, arch);
+  }
   virtual size_t GetMemAlignmentByte(const Storage&, const ArchId&) const = 0;
   virtual size_t GetMinGroupDim(const ArchId& arch) const {
     choreo_unreachable("unsupported target '" + Name() + "(" + arch + ")'.");
@@ -195,6 +201,10 @@ public:
   virtual size_t GetMaxThreadsPerBlock(const ArchId& /*arch*/) const {
     return 0;
   }
+  // Max resident threads per streaming multiprocessor for GPU targets.
+  // Returns 0 if not applicable. Used to derive per-thread budgets from
+  // per-SM resources (e.g. the `local` budget from the register file).
+  virtual size_t GetMaxThreadsPerSM(const ArchId& /*arch*/) const { return 0; }
   virtual size_t GetVectorLength(const ArchId& arch) const {
     choreo_unreachable("unsupported target '" + Name() + "(" + arch + ")'.");
     return 0;

@@ -740,6 +740,12 @@ public:
     return GetTarget().GetMemCapacity(sto, GetArch());
   }
 
+  // Best-practice per-thread `local` budget (soft limit). Independent of the
+  // user override, which only raises the hard cap.
+  size_t GetLocalMemBudget() const {
+    return GetTarget().GetLocalMemBudget(GetArch());
+  }
+
   // return memory alignment in byte. Used in memory reuse pass.
   size_t GetMemoryAlignmentByte(const ArchId& arch, Storage sto) const {
     if (sto == Storage::SHARED && SharedMemAlignment() != 0)

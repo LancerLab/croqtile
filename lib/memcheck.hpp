@@ -252,6 +252,24 @@ private:
                        " target, the local memory limits can be set via "
                        "`--max-local-mem-capacity` option.";
         Error1(n.LOC(), error_msg);
+      } else if (sto == Storage::LOCAL) {
+        // Warn-only band between the best-practice budget and the hard cap.
+        const size_t budget = CCtx().GetLocalMemBudget();
+        if (budget < mem_usage_limit[sto] && ct_tot_mem_usage[sto] > budget) {
+          std::ostringstream oss;
+          for (const auto& inst_set : ct_mem_alloc_inst_sets)
+            if (inst_set.count(sto))
+              for (const auto& inst : inst_set.at(sto)) oss << "\n\t\t" << inst;
+          Warning(n.LOC(),
+                  "local memory usage " +
+                      std::to_string(ct_tot_mem_usage[sto]) +
+                      " bytes exceeds the recommended per-thread budget " +
+                      std::to_string(budget) +
+                      " bytes; this may spill to global memory and reduce "
+                      "performance. The hard limit is " +
+                      std::to_string(mem_usage_limit[sto]) +
+                      " bytes. With variables:" + oss.str());
+        }
       }
     }
 

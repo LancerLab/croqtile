@@ -1,4 +1,4 @@
-// RUN: choreo -es -t cute -arch=sm_86 %s -o - | FileCheck %s
+// RUN: choreo -es -t cute -arch=sm_86 --max-local-mem-capacity=4096 %s -o - | FileCheck %s
 //
 // Comprehensive codegen tests for span operations (span_as, view.from,
 // subspan.at, chunkat) and their interactions.  Motivated by the fix in

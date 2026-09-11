@@ -1,6 +1,8 @@
 #ifndef __CHOREO_GPU_TARGET_HPP__
 #define __CHOREO_GPU_TARGET_HPP__
 
+#include <algorithm>
+
 #include "target.hpp"
 
 namespace Choreo {
@@ -31,27 +33,50 @@ public:
 
   const ArchId DefaultArch() const override { return "sm_86"; }
 
+  // Max resident threads per streaming multiprocessor. Drives the per-thread
+  // `local` budget derived from the per-SM register file below.
+  size_t GetMaxThreadsPerSM(const ArchId& arch) const override {
+    int arch_num = ArchNum(arch);
+    static std::map<int, size_t> threads_per_sm = {
+        {70, 2048}, {75, 1024}, {80, 2048},  {86, 1536},
+        {89, 1536}, {90, 2048}, {100, 2048}, {120, 1536},
+    };
+    if (!threads_per_sm.count(arch_num))
+      choreo_unreachable("unsupported architecture: " + arch + ".");
+    return threads_per_sm[arch_num];
+  }
+
+  // Coarse best-practice per-thread `local` budget. `local` is backed by
+  // device global memory, so it is not a fixed hardware resource; instead of
+  // modeling exact register promotion we reserve an even share of the per-SM
+  // register file per resident thread at full occupancy and clamp it by an
+  // absolute per-thread spill budget. Exceeding this budget warns; exceeding
+  // GetMemCapacity(LOCAL) errors. `--max-local-mem-capacity` overrides the
+  // hard cap.
+  size_t GetLocalMemBudget(const ArchId& arch) const override {
+    constexpr size_t regfile_bytes_per_sm = 64ull * 1024 * 4; // 64K x 32-bit
+    constexpr size_t local_spill_budget = 256; // absolute per-thread ceiling
+    size_t regfile_share = regfile_bytes_per_sm / GetMaxThreadsPerSM(arch);
+    return std::max<size_t>(1, std::min(regfile_share, local_spill_budget));
+  }
+
   size_t GetMemCapacity(const Storage& sto, const ArchId& arch) const override {
     int arch_num = ArchNum(arch);
-    // arch -> {local, shared}
-    static std::map<int, std::pair<size_t, size_t>> caps = {
-        {70, {1024 /*1KB*/, 48ull * 1024 /* 48KB */}},
-        {75, {1024 /*1KB*/, 64ull * 1024 /* 64KB */}},
-        {80, {2048 /*1KB*/, 164ull * 1024 /* 164KB */}},
-        {86, {2048 /*1KB*/, 100ull * 1024 /* 100KB */}},
-        {89, {2048 /*1KB*/, 100ull * 1024 /* 100KB */}},
-        {90, {2048 /*1KB*/, 228ull * 1024 /* 228KB */}},
-        {100, {2048 /*1KB*/, 228ull * 1024 /* 228KB */}},
-        {120, {2048 /*1KB*/, 300ull * 1024 /* 228KB */}},
+    // Per-SM shared-memory capacity, keyed by arch.
+    static std::map<int, size_t> shared_caps = {
+        {70, 48ull * 1024},   {75, 64ull * 1024},   {80, 164ull * 1024},
+        {86, 100ull * 1024},  {89, 100ull * 1024},  {90, 228ull * 1024},
+        {100, 228ull * 1024}, {120, 300ull * 1024},
     };
 
-    if (!caps.count(arch_num))
+    if (!shared_caps.count(arch_num))
       choreo_unreachable("unsupported architecture: " + arch + ".");
 
     if (sto == Storage::LOCAL)
-      return caps[arch_num].first;
+      // Hard cap: 2x the best-practice budget, leaving a warn-only band.
+      return 2 * GetLocalMemBudget(arch);
     else if (sto == Storage::SHARED)
-      return caps[arch_num].second;
+      return shared_caps[arch_num];
     else if (sto == Storage::GLOBAL)
       return 8ull * 1024 * 1024 * 1024; // 8GB
 
