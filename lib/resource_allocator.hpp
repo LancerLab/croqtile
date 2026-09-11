@@ -1,15 +1,13 @@
 #ifndef __CHOREO_RESOURCE_ALLOCATOR_HPP__
 #define __CHOREO_RESOURCE_ALLOCATOR_HPP__
 
-/// DmaResourceAllocator -- liveness-driven coloring of finite DMA completion
-/// resources (FUTURE and EVENT handles) into minimal slots.
+/// DmaResourceAllocator -- interference coloring of DMA completion resources.
 ///
-/// This is the DMA counterpart of MemReuse.  It runs LivenessAnalyzer, then
-/// per device function feeds one unit-size chunk per handle (with the handle's
-/// live ranges from VarRanges()) into the shared HeapSimulator.  The result is
-/// a handle -> slot map and a slot count per device function, keyed by scoped
-/// handle name.  Target codegen (DMA completion slots, GPU named barriers)
-/// reads the precomputed plan instead of allocating ad hoc.
+/// Opted-in private contexts use completion occupancy, independently of buffer
+/// liveness. Other resource protocols retain their existing liveness analysis.
+/// The shared HeapSimulator colors the interference relation into a static
+/// plan, keyed by scoped handle identity (or anonymous synchronous DMA site).
+/// Greedy coloring is deterministic but does not guarantee the minimum count.
 ///
 /// Resource classes:
 ///   FUTURE -- device DMA completion slot (DTE), GPU TMA mbarrier
@@ -17,6 +15,7 @@
 /// BUFFER is handled by MemReuse and is out of scope here.
 
 #include "codegen.hpp"
+#include "dma_completion_analysis.hpp"
 #include "heap_simulator.hpp"
 #include "liveness_analysis.hpp"
 #include "options.hpp"
@@ -41,6 +40,7 @@ enum class EventAllocMode {
 // completion path (e.g. a DTE pool); otherwise the flag has no observable
 // effect.  Replaces the old greedy -fdte-merge slot assignment.
 extern Option<bool> dma_alloc_mode;
+extern Option<bool> dma_completion_report;
 
 // Select how EVENT handles (named barrier / mbarrier) are colored.  This is a
 // parameterized option rather than a bare bool so the upcoming scalar-
@@ -64,6 +64,7 @@ struct DmaResourcePlan {
   struct DevicePlan {
     // Scoped handle name -> slot index.
     std::map<std::string, size_t> future_slots;
+    std::map<const AST::DMA*, size_t> synchronous_slots;
     std::map<std::string, size_t> event_slots;
     // Total number of slots (colors) needed per class.
     size_t future_slot_count = 0;
@@ -90,11 +91,15 @@ struct DmaResourcePlan {
 // ---------------------------------------------------------------------------
 
 struct DmaResourceAllocator : public VisitorWithSymTab {
-  DmaResourceAllocator() : VisitorWithSymTab("dma-alloc") {}
+  explicit DmaResourceAllocator(bool use_completion_occupancy = false)
+      : VisitorWithSymTab("dma-alloc"),
+        use_completion_occupancy_(use_completion_occupancy) {}
   ~DmaResourceAllocator() override = default;
 
 private:
+  bool use_completion_occupancy_;
   LivenessAnalyzer la;
+  DMACompletionAnalysis completion;
   std::string cur_dev_fname;
 
   bool RunOnProgramImpl(AST::Node& root) override;
@@ -110,6 +115,7 @@ private:
   // store the result in DmaResourcePlan.
   void AllocateClass(LivenessAnalyzer::ResourceClass rc,
                      const std::string& df_name);
+  bool AllocateCompletions(const std::string& df_name);
 };
 
 // VisitorGroup wrapper so the pass can be added as a pipeline stage.
@@ -118,7 +124,9 @@ private:
   DmaResourceAllocator dra;
 
 public:
-  DmaResourceAllocation() : VisitorGroup("DmaResourceAllocation", dra) {}
+  explicit DmaResourceAllocation(bool use_completion_occupancy = false)
+      : VisitorGroup("DmaResourceAllocation", dra),
+        dra(use_completion_occupancy) {}
 };
 
 } // namespace Choreo

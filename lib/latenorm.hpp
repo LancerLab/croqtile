@@ -547,6 +547,7 @@ public:
 
       auto& buf_info = FBInfo()[InScopeName(n.future)];
       buf_info.buffer = InScopeName(buf_name);
+      buf_info.implicit_buffer = n.HasNote("implicit_dma_destination");
       // Record source/destination storage tiers so that codegen can pick the
       // DTE context that matches the actual DMA a dma.any placeholder will be
       // bound to (e.g. a shared -> global deslice lowers to the SHARED tier,
@@ -590,6 +591,7 @@ public:
     if (!isa<AST::Memory>(n.to)) return true;
 
     auto future_name = ((n.future.empty()) ? "" : InScopeName(n.future));
+    n.AddNote("implicit_dma_destination");
     if (n.future.empty() || FBInfo()[future_name].buffer.empty()) {
       // It requires to generate an anonymous buffer for "=> local/share/global"
       auto sty = cast<SpannedType>(NodeType(*n.GetTo()));

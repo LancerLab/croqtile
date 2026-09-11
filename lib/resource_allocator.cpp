@@ -11,11 +11,17 @@ namespace Choreo {
 
 Option<bool> dma_alloc_mode(
     OptionKind::User, "-fdma-alloc", "", true,
-    "Enable liveness-driven DMA future allocation: color FUTURE handles into "
-    "a minimal set of completion slots. Futures are only pooled where the "
+    "Enable DMA future allocation: color completion interference into reusable "
+    "slots. Opted-in targets use occupancy independent of buffer liveness. "
+    "Futures are only pooled where the "
     "target provides a pooled completion path (e.g. a DTE pool); where no "
     "such path is enabled this flag has no observable effect. Disable with "
     "-fdma-alloc=false to fall back to monotonic slot assignment.");
+
+Option<bool> dma_completion_report(
+    OptionKind::User, "-fdma-completion-report", "", false,
+    "Report DMA completion occupancy, context assignments, potential lifecycle "
+    "violations and conservative fallback reasons on supported pooled paths.");
 
 Option<std::string> event_alloc_mode(
     OptionKind::User, "-fevent-alloc", "", "simple",
@@ -43,6 +49,11 @@ bool DmaResourceAllocator::RunOnProgramImpl(AST::Node& root) {
   la.SSTab().UpdateGlobal(SymTab());
   if (!la.RunOnProgram(root)) return la.Status();
 
+  if ((dma_alloc_mode || dma_completion_report) && use_completion_occupancy_) {
+    completion.SSTab().UpdateGlobal(SymTab());
+    if (!completion.RunOnProgram(root)) return completion.Status();
+  }
+
   root.accept(*this);
 
   return !HasError();
@@ -60,7 +71,7 @@ bool DmaResourceAllocator::BeforeVisitImpl(AST::Node& n) {
 bool DmaResourceAllocator::AfterVisitImpl(AST::Node& n) {
   if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     if (pb->IsDeviceEntry()) {
-      if (dma_alloc_mode)
+      if (dma_alloc_mode || dma_completion_report)
         AllocateClass(LivenessAnalyzer::ResourceClass::FUTURE, cur_dev_fname);
       if (EventAllocEnabled())
         AllocateClass(LivenessAnalyzer::ResourceClass::EVENT, cur_dev_fname);
@@ -89,6 +100,9 @@ DmaResourceAllocator::FindHBGraph(const std::string& df_name) const {
 
 void DmaResourceAllocator::AllocateClass(LivenessAnalyzer::ResourceClass rc,
                                          const std::string& df_name) {
+  if (rc == LivenessAnalyzer::ResourceClass::FUTURE &&
+      AllocateCompletions(df_name))
+    return;
   auto& plan = DmaResourcePlan::Plans()[df_name];
 
   HeapSimulator::Chunks chunks;
@@ -136,4 +150,51 @@ void DmaResourceAllocator::AllocateClass(LivenessAnalyzer::ResourceClass rc,
     plan.future_slot_count = result.heap_size;
   else
     plan.event_slot_count = result.heap_size;
+}
+
+bool DmaResourceAllocator::AllocateCompletions(const std::string& df_name) {
+  if (!use_completion_occupancy_) return false;
+  auto found = completion.results().find(df_name);
+  if (found == completion.results().end()) return false;
+  const auto& info = found->second;
+  // Keep the established liveness/HB protocol for independently executing
+  // participants and externally bound completion. No sequential-CFG reuse
+  // proof applies there. Do not enlarge their pool because this analysis
+  // cannot model the protocol.
+  if (!info.fallback.empty() && !info.dedicated_fallback) {
+    if (dma_completion_report)
+      errs() << "DMA completion " << df_name
+             << ": fallback (existing liveness/HB): " << info.fallback << "\n";
+    return false;
+  }
+  HeapSimulator::Chunks chunks;
+  for (const auto& name : info.resources) chunks.push_back({1, {}, name});
+  HeapSimulator simulator;
+  auto result = simulator.AllocateInterference(
+      chunks, [&](const std::string& a, const std::string& b) {
+        return info.interferes(a, b);
+      });
+  auto& plan = DmaResourcePlan::Plans()[df_name];
+  plan.future_slot_count = result.heap_size;
+  std::set<std::string> anonymous;
+  for (const auto& [dma, name] : info.anonymous) {
+    plan.synchronous_slots[dma] = result.chunk_offsets.at(name);
+    anonymous.insert(name);
+  }
+  for (const auto& [name, slot] : result.chunk_offsets)
+    if (!anonymous.count(name)) plan.future_slots[name] = slot;
+  if (dma_completion_report) {
+    errs() << "DMA completion " << df_name << ": resources=" << chunks.size()
+           << ", slots=" << plan.future_slot_count << ", may-pending bound="
+           << (info.fallback.empty() ? std::to_string(info.pending_bound)
+                                     : "unknown")
+           << "\n";
+    if (!info.fallback.empty())
+      errs() << "  fallback (dedicated contexts): " << info.fallback << "\n";
+    for (const auto& [name, slot] : result.chunk_offsets)
+      errs() << "  slot " << slot << ": " << name << "\n";
+    for (const auto& diagnostic : info.diagnostics)
+      errs() << "  unproven completion: " << diagnostic << "\n";
+  }
+  return true;
 }

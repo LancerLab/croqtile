@@ -80,6 +80,7 @@ set(CORE_SOURCES
   loop_vectorize.cpp
   mem_reuse.cpp
   resource_allocator.cpp
+  dma_completion_analysis.cpp
   diversity_analysis.cpp
   scalar_evolution.cpp
   pipeline.cpp

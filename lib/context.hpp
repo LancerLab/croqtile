@@ -99,6 +99,9 @@ struct DMABufferInfo {
   DMABufferKind to_kind = DOK_UNKNOWN;
   Storage from_sto = Storage::DEFAULT; // source buffer storage tier
   Storage to_sto = Storage::DEFAULT;   // destination buffer storage tier
+  // Compiler-created destination for "=> local/shared/global". Its address
+  // follows the future binding through rotate; explicit buffer bases do not.
+  bool implicit_buffer = false;
 };
 
 // per-function(name) future-buffer info

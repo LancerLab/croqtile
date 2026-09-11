@@ -85,7 +85,8 @@ struct HeapSimulator {
   Result GlobalDecreasingSizeBestFitAllocate(
       const std::vector<Chunk>& chunks, size_t alignment = 0,
       HBOverride hb_override = nullptr,
-      HBMustInterfere hb_must_interfere = nullptr) {
+      HBMustInterfere hb_must_interfere = nullptr,
+      HBMustInterfere explicit_interference = nullptr) {
     Result result;
     result.heap_size = 0;
 
@@ -106,6 +107,12 @@ struct HeapSimulator {
 
     for (size_t i = 0; i < length; ++i)
       for (size_t j = i + 1; j < length; ++j) {
+        if (explicit_interference) {
+          interference_graph[i][j] = interference_graph[j][i] =
+              explicit_interference(sorted_chunks[i].buffer_id,
+                                    sorted_chunks[j].buffer_id);
+          continue;
+        }
         if (sorted_chunks[i].Interfere(sorted_chunks[j])) {
           if (hb_override && hb_override(sorted_chunks[i].buffer_id,
                                          sorted_chunks[j].buffer_id))
@@ -213,6 +220,15 @@ struct HeapSimulator {
                   HBMustInterfere hb_must_interfere = nullptr) {
     return GlobalDecreasingSizeBestFitAllocate(chunks, alignment, hb_override,
                                                hb_must_interfere);
+  }
+
+  // Completion analysis supplies a CFG interference relation directly. Buffer
+  // allocation continues to use intervals and its existing HB overrides.
+  Result AllocateInterference(const Chunks& chunks,
+                              HBMustInterfere interference) {
+    assert(interference);
+    return GlobalDecreasingSizeBestFitAllocate(chunks, 0, nullptr, nullptr,
+                                               interference);
   }
 
   RootResult PartitionAllocationRoots(const std::vector<Chunk>& chunks,
