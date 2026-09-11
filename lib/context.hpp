@@ -455,7 +455,7 @@ struct AssessmentStats {
   size_t runtime_medium = 0;   // runtime assertions with medium estimated cost
   size_t runtime_high = 0;     // runtime assertions with high estimated cost
   size_t runtime_enabled = 0;  // runtime assertions enabled for emission
-  size_t runtime_disabled = 0; // runtime assertions suppressed by cost filter
+  size_t runtime_disabled = 0; // suppressed by cost filter or duplicate removal
   // Per-usage-type assessment counts (total evaluated, including static)
   size_t unclassified_total = 0;  // UsageType::ShapeCompatibility
   size_t shape_compat_total = 0;  // UsageType::ShapeCompatibility

@@ -370,7 +370,7 @@ void Choreo::PrintAssessmentStats(const AssessmentStats& s) {
   row(s.runtime_medium, "Runtime assertions (medium cost)");
   row(s.runtime_high, "Runtime assertions (high cost)");
   row(s.runtime_enabled, "Runtime assertions enabled");
-  row(s.runtime_disabled, "Runtime assertions disabled by cost filter");
+  row(s.runtime_disabled, "Runtime assertions disabled (cost or duplicate)");
   errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
          << "\n";
   row(s.unclassified_total, "Assessments (unclassified)");

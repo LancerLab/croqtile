@@ -16,7 +16,7 @@
 // CHECK: {{[ ]*}}0  assess  - Runtime assertions (medium cost)
 // CHECK: {{[ ]*}}0  assess  - Runtime assertions (high cost)
 // CHECK: {{[ ]*}}2  assess  - Runtime assertions enabled
-// CHECK: {{[ ]*}}0  assess  - Runtime assertions disabled by cost filter
+// CHECK: {{[ ]*}}0  assess  - Runtime assertions disabled (cost or duplicate)
 //
 // Memory reuse: 1 shared buffer (buf), events excluded.
 // CHECK: Memory Reuse Statistics

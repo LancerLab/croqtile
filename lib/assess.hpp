@@ -94,6 +94,9 @@ struct Assertion {
   AssertionCost cost = AssertionCost::LOW;
   bool enabled = true;
   UsageType usage_type = UsageType::UnClassified;
+  // Retain the assessment record and source location even when another
+  // enabled assertion checks the same predicate at the same emission site.
+  bool duplicate = false;
 
   /// Return the node to use for site-assertion emission mapping.
   AST::Node* EmitTarget() const {

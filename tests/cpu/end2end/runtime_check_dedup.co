@@ -1,0 +1,31 @@
+// REQUIRES: TARGET-CPU
+// RUN: set -o pipefail; choreo -t cc -gs %s | CHOREO_TEST_INDEX=2 bash -s -- --execute 2>&1 | FileCheck %s --check-prefix=VALID
+// RUN: set -o pipefail; choreo -t cc -gs %s | CHOREO_TEST_INDEX=-1 not bash -s -- --execute 2>&1 | FileCheck %s --check-prefix=LOWER
+// RUN: set -o pipefail; choreo -t cc -gs %s | CHOREO_TEST_INDEX=4 not bash -s -- --execute 2>&1 | FileCheck %s --check-prefix=UPPER
+
+#include "choreo.h"
+#include <cstdlib>
+#include <cstdio>
+
+__co__ void duplicate_bounds(s32[4] a, s32[4] b, s32[1] out, int j) {
+  parallel p by 1 {
+    x = a.at(j);
+    y = b.at(j);
+    out.at(0) = x + y;
+  }
+}
+
+int main() {
+  int j = std::atoi(std::getenv("CHOREO_TEST_INDEX"));
+  choreo::s32 a[4] = {1, 2, 3, 4};
+  choreo::s32 b[4] = {5, 6, 7, 8};
+  choreo::s32 out[1] = {};
+  duplicate_bounds(choreo::make_spanview(a), choreo::make_spanview(b),
+                   choreo::make_spanview(out), j);
+  if (out[0] != 10) return 1;
+  std::puts("Valid bounds passed");
+}
+
+// VALID: Valid bounds passed
+// LOWER: choreo runtime check failed: The 1st index `j` of element access 'a' should be greater than or equal to 0
+// UPPER: choreo runtime check failed: The 1st index `j` of element access 'a' should be less than 4

@@ -2,6 +2,9 @@
 #include "context.hpp"
 #include "symvals.hpp"
 
+#include <map>
+#include <tuple>
+
 namespace Choreo {
 
 namespace {
@@ -446,11 +449,30 @@ void AssertSite::EstimateAssertions() {
   auto& assertions =
       const_cast<std::vector<Assertion>&>(assessor.GetAssertions());
 
+  using Site = std::tuple<AST::Node*, AssertionEmitPosition, AssessType>;
+  std::map<Site, std::vector<const Assertion*>> checked;
   for (auto& ar : assertions) {
     ar.estimated_cost = EstimateAssertionCost(ar.emit_node);
     ar.cost = CategorizeCost(ar.estimated_cost);
     ar.enabled =
         IsEnabledAtThreshold(ar.cost, CCtx().RuntimeCheckCostThreshold());
+    ar.duplicate = false;
+    if (!ar.enabled) continue;
+
+    // Placement is final here. Checks at this exact site execute together,
+    // without intervening assignments or control flow. Keep the first enabled
+    // diagnostic, regardless of which source access requested the check.
+    // Do not merge across sites: equal expressions may observe different
+    // values, loop iterations, or branch participation there.
+    auto& previous = checked[{ar.emit_node, ar.emit_position, ar.type}];
+    for (const auto* other : previous) {
+      if (sbe::ceq(ar.expr, other->expr)) {
+        ar.duplicate = true;
+        ar.enabled = false;
+        break;
+      }
+    }
+    if (!ar.duplicate) previous.push_back(&ar);
   }
 
   if (CCtx().ShowAssess()) PrintAssertionReport();
@@ -579,7 +601,9 @@ void AssertSite::PrintAssertionReport() const {
         errs() << "  [" << idx++ << "] " << type_str(ar->type)
                << "  enabled=" << (ar->enabled ? "yes" : "no ")
                << "  cost=" << cost_str(ar->cost)
-               << "  estimated=" << ar->estimated_cost << "\n";
+               << "  estimated=" << ar->estimated_cost;
+        if (ar->duplicate) errs() << "  duplicate=yes";
+        errs() << "\n";
         errs() << "       assess  : runtime " << STR(ar->expr) << "\n";
         errs() << "       message : " << ae.message << "\n";
         errs() << "       loc     : " << ae.loc << "\n";
