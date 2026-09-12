@@ -54,8 +54,15 @@ AccessTracker::GetAllSymbolicOperands(const AST::Node* n) const {
     }
     return res;
   }
-  if (auto da = dyn_cast<AST::DataAccess>(n))
-    return {sym_scoper(da->GetDataName())};
+  if (auto da = dyn_cast<AST::DataAccess>(n)) {
+    VarSet res{sym_scoper(da->GetDataName())};
+    if (!da->AccessElement()) return res;
+    for (const auto& index : da->GetIndices()) {
+      VarSet sub = GetAllSymbolicOperands(index.get());
+      res.insert(sub.begin(), sub.end());
+    }
+    return res;
+  }
   if (auto vm = dyn_cast<AST::VectorMemory>(n)) {
     VarSet res{sym_scoper(vm->Address()->GetDataName())};
     for (const auto& index : vm->Address()->GetIndices()) {

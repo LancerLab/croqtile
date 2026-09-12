@@ -160,6 +160,11 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
     bool buffer_related = false;
   };
 
+  struct RegionLiveness {
+    VarSet live_in;
+    VarSet live_out;
+  };
+
   // ---- Construction ----
 
   LivenessAnalyzer()
@@ -188,6 +193,8 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   const std::unordered_map<std::string, Ranges>& VarRanges() const {
     return var_ranges;
   }
+
+  RegionLiveness GetRegionLiveness(const AST::Node* region) const;
 
   // Resource classes used by the DMA resource allocator.  BUFFER is handled by
   // MemReuse; FUTURE and EVENT are the finite completion slots this allocator

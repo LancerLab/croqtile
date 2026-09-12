@@ -832,6 +832,57 @@ bool LivenessAnalyzer::IsPoolFuture(const std::string& fut) const {
   return pool_futures.count(fut) > 0;
 }
 
+LivenessAnalyzer::RegionLiveness
+LivenessAnalyzer::GetRegionLiveness(const AST::Node* region) const {
+  RegionLiveness result;
+  auto start = stmt2id.find(region);
+  if (start == stmt2id.end()) return result;
+
+  VarSet definitions;
+  const size_t begin = start->second;
+  size_t end = preorder_stmts.size();
+  const ScopeEnd* region_end = nullptr;
+  for (size_t i = begin + 1; i < preorder_stmts.size(); ++i) {
+    auto scope_end = dyn_cast<ScopeEnd>(preorder_stmts[i]);
+    if (scope_end && scope_end->scope_start == region) {
+      end = i;
+      region_end = scope_end;
+      break;
+    }
+  }
+
+  for (size_t i = begin; i < end; ++i) {
+    const auto* stmt = preorder_stmts[i];
+    if (isa<ScopeEnd>(stmt)) continue;
+    auto found = stmt_linfo.find(stmt);
+    if (found == stmt_linfo.end()) continue;
+    for (const auto& use : found->second.use)
+      if (!definitions.count(use) && !found->second.def.count(use))
+        result.live_in.insert(use);
+    SetUnionInPlace(definitions, found->second.def);
+    if (auto assignment = dyn_cast<AST::Assignment>(stmt)) {
+      if (!assignment->IsDecl() && !assignment->AssignToDataElement()) {
+        for (const auto& use : found->second.use) {
+          if (UnScopedName(use) == assignment->GetName()) {
+            definitions.insert(use);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if (region_end) {
+    auto end_info = stmt_linfo.find(region_end);
+    if (end_info != stmt_linfo.end()) {
+      for (const auto& definition : definitions)
+        if (end_info->second.live_out.count(definition))
+          result.live_out.insert(definition);
+    }
+  }
+  return result;
+}
+
 void LivenessAnalyzer::DumpLivenessResults(
     const std::vector<std::pair<std::string, Ranges>>& var_live_ranges,
     const std::map<std::string, std::map<size_t, BlockInfo>>& bb_infos_map) {
