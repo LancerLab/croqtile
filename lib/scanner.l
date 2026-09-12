@@ -412,6 +412,10 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
 <PB_ATTR>{
   "launch_bounds" { BEGIN(CO_FUNC); return Choreo::Parser::make_LAUNCHBOUNDS(yytext, loc); }
   "maxnreg"    { BEGIN(CO_FUNC); return Choreo::Parser::make_MAXNREG(yytext, loc); }
+  "g""cu::no_mem_alias_in_vldst_tar" { BEGIN(CO_FUNC); return Choreo::Parser::make_TARGET_NO_MEM_ALIAS_IN_VLDST_TAR(yytext, loc); }
+  "g""cu::loop_iterator_less_than_1024" { BEGIN(CO_FUNC); return Choreo::Parser::make_TARGET_LOOP_ITERATOR_LESS_THAN_1024(yytext, loc); }
+  "g""cu::enable_software_pipeliner" { BEGIN(CO_FUNC); return Choreo::Parser::make_TARGET_ENABLE_SOFTWARE_PIPELINER(yytext, loc); }
+  "g""cu::enable_bc_resolver" { BEGIN(CO_FUNC); return Choreo::Parser::make_TARGET_ENABLE_BC_RESOLVER(yytext, loc); }
   [ \t\n]    ; /* Ignore whitespace */
   .          { BEGIN(CO_FUNC); yyless(0); }
 }

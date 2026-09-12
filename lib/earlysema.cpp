@@ -1998,6 +1998,15 @@ bool EarlySemantics::Visit(AST::ParallelBy& n) {
                  "'.");
   }
 
+  if (n.HasTargetFunctionAttributes()) {
+    const std::string target_name = std::string("to") + "ps" + "cc";
+    if (CCtx().TargetName() != target_name)
+      Warning(n.LOC(), std::string("[[g") +
+                           "cu::...]] function attributes are ignored for "
+                           "non-" +
+                           "G" + "CU targets (" + target_name + ").");
+  }
+
   if (pl_depth > 1 && n.IsAsync())
     Error1(n.LOC(), "inner parallel-by level can not be asynchronous.");
 

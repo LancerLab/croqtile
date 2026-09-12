@@ -2061,6 +2061,7 @@ private:
   std::string device_target_name;
   ptr<MultiValues> launch_bounds_args = nullptr;
   ptr<Expr> maxnreg_arg = nullptr;
+  std::vector<std::string> target_function_attributes;
   bool cooperative = false;
 
 public:
@@ -2185,6 +2186,19 @@ public:
   const ptr<Expr>& GetMaxnregArg() const { return maxnreg_arg; }
   void SetMaxnregArg(const ptr<Expr>& arg) { maxnreg_arg = arg; }
 
+  bool HasTargetFunctionAttributes() const {
+    return !target_function_attributes.empty();
+  }
+  const std::vector<std::string>& GetTargetFunctionAttributes() const {
+    return target_function_attributes;
+  }
+  void AddTargetFunctionAttribute(const std::string& attribute) {
+    for (const auto& current : target_function_attributes)
+      if (current == attribute) return;
+    target_function_attributes.push_back(attribute);
+  }
+  void ClearTargetFunctionAttributes() { target_function_attributes.clear(); }
+
   bool IsCooperative() const { return cooperative; }
   void SetCooperative(bool c = true) { cooperative = c; }
 
@@ -2202,13 +2216,16 @@ public:
     if (HasDeviceTarget()) pb->SetDeviceTargetName(DeviceTargetName());
     if (HasLaunchBounds()) pb->SetLaunchBoundsArgs(CloneP(launch_bounds_args));
     if (HasMaxnreg()) pb->SetMaxnregArg(CloneP(maxnreg_arg));
+    for (const auto& attribute : target_function_attributes)
+      pb->AddTargetFunctionAttribute(attribute);
     pb->SetCooperative(IsCooperative());
     return pb;
   }
 
   void InlinePrint(std::ostream& os, const std::string& prefix = {},
                    bool with_type = false) const override {
-    bool has_attr = HasLaunchBounds() || HasMaxnreg();
+    bool has_attr =
+        HasLaunchBounds() || HasMaxnreg() || HasTargetFunctionAttributes();
     if (HasLaunchBounds()) {
       os << prefix << "[[launch_bounds(";
       launch_bounds_args->InlinePrint(os, "", with_type);
@@ -2218,6 +2235,11 @@ public:
       os << (HasLaunchBounds() ? "" : prefix) << "[[maxnreg(";
       maxnreg_arg->InlinePrint(os, "", with_type);
       os << ")]] ";
+    }
+    bool prefixed_attribute = HasLaunchBounds() || HasMaxnreg();
+    for (const auto& attribute : target_function_attributes) {
+      os << (prefixed_attribute ? "" : prefix) << "[[" << attribute << "]] ";
+      prefixed_attribute = true;
     }
     os << (has_attr ? "" : prefix) << "parallel";
     if (stream_expr) {

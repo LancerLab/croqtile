@@ -1146,6 +1146,7 @@ public:
 
     auto new_pb = cast<AST::ParallelBy>(pb.Clone());
     new_pb->SetOuter(false);
+    new_pb->ClearTargetFunctionAttributes();
     // pb is now the outer level
     pb.SetLevel(pl);
     pb.SetEnforced(false);

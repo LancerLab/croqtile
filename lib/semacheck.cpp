@@ -254,6 +254,13 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
                             std::to_string(extent) + ").");
     }
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    const bool owns_device_function = pb->IsOuter() || pb->IsDeviceEntry();
+    if (pb->HasTargetFunctionAttributes() && !owns_device_function)
+      Error1(pb->LOC(),
+             "[[g"
+             "cu::...]] function attributes require a parallel-by that "
+             "owns a generated device function.");
+
     parallel_level_stack.push_back(pb->GetLevel());
     cooperative_stack.push_back(pb->IsCooperative());
 

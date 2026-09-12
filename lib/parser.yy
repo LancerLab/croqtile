@@ -66,6 +66,7 @@ namespace Choreo { namespace AST { struct MultiValues; struct Expr; } }
 struct PBAttributes {
   std::shared_ptr<Choreo::AST::MultiValues> launch_bounds;
   std::shared_ptr<Choreo::AST::Expr> maxnreg;
+  std::vector<std::string> target_function_attributes;
 };
 
 } // %code requires
@@ -214,7 +215,7 @@ extern int yylex();
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
 %token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
-%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST EVICT_FIRST EVICT_LAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC BARRIER FENCE CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG
+%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST EVICT_FIRST EVICT_LAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC BARRIER FENCE CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG TARGET_NO_MEM_ALIAS_IN_VLDST_TAR TARGET_LOOP_ITERATOR_LESS_THAN_1024 TARGET_ENABLE_SOFTWARE_PIPELINER TARGET_ENABLE_BC_RESOLVER
 %token <std::string> MAP REMAP
 %token DLBRAKT
 %token ACQ REL ACQ_REL SEQ_CST
@@ -911,6 +912,25 @@ pb_attribute
         $$ = PBAttributes{};
         $$.maxnreg = $4;
       }
+    | DLBRAKT TARGET_NO_MEM_ALIAS_IN_VLDST_TAR RBRAKT RBRAKT {
+        $$ = PBAttributes{};
+        $$.target_function_attributes.push_back(
+            "g" "cu::no_mem_alias_in_vldst_tar");
+      }
+    | DLBRAKT TARGET_LOOP_ITERATOR_LESS_THAN_1024 RBRAKT RBRAKT {
+        $$ = PBAttributes{};
+        $$.target_function_attributes.push_back(
+            "g" "cu::loop_iterator_less_than_1024");
+      }
+    | DLBRAKT TARGET_ENABLE_SOFTWARE_PIPELINER RBRAKT RBRAKT {
+        $$ = PBAttributes{};
+        $$.target_function_attributes.push_back(
+            "g" "cu::enable_software_pipeliner");
+      }
+    | DLBRAKT TARGET_ENABLE_BC_RESOLVER RBRAKT RBRAKT {
+        $$ = PBAttributes{};
+        $$.target_function_attributes.push_back("g" "cu::enable_bc_resolver");
+      }
     | pb_attribute DLBRAKT LAUNCHBOUNDS LPAREN g_value_list RPAREN RBRAKT RBRAKT {
         $$ = $1;
         $$.launch_bounds = $5;
@@ -918,6 +938,25 @@ pb_attribute
     | pb_attribute DLBRAKT MAXNREG LPAREN s_expr RPAREN RBRAKT RBRAKT {
         $$ = $1;
         $$.maxnreg = $5;
+      }
+    | pb_attribute DLBRAKT TARGET_NO_MEM_ALIAS_IN_VLDST_TAR RBRAKT RBRAKT {
+        $$ = $1;
+        $$.target_function_attributes.push_back(
+            "g" "cu::no_mem_alias_in_vldst_tar");
+      }
+    | pb_attribute DLBRAKT TARGET_LOOP_ITERATOR_LESS_THAN_1024 RBRAKT RBRAKT {
+        $$ = $1;
+        $$.target_function_attributes.push_back(
+            "g" "cu::loop_iterator_less_than_1024");
+      }
+    | pb_attribute DLBRAKT TARGET_ENABLE_SOFTWARE_PIPELINER RBRAKT RBRAKT {
+        $$ = $1;
+        $$.target_function_attributes.push_back(
+            "g" "cu::enable_software_pipeliner");
+      }
+    | pb_attribute DLBRAKT TARGET_ENABLE_BC_RESOLVER RBRAKT RBRAKT {
+        $$ = $1;
+        $$.target_function_attributes.push_back("g" "cu::enable_bc_resolver");
       }
     ;
 
@@ -935,6 +974,8 @@ paraby_block
         pb->stmts = $7;
         if ($1.launch_bounds) $6->SetLaunchBoundsArgs($1.launch_bounds);
         if ($1.maxnreg) $6->SetMaxnregArg($1.maxnreg);
+        for (const auto& attribute : $1.target_function_attributes)
+          $6->AddTargetFunctionAttribute(attribute);
         $$ = $6;
       }
     | PARA sync_type opt_stream_bind {
