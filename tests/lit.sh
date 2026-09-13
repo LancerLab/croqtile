@@ -1059,7 +1059,11 @@ execute_command() {
     echo "DRYRUN: $file" >&2
     local exit_code=0
   else
-    eval "$command" 2>/dev/null
+    # Run each RUN line in a subshell.  Test commands may enable shell
+    # options (notably `set -o pipefail`) or alter the working environment;
+    # leaking either into later RUN lines changes their pipeline status and
+    # makes expected-error tests fail spuriously.
+    ( eval "$command" ) 2>/dev/null
     local exit_code=$?
   fi
 

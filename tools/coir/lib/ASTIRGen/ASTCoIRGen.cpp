@@ -3583,6 +3583,19 @@ bool ASTCoIRGen::Visit(AST::DMA& dma) {
     emitFenceKinds(dma.GetNote("dma_fence_producer"), loc);
 
   mlir::Value token = nullptr;
+  auto attachDmaSourceAttrs = [&](mlir::Operation *op) {
+    // CoIR is serialized through a temporary MLIR file by cocc.  The regular
+    // MLIR location is consequently the generated file/line, not the source
+    // .co location needed by runtime DMA diagnostics.  Keep the frontend
+    // location as explicit attributes so target emitters can preserve it
+    // across CoIR optimization and lowering.
+    op->setAttr("coir.source_line",
+                builder.getI64IntegerAttr(dma.LOC().begin.line));
+    op->setAttr("coir.source_column",
+                builder.getI64IntegerAttr(dma.LOC().begin.column));
+    if (isAsync) op->setAttr("coir.source_async", builder.getUnitAttr());
+  };
+
   if (dma.IsTMA()) {
     mlir::IntegerAttr swizAttr;
     auto swizMode = dma.GetSwizzleMode();
@@ -3599,11 +3612,13 @@ bool ASTCoIRGen::Visit(AST::DMA& dma) {
     auto tmaCopy = builder.create<coir::TmaCopyOp>(
         loc, coir::AsyncTokenType::get(&IRContext()), srcVal, dstVal, swizAttr,
         dma.IsOOBZeroFill() ? builder.getUnitAttr() : mlir::UnitAttr());
+    attachDmaSourceAttrs(tmaCopy.getOperation());
     token = tmaCopy.getToken();
   } else {
     auto dmaCopy = builder.create<coir::DmaCopyOp>(
         loc, coir::AsyncTokenType::get(&IRContext()), srcVal, dstVal, kindAttr,
         padLowAttr, padHighAttr, padValueAttr, transpPermAttr);
+    attachDmaSourceAttrs(dmaCopy.getOperation());
     token = dmaCopy.getToken();
   }
 

@@ -18,4 +18,4 @@ __co__ s32 [32] scale(s32 [32] x) {
 // CHECK: 3  assess  - Resolved at compile time (static-true)
 // CHECK: assess  - Runtime assertions generated
 // CHECK: assess  - Runtime assertions enabled
-// CHECK: assess  - Runtime assertions disabled by cost filter
+// CHECK: assess  - Runtime assertions disabled (cost or duplicate)
