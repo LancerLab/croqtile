@@ -10,7 +10,7 @@
 /// Greedy coloring is deterministic but does not guarantee the minimum count.
 ///
 /// Resource classes:
-///   FUTURE -- device DMA completion slot (DTE), GPU TMA mbarrier
+///   FUTURE -- device DMA completion slot (DMA context), GPU TMA mbarrier
 ///   EVENT  -- GPU named barrier / scalar mbarrier, device sync-point
 /// BUFFER is handled by MemReuse and is out of scope here.
 
@@ -37,8 +37,8 @@ enum class EventAllocMode {
 
 // Enable/disable liveness-driven coloring of FUTURE handles (DMA completion
 // slots).  Futures are only pooled where the target provides a pooled
-// completion path (e.g. a DTE pool); otherwise the flag has no observable
-// effect.  Replaces the old greedy -fdte-merge slot assignment.
+// completion path (e.g. a context pool); otherwise the flag has no observable
+// effect.
 extern Option<bool> dma_alloc_mode;
 extern Option<bool> dma_completion_report;
 

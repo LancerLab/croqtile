@@ -549,7 +549,7 @@ public:
       buf_info.buffer = InScopeName(buf_name);
       buf_info.implicit_buffer = n.HasNote("implicit_dma_destination");
       // Record source/destination storage tiers so that codegen can pick the
-      // DTE context that matches the actual DMA a dma.any placeholder will be
+      // DMA context that matches the actual DMA a dma.any placeholder will be
       // bound to (e.g. a shared -> global deslice lowers to the SHARED tier,
       // not the destination's GLOBAL tier).
       if (auto f_ca = dyn_cast<AST::ChunkAt>(n.from)) {

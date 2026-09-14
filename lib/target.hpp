@@ -30,6 +30,7 @@ enum class ChoreoFeature {
   DGMA,
   DSDMA,
   ASYNC_DMA,
+  LITE_DMA,
   NSVR,
   SLML,
   MGM,
@@ -55,6 +56,7 @@ inline static const std::string STR(ChoreoFeature cf) {
   case ChoreoFeature::DGMA: return "dgma";
   case ChoreoFeature::DSDMA: return "dsdma";
   case ChoreoFeature::ASYNC_DMA: return "async_dma";
+  case ChoreoFeature::LITE_DMA: return "lite_dma";
   case ChoreoFeature::NSVR: return "nsvr";
   case ChoreoFeature::SLML: return "slml";
   case ChoreoFeature::MGM: return "mgm";
@@ -87,6 +89,8 @@ inline static const std::string Description(ChoreoFeature cf) {
     return "Single DMA/TMA with Both Slice and DeSlice.";
   case ChoreoFeature::ASYNC_DMA:
     return "Hardware-accelerated async DMA (e.g. cp.async).";
+  case ChoreoFeature::LITE_DMA:
+    return "Low-overhead DMA emission without runtime future objects.";
   case ChoreoFeature::NSVR: return "No Scalar Value Return Support.";
   case ChoreoFeature::SLML: return "Allow User to Set Local Memory Limit.";
   case ChoreoFeature::MGM: return "Choreo to Manage Global Memory.";
@@ -166,6 +170,14 @@ public:
   // Resolve "native" to a concrete arch by probing local hardware.
   // Returns empty string if detection is not supported or fails.
   virtual ArchId ResolveNativeArch() const { return ""; }
+
+  // Whether lite-dma emission (raw scalar DMA context plus a raw event object
+  // instead of choreo::future objects) is enabled by default for the given
+  // architecture. Targets that offer lite-dma override this to select the
+  // default by architecture; architectures without lite-dma keep it disabled.
+  // The default is independent of build type so debug and release emit
+  // identical lowering.
+  virtual bool LiteDmaDefault(const ArchId& /*arch*/) const { return false; }
 
   // Return path to the host C++ compiler for this target.
   // Used by --lib multi-file driver to compile .cpp wrapper files.

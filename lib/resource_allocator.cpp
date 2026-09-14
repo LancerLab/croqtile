@@ -14,7 +14,7 @@ Option<bool> dma_alloc_mode(
     "Enable DMA future allocation: color completion interference into reusable "
     "slots. Opted-in targets use occupancy independent of buffer liveness. "
     "Futures are only pooled where the "
-    "target provides a pooled completion path (e.g. a DTE pool); where no "
+    "target provides a pooled completion path (e.g. a context pool); where no "
     "such path is enabled this flag has no observable effect. Disable with "
     "-fdma-alloc=false to fall back to monotonic slot assignment.");
 
@@ -108,12 +108,13 @@ void DmaResourceAllocator::AllocateClass(LivenessAnalyzer::ResourceClass rc,
   HeapSimulator::Chunks chunks;
   for (const auto& [name, ranges] : la.ResourceRanges(rc)) {
     if (!PrefixedWith(name, df_name)) continue;
-    // SHARED-storage futures are routed through named CDTE contexts, not the
-    // SDTE pool, so they must not consume a pool slot.  This mirrors the
-    // storage half of the codegen `use_pool = use_dte_pool &&
-    // sto != Storage::SHARED` condition; the target-specific `use_dte_pool`
-    // switch is applied at the codegen consumption site, not here.
-    if (rc == LivenessAnalyzer::ResourceClass::FUTURE && !la.IsPoolFuture(name))
+    // SHARED-storage futures are routed through per-DMA contexts, not reusable
+    // named slots, so they must not consume a named slot.  This mirrors the
+    // storage half of the codegen named-emission condition (named emission
+    // applies only to non-SHARED storage); the target's named-emission flag is
+    // applied at the codegen consumption site, not here.
+    if (rc == LivenessAnalyzer::ResourceClass::FUTURE &&
+        !la.IsNamedContextFuture(name))
       continue;
     HeapSimulator::Chunk chunk;
     chunk.size = 1; // each DMA handle occupies one completion slot

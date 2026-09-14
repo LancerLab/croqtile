@@ -824,12 +824,12 @@ LivenessAnalyzer::ResourceRanges(ResourceClass rc) const {
   return result;
 }
 
-bool LivenessAnalyzer::IsPoolFuture(const std::string& fut) const {
+bool LivenessAnalyzer::IsNamedContextFuture(const std::string& fut) const {
   // `.any` placeholder futures carry no src/dst, so their storage can only be
   // resolved once the placeholder is matched to a real DMA. Conservatively
-  // treat them as pool futures so existing behavior is preserved.
+  // treat them as named-context futures so existing behavior is preserved.
   if (dma_any_futures.count(fut)) return true;
-  return pool_futures.count(fut) > 0;
+  return named_context_futures.count(fut) > 0;
 }
 
 LivenessAnalyzer::RegionLiveness
@@ -1948,14 +1948,14 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
     tracker_.AddFut2Buffers(n.future, DMABufInfo{n.FromSymbol(), n.ToSymbol()});
 
     // Classify the future for DMA resource allocation.  A future whose DMA
-    // touches only non-SHARED storage is a candidate for a pooled completion
-    // slot; SHARED-storage futures are routed through per-DMA CDTE contexts
-    // and must not consume a pool slot.  This mirrors the storage half of the
-    // codegen `use_pool = use_dte_pool && sto != Storage::SHARED` condition;
-    // the target-specific `use_dte_pool` switch is applied at the codegen
-    // consumption site, not here, because the core liveness analysis is
-    // target-agnostic.  A side may be a plain buffer, a future `.data`
-    // expression (resolved via FutureType), or an inferred `local`
+    // touches only non-SHARED storage is a candidate for a reusable named
+    // completion slot; SHARED-storage futures are routed through per-DMA
+    // contexts and must not consume a named slot.  This mirrors the storage
+    // half of the codegen named-emission condition (named emission applies
+    // only to non-SHARED storage); the target's named-emission flag is applied
+    // at the codegen consumption site, not here, because the core liveness
+    // analysis is target-agnostic.  A side may be a plain buffer, a future
+    // `.data` expression (resolved via FutureType), or an inferred `local`
     // destination (an AST::Memory node), so resolve each side's storage
     // through its type exactly like the codegen.
     auto StorageOf = [&](const ptr<AST::Node>& node) -> Storage {
@@ -1969,7 +1969,8 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
     Storage f_sto = StorageOf(n.from);
     Storage t_sto = StorageOf(n.to);
     Storage dma_sto = f_sto < t_sto ? f_sto : t_sto;
-    if (dma_sto != Storage::SHARED) pool_futures.insert(InScopeName(n.future));
+    if (dma_sto != Storage::SHARED)
+      named_context_futures.insert(InScopeName(n.future));
   }
 
   // An async DMA carrying an event (dma.copy.async<ev> ...) (re)arms the

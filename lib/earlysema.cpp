@@ -2277,7 +2277,8 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   // Reject DMA with a `local` source or destination on targets without a
   // native `local` tier (mirrors the declaration gate in
   // Visit(NamedVariableDecl)). This is unconditional: even when `--allow-local`
-  // permits a stack-backed `local`, the DTE cannot source/sink stack.
+  // permits a stack-backed `local`, the transfer engine cannot source/sink
+  // stack.
   if ((src_storage == Storage::LOCAL || dst_storage == Storage::LOCAL) &&
       !CCtx().GetTarget().IsLocalStorageSupported(CCtx().GetArch()))
     Error1(n.LOC(),

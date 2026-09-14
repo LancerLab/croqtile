@@ -614,8 +614,11 @@ fi
 repo_root="$(cd "$repo_root" && pwd)"
 timestamp=$(date +%Y%m%d%H%M%S)
 
-# Add repo root and its tooling directories to PATH
-export PATH="$script_dir:${repo_root}:${repo_root}/extern/bin/:${repo_root}/extern/:${repo_root}/extern/llvm-project/bin/:$PATH"
+# Add repo root and its tooling directories to PATH.
+# extern/llvm-project/bin/ (CoIR LLVM download) is listed before extern/bin/
+# (prebuilt filecheck-kit) so the fresher LLVM FileCheck wins when CoIR is
+# present; extern/bin/ remains the fallback for choreo-only builds.
+export PATH="$script_dir:${repo_root}:${repo_root}/extern/llvm-project/bin/:${repo_root}/extern/bin/:${repo_root}/extern/:$PATH"
 
 # Check if FileCheck exists in the PATH
 FILECHECK=$(which FileCheck \

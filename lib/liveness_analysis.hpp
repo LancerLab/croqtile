@@ -212,14 +212,15 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   std::unordered_map<std::string, Ranges>
   ResourceRanges(ResourceClass rc) const;
 
-  // True if `fut` (a scoped DMA-future name) is routed through the DTE pool
-  // rather than a named completion context.  Codegen uses the pool iff the DMA
-  // storage is non-SHARED (EmitFutureClaim: use_pool = use_dte_pool &&
-  // sto != Storage::SHARED, with sto = min(from, to)).  The pool decision is
-  // recorded during Visit(DMA) by resolving each side's storage exactly like
-  // the codegen (future `.data` sources resolve through FutureType), so future
-  // names and inferred `local` destinations are handled correctly.
-  bool IsPoolFuture(const std::string& fut) const;
+  // True if `fut` (a scoped DMA-future name) is routed through a reusable
+  // named completion context rather than a per-DMA context.  Codegen selects
+  // the named slot iff the DMA storage is non-SHARED (with `sto` taken as the
+  // more restrictive of the source and destination tiers); SHARED-storage
+  // futures use per-DMA contexts.  The decision is recorded during Visit(DMA)
+  // by resolving each side's storage exactly like the codegen (future `.data`
+  // sources resolve through FutureType), so future names and inferred `local`
+  // destinations are handled correctly.
+  bool IsNamedContextFuture(const std::string& fut) const;
 
   // ---- Visitor overrides ----
 
@@ -332,10 +333,10 @@ private:
   std::set<std::string> future_vars;
   std::set<std::string> event_vars;
 
-  // Scoped names of DMA futures routed through the DTE pool (non-SHARED
-  // storage). Populated in Visit(DMA) by mirroring the codegen use_pool
-  // condition (sto = min(from,to) != Storage::SHARED).
-  std::set<std::string> pool_futures;
+  // Scoped names of DMA futures routed through a named completion context
+  // (non-SHARED storage). Populated in Visit(DMA) by mirroring the codegen
+  // non-SHARED-storage condition (sto = min(from,to) != Storage::SHARED).
+  std::set<std::string> named_context_futures;
 
   // -- CFG / basic block state --
   inline void ConnectBB(ptr<BB> x, ptr<BB> y) {
