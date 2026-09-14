@@ -1943,7 +1943,11 @@ bool SemaChecker::VisitNode(AST::Call& n) {
 
       for (size_t i = 1; i < n.arguments->Count(); ++i) {
         auto sty = NodeType(*n.arguments->ValueAt(i));
-        if (!sty->ApprxEqual(*pty))
+        const bool fmaf_vector_scalar_broadcast =
+            n.function->name == "__fmaf" && isa<VectorType>(pty) &&
+            isa<ScalarFloatType>(sty) &&
+            ScalarOrVectorElementType(pty) == sty->GetBaseType();
+        if (!sty->ApprxEqual(*pty) && !fmaf_vector_scalar_broadcast)
           Error1(n.LOC(),
                  "expect the " + std::to_string(i) +
                      "th argument to be the same type as the first one.");
