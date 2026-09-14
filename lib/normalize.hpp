@@ -454,6 +454,17 @@ private:
       auto ref = operand->GetReference();
       if (auto chunk = dyn_cast<AST::ChunkAt>(ref))
         return cast<AST::ChunkAt>(chunk->Clone());
+      if (operand->op == Op::ElemOf) {
+        auto indices = AST::Make<AST::MultiValues>(operand->LOC());
+        ptr<AST::Expr> current = operand;
+        while (current && current->op == Op::ElemOf) {
+          indices->Insert(current->GetR()->Clone(), 0);
+          current = dyn_cast<AST::Expr>(current->GetL());
+        }
+        auto base = AST::GetArrayBaseSymbol(*operand);
+        return AST::Make<AST::ChunkAt>(
+            operand->LOC(), cast<AST::Identifier>(base->Clone()), indices);
+      }
       auto id = cast<AST::Identifier>(ref);
       return AST::Make<AST::ChunkAt>(operand->LOC(),
                                      cast<AST::Identifier>(id->Clone()));

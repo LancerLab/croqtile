@@ -1121,6 +1121,12 @@ multi_decls
             YYERROR;
           }
           decl->AddNote("alignment", std::to_string($1));
+          if (auto aty = dyn_cast<SpannedArrayType>(decl->GetType()))
+            aty->SetSlotAlignment(static_cast<size_t>($1));
+          if (decl->type) {
+            if (auto aty = dyn_cast<SpannedArrayType>(decl->type->GetType()))
+              aty->SetSlotAlignment(static_cast<size_t>($1));
+          }
         }
         $2->SetLOC(@1);
         $$ = $2;
@@ -2672,7 +2678,11 @@ vec_store_stmt
 
 
 data_element
-    : IDENTIFIER AT LPAREN data_indices RPAREN {
+    : subscript_like_expr AT LPAREN data_indices RPAREN {
+        auto ide = ElementMultiValues($1);
+        $$ = AST::Make<AST::DataAccess>(@1, ide.first, $4, false, ide.second);
+      }
+    | IDENTIFIER AT LPAREN data_indices RPAREN {
         $$ = AST::Make<AST::DataAccess>(@1, AST::Make<AST::Identifier>(@1, $1), $4);
       }
     | IDENTIFIER FNDATA AT LPAREN data_indices RPAREN {

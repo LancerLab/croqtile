@@ -497,11 +497,27 @@ bool TypeInference::Visit(AST::DataAccess& n) {
   auto dty = GetSymbolType(n.LOC(), n.GetDataName());
   SetNodeType(*n.data, dty);
 
+  ptr<Type> accessed_ty = dty;
+  if (n.AccessArrayElement()) {
+    auto aty = dyn_cast<SpannedArrayType>(dty);
+    if (!aty) {
+      Error1(n.LOC(),
+             "expect '" + n.GetDataName() + "' an array-of-spanned type.");
+      return false;
+    }
+    accessed_ty = aty->SubScriptType(n.GetArrayIndices().size());
+  }
+
   if (n.AccessElement()) {
-    auto sty = cast<SpannedType>(dty);
+    auto sty = dyn_cast<SpannedType>(accessed_ty);
+    if (!sty) {
+      Error1(n.LOC(), "span-array slot access must select a complete slot "
+                      "before '.at(...)'.");
+      return false;
+    }
     SetNodeType(n, MakeScalarType(sty->ElementType()));
   } else
-    SetNodeType(n, dty);
+    SetNodeType(n, accessed_ty);
 
   return true;
 }

@@ -2741,20 +2741,28 @@ struct EventArrayType final : public ArrayType,
 struct SpannedArrayType final : public ArrayType,
                                 public TypeIDProvider<SpannedArrayType> {
   ptr<SpannedType> spty = nullptr;
-  explicit SpannedArrayType(BaseType ft, const ptr<MDSpanType>& s,
-                            const ValueList& strd, Storage m,
-                            const ValueList& ads)
-      : ArrayType(ads), spty(std::make_shared<SpannedType>(ft, s, strd, m)) {}
+  // Explicit source-level alignment for each logical spanned-array slot.
+  // Zero preserves the historical tightly-packed layout.
+  size_t slot_alignment = 0;
 
   explicit SpannedArrayType(BaseType ft, const ptr<MDSpanType>& s,
-                            const ValueList& strd, Storage m, size_t array_rank)
+                            const ValueList& strd, Storage m,
+                            const ValueList& ads, size_t slot_align = 0)
+      : ArrayType(ads), spty(std::make_shared<SpannedType>(ft, s, strd, m)),
+        slot_alignment(slot_align) {}
+
+  explicit SpannedArrayType(BaseType ft, const ptr<MDSpanType>& s,
+                            const ValueList& strd, Storage m, size_t array_rank,
+                            size_t slot_align = 0)
       : ArrayType(array_rank),
-        spty(std::make_shared<SpannedType>(ft, s, strd, m)) {}
+        spty(std::make_shared<SpannedType>(ft, s, strd, m)),
+        slot_alignment(slot_align) {}
 
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<SpannedArrayType>(
         spty->ElementType(), cast<MDSpanType>(spty->s_type->Clone()),
-        spty->GetStrides(), spty->GetStorage(), ArrayType::Dimensions());
+        spty->GetStrides(), spty->GetStorage(), ArrayType::Dimensions(),
+        slot_alignment);
   }
 
   const ptr<Type> ArrayElementType() const override {
@@ -2773,7 +2781,7 @@ struct SpannedArrayType final : public ArrayType,
     else
       return std::make_shared<SpannedArrayType>(
           spty->e_type, spty->GetMDSpanType(), spty->GetStrides(),
-          spty->GetStorage(), arr);
+          spty->GetStorage(), arr, slot_alignment);
   }
   const ptr<Type> RemainderType(size_t remainder_count) override {
     auto arr = RemainderDimensions(remainder_count);
@@ -2784,14 +2792,29 @@ struct SpannedArrayType final : public ArrayType,
     else
       return std::make_shared<SpannedArrayType>(
           spty->e_type, spty->GetMDSpanType(), spty->GetStrides(),
-          spty->GetStorage(), arr);
+          spty->GetStorage(), arr, slot_alignment);
+  }
+
+  void SetSlotAlignment(size_t alignment) { slot_alignment = alignment; }
+  size_t SlotAlignment() const { return slot_alignment; }
+  bool HasAlignedSlots() const { return slot_alignment != 0; }
+  size_t PhysicalSlotStrideBytes() const {
+    const size_t bytes = spty->ByteSize();
+    if (!slot_alignment) return bytes;
+    return ((bytes + slot_alignment - 1) / slot_alignment) * slot_alignment;
+  }
+  size_t PhysicalSlotStrideElements() const {
+    const size_t elem_bytes = SizeOf(spty->ElementType());
+    assert(PhysicalSlotStrideBytes() % elem_bytes == 0);
+    return PhysicalSlotStrideBytes() / elem_bytes;
   }
 
   size_t Dims() const override { return ArrayType::ArrayRank(); }
 
   bool operator==(const Type& ty) const override {
     if (auto t = dyn_cast<SpannedArrayType>(&ty))
-      return sbe::must_eq(t->ElemCount(), ElemCount());
+      return slot_alignment == t->slot_alignment &&
+             sbe::must_eq(t->ElemCount(), ElemCount());
     return false;
   }
 
@@ -3422,11 +3445,14 @@ inline ptr<FunctionType> MakeFunctionType(const ptr<Type> ot,
 // map default to global
 inline static ptr<Type> ShadowTypeStorage(const ptr<Type>& ty) {
   if (auto sty = dyn_cast<SpannedType>(ty)) {
-    if (auto at = dyn_cast<ArrayType>(ty))
-      return MakeStridedSpannedArrayType(sty->ElementType(), sty->GetShape(),
-                                         sty->GetStrides(), at->dims,
-                                         ProjectStorage(sty->GetStorage()));
-    else
+    if (auto at = dyn_cast<ArrayType>(ty)) {
+      auto result = MakeStridedSpannedArrayType(
+          sty->ElementType(), sty->GetShape(), sty->GetStrides(), at->dims,
+          ProjectStorage(sty->GetStorage()));
+      if (auto src = dyn_cast<SpannedArrayType>(ty))
+        result->SetSlotAlignment(src->SlotAlignment());
+      return result;
+    } else
       return MakeSpannedType(sty->ElementType(), sty->GetShape(),
                              sty->GetStrides(),
                              ProjectStorage(sty->GetStorage()));

@@ -1473,11 +1473,26 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
   }
 
   auto dty = GetSymbolType(n.GetDataName());
-  auto sty = dyn_cast<SpannedType>(dty);
+  ptr<Type> accessed_ty = dty;
+  if (n.AccessArrayElement()) {
+    auto aty = dyn_cast<SpannedArrayType>(dty);
+    if (!aty) {
+      Error1(n.LOC(), "expect '" + n.GetDataName() +
+                          "' an array-of-spanned type but got " + PSTR(dty) +
+                          ".");
+      return false;
+    }
+    accessed_ty = aty->SubScriptType(n.GetArrayIndices().size());
+  }
+  auto sty = dyn_cast<SpannedType>(accessed_ty);
 
   if (!sty) {
-    Error1(n.LOC(), "expect '" + n.GetDataName() + "' a spanned type but got " +
-                        PSTR(dty) + ".");
+    if (n.AccessArrayElement())
+      Error1(n.LOC(), "span-array slot access must select a complete slot "
+                      "before '.at(...)'.");
+    else
+      Error1(n.LOC(), "expect '" + n.GetDataName() +
+                          "' a spanned type but got " + PSTR(dty) + ".");
     return false;
   }
 
@@ -2649,6 +2664,7 @@ bool EarlySemantics::Visit(AST::MMA& n) {
     if (buffer_accumulator) {
       auto is_buffer_operand = [](const ptr<AST::Expr>& operand) {
         if (!isa<SpannedType>(operand->GetType())) return false;
+        if (operand->op == Op::ElemOf) return true;
         auto ref = operand->GetReference();
         return isa<AST::Identifier>(ref) || isa<AST::ChunkAt>(ref);
       };

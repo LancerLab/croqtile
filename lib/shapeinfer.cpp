@@ -338,6 +338,18 @@ bool ShapeInference::Visit(AST::Expr& n) {
 
   if (n.IsReference()) SetNodeType(n, NodeType(*n.GetReference()));
   auto nty = NodeType(n);
+  if (n.op == Op::ElemOf) {
+    if (auto sty = dyn_cast<SpannedType>(nty);
+        sty && sty->GetShape().IsValid()) {
+      auto sign = m_sn();
+      for (auto dim : sty->GetShape().Value())
+        sign->Append(vn.ValueItemToSignature(dim, true));
+      cur_mdspan_vn = GetOrGenValNum(sign);
+      ast_vn.Update(&n, cur_mdspan_vn, VNKind::VNK_MDSPAN);
+      cur_vn.Invalidate();
+      return true;
+    }
+  }
   cur_vn = GenValNo(n);
 
   auto ShouldOpt = [](const ValueList& vl) -> bool {
@@ -617,11 +629,26 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
     if (cur_mdspan_vn.IsValid()) {
       SymbolAliasNum(SSTab().ScopedName(name + ".span"), cur_mdspan_vn);
       auto mds_value = GenShape(cur_mdspan_vn);
-      if (n.IsArray())
-        nty =
+      if (n.IsArray()) {
+        auto array_ty =
             MakeDenseSpannedArrayType(n.type->base_type, mds_value,
                                       MakeValueList(n.ArrayDimensions()), sto);
-      else
+        if (n.HasNote("alignment")) {
+          array_ty->SetSlotAlignment(
+              static_cast<size_t>(std::stoull(n.GetNote("alignment"))));
+          bool static_layout = mds_value.IsValid();
+          if (static_layout) {
+            for (auto dim : mds_value.Value())
+              static_layout &= VIInt(dim).has_value();
+            for (auto dim : array_ty->Dimensions())
+              static_layout &= VIInt(dim).has_value();
+          }
+          if (!static_layout)
+            Error1(n.LOC(), "explicitly aligned arrays of spans require "
+                            "static slot shapes and array dimensions.");
+        }
+        nty = array_ty;
+      } else
         nty = MakeDenseSpannedType(n.type->base_type, mds_value, sto);
     } else if (cur_vn.IsValid()) {
       SymbolAliasNum(SSTab().ScopedName(name), cur_vn);
@@ -1354,9 +1381,17 @@ bool ShapeInference::Visit(AST::MMA& n) {
       if (auto ref = expr->GetReference();
           ref && HasValNo(*ref, VNKind::VNK_MDSPAN))
         return GetValNo(*ref, VNKind::VNK_MDSPAN);
-      if (auto elemof = dyn_cast<AST::Expr>(expr.get());
-          elemof && elemof->op == Op::ElemOf) {
-        if (auto base = AST::GetArrayBaseSymbol(*elemof)) {
+      if (expr->op == Op::ElemOf) {
+        if (auto sty = GetSpannedType(NodeType(*expr))) {
+          auto shape = sty->GetShape();
+          if (shape.IsValid()) {
+            auto sign = m_sn();
+            for (auto dim : shape.Value())
+              sign->Append(vn.ValueItemToSignature(dim, true));
+            return GetOrGenValNum(sign);
+          }
+        }
+        if (auto base = AST::GetArrayBaseSymbol(*expr)) {
           auto base_span = SSTab().InScopeName(base->name + ".span");
           if (vn.HasValidValueNumberOfSymbol(base_span))
             return GetValNum(base_span);
@@ -2075,21 +2110,36 @@ bool ShapeInference::Visit(AST::Select& n) {
   if (auto sty = dyn_cast<SpannedType>(NodeType(n))) {
     auto s0 = cast<AST::Expr>(n.expr_list->ValueAt(0));
     auto s0ty = NodeType(*s0);
-    if (s0ty && s0ty->HasSufficientInfo()) {
-      SetNodeType(n, ProjectSelectStorage(s0ty));
-    } else {
-      cur_mdspan_vn = GetOnlyValueNumber(*n.expr_list, VNKind::VNK_MDSPAN);
-      // handle dataof expr (TODO: any better idea?)
-      if (!cur_mdspan_vn.IsValid()) {
-        Error1(n.LOC(), "Failed to decide the type of Select." + STR(n) +
-                            ", type0: " + PSTR(s0ty));
+    if (s0->op == Op::ElemOf) {
+      auto base = AST::GetArrayBaseSymbol(*s0);
+      auto selected = GetSpannedType(GetSymbolType(base->name));
+      if (!selected || !selected->GetShape().IsValid()) {
+        Error1(n.LOC(), "Failed to preserve the selected span shape.");
         return false;
       }
-      auto nty = ProjectSelectStorage(NodeType(*n.expr_list->ValueAt(0)));
-      SetNodeType(n, nty);
+      SetNodeType(n, ProjectSelectStorage(selected));
+      auto sign = m_sn();
+      for (auto dim : selected->GetShape().Value())
+        sign->Append(vn.ValueItemToSignature(dim, true));
+      cur_mdspan_vn = GetOrGenValNum(sign);
+      ast_vn.Update(&n, cur_mdspan_vn, VNKind::VNK_MDSPAN);
+    } else {
+      if (s0ty && s0ty->HasSufficientInfo()) {
+        SetNodeType(n, ProjectSelectStorage(s0ty));
+      } else {
+        cur_mdspan_vn = GetOnlyValueNumber(*n.expr_list, VNKind::VNK_MDSPAN);
+        // handle dataof expr (TODO: any better idea?)
+        if (!cur_mdspan_vn.IsValid()) {
+          Error1(n.LOC(), "Failed to decide the type of Select." + STR(n) +
+                              ", type0: " + PSTR(s0ty));
+          return false;
+        }
+        auto nty = ProjectSelectStorage(NodeType(*n.expr_list->ValueAt(0)));
+        SetNodeType(n, nty);
+      }
+      ast_vn.Copy(s0.get(), &n, VNKind::VNK_MDSPAN);
+      cur_mdspan_vn = GetValNo(n, VNKind::VNK_MDSPAN);
     }
-    ast_vn.Copy(s0.get(), &n, VNKind::VNK_MDSPAN);
-    cur_mdspan_vn = GetValNo(n, VNKind::VNK_MDSPAN);
     cur_vn.Invalidate(); // used for variable def
   } else if (GeneralFutureType(NodeType(n))) {
     cur_vn.Invalidate();

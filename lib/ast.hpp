@@ -1316,6 +1316,8 @@ struct Identifier : public Node, public TypeIDProvider<Identifier> {
 
 struct DataAccess : public Node, public TypeIDProvider<DataAccess> {
   ptr<Identifier> data = nullptr;
+  // Optional indices selecting a span-array slot before applying `.at(...)`.
+  ptr<MultiValues> array_indices = nullptr;
   ptr<MultiValues> indices = nullptr;
   ptr<SCEV> scev = nullptr;
 
@@ -1324,8 +1326,9 @@ private:
 
 public:
   DataAccess(const location& l, const ptr<Identifier>& i,
-             const ptr<MultiValues>& m = nullptr, bool isd = false)
-      : Node(l), data(i), indices(m), is_decl(isd) {
+             const ptr<MultiValues>& m = nullptr, bool isd = false,
+             const ptr<MultiValues>& ai = nullptr)
+      : Node(l), data(i), array_indices(ai), indices(m), is_decl(isd) {
     assert(i != nullptr && "no data is specified.");
     if (m) assert((m->Count() > 0) && "requires at least one index.");
   }
@@ -1338,6 +1341,12 @@ public:
   ptr<SCEV> GetSCEV() const { return scev; }
 
   bool AccessElement() const { return indices != nullptr; }
+  bool AccessArrayElement() const { return array_indices != nullptr; }
+  const NodeList& GetArrayIndices() const {
+    if (!array_indices)
+      choreo_unreachable("unexpected null span-array indices.");
+    return array_indices->AllValues();
+  }
   void SetDecl(bool isd = true) { is_decl = isd; }
   bool IsDecl() const { return is_decl; }
 
@@ -1347,13 +1356,16 @@ public:
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<DataAccess>(LOC(), CloneP(data), CloneP(indices), is_decl);
+    return Make<DataAccess>(LOC(), CloneP(data), CloneP(indices), is_decl,
+                            CloneP(array_indices));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
     (void)prefix;
     os << data->name;
+    if (array_indices)
+      for (auto e : GetArrayIndices()) os << "[" << PSTR(e) << "]";
     if (indices) {
       os << "[";
       int i = 0;

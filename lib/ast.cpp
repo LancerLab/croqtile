@@ -110,6 +110,7 @@ void DataAccess::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
   data->accept(v);
+  if (array_indices) array_indices->accept(v);
   if (indices) indices->accept(v);
 
   v.Visit(*this);

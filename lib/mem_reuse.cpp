@@ -188,7 +188,13 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
     auto sto = sty->GetStorage();
     buf_sto.emplace(sname, sto);
     if (!sty->RuntimeShaped()) {
-      auto total_size = sty->ByteSizeValue() * elem_count;
+      ValueItem total_size;
+      if (auto saty = dyn_cast<SpannedArrayType>(ty);
+          saty && saty->HasAlignedSlots()) {
+        total_size = sbe::nu(saty->PhysicalSlotStrideBytes()) * elem_count;
+      } else {
+        total_size = sty->ByteSizeValue() * elem_count;
+      }
       buf_size.emplace(sname, total_size);
       VST_DEBUG(dbgs() << "\tstatic  size:  " << total_size << "\n");
     } else {
