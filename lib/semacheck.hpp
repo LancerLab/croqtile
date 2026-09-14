@@ -25,6 +25,20 @@ private:
   std::set<std::string> observed_async;
   std::set<std::string> completed_async;
 
+  // Track only statically identifiable data-future instances.  A future
+  // binding gets a new identity when an async DMA is issued and identities are
+  // permuted by swap/rotate.  Unknown control-flow joins intentionally do not
+  // propagate this state, so ambiguous cases remain conservative.
+  using DataFutureId = size_t;
+  using DataFutureBindings = std::map<std::string, DataFutureId>;
+  struct DataFutureScope {
+    DataFutureBindings bindings;
+  };
+  DataFutureBindings data_future_bindings;
+  std::set<DataFutureId> waited_data_futures;
+  std::vector<DataFutureScope> data_future_scopes;
+  DataFutureId next_data_future_id = 1;
+
   AttributeDeriver input_deps{this, "input-deps", false};
   AttributeDeriver local_deps{this, "local-deps", false};
   std::vector<ValueItem> scope_pred_stack;
@@ -43,6 +57,9 @@ private:
                            int);
 
   void RecordAsyncProducer(const std::string&);
+  void RecordDataFutureProducer(const std::string&);
+  void ObserveDataFuture(const std::string&, const location&);
+  void RotateDataFutureBindings(const AST::Rotate&);
   bool ObserveAsyncFuture(const std::string&, const location&,
                           const std::string&);
   bool ConsumeAsyncFuture(const std::string&, const location&,

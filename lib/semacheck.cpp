@@ -235,12 +235,26 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
     live_async.clear();
     observed_async.clear();
     completed_async.clear();
+    data_future_bindings.clear();
+    waited_data_futures.clear();
+    data_future_scopes.clear();
+    next_data_future_id = 1;
     scope_pred_stack.clear();
     parallel_level_stack.clear();
     cooperative_stack.clear();
     shared_tensor_producers.clear();
     async_dma_producers.clear();
   }
+  // Keep this source-order check conservative across control-flow joins. A
+  // duplicate inside a body is still diagnosed; state from an if/loop body is
+  // not assumed to reach code after the body.
+  if (isa<AST::PredBlock>(&n) || isa<AST::ForeachBlock>(&n) ||
+      isa<AST::WithBlock>(&n) || isa<AST::ApplyBlock>(&n))
+    data_future_scopes.push_back({data_future_bindings});
+  if (isa<AST::PredBlock>(&n) || isa<AST::ForeachBlock>(&n) ||
+      isa<AST::WithBlock>(&n) || isa<AST::ApplyBlock>(&n))
+    waited_data_futures.clear();
+
   if (auto block = dyn_cast<AST::PredBlock>(&n))
     scope_pred_stack.push_back(block->GetScopePredicate());
   else if (auto fe = dyn_cast<AST::ForeachBlock>(&n)) {
@@ -292,6 +306,43 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
 void SemaChecker::RecordAsyncProducer(const std::string& name) {
   pending_async.insert(name);
   live_async.insert(name);
+}
+
+void SemaChecker::RecordDataFutureProducer(const std::string& name) {
+  data_future_bindings[name] = next_data_future_id++;
+}
+
+void SemaChecker::ObserveDataFuture(const std::string& name,
+                                    const location& loc) {
+  auto it = data_future_bindings.find(name);
+  if (it == data_future_bindings.end()) return;
+
+  const auto id = it->second;
+  if (id != 0 && waited_data_futures.count(id))
+    Error1(loc, "wait observes future '" + name + "' more than once.");
+  if (id != 0) waited_data_futures.insert(id);
+}
+
+void SemaChecker::RotateDataFutureBindings(const AST::Rotate& n) {
+  std::vector<std::string> names;
+  for (auto value : n.GetIds()) {
+    auto id = AST::GetIdentifier(*value);
+    if (!id) return;
+    names.push_back(InScopeName(id->name));
+  }
+  if (names.size() < 2) return;
+
+  std::vector<DataFutureId> ids;
+  ids.reserve(names.size());
+  for (const auto& name : names) {
+    auto it = data_future_bindings.find(name);
+    ids.push_back(it == data_future_bindings.end() ? 0 : it->second);
+  }
+
+  const auto first = ids.front();
+  for (size_t i = 1; i < ids.size(); ++i)
+    data_future_bindings[names[i - 1]] = ids[i];
+  data_future_bindings[names.back()] = first;
 }
 
 bool SemaChecker::ObserveAsyncFuture(const std::string& name,
@@ -357,6 +408,16 @@ bool SemaChecker::AfterVisitImpl(AST::Node& n) {
       Error1(n.LOC(), "some asyncs are not explicitly waited: " +
                           DelimitedString(pending_async) + ".");
   }
+
+  if (isa<AST::PredBlock>(&n) || isa<AST::ForeachBlock>(&n) ||
+      isa<AST::WithBlock>(&n) || isa<AST::ApplyBlock>(&n)) {
+    assert(!data_future_scopes.empty());
+    data_future_bindings = std::move(data_future_scopes.back().bindings);
+    // Do not carry wait facts through an unknown control-flow join.
+    waited_data_futures.clear();
+    data_future_scopes.pop_back();
+  }
+
   return true;
 }
 
@@ -365,6 +426,12 @@ bool SemaChecker::InMidVisitImpl(AST::Node& n) {
     if (block->HasElse()) {
       scope_pred_stack.pop_back();
       scope_pred_stack.push_back(block->GetElseScopePredicate());
+
+      // The else branch starts from the state at the if entry, not from the
+      // state accumulated while visiting the then branch.
+      assert(!data_future_scopes.empty());
+      data_future_bindings = data_future_scopes.back().bindings;
+      waited_data_futures.clear();
     }
   }
   return true;
@@ -1013,6 +1080,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
       Error1(n.LOC(), "Expect a placeholder type but got '" + PSTR(ty) + "'.");
       return false;
     }
+    data_future_bindings[InScopeName(n.future)] = 0;
     return true;
   }
 
@@ -1057,6 +1125,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
 
   if (!n.future.empty() && cast<FutureType>(ty)->IsAsync()) {
     RecordAsyncProducer(InScopeName(n.future));
+    RecordDataFutureProducer(InScopeName(n.future));
     async_dma_producers[InScopeName(n.future)] = &n;
   }
   if (!n.chain_from.empty()) waited_async.insert(InScopeName(n.chain_from));
@@ -1757,11 +1826,13 @@ bool SemaChecker::VisitNode(AST::Wait& n) {
         ObserveAsyncFuture(future_name, f->LOC(), "wait");
       else if (isa<FutureType>(fty)) {
         // Data-future symbols can participate in swap/rotation pipelines, so
-        // multiple static wait sites are valid. Remember a direct DMA wait to
-        // reject a later native event binding without applying the stricter
-        // single-observation rule used by operation futures.
-        if (async_dma_producers.count(future_name))
+        // multiple static wait sites may refer to different dynamic
+        // instances. The identity tracker diagnoses only a known duplicate;
+        // ambiguous control-flow cases remain conservative.
+        if (async_dma_producers.count(future_name)) {
+          ObserveDataFuture(future_name, f->LOC());
           observed_async.insert(future_name);
+        }
         waited_async.insert(future_name);
       } else {
         waited_async.insert(future_name);
@@ -1956,6 +2027,8 @@ bool SemaChecker::VisitNode(AST::Call& n) {
 }
 
 bool SemaChecker::VisitNode(AST::Rotate& n) {
+  RotateDataFutureBindings(n);
+
   size_t index = 0;
   for (auto s : n.ids->AllValues()) {
     if (auto id = AST::GetIdentifier(*s))
