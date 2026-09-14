@@ -444,6 +444,25 @@ struct MemReuseStats {
       0; // sum of heap_size from static allocations
 };
 
+/// Peak compile-time memory usage per storage tier, aggregated across all
+/// functions. Values are bytes; a tier is present only if the target manages
+/// its usage.
+struct MemUsageStats {
+  struct Tier {
+    size_t peak_bytes = 0;           // peak live compile-time usage
+    size_t limit_bytes = 0;          // budget the usage was checked against
+    bool has_runtime_extent = false; // usage also depends on runtime extents
+  };
+  std::map<Storage, Tier> tiers; // keyed by storage tier
+  // Tiers holding runtime-managed allocations whose size is decided by input
+  // parameters (detected while planning memory reuse).
+  std::set<Storage> runtime_decided;
+};
+
+/// Print the per-storage memory-usage statistics section to stderr.
+/// Used by both the AST pipeline and the CoIR pipeline (CoCC).
+void PrintMemUsageStats(const MemUsageStats& s);
+
 /// Aggregate statistics for assessments and assertions across all functions.
 struct AssessmentStats {
   size_t total = 0;            // total assessments evaluated
@@ -495,6 +514,7 @@ private:
   AssessmentStats assessment_stats;  // accumulated across all functions
   VectorizerStats vectorizer_stats;  // accumulated across all functions
   MemReuseStats mem_reuse_stats;     // accumulated across all functions
+  MemUsageStats mem_usage_stats;     // peak per-tier usage across all functions
   BufferAccessLog buffer_access_log; // buffer access log from analysis
   std::unique_ptr<Target> compile_target = nullptr;
   std::map<std::string, std::unique_ptr<Target>> device_targets;
@@ -830,6 +850,8 @@ public:
   VectorizerStats& GetVectorizerStats() { return vectorizer_stats; }
   const MemReuseStats& GetMemReuseStats() const { return mem_reuse_stats; }
   MemReuseStats& GetMemReuseStats() { return mem_reuse_stats; }
+  const MemUsageStats& GetMemUsageStats() const { return mem_usage_stats; }
+  MemUsageStats& GetMemUsageStats() { return mem_usage_stats; }
   const BufferAccessLog& GetBufferAccessLog() const {
     return buffer_access_log;
   }

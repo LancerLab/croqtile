@@ -146,7 +146,8 @@ Option<bool> trace_assess(OptionKind::Hidden, "--trace-assess", "-tass", false,
                           "corresoponding assertion site determination.");
 Option<bool> print_stats(
     OptionKind::User, "--stats", "", false,
-    "Print aggregate assertion/assessment statistics after compilation.");
+    "Print aggregate assertion/assessment and memory-usage statistics after "
+    "compilation.");
 Option<bool> disable_cuda_runtime_env_check(
     OptionKind::Hidden, "--disable-cuda-runtime-env-check", "", false,
     "Do not emit cuda runtime enviroment check.");

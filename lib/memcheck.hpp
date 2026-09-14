@@ -1,6 +1,7 @@
 #ifndef __CHOREO_MEMORY_USAGE_CHECK_HPP__
 #define __CHOREO_MEMORY_USAGE_CHECK_HPP__
 
+#include <algorithm>
 #include <iomanip>
 #include <numeric>
 
@@ -194,6 +195,9 @@ private:
                        << "Total compile-time mem used before leaving scope "
                        << SSTab().ScopeName() << "\n"
                        << GetMemUsageMapDetail(ct_tot_mem_usage));
+      // Publish the per-tier peak for --stats reporting. This must happen
+      // before RestoreMemUsage(), which pops the live runtime-usage map.
+      if (isa<AST::ChoreoFunction>(&n)) CaptureMemUsageStats();
       RestoreMemUsage();
     }
 
@@ -209,6 +213,35 @@ private:
       AppendRuntimeCheck(cf->name);
     }
     return true;
+  }
+
+  /// Fold the running compile-time peak and the live runtime-evaluated usage
+  /// into the per-storage --stats summary.
+  void CaptureMemUsageStats() {
+    auto& stats = CCtx().GetMemUsageStats();
+    // Only report tiers the target actually budgets. ct_max_mem_usage and
+    // rt_tot_mem_usage can hold untracked tiers (e.g. GLOBAL bytes from
+    // function parameters); skip those and never insert into mem_usage_limit
+    // here.
+    auto tracked_tier = [&](Storage sto) -> MemUsageStats::Tier* {
+      auto limit = mem_usage_limit.find(sto);
+      if (limit == mem_usage_limit.end()) return nullptr;
+      auto& tier = stats.tiers[sto];
+      tier.limit_bytes = limit->second;
+      return &tier;
+    };
+    for (const auto& [sto, usage] : ct_max_mem_usage)
+      if (auto* tier = tracked_tier(sto))
+        tier->peak_bytes = std::max(tier->peak_bytes, usage);
+    for (const auto& [sto, usages] : rt_tot_mem_usage) {
+      if (usages.empty()) continue;
+      if (auto* tier = tracked_tier(sto)) tier->has_runtime_extent = true;
+    }
+    // Tiers whose allocations are runtime-managed by memory reuse (size
+    // decided by input parameters) are runtime-decided even though the reuse
+    // pool itself is presented to this pass as a fixed-size scratchpad.
+    for (Storage sto : stats.runtime_decided)
+      if (auto* tier = tracked_tier(sto)) tier->has_runtime_extent = true;
   }
 
   void TraceEachVisit(AST::Node& n, std::string sup = "") {

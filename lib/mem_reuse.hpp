@@ -161,6 +161,9 @@ private:
                          const std::string& dev_func_name) const;
   void Initialize();
   void AnalyzeMemOffset();
+  // Mark storage tiers that memory reuse will manage with runtime-decided
+  // sizes, so --stats can report them as such.
+  void RecordRuntimeDecidedTiers();
   void ProtoType(const std::string& dev_fname, DevFuncMemReuseCtx& ctx,
                  std::string idx_suffix);
   bool

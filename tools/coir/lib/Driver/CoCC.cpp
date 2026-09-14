@@ -14,6 +14,7 @@
 #include "command_line.hpp"
 #include "context.hpp"
 #include "io.hpp"
+#include "memcheck.hpp"
 #include "options.hpp"
 #include "pipeline.hpp"
 
@@ -139,10 +140,13 @@ std::pair<int, std::vector<char*>> ProcessCoIROptions(int argc, char* argv[]) {
 /// Run the pre-codegen AST stages (CodegenPrepare + target adaptor) so that
 /// the assessor contains both sema-level and target-level (HW constraint)
 /// assertions.  RunFrontend() sets NoCodegen(true), so PlanCodeGenStages()
-/// never executes; we run the pre-codegen subset explicitly.
-void RunPreCodegenOnAST() {
+/// never executes; we run the pre-codegen subset explicitly.  When stats are
+/// requested, also run the memory-usage pass so the report includes the
+/// per-storage breakdown.
+void RunPreCodegenOnAST(bool with_mem_stats) {
   ASTPipeline pre_cg;
   CCtx().GetTarget().PlanPreCodegenStages(pre_cg);
+  if (with_mem_stats) pre_cg.AddStage<MemUsageCheck>();
   pre_cg.RunOnProgram(CompilerAPI::GetAST());
 }
 
@@ -234,7 +238,7 @@ int main(int argc, char* argv[]) {
   // Populates CodeGenInfo (PBTree, launch config) and registers HW-constraint
   // assessments via SBE.  After this, the assessor contains RUNTIME assertions
   // from both SemaChecker and the target adaptor.
-  RunPreCodegenOnAST();
+  RunPreCodegenOnAST(want_stats);
   CollectSemaStats();
   CCtx().SetPrintStats(want_stats);
 
@@ -341,7 +345,10 @@ int main(int argc, char* argv[]) {
 
   // --- Stats reporting ---
   // CollectAssertStats already wrote directly into CCtx().GetAssessmentStats().
-  if (CCtx().PrintStats()) PrintAssessmentStats(CCtx().GetAssessmentStats());
+  if (CCtx().PrintStats()) {
+    PrintAssessmentStats(CCtx().GetAssessmentStats());
+    PrintMemUsageStats(CCtx().GetMemUsageStats());
+  }
 
   return result;
 }

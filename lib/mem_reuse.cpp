@@ -442,6 +442,14 @@ void MemReuse::AnalyzeMemOffset() {
     ProtoType(df_name, ctx,
               (df_name_idx.count(df_name) ? df_name_idx.at(df_name) : ""));
   }
+  RecordRuntimeDecidedTiers();
+}
+
+void MemReuse::RecordRuntimeDecidedTiers() {
+  auto& decided = CCtx().GetMemUsageStats().runtime_decided;
+  for (const auto& [df_name, dyn_flags] : ma.sto_have_dyn)
+    for (const auto& [sto, is_dyn] : dyn_flags)
+      if (is_dyn && ShouldReuseStorage(sto, df_name)) decided.insert(sto);
 }
 
 void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,

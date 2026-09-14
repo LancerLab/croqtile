@@ -253,6 +253,8 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
       mr_row(ms.total_static_heap_bytes, "Static heap bytes (after reuse)");
     }
 
+    PrintMemUsageStats(CCtx().GetMemUsageStats());
+
     errs() << color::err(color::kBold) << sep << color::err(color::kReset)
            << "\n";
   }
@@ -393,4 +395,54 @@ void Choreo::PrintAssessmentStats(const AssessmentStats& s) {
   row(s.fence_stats.explicit_fences, "Explicit sync.fence nodes");
   for (const auto& kind_count : s.fence_stats.by_kind)
     row(kind_count.second, kind_count.first.Name().c_str());
+}
+
+void Choreo::PrintMemUsageStats(const MemUsageStats& s) {
+  if (s.tiers.empty()) return;
+  const char* sep =
+      "===-------------------------------------------------------------------"
+      "----===";
+  errs() << color::err(color::kBold) << sep << "\n"
+         << "                    ... Memory Usage Statistics ...\n"
+         << sep << color::err(color::kReset) << "\n";
+  auto human = [](size_t size) {
+    std::ostringstream oss;
+    if (size >= (size_t)1024 * 1024 * 1024)
+      oss << std::defaultfloat << std::setprecision(3)
+          << size / 1024.0 / 1024 / 1024 << " GB";
+    else if (size >= (size_t)1024 * 1024)
+      oss << std::defaultfloat << std::setprecision(3) << size / 1024.0 / 1024
+          << " MB";
+    else if (size >= (size_t)1024)
+      oss << std::defaultfloat << std::setprecision(3) << size / 1024.0
+          << " KB";
+    else
+      oss << size << " B";
+    return oss.str();
+  };
+  for (const auto& [sto, tier] : s.tiers) {
+    size_t used = tier.peak_bytes;
+    size_t limit = tier.limit_bytes;
+    // A tier whose extent is decided at runtime cannot be given a meaningful
+    // compile-time occupancy, so say so rather than printing a bogus 0%.
+    std::string lead = "-";
+    if (tier.has_runtime_extent) {
+      lead = "runtime";
+    } else if (limit > 0) {
+      std::ostringstream pct;
+      pct << std::defaultfloat << std::setprecision(3)
+          << (100.0 * used / limit) << "%";
+      lead = pct.str();
+    }
+    errs() << color::err(color::kBold) << std::right << std::setw(7) << lead
+           << color::err(color::kReset) << "  mem     - "
+           << __internal__::GetStringFrom(sto) << " peak: ";
+    if (tier.has_runtime_extent)
+      // The size is decided by the launcher inputs, so no compile-time byte
+      // count would be meaningful here.
+      errs() << "decided at runtime (limit " << human(limit) << ")";
+    else
+      errs() << human(used) << " of " << human(limit) << " limit";
+    errs() << "\n";
+  }
 }
