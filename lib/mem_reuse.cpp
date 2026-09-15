@@ -206,6 +206,17 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
       buf_size.emplace(sname, size_expr);
       VST_DEBUG(dbgs() << "\tdynamic  size: " << size_expr << "\n";);
     }
+    // A thread-sliced shared buffer holds one slice per thread: scale its
+    // footprint by the slice count and remember the per-thread slice bytes
+    // so codegen can offset each thread into its own slice.
+    if (sto == Storage::SHARED)
+      if (auto count = ThreadSlicedShared::Lookup(sname)) {
+        buf_tslice_bytes.emplace(sname, buf_size.at(sname));
+        buf_tslice_count.emplace(sname, *count);
+        buf_size[sname] = buf_size.at(sname) * (*count);
+        VST_DEBUG(dbgs() << "\tthread-sliced: x" << *count << " -> "
+                         << buf_size.at(sname) << "\n";);
+      }
     buf_dev_func_name.emplace(sname, cur_dev_fname);
     VST_DEBUG(dbgs() << "\tdecl in dev func: " << cur_dev_fname << "\n";);
     return true;
@@ -848,6 +859,10 @@ void MemReuse::ApplyMemOffset(AST::NamedVariableDecl& n, Storage sto) {
   n.AddNote("offset", offset);
   size_t alignment = AlignmentForDevFunc(sto, cur_dev_fname);
   n.AddNote("alignment", std::to_string(alignment));
+  // Thread-sliced shared buffer: record the per-thread slice bytes so the
+  // codegen can offset each thread into its own slice of the spm.
+  if (ma.buf_tslice_bytes.count(sname))
+    n.AddNote("tsliced", STR(ma.buf_tslice_bytes.at(sname)));
 }
 
 bool MemReuse::RunOnProgramImpl(AST::Node& root) {

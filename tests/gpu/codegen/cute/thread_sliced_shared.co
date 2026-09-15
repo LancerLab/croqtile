@@ -1,0 +1,38 @@
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - | FileCheck %s
+
+// Thread-sliced shared buffers: a DMA whose chunk indexing depends on a
+// thread-level parallel variable stages one slice per thread in shared
+// memory (union-of-slices).  The buffer footprint is scaled by the thread
+// count, the base pointer carries a per-thread addend, and every thread
+// performs its own copy -- a __CHOREO_BLOCK_SINGLE__ guard would move only
+// thread 0's slice (the previous, silently-wrong lowering).
+
+__co__ auto foo(f32 [64, 64] input) {
+  f32 [input.span(0), input.span(1)] output;
+  parallel p by 4, q by 8 {
+    shared f32[input.span(0)/#p/#q, input.span(1)] l1_out {0.0f};
+    l1_a = dma.copy input.chunkat(p#q, _) => shared;
+    foreach {i} in [l1_out.span(0)] {
+      foreach {j} in [l1_out.span(1)] {
+        l1_out.at(i, j) = l1_a.data.at(i, j) * 2.0f;
+      }
+    }
+    dma.copy l1_out => output.chunkat(p#q, _);
+  }
+  return output;
+}
+
+// CHECK: __global__ void __choreo_device_foo(float * input, float * output) {
+// footprint: two [2, 64] f32 buffers (512 B per thread slice) x 8 threads.
+// CHECK: __shared__ alignas(16) unsigned char anon_{{[0-9]+}}[8192];
+// CHECK-NOT: __CHOREO_BLOCK_SINGLE__
+// CHECK: float* l1_out = (float*)(anon_{{[0-9]+}} + 4096 + __choreo_vtid_x * (512));
+// per-thread slice initialization (unguarded).
+// CHECK: for (int i = 0; i < 128; ++i) l1_out[i] = 0.000000f;
+// CHECK-NOT: __CHOREO_BLOCK_SINGLE__
+// CHECK: float* l1_a__buf__ = (float*)(anon_{{[0-9]+}} + 0 + __choreo_vtid_x * (512));
+// per-thread G2S and S2G copies (unguarded).
+// CHECK-NOT: __CHOREO_BLOCK_SINGLE__
+// CHECK: choreo::naive_copy(__tensor1_input, __tensor2_l1_a__buf__);
+// CHECK-NOT: __CHOREO_BLOCK_SINGLE__
+// CHECK: choreo::naive_copy(__tensor3_l1_out, __tensor4_output);

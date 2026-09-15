@@ -183,6 +183,10 @@ struct DMALoweringDecision {
   bool is_zfill = false; // dma.copy.*.zfill  -> cp.async zero-fill semantic
   bool has_pred = false; // predicated tiled copy needed (tail handling)
   bool use_tma = false;  // TMA bulk-copy path
+  // The DMA moves per-thread slices of a thread-sliced shared buffer; it
+  // must be lowered to a per-thread naive copy (no __CHOREO_BLOCK_SINGLE__
+  // guard, no cooperative tiled copy).
+  bool thread_sliced = false;
 
   // -- swizzle ---------------------------------------------------------------
   SwizMode swizzle_mode = SwizMode::NONE;
