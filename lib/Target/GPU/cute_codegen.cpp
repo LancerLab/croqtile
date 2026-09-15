@@ -2754,7 +2754,13 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         auto reuse = n.GetNote("reuse");
         auto offset = n.GetNote("offset");
         ds << d_indent << bts << "* " << sym << " = (" << bts << "*)"
-           << "(" << reuse << " + " << offset << ");\n";
+           << "(" << reuse << " + " << offset;
+        // Thread-sliced shared buffer: each thread stages its own slice of
+        // the spm, offset by vtid * (per-thread slice bytes).
+        if (n.HasNote("tsliced"))
+          ds << " + __choreo_vtid_x * (" << UnScopedExpr(n.GetNote("tsliced"))
+             << ")";
+        ds << ");\n";
       } else {
         // the buffer is not reused
         assert(!n.HasNote("offset"));
@@ -2874,7 +2880,10 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       if (sto != Storage::SHARED && sto != Storage::LOCAL)
         choreo_unreachable(
             "error: unexpected storage type in spm initialization.");
-      if (sto == Storage::SHARED) {
+      // A thread-sliced shared buffer is initialized per-thread (each thread
+      // zeroes its own slice); block-common buffers are initialized once.
+      bool tsliced = n.HasNote("tsliced");
+      if (sto == Storage::SHARED && !tsliced) {
         ds << d_indent << LevelPred() << " {\n";
         IncrDeviceIndent();
       }
@@ -2886,8 +2895,10 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         ds << sym << "[i] = " << ExprSTR(n.init_value) << ";\n";
       }
       if (sto == Storage::SHARED) {
-        DecrDeviceIndent();
-        ds << d_indent << "} // single instance\n";
+        if (!tsliced) {
+          DecrDeviceIndent();
+          ds << d_indent << "} // single instance\n";
+        }
         ds << d_indent << EmitSync(Storage::SHARED) << ";\n";
       }
     }
@@ -4220,7 +4231,12 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       bool to_or_from_shared = dma_plan->direction == DMADirection::G2S ||
                                dma_plan->direction == DMADirection::S2G ||
                                dma_plan->direction == DMADirection::S2S;
-      if (to_or_from_shared) {
+      if (to_or_from_shared && dma_plan->thread_sliced) {
+        // Thread-sliced shared buffer: every thread copies its own slice;
+        // a BLOCK_SINGLE guard would move only thread 0's slice.
+        ds << d_indent << "choreo::naive_copy(" << src << ", " << dst << ");\n";
+        ds << d_indent << "__syncthreads();\n";
+      } else if (to_or_from_shared) {
         ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
         ds << d_indent << "  choreo::naive_copy(" << src << ", " << dst
            << ");\n";
@@ -10002,17 +10018,26 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
     for (size_t i = 1; i < entries.size(); ++i) {
       auto& entry0 = entries[i - 1];
       auto& entry1 = entries[i];
+      std::string msg = "The shapes of the " + Ordinal(entry0.para_ordinal) +
+                        " parameter (dim: " + std::to_string(entry0.dim) +
+                        ") and the " + Ordinal(entry1.para_ordinal) +
+                        " parameter (dim: " + std::to_string(entry1.dim) +
+                        ") are inconsistent.";
       hs << h_indent << "choreo::runtime_check(" << entry0.elem_name
          << " == " << entry1.elem_name;
-      hs << ", \"The shapes of the " << Ordinal(entry0.para_ordinal)
-         << " parameter (dim: " << entry0.dim << ") and the "
-         << Ordinal(entry1.para_ordinal) << " parameter (dim: " << entry1.dim
-         << ") are inconsistent.\");\n";
+      hs << ", \"" << msg << "\");\n";
       ++stats.total;
       ++stats.shape_compat_total;
       ++stats.runtime_total;
       ++stats.shape_compat_runtime;
       ++stats.runtime_entry;
+      // Record in the safety ledger: these obligations are generated and
+      // materialized directly at codegen; parameter dims are host-visible
+      // scalars, hence scalar-symbolic dependence. Stats aggregation already
+      // happened (assert-site pass), so this does not double-count.
+      FCtx(fname).GetAssessor().RecordExternalObligation(
+          msg, location(), AssessOutcome::RUNTIME,
+          UsageType::ShapeCompatibility, AssessDependence::SCALAR_SYMBOLIC);
     }
   }
 

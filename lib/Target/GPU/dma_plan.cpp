@@ -1,5 +1,6 @@
 #include "dma_plan.hpp"
 #include "ast.hpp"
+#include "thread_sliced_shared.hpp"
 #include "types.hpp"
 
 using namespace Choreo;
@@ -234,6 +235,20 @@ void DMAPlan::ResolveDMADecision(const AST::DMA& n,
   dec.rank = static_cast<int>(from_ca->GetBlockShape().Rank());
   dec.elem_type = from_sty->ElementType();
 
+  // A shared buffer staged per-thread (thread-sliced, see
+  // thread_sliced_shared.hpp) must be copied per-thread: cooperative tiled
+  // lowering would fill only one slice, and a __CHOREO_BLOCK_SINGLE__ guard
+  // would load only thread 0's slice.  Mark the decision so codegen emits an
+  // unguarded per-thread copy; the tiled-copy ladder below is skipped.
+  auto touches_tsliced = [this](const std::string& sym) {
+    return ThreadSlicedShared::Lookup(InScopeName(sym)) != nullptr;
+  };
+  if ((dec.direction == DMADirection::G2S && touches_tsliced(to_sym)) ||
+      (dec.direction == DMADirection::S2G && touches_tsliced(from_sym)) ||
+      (dec.direction == DMADirection::S2S &&
+       (touches_tsliced(from_sym) || touches_tsliced(to_sym))))
+    dec.thread_sliced = true;
+
   if (n.IsTMA()) {
     dec.strategy = DMAStrategy::TMA;
     dec.atom = CUDA_COPY_ATOM::TMA_ATOM;
@@ -325,6 +340,11 @@ void DMAPlan::ResolveDMADecision(const AST::DMA& n,
   }
   if (HasInnerBlockPV(*from_ca) || HasInnerBlockPV(*to_ca)) {
     debug_naive_fallback("chunk indexing depends on inner-than-block PV");
+    return;
+  }
+  if (dec.thread_sliced) {
+    debug_naive_fallback(
+        "thread-sliced shared buffer requires per-thread copy");
     return;
   }
 
