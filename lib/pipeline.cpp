@@ -18,6 +18,7 @@
 #include "shapeinfer.hpp"
 #include "symbexpr.hpp"
 #include "target_utils.hpp"
+#include "thread_sliced_shared.hpp"
 #include "typeinfer.hpp"
 #include "visualize.hpp"
 #include <chrono>
@@ -186,8 +187,8 @@ void DumpAssessmentLedger(const std::string& path) {
       first = false;
       const auto& pos = e.loc.begin;
       out << "    {\"function\": \"" << LedgerEscape(fname) << "\""
-          << ", \"loc\": \"" << LedgerEscape(pos.filename) << ":"
-          << pos.line << "." << pos.column << "\""
+          << ", \"loc\": \"" << LedgerEscape(pos.filename) << ":" << pos.line
+          << "." << pos.column << "\""
           << ", \"message\": \"" << LedgerEscape(e.message) << "\""
           << ", \"outcome\": \"" << STR(e.outcome) << "\""
           << ", \"usage\": \"" << STR(e.usage_type) << "\""
@@ -402,8 +403,10 @@ ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
         [](ASTPipeline& p) { CCtx().SetGlobalSymbolTable(p.LastSymTab()); });
   }
 
-  if (CCtx().TargetSupportMemAlloc() && CCtx().MemReuse())
+  if (CCtx().TargetSupportMemAlloc() && CCtx().MemReuse()) {
+    AddStage<ThreadSlicedShared>();
     AddStage<MemoryReuse>();
+  }
 
   // compute active thread counts for inthreads scopes (before semacheck
   // so the checker can validate events with thread count info)
@@ -442,7 +445,6 @@ ASTPipeline& ASTPipeline::Get() {
                  []() { instance = std::make_unique<ASTPipeline>(); });
   return *instance;
 }
-
 
 void Choreo::PrintAssessmentStats(const AssessmentStats& s) {
   const char* sep =
