@@ -37,32 +37,49 @@ bool BufferAccessAnalyzer::AfterVisitImpl(AST::Node& n) {
 
 BufferAccessAnalyzer::VarSet
 BufferAccessAnalyzer::ResolveBuffers(const std::string& name) const {
-  std::string scoped = Scoped(name);
   VarSet result;
+  VarSet visited;
 
-  // A DMA future's `.data` denotes the destination buffer only. The source
-  // buffer is read directly by the DMA and never through the future.
-  if (tracker_.future_buffers.count(scoped)) {
-    for (const auto& [src, dst] : tracker_.future_buffers.at(scoped)) {
-      if (!dst.empty()) result.insert(tracker_.ResolveNoStorageAlias(dst));
-    }
-    return result;
-  }
+  // Alias and binding edges can be interleaved. For example:
+  //
+  //   av = a.span_as([N]);
+  //   bv = b.span_as([N]);
+  //   tile = select(which, av, bv);
+  //
+  // A write through `tile` must be attributed to `a` and `b`, not to the
+  // intermediate aliases `av` and `bv`. Resolve to storage-owning leaves
+  // transitively so later DMA dependency queries see the intervening thread
+  // write. Keep a visited set because rotate/select relationships may cycle.
+  std::function<void(const std::string&)> resolve =
+      [&](const std::string& candidate) {
+        std::string current = tracker_.ResolveNoStorageAlias(candidate);
+        if (!visited.insert(current).second) return;
 
-  // An alias denotes its source buffer.
-  if (tracker_.alias_.count(scoped)) {
-    result.insert(tracker_.ResolveNoStorageAlias(tracker_.alias_.at(scoped)));
-    return result;
-  }
+        // A DMA future's `.data` denotes the destination buffer only. The
+        // source is read directly by the DMA and never through the future.
+        if (auto it = tracker_.future_buffers.find(current);
+            it != tracker_.future_buffers.end()) {
+          for (const auto& [src, dst] : it->second)
+            if (!dst.empty()) resolve(dst);
+          return;
+        }
 
-  // A binding (select / rotate) fans out to its member buffers.
-  if (tracker_.bindings_.count(scoped)) {
-    for (const auto& member : tracker_.bindings_.at(scoped))
-      result.insert(tracker_.ResolveNoStorageAlias(member));
-    return result;
-  }
+        if (auto it = tracker_.alias_.find(current);
+            it != tracker_.alias_.end()) {
+          resolve(it->second);
+          return;
+        }
 
-  result.insert(tracker_.ResolveNoStorageAlias(scoped));
+        if (auto it = tracker_.bindings_.find(current);
+            it != tracker_.bindings_.end()) {
+          for (const auto& member : it->second) resolve(member);
+          return;
+        }
+
+        result.insert(current);
+      };
+
+  resolve(Scoped(name));
   return result;
 }
 
