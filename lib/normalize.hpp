@@ -229,10 +229,18 @@ private:
       if (it != names.end()) n.name = it->second;
       return true;
     }
+
+    // ChunkAt stores its chained spanned operations separately from the
+    // regular child nodes. Traverse them here so matcher-IV canonicalization
+    // also updates indices in `.At(...)`, `.chunkat(...)`, and related
+    // operations.
+    bool Visit(AST::ChunkAt& n) override {
+      for (auto op : n.AllOperations()) op->accept(*this);
+      return true;
+    }
   };
 
 public:
-
   LoopNorm() : NormBase("loopnorm") {}
   bool BeforeVisitImpl(AST::Node& n) override {
     if (trace_visit) dbgs() << "before visiting " << n.TypeNameString() << "\n";
@@ -260,12 +268,32 @@ public:
         if (fb->ranges->Count() == 1 && matcher_map.count(cname)) {
           // single range, multiple loops (range dim > 1)
           std::map<std::string, std::string> canonical_matchers;
+          // ForeachCanon may already have split a scalar source into a
+          // canonical IV (for example `r` -> `__iv_r`). LoopNorm then expands
+          // the same source into matcher components (`r__elem__0`, ...).
+          // Rewrite that pre-expansion IV as well, otherwise body references
+          // keep naming a placeholder that is no longer part of the loop
+          // hierarchy and later shape inference sees an unknown type.
+          const auto pre_expansion_iv = rng->GetIVName();
+          bool map_pre_expansion_iv = pre_expansion_iv.rfind("__iv_", 0) == 0;
           for (auto matcher : matcher_map[cname]->values) {
             auto matcher_iv = AST::GetIdentifier(matcher);
             auto iv_ty = matcher_iv->GetType();
             auto iv_name = matcher_iv->name;
             auto canonical_iv_name = "__iv_" + iv_name;
             canonical_matchers[iv_name] = canonical_iv_name;
+            // Scalar with-sources may have been flattened to a single
+            // `name__elem__0` matcher after ForeachCanon ran. References in
+            // the original body then still use the old `__iv_name` spelling;
+            // carry that spelling through the expansion too.
+            const auto elem_marker = iv_name.rfind("__elem__");
+            if (elem_marker != std::string::npos)
+              canonical_matchers["__iv_" + iv_name.substr(0, elem_marker)] =
+                  canonical_iv_name;
+            if (map_pre_expansion_iv) {
+              canonical_matchers[pre_expansion_iv] = canonical_iv_name;
+              map_pre_expansion_iv = false;
+            }
             auto new_iv =
                 AST::Make<AST::Identifier>(rng->LOC(), canonical_iv_name);
             new_iv->SetType(iv_ty);
