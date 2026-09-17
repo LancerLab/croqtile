@@ -457,6 +457,7 @@ void AssertSite::EstimateAssertions() {
     ar.enabled =
         IsEnabledAtThreshold(ar.cost, CCtx().RuntimeCheckCostThreshold());
     ar.duplicate = false;
+    ar.duplicate_of = static_cast<size_t>(-1);
     if (!ar.enabled) continue;
 
     // Placement is final here. Checks at this exact site execute together,
@@ -468,6 +469,7 @@ void AssertSite::EstimateAssertions() {
     for (const auto* other : previous) {
       if (sbe::ceq(ar.expr, other->expr)) {
         ar.duplicate = true;
+        ar.duplicate_of = other - assertions.data();
         ar.enabled = false;
         break;
       }
@@ -493,6 +495,7 @@ void AssertSite::EstimateAssertions() {
       case UsageType::HardwareConstraint: ++stats.hw_constraint_total; break;
       }
       switch (ae.outcome) {
+      case AssessOutcome::UNKNOWN: break;
       case AssessOutcome::STATIC_TRUE: ++stats.static_true; break;
       case AssessOutcome::STATIC_FALSE: ++stats.static_false; break;
       case AssessOutcome::RUNTIME: {
@@ -536,14 +539,16 @@ void AssertSite::PrintAssertionReport() const {
   if (log.empty()) return;
 
   // Count outcomes for the header.
-  size_t n_strue = 0, n_sfalse = 0, n_runtime = 0;
+  size_t n_strue = 0, n_sfalse = 0, n_runtime = 0, n_unknown = 0;
   for (const auto& ae : log) {
     if (ae.outcome == AssessOutcome::STATIC_TRUE)
       ++n_strue;
     else if (ae.outcome == AssessOutcome::STATIC_FALSE)
       ++n_sfalse;
-    else
+    else if (ae.outcome == AssessOutcome::RUNTIME)
       ++n_runtime;
+    else
+      ++n_unknown;
   }
 
   auto type_str = [](AssessType t) -> const char* {
@@ -570,8 +575,9 @@ void AssertSite::PrintAssertionReport() const {
   };
 
   errs() << "\n[assertions] function: " << fname << "  (" << log.size()
-         << " assessed:"
-         << "  " << n_strue << " static-true,"
+         << " assessed:";
+  if (n_unknown) errs() << "  " << n_unknown << " unknown,";
+  errs() << "  " << n_strue << " static-true,"
          << "  " << n_sfalse << " static-false,"
          << "  " << n_runtime << " runtime)\n";
   errs() << "  " << std::string(75, '-') << "\n";
@@ -592,6 +598,9 @@ void AssertSite::PrintAssertionReport() const {
                 "error/warning)\n";
       errs() << "       message : " << ae.message << "\n";
       errs() << "       loc     : " << ae.loc << "\n";
+    } else if (ae.outcome == AssessOutcome::UNKNOWN) {
+      errs() << "  [" << idx++ << "] unknown (warning-only assessment)\n"
+             << "       message : " << ae.message << "\n";
     } else {
       // RUNTIME: look up the matching Assertion for hoist/cost info.
       const Assertion* ar =

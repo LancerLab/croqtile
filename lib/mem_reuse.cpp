@@ -455,7 +455,13 @@ void MemReuse::RecordRuntimeDecidedTiers() {
   auto& decided = CCtx().GetMemUsageStats().runtime_decided;
   for (const auto& [df_name, dyn_flags] : ma.sto_have_dyn)
     for (const auto& [sto, is_dyn] : dyn_flags)
-      if (is_dyn && ShouldReuseStorage(sto, df_name)) decided.insert(sto);
+      if (is_dyn && ShouldReuseStorage(sto, df_name)) {
+        decided.insert(sto);
+        CCtx()
+            .GetMemUsageStats()
+            .runtime_decided_functions[GetFuncNameFromScopedName(df_name)]
+            .insert(sto);
+      }
 }
 
 void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,

@@ -10,6 +10,7 @@
 #include "colors.hpp"
 #include "infra_utils.hpp"
 #include "loc.hpp"
+#include "static_check_info.hpp"
 
 namespace Choreo {
 
@@ -355,6 +356,8 @@ protected:
 
 public:
   void Error(const location& loc, const std::string& message) const {
+    RecordStaticCheckError(loc.begin.get_filename(), loc.begin.get_line(),
+                           loc.begin.get_column(), message);
     errs() << loc << ": " << (should_use_colors() ? color_red : "")
            << "error: " << (should_use_colors() ? color_reset : "");
     errs() << message << "\n";

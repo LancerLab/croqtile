@@ -85,6 +85,7 @@ struct PBAttributes {
 #include <memory>
 #include "ast.hpp"
 #include "choreo_template.hpp"
+#include "static_check_info.hpp"
 #include "symtab.hpp"
 #include "scanner.hpp"
 
@@ -3315,6 +3316,8 @@ inline const ptr<AST::MultiValues> UBoundAll(const ptr<AST::MultiValues>& mv, bo
 
 // Bison expects us to provide implementation - otherwise linker complains
 void Parser::error(const location &loc , const std::string &message) {
+  RecordStaticCheckError(loc.begin.get_filename(), loc.begin.get_line(),
+                        loc.begin.get_column(), message);
   errs() << loc << ": ";
   errs() << ((should_use_colors()) ? color_red : "") << "error: "
          << ((should_use_colors()) ? color_reset : "");

@@ -1,7 +1,9 @@
 #include "command_line.hpp"
 #include "context.hpp"
+#include "static_check_info.hpp"
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 #include <sys/stat.h>
 
 using namespace Choreo;
@@ -283,6 +285,41 @@ bool CommandLine::Parse(int argc, char** argv) {
   // parse all the options
   auto& r = OptionRegistry::GetInstance();
   r.Reset();
+  // Store a report-stable options identity. Report destinations, output file
+  // names, and performance-remark formatting are not codegen options and must
+  // not invalidate a workflow cache entry. The source path is retained in the
+  // invocation identity; the separate content hash is the semantic identity.
+  std::ostringstream invocation;
+  bool after_options = false;
+  bool first_option = true;
+  auto append_option = [&](const std::string& value) {
+    if (!first_option) invocation << '\x1f';
+    first_option = false;
+    invocation << value;
+  };
+  for (int i = 1; i < argc; ++i) {
+    const std::string value = argv[i];
+    if (after_options) continue;
+    if (value == "--") {
+      after_options = true;
+      continue;
+    }
+    if (value == "-o" || value == "--output") {
+      ++i;
+      continue;
+    }
+    if (value.rfind("-o=", 0) == 0 || value.rfind("--output=", 0) == 0 ||
+        value == "-target-info" || value == "--target-info" ||
+        value.rfind("-target-info=", 0) == 0 ||
+        value.rfind("--target-info=", 0) == 0 ||
+        value == "-static-check-info" || value == "--static-check-info" ||
+        value.rfind("-static-check-info=", 0) == 0 ||
+        value.rfind("--static-check-info=", 0) == 0 ||
+        value.rfind("-Rperformance", 0) == 0)
+      continue;
+    append_option(value);
+  }
+  r.SetInvocation(invocation.str());
   bool end_of_options = false;
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
@@ -290,6 +327,18 @@ bool CommandLine::Parse(int argc, char** argv) {
     if (end_of_options) {
       // After '--', treat everything as positional (input file)
       r.SetInputFileDirect(arg);
+      continue;
+    }
+
+    // Report queries are useful as bare flags as well as -option=<file>. A
+    // bare query writes JSON to stdout; the path form is preferable for a
+    // tuning harness that needs to preserve a machine-readable artifact.
+    if (arg == "-target-info" || arg == "--target-info") {
+      target_info = "-";
+      continue;
+    }
+    if (arg == "-static-check-info" || arg == "--static-check-info") {
+      static_check_info = "-";
       continue;
     }
 
@@ -363,8 +412,14 @@ bool CommandLine::Parse(int argc, char** argv) {
   }
 
   if (!print_features.GetValue() && !r.StdinAsInput() &&
-      r.GetInputFileName().empty()) {
+      r.GetInputFileName().empty() && target_info.GetValue().empty()) {
     std::cerr << "error: no input file.\n";
+    ret_code = 1;
+    return false;
+  }
+  if (!static_check_info.GetValue().empty() && !r.StdinAsInput() &&
+      r.GetInputFileName().empty()) {
+    std::cerr << "error: -static-check-info requires an input file.\n";
     ret_code = 1;
     return false;
   }
@@ -378,6 +433,21 @@ bool CommandLine::Parse(int argc, char** argv) {
 
   // set the arch to compile
   if (!arch.GetValue().empty()) CCtx().AddArch(ToLower(arch.GetValue()));
+
+  if (!target_info.GetValue().empty()) {
+    if (!WriteReportFile(target_info.GetValue(),
+                         [](std::ostream& os) { EmitTargetInfoJson(os); })) {
+      ret_code = 1;
+      return false;
+    }
+    // A target query is useful without a source file. Returning false with a
+    // zero code lets the driver terminate successfully without entering the
+    // source pipeline. If a source/static report is also present, continue.
+    if (r.GetInputFileName().empty() && static_check_info.GetValue().empty()) {
+      ret_code = 0;
+      return false;
+    }
+  }
 
   if (print_features.GetValue()) {
     auto& tgt = CCtx().GetTarget();
@@ -434,9 +504,14 @@ bool CommandLine::Parse(int argc, char** argv) {
   } else if (compile_only) {
     CCtx().SetOutputKind(OutputKind::TargetModule);
     if (output.GetValue().empty()) output = "a.o";
-  } else if (generate_script)
+  } else if (generate_script) {
     CCtx().SetOutputKind(OutputKind::ShellScript);
-  else {
+  } else if (!static_check_info.GetValue().empty()) {
+    // Static reporting is a planning/query operation by default. Users can
+    // still select -c/-es/-gs explicitly when they need another output.
+    CCtx().SetOutputKind(OutputKind::TargetSourceCode);
+    if (output.GetValue().empty()) output = "/dev/null";
+  } else {
     CCtx().SetOutputKind(OutputKind::TargetExecutable);
     if (output.GetValue().empty()) output = "a.out";
   }

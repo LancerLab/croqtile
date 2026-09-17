@@ -4,10 +4,15 @@
 #include "aux.hpp"
 #include "parallel_level.hpp"
 #include "preprocess.hpp"
+#include <iosfwd>
 #include <memory>
 #include <set>
 
 namespace Choreo {
+
+namespace AST {
+struct Node;
+}
 
 enum class Storage;
 enum class BaseType;
@@ -231,6 +236,16 @@ public:
   virtual std::string LowerAsmOperand(const std::string& varName) const {
     return varName;
   }
+  // Emit a target-specific machine-readable static-check report after the
+  // target source has been emitted. The default implementation lets the
+  // driver explicitly report unsupported analysis for other targets.
+  virtual bool EmitStaticCheckInfo(AST::Node&, std::ostream&) const {
+    return false;
+  }
+  virtual std::vector<std::string> ReportEnvironmentVariables() const {
+    return {};
+  }
+
   virtual bool IsArchSupported(const ArchId& arch) const {
     for (auto& ai : SupportedArchs())
       if (ai.id == arch) return true;

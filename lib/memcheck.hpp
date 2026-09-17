@@ -35,6 +35,8 @@ private:
   CtMemUsageMap ct_tot_mem_usage;
   // Only the maximum ct memory usage is recorded
   CtMemUsageMap ct_max_mem_usage;
+  CtMemUsageMap function_max_mem_usage;
+  std::set<Storage> function_runtime_extents;
 
   std::stack<RtMemUsageMap> rt_mem_usage_list;
   // only runtime usages are recorded
@@ -148,6 +150,10 @@ private:
 
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
+    if (isa<AST::ChoreoFunction>(&n)) {
+      function_max_mem_usage.clear();
+      function_runtime_extents.clear();
+    }
     if (isa<AST::Program>(&n)) {
       struct ReassignedValues : VisitorWithSymTab {
         std::unordered_set<std::string>& values;
@@ -236,6 +242,14 @@ private:
     for (const auto& [sto, usages] : rt_tot_mem_usage) {
       if (usages.empty()) continue;
       if (auto* tier = tracked_tier(sto)) tier->has_runtime_extent = true;
+    }
+    for (const auto& [sto, limit] : mem_usage_limit) {
+      auto& tier = stats.functions[CurrentFunctionName()][sto];
+      tier.limit_bytes = limit;
+      tier.peak_bytes = function_max_mem_usage[sto];
+      tier.has_runtime_extent =
+          function_runtime_extents.count(sto) ||
+          stats.runtime_decided_functions[CurrentFunctionName()].count(sto);
     }
     // Tiers whose allocations are runtime-managed by memory reuse (size
     // decided by input parameters) are runtime-decided even though the reuse
@@ -340,8 +354,13 @@ private:
 
   // Update the maximum ct memory usage for each storage level
   void UpdateCtMaxMemUsage() {
-    for (const auto& [sto, usage] : ct_tot_mem_usage)
+    for (const auto& [sto, usage] : ct_tot_mem_usage) {
       if (ct_max_mem_usage[sto] < usage) ct_max_mem_usage[sto] = usage;
+      function_max_mem_usage[sto] =
+          std::max(function_max_mem_usage[sto], usage);
+    }
+    for (const auto& [sto, usage] : rt_tot_mem_usage)
+      if (!usage.empty()) function_runtime_extents.insert(sto);
   }
 
   // Return the detail memory usage of the given map

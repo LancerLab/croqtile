@@ -159,6 +159,7 @@ void CollectSemaStats() {
     for (auto& entry : fctx.GetAssessor().GetAssessmentLog()) {
       stats.total++;
       switch (entry.outcome) {
+      case AssessOutcome::UNKNOWN: break;
       case AssessOutcome::STATIC_TRUE: stats.static_true++; break;
       case AssessOutcome::STATIC_FALSE: stats.static_false++; break;
       case AssessOutcome::RUNTIME: stats.runtime_total++; break;

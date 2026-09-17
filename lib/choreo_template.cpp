@@ -1,6 +1,7 @@
 #include "choreo_template.hpp"
 
 #include "io.hpp"
+#include "static_check_info.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -197,6 +198,8 @@ std::string SourceLine(size_t line) {
 
 bool DiagnoseAt(const std::string& filename, size_t line, size_t column,
                 const std::string& message, const char* level = "error") {
+  if (std::string(level) == "error")
+    RecordStaticCheckError(filename, line, column, message);
   if (!filename.empty()) errs() << filename << ":";
   if (line) errs() << line << "." << std::max<size_t>(column, 1) << ": ";
   errs() << level << ": " << message << "\n";

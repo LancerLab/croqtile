@@ -12,11 +12,20 @@
 
 using namespace Choreo;
 
+void DMACompletionAnalysis::recordParticipant(Device& device) {
+  device.participant_levels.insert(levels_.back());
+  device.participant_scopes.insert(participants_.back());
+}
+
 bool DMACompletionAnalysis::RunOnProgramImpl(AST::Node& root) {
+  parents_.clear();
+  nodes_.clear();
   devices_.clear();
   results_.clear();
   device_ = nullptr;
   levels_.clear();
+  participants_.clear();
+  scope_ordinals_.clear();
   root.accept(*this);
   for (auto& [name, device] : devices_) {
     analyze(device);
@@ -26,24 +35,56 @@ bool DMACompletionAnalysis::RunOnProgramImpl(AST::Node& root) {
 }
 
 bool DMACompletionAnalysis::BeforeVisitImpl(AST::Node& n) {
+  if (participant_local_) {
+    parents_[&n] = nodes_.empty() ? nullptr : nodes_.back();
+    // Expressions and device prototypes have no AfterVisit callback.
+    // They cannot own a statement effect; retain their parent but do not
+    // leave them on the structural statement stack.
+    if (!isa<AST::Expr>(&n) && !isa<AST::DeviceFunctionDecl>(&n))
+      nodes_.push_back(&n);
+  }
   if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels_.push_back(pb->GetLevel());
+    participants_.push_back(pb);
     if (pb->IsDeviceEntry()) {
       device_name_ = SSTab().ScopeName();
       device_ = &devices_[device_name_];
       device_->root = &n;
+      device_->info.root = &n;
+      device_->info.function = CurrentFunctionName();
+      device_->info.scope_ordinal = scope_ordinals_[CurrentFunctionName()]++;
+      device_->info.async_launch = pb->IsAsync();
     }
-    if (device_ && pb->IsAsync())
+    if (device_ && pb->IsAsync() &&
+        !(participant_local_ && pb->IsDeviceEntry()))
       device_->info.fallback = "asynchronous parallel participants";
   }
   if (!device_) return true;
   auto& device = *device_;
+  if (participant_local_) {
+    if (auto call = dyn_cast<AST::Call>(&n);
+        call && !call->IsArith() && !call->CompileTimeEval() && !call->IsAnno())
+      device.info.buffer_limitations.insert("opaque_call_effects");
+    if (isa<AST::CppSourceCode>(&n))
+      device.info.buffer_limitations.insert("embedded_code_effects");
+    if (auto mma = dyn_cast<AST::MMA>(&n)) {
+      auto op = mma->GetOperation();
+      if ((op->IsLoad() && op->IsAsync()) ||
+          (op->IsKind(AST::MMAOperation::Store) && op->StoreIsAsync()))
+        device.info.buffer_limitations.insert("asynchronous_mma_effects");
+    }
+  }
   if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
-    if (it->async) device.info.fallback = "asynchronous inthreads participants";
+    // At leaf THREAD level this is a per-participant conditional in the
+    // emitted kernel. It does not fork another execution stream in that SIP.
+    if (it->async &&
+        !(participant_local_ && levels_.back() == ParallelLevel::THREAD))
+      device.info.fallback = "asynchronous inthreads participants";
   }
   if (auto dma = dyn_cast<AST::DMA>(&n)) {
     std::string name;
     if (!dma->future.empty()) name = InScopeName(dma->future);
+    if (participant_local_) recordParticipant(device);
     if (dma->operation == ".any") {
       device.declarations.insert(name);
       device.info.resources.insert(name);
@@ -73,6 +114,8 @@ bool DMACompletionAnalysis::BeforeVisitImpl(AST::Node& n) {
     if (!private_context) {
       // Collective contexts have a different ownership contract. They are
       // not part of the private pool, including placeholders later bound here.
+      if (participant_local_)
+        device.info.fallback = "collective completion ownership not analyzed";
       device.info.resources.erase(name);
       return true;
     }
@@ -86,7 +129,7 @@ bool DMACompletionAnalysis::BeforeVisitImpl(AST::Node& n) {
     bool declaration = device.declarations.insert(name).second;
     device.info.resources.insert(name);
     device.actions[&n] = {Kind::Issue, {name}, dma->IsAsync(), declaration};
-    device.participant_levels.insert(levels_.back());
+    recordParticipant(device);
   } else if (auto wait = dyn_cast<AST::Wait>(&n)) {
     Action action{Kind::Wait, {}};
     for (auto& target : wait->GetTargets()) {
@@ -95,13 +138,13 @@ bool DMACompletionAnalysis::BeforeVisitImpl(AST::Node& n) {
       if (id) action.names.push_back(InScopeName(id->name));
     }
     device.actions[&n] = std::move(action);
-    if (!wait->GetTargets().empty())
-      device.participant_levels.insert(levels_.back());
+    if (!wait->GetTargets().empty()) recordParticipant(device);
   } else if (auto rotate = dyn_cast<AST::Rotate>(&n)) {
     Action action{Kind::Rotate, {}};
     for (auto& value : rotate->GetIds())
       action.names.push_back(InScopeName(cast<AST::Identifier>(value)->name));
     device.actions[&n] = std::move(action);
+    if (participant_local_) recordParticipant(device);
   } else if (auto select = dyn_cast<AST::Select>(&n)) {
     for (auto& value : select->expr_list->AllValues()) {
       if (isa<FutureType>(NodeType(*value)))
@@ -121,9 +164,11 @@ bool DMACompletionAnalysis::BeforeVisitImpl(AST::Node& n) {
 }
 
 bool DMACompletionAnalysis::AfterVisitImpl(AST::Node& n) {
+  if (participant_local_) nodes_.pop_back();
   if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     if (pb->IsDeviceEntry()) device_ = nullptr;
     levels_.pop_back();
+    participants_.pop_back();
   }
   return true;
 }
@@ -132,10 +177,62 @@ void DMACompletionAnalysis::analyze(Device& device) {
   auto& info = device.info;
   if (device.participant_levels.size() > 1)
     info.fallback = "completion uses different participant levels";
-  if (!info.fallback.empty() || info.resources.empty()) return;
+  if (participant_local_ && !info.resources.empty() &&
+      (device.participant_scopes.size() != 1 ||
+       device.participant_levels !=
+           std::set<ParallelLevel>{ParallelLevel::THREAD}))
+    info.fallback = "completion requires one lexical THREAD participant scope";
+  if (!info.fallback.empty() || (!participant_local_ && info.resources.empty()))
+    return;
+  if (participant_local_) {
+    for (const auto& [node, action] : device.actions)
+      for (const auto& name : action.names)
+        if (!info.resources.count(name)) {
+          info.fallback = "completion references an external context";
+          return;
+        }
+  }
   std::vector<std::string> names(info.resources.begin(), info.resources.end());
   std::map<std::string, size_t> indices;
   for (size_t i = 0; i < names.size(); ++i) indices[names[i]] = i;
+
+  std::map<const AST::Node*, std::vector<BufferAccessEvent>> effects;
+  if (participant_local_) {
+    for (const auto& event : CCtx().GetBufferAccessLog().events) {
+      const AST::Node* current = event.stmt;
+      const AST::Node* statement = current;
+      bool belongs = false;
+      while (current) {
+        if (current == device.root) {
+          belongs = true;
+          break;
+        }
+        auto parent = parents_.find(current);
+        if (parent == parents_.end()) break;
+        if (isa<AST::MultiNodes>(parent->second)) statement = current;
+        current = parent->second;
+      }
+      if (!belongs) continue;
+      // Keep effects on the innermost statement, not the enclosing loop.
+      current = event.stmt;
+      while (current && current != device.root) {
+        auto parent = parents_.find(current);
+        if (parent == parents_.end()) break;
+        statement = current;
+        if (isa<AST::MultiNodes>(parent->second)) break;
+        current = parent->second;
+      }
+      effects[statement].push_back(event);
+      ++info.buffer_accesses;
+      if (event.opaque_effect)
+        info.buffer_limitations.insert("opaque_call_effects");
+      if (event.storage == Storage::SHARED ||
+          event.storage == Storage::GROUP_SHARED)
+        info.buffer_limitations.insert("cross_participant_storage");
+      if (!event.allocation && event.level != ParallelLevel::THREAD)
+        info.buffer_limitations.insert("non_thread_buffer_access");
+    }
+  }
 
   struct Node {
     const AST::Node* source = nullptr;
@@ -174,7 +271,7 @@ void DMACompletionAnalysis::analyze(Device& device) {
       if (isa<AST::InThreadsBlock>(n)) return add(n, {body, next});
       return body;
     }
-    return device.actions.count(n) ? add(n, {next}) : next;
+    return device.actions.count(n) || effects.count(n) ? add(n, {next}) : next;
   };
   size_t entry = build(device.root->GetBody().get(), 0, 0, 0);
 
@@ -183,11 +280,21 @@ void DMACompletionAnalysis::analyze(Device& device) {
   // rotated pending operation with the next operation at the same DMA site.
   using Bindings = std::vector<size_t>;
   using Pending = std::vector<bool>;
-  std::vector<std::map<Bindings, Pending>> incoming(cfg.size());
+  struct State {
+    Pending pending;
+    Pending must_pending;
+    std::vector<std::set<const AST::Node*>> transfers;
+    std::set<std::string> initialized;
+  };
+  std::vector<std::map<Bindings, State>> incoming(cfg.size());
   std::deque<std::pair<size_t, Bindings>> work;
   Bindings initial(names.size());
   std::iota(initial.begin(), initial.end(), 0);
-  incoming[entry][initial] = Pending(names.size(), false);
+  incoming[entry][initial] = {
+      Pending(names.size(), false),
+      Pending(names.size(), false),
+      std::vector<std::set<const AST::Node*>>(names.size()),
+      {}};
   work.emplace_back(entry, initial);
   size_t partitions = 1;
   constexpr size_t partition_limit = 32768;
@@ -197,18 +304,76 @@ void DMACompletionAnalysis::analyze(Device& device) {
     std::ostringstream message;
     if (source) message << source->LOC() << ": ";
     message << names[owner] << ": " << reason;
-    info.diagnostics.insert(message.str());
+    if (info.diagnostics.insert(message.str()).second)
+      info.findings.push_back({source, names[owner], reason});
     unproven.insert(owner);
   };
   while (!work.empty()) {
     auto [pc, binding] = std::move(work.front());
     work.pop_front();
-    Pending pending = incoming[pc].at(binding);
+    State state = incoming[pc].at(binding);
+    auto& pending = state.pending;
     if (pc == 0) {
       for (size_t i = 0; i < pending.size(); ++i)
         if (pending[i]) diagnose(device.root, i, "may exit with pending DMA");
       continue;
     }
+    const auto* source = cfg[pc].source;
+    for (const auto& access : effects[source]) {
+      for (size_t owner = 0; owner < pending.size(); ++owner) {
+        if (!pending[owner]) continue;
+        for (const auto* issue : state.transfers[owner]) {
+          for (const auto& transfer : effects[issue]) {
+            if (transfer.buffer != access.buffer ||
+                (transfer.kind == AccessKind::READ &&
+                 access.kind == AccessKind::READ))
+              continue;
+            auto code = access.kind == AccessKind::READ
+                            ? "BUFFER_READ_BEFORE_DMA_COMPLETE"
+                            : "BUFFER_WRITE_WHILE_DMA_PENDING";
+            info.buffer_findings.insert(
+                {access.stmt, issue, access.buffer, code});
+          }
+        }
+      }
+      if (access.allocation) {
+        state.initialized.erase(access.buffer);
+        if (access.initializes_whole_buffer)
+          state.initialized.insert(access.buffer);
+      } else if (access.kind == AccessKind::READ &&
+                 access.storage == Storage::LOCAL) {
+        if (!state.initialized.count(access.buffer))
+          info.buffer_findings.insert({access.stmt, nullptr, access.buffer,
+                                       "BUFFER_INITIALIZATION_UNPROVEN"});
+      }
+    }
+    auto complete = [&](size_t owner) {
+      // Initialization must hold for every issue that can reach this wait.
+      std::set<std::string> initialized;
+      bool first = true;
+      for (const auto* issue : state.transfers[owner]) {
+        std::set<std::string> written;
+        for (const auto& access : effects[issue])
+          if (access.kind == AccessKind::WRITE &&
+              access.initializes_whole_buffer)
+            written.insert(access.buffer);
+        if (first)
+          initialized = written;
+        else {
+          std::set<std::string> intersection;
+          std::set_intersection(
+              initialized.begin(), initialized.end(), written.begin(),
+              written.end(), std::inserter(intersection, intersection.end()));
+          initialized = std::move(intersection);
+        }
+        first = false;
+      }
+      if (state.must_pending[owner])
+        state.initialized.insert(initialized.begin(), initialized.end());
+      state.must_pending[owner] = false;
+      state.transfers[owner].clear();
+      pending[owner] = false;
+    };
     auto action_it = device.actions.find(cfg[pc].source);
     if (action_it != device.actions.end()) {
       const auto& action = action_it->second;
@@ -229,7 +394,7 @@ void DMACompletionAnalysis::analyze(Device& device) {
           binding[handles.back()] = first;
         }
       } else if (action.kind == Kind::Wait) {
-        for (auto handle : handles) pending[binding[handle]] = false;
+        for (auto handle : handles) complete(binding[handle]);
       } else if (!handles.empty()) {
         auto handle = handles.front();
         if (action.declaration && binding[handle] != handle) {
@@ -249,14 +414,19 @@ void DMACompletionAnalysis::analyze(Device& device) {
           size_t demand = std::count(pending.begin(), pending.end(), true);
           info.pending_bound =
               std::max(info.pending_bound, demand + !pending[owner]);
+          if (participant_local_) {
+            state.transfers[owner].insert(source);
+            state.must_pending[owner] = true;
+          }
           pending[owner] = action.async;
+          if (!action.async) complete(owner);
         } else {
-          pending[owner] = false;
+          complete(owner);
         }
       }
     }
     for (size_t next : cfg[pc].successors) {
-      auto [it, inserted] = incoming[next].emplace(binding, pending);
+      auto [it, inserted] = incoming[next].emplace(binding, state);
       bool changed = inserted;
       if (inserted && ++partitions > partition_limit) {
         info.fallback = "completion binding analysis budget exceeded";
@@ -265,15 +435,36 @@ void DMACompletionAnalysis::analyze(Device& device) {
       }
       if (!inserted) {
         for (size_t i = 0; i < pending.size(); ++i) {
-          if (pending[i] && !it->second[i]) {
-            it->second[i] = true;
+          if (pending[i] && !it->second.pending[i]) {
+            it->second.pending[i] = true;
             changed = true;
           }
         }
       }
+      if (!inserted && participant_local_) {
+        for (size_t i = 0; i < state.transfers.size(); ++i) {
+          bool must = it->second.must_pending[i] && state.must_pending[i];
+          changed |= must != it->second.must_pending[i];
+          it->second.must_pending[i] = must;
+          auto& target = it->second.transfers[i];
+          auto before = target.size();
+          target.insert(state.transfers[i].begin(), state.transfers[i].end());
+          changed |= target.size() != before;
+        }
+        std::set<std::string> initialized;
+        std::set_intersection(
+            it->second.initialized.begin(), it->second.initialized.end(),
+            state.initialized.begin(), state.initialized.end(),
+            std::inserter(initialized, initialized.end()));
+        changed |= initialized != it->second.initialized;
+        it->second.initialized = std::move(initialized);
+      }
       if (changed) work.emplace_back(next, binding);
     }
   }
+  info.analyzed = true;
+  if (participant_local_ && !info.findings.empty())
+    info.buffer_limitations.insert("completion_not_proved");
   // Do not make a suspect lifecycle less safe through sharing. Diagnostics
   // are may-path facts (scalar predicates are not correlated), not errors.
   for (size_t owner : unproven)

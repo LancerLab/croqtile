@@ -12,6 +12,21 @@ string(REGEX MATCH "^[0-9]+\.[0-9]+\.[0-9]+" PROJECT_VERSION_ONLY "${VERSION_FRO
 
 project(Choreo VERSION ${PROJECT_VERSION_ONLY})
 
+# Embed the source revision in machine-readable compiler reports. Builds from
+# source archives or directories without git retain an explicit "unknown"
+# value rather than silently pretending that reports are reproducible.
+execute_process(
+  COMMAND git -C "${CMAKE_SOURCE_DIR}" rev-parse HEAD
+  OUTPUT_VARIABLE CHOREO_GIT_REVISION
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET
+  RESULT_VARIABLE CHOREO_GIT_REVISION_RESULT
+)
+if(NOT CHOREO_GIT_REVISION_RESULT EQUAL 0 OR
+   CHOREO_GIT_REVISION STREQUAL "")
+  set(CHOREO_GIT_REVISION "unknown")
+endif()
+
 # Function to check compiler compatibility
 function(check_compiler_compatibility)
   set(COMPATIBLE_COMPILER FALSE)

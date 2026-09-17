@@ -139,6 +139,7 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
     if ((ps.pred && ps.pred()) || !ps.pred) {
       if (ps.v) {
         auto t0 = std::chrono::steady_clock::now();
+        last_stage_ = ps.v->GetName();
         bool pass_ok = ps.v->RunOnProgram(root);
         if (do_time) {
           auto t1 = std::chrono::steady_clock::now();
@@ -430,8 +431,8 @@ void Choreo::PrintMemUsageStats(const MemUsageStats& s) {
       lead = "runtime";
     } else if (limit > 0) {
       std::ostringstream pct;
-      pct << std::defaultfloat << std::setprecision(3)
-          << (100.0 * used / limit) << "%";
+      pct << std::defaultfloat << std::setprecision(3) << (100.0 * used / limit)
+          << "%";
       lead = pct.str();
     }
     errs() << color::err(color::kBold) << std::right << std::setw(7) << lead

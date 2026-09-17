@@ -454,9 +454,11 @@ struct MemUsageStats {
     bool has_runtime_extent = false; // usage also depends on runtime extents
   };
   std::map<Storage, Tier> tiers; // keyed by storage tier
+  std::map<std::string, std::map<Storage, Tier>> functions;
   // Tiers holding runtime-managed allocations whose size is decided by input
   // parameters (detected while planning memory reuse).
   std::set<Storage> runtime_decided;
+  std::map<std::string, std::set<Storage>> runtime_decided_functions;
 };
 
 /// Print the per-storage memory-usage statistics section to stderr.

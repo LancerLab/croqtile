@@ -40,6 +40,7 @@ private:
 
   bool abend = false;
   bool debug = false;
+  std::string last_stage_;
   int state = 0; // no error
 
 public:
@@ -85,6 +86,7 @@ public:
   void SetAbend() { abend = true; }
 
   int Status() const { return state; }
+  const std::string& LastStage() const { return last_stage_; }
 
   const ptr<SymbolTable> LastSymTab() const {
     if (!symtab) choreo_unreachable("unable to find a valid last symtab.");

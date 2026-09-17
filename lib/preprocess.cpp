@@ -5,6 +5,7 @@
 #include "fs_utils.hpp"
 #include "io.hpp"
 #include "options.hpp"
+#include "static_check_info.hpp"
 #include <filesystem>
 #include <fstream>
 #include <istream>
@@ -1430,6 +1431,7 @@ CollectCokLinesRecursive(const std::string& filepath,
 
   std::ifstream ifs(normalized);
   if (!ifs.is_open()) return result;
+  RecordStaticCheckDependency(normalized);
 
   std::regex inc_re("^\\s*#include\\s+\"(.*)\"");
   auto current_dir = std::filesystem::path(normalized).parent_path().string();
@@ -1520,6 +1522,7 @@ bool Preprocess::Process(std::istream& input) {
   std::string cur_line;
   std::string line_to_handle;
   int extra_line = 0;
+  std::unordered_set<std::string> dependency_visited;
   while (std::getline(input, cur_line)) {
     // we skip the include of choreo.h, which is not needed for extracting
     // device kernels from preprocessed file
@@ -1529,6 +1532,13 @@ bool Preprocess::Process(std::istream& input) {
       if (std::regex_match(cur_line, match, ifdefRegex)) {
         std::string include_file = match[1];
         if (include_file != "choreo.h") include_lines.push_back(cur_line);
+        if (!static_check_info.GetValue().empty()) {
+          auto source = OptionRegistry::GetInstance().GetInputFileName();
+          auto directory = std::filesystem::absolute(source).parent_path();
+          auto resolved = ResolveInclude(include_file, directory.string());
+          if (!resolved.empty())
+            CollectCokLinesRecursive(resolved, dependency_visited);
+        }
       }
     }
     if (code_partition == CP_KERNEL) cok_codes.push_back(cur_line);

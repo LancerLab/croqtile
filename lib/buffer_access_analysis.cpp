@@ -18,6 +18,15 @@ bool BufferAccessAnalyzer::BeforeVisitImpl(AST::Node& n) {
     ParallelLevel lvl = pb->GetLevel();
     pl_stack_.push_back(lvl == ParallelLevel::NONE ? CurrentLevel() : lvl);
   }
+  if (report_mode_) {
+    if (auto pred = dyn_cast<AST::PredBlock>(&n))
+      RecordAll(AccessKind::READ, &n,
+                GetAllSymbolicOperands(pred->GetPredicate().get()),
+                AccessEntity::THREADS);
+    if (auto ret = dyn_cast<AST::Return>(&n); ret && ret->value)
+      RecordAll(AccessKind::READ, &n, GetAllSymbolicOperands(ret->value.get()),
+                AccessEntity::THREADS);
+  }
   return true;
 }
 
@@ -147,7 +156,12 @@ bool BufferAccessAnalyzer::Visit(AST::NamedVariableDecl& n) {
   if (auto sty = dyn_cast<SpannedType>(ty)) {
     if (!IsRef(n)) {
       // A storage-bearing buffer is produced (allocated/initialized) here.
+      size_t first = events_.size();
       Record(AccessKind::WRITE, &n, n.name_str, AccessEntity::THREADS);
+      for (; first < events_.size(); ++first) {
+        events_[first].allocation = true;
+        events_[first].initializes_whole_buffer = !!n.init_value;
+      }
       return true;
     }
     // Reference: resolve to the aliased source buffer.
@@ -159,12 +173,24 @@ bool BufferAccessAnalyzer::Visit(AST::NamedVariableDecl& n) {
     } else if (e->GetOp() == Op::ElemOf) {
       std::string base_array = AST::GetArrayBaseSymbol(*e)->name;
       tracker_.AddAlias(n.name_str, base_array);
+    } else if (report_mode_) {
+      for (const auto& operand : GetAllSymbolicOperands(n.init_expr.get()))
+        tracker_.AddBinding(n.name_str, operand);
     }
   }
+  if (report_mode_ && isa<AST::Expr>(n.init_expr) && !GetSpannedType(ty))
+    RecordAll(AccessKind::READ, &n, GetAllSymbolicOperands(n.init_expr.get()),
+              AccessEntity::THREADS);
   return true;
 }
 
 bool BufferAccessAnalyzer::Visit(AST::Assignment& n) {
+  if (report_mode_ && !n.da->AccessElement()) {
+    if (auto chunk = dyn_cast<AST::ChunkAt>(AST::Ref(n.value))) {
+      tracker_.AddAlias(n.GetName(), chunk->RefSymbol());
+      return true;
+    }
+  }
   if (auto select = dyn_cast<AST::Select>(n.value)) {
     HandleSelect(n, *select);
     return true;
@@ -206,7 +232,20 @@ bool BufferAccessAnalyzer::Visit(AST::DMA& n) {
   if (dst.empty() && !n.future.empty()) dst = n.future;
 
   Record(AccessKind::READ, &n, src, entity);
+  size_t first_write = events_.size();
   if (!dst.empty()) Record(AccessKind::WRITE, &n, dst, entity);
+  if (report_mode_) {
+    auto chunk = dyn_cast<AST::ChunkAt>(n.to);
+    // A whole-symbol destination includes shape-relaxed DMA padding. Views
+    // and array slots conservatively do not initialize their entire root.
+    bool whole = n.IsDstInferred() ||
+                 (chunk && chunk->NoOperation() &&
+                  (!chunk->indices || chunk->indices->Count() == 0));
+    for (; first_write < events_.size(); ++first_write)
+      events_[first_write].initializes_whole_buffer =
+          whole &&
+          (n.ToSymbol().empty() || events_[first_write].buffer == Scoped(dst));
+  }
 
   if (!n.future.empty()) {
     // Only a named destination needs a future -> buffer mapping; an
@@ -273,9 +312,17 @@ bool BufferAccessAnalyzer::Visit(AST::MMA& n) {
 }
 
 bool BufferAccessAnalyzer::Visit(AST::Call& n) {
-  for (const auto& arg : n.GetArguments())
-    RecordAll(AccessKind::READ, &n, GetAllSymbolicOperands(arg.get()),
-              AccessEntity::THREADS);
+  size_t first = events_.size();
+  bool opaque =
+      report_mode_ && !n.IsArith() && !n.CompileTimeEval() && !n.IsAnno();
+  for (const auto& arg : n.GetArguments()) {
+    auto operands = GetAllSymbolicOperands(arg.get());
+    RecordAll(AccessKind::READ, &n, operands, AccessEntity::THREADS);
+    if (opaque)
+      RecordAll(AccessKind::WRITE, &n, operands, AccessEntity::THREADS);
+  }
+  if (opaque)
+    for (; first < events_.size(); ++first) events_[first].opaque_effect = true;
   return true;
 }
 

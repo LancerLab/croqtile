@@ -5,6 +5,7 @@
 #include "pipeline.hpp"
 #include "preprocess.hpp"
 #include "scanner.hpp"
+#include "static_check_info.hpp"
 #include <cstdlib>
 #include <filesystem>
 #include <getopt.h>
@@ -227,7 +228,10 @@ static int MultiFileLibDriver(int argc, char* argv[]) {
   return 0;
 }
 
-static int SingleFileCompile() {
+static std::string report_stage = "preprocess";
+static bool report_complete = false;
+
+static int CompileInput() {
   auto& r = OptionRegistry::GetInstance();
 
   if (CCtx().DumpAst() && CCtx().NoCodegen())
@@ -256,6 +260,9 @@ static int SingleFileCompile() {
 
   if (CCtx().GetOutputKind() == OutputKind::PreProcessedCode) return 0;
 
+  if (!CCtx().NoPreProcess())
+    RecordStaticCheckPreprocessedInput(pps.str() + cok_ss.str());
+  report_stage = "parse";
   Scanner s;
   PContext pctx;
   Parser p(pctx, s);
@@ -294,9 +301,42 @@ static int SingleFileCompile() {
   auto& pl = ASTPipeline::Get().PlanAllRoutines();
   pl.ValidatePassNames();
 
-  if (!pl.RunOnProgram(CompilerAPI::GetAST())) return pl.Status();
+  bool completed = pl.RunOnProgram(CompilerAPI::GetAST());
+  report_stage = pl.LastStage();
+  report_complete = completed;
+  return pl.Status();
+}
 
-  return 0;
+static int SingleFileCompile() {
+  const auto path = static_check_info.GetValue();
+  // Invalidate an older successful result before starting compilation. If the
+  // process is interrupted, consumers see "in_progress", never stale success.
+  if (!path.empty() && path != "-" &&
+      !WriteReportFile(path, [](std::ostream& os) {
+        EmitIncompleteStaticCheckInfo(os, "in_progress", "start", 0);
+      }))
+    return 1;
+  int status = CompileInput();
+  // The operating system exposes only the low byte of main's return code.
+  // Keep every compiler failure nonzero, including multiples of 256 errors.
+  if (status) status = (status & 255) ? (status & 255) : 1;
+  if (!path.empty()) {
+    bool emitted = WriteReportFile(path, [&](std::ostream& os) {
+      if (status || !report_complete) {
+        EmitIncompleteStaticCheckInfo(os, status ? "failed" : "incomplete",
+                                      report_stage, status);
+      } else if (!CCtx().GetTarget().EmitStaticCheckInfo(CompilerAPI::GetAST(),
+                                                         os)) {
+        EmitGenericStaticCheckInfo(os);
+      }
+    });
+    if (!emitted) return 1;
+  } else if (!performance_remarks.GetValue().empty() && !status &&
+             report_complete) {
+    std::ostringstream unused;
+    CCtx().GetTarget().EmitStaticCheckInfo(CompilerAPI::GetAST(), unused);
+  }
+  return status;
 }
 
 int main(int argc, char* argv[]) {
