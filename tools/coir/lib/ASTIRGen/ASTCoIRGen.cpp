@@ -2657,6 +2657,13 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl& nvd) {
   auto symType = GetSymbolType(nvd.GetName());
   if (!symType) return true;
 
+  if (auto array = dyn_cast<SpannedArrayType>(symType);
+      array && array->HasAlignedSlots() && array->spty->RuntimeShaped()) {
+    Error1(nvd.LOC(), "dynamic aligned span arrays require the classic choreo "
+                      "compiler; CoIR does not yet represent padded slots.");
+    return true;
+  }
+
   if (auto select = dyn_cast<AST::Select>(nvd.init_expr)) {
     auto val = EmitSelect(*select);
     if (val) {

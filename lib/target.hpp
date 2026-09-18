@@ -547,6 +547,12 @@ public:
     return false;
   }
 
+  // Runtime-shaped local span arrays with per-slot padding, using memory reuse.
+  virtual bool SupportsDynamicAlignedLocalArrays(const ArchId&,
+                                                 size_t /*alignment*/) const {
+    return false;
+  }
+
   // Whether the target's code generation only produces binaries (no text
   // source or script emission).  Targets that return true default to
   // compile_binary mode and reject -es/-gs.

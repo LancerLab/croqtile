@@ -449,7 +449,8 @@ void EmitAssessmentFactsJson(std::ostream& os, bool finalized) {
 void EmitMemoryFactsJson(std::ostream& os) {
   os << "{\"measurement\":\"compiler_static_peak_live_bytes\",\"functions\":[";
   bool first = true;
-  for (const auto& [function, tiers] : CCtx().GetMemUsageStats().functions) {
+  const auto& stats = CCtx().GetMemUsageStats();
+  for (const auto& [function, tiers] : stats.functions) {
     if (!first) os << ',';
     first = false;
     os << "{\"function\":";
@@ -462,8 +463,15 @@ void EmitMemoryFactsJson(std::ostream& os) {
       first_tier = false;
       os << "{\"storage\":";
       String(os, STR(storage));
-      os << ",\"peak_bytes\":" << tier.peak_bytes
-         << ",\"limit_bytes\":" << tier.limit_bytes
+      os << ",\"peak_bytes\":" << tier.peak_bytes << ",\"peak_bytes_kind\":";
+      auto runtime_tiers = stats.runtime_decided_functions.find(function);
+      bool runtime_pool =
+          runtime_tiers != stats.runtime_decided_functions.end() &&
+          runtime_tiers->second.count(storage);
+      String(os, runtime_pool              ? "runtime_pool_reservation"
+                 : tier.has_runtime_extent ? "static_lower_bound"
+                                           : "static_peak");
+      os << ",\"limit_bytes\":" << tier.limit_bytes
          << ",\"has_runtime_extent\":"
          << (tier.has_runtime_extent ? "true" : "false") << '}';
     }

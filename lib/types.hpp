@@ -2798,10 +2798,17 @@ struct SpannedArrayType final : public ArrayType,
   void SetSlotAlignment(size_t alignment) { slot_alignment = alignment; }
   size_t SlotAlignment() const { return slot_alignment; }
   bool HasAlignedSlots() const { return slot_alignment != 0; }
-  size_t PhysicalSlotStrideBytes() const {
-    const size_t bytes = spty->ByteSize();
+  ValueItem PhysicalSlotStrideValue() const {
+    auto bytes = spty->ByteSizeValue();
     if (!slot_alignment) return bytes;
-    return ((bytes + slot_alignment - 1) / slot_alignment) * slot_alignment;
+    return (((bytes + sbe::nu(slot_alignment - 1)) / sbe::nu(slot_alignment)) *
+            sbe::nu(slot_alignment))
+        ->Normalize();
+  }
+  size_t PhysicalSlotStrideBytes() const {
+    auto bytes = VIInt(PhysicalSlotStrideValue());
+    assert(bytes && "slot stride is not static");
+    return *bytes;
   }
   size_t PhysicalSlotStrideElements() const {
     const size_t elem_bytes = SizeOf(spty->ElementType());
@@ -3270,9 +3277,8 @@ inline ptr<BoundedIntegerType> MakeBoundedIntegerType(const ValueItem& ub) {
   return std::make_shared<BoundedIntegerType>(sbe::nu(0), ub);
 }
 
-inline ptr<BoundedIntegerType> MakeBoundedIntegerType(const ValueItem& lb,
-                                                      const ValueItem& ub,
-                                                      int step = 1) {
+inline ptr<BoundedIntegerType>
+MakeBoundedIntegerType(const ValueItem& lb, const ValueItem& ub, int step = 1) {
   return std::make_shared<BoundedIntegerType>(lb, ub, step);
 }
 

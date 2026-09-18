@@ -636,16 +636,25 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
         if (n.HasNote("alignment")) {
           array_ty->SetSlotAlignment(
               static_cast<size_t>(std::stoull(n.GetNote("alignment"))));
-          bool static_layout = mds_value.IsValid();
-          if (static_layout) {
+          bool static_shape = mds_value.IsValid();
+          bool static_slots = true;
+          if (static_shape) {
             for (auto dim : mds_value.Value())
-              static_layout &= VIInt(dim).has_value();
-            for (auto dim : array_ty->Dimensions())
-              static_layout &= VIInt(dim).has_value();
+              static_shape &= VIInt(dim).has_value();
           }
-          if (!static_layout)
+          for (auto dim : array_ty->Dimensions())
+            static_slots &= VIInt(dim).has_value();
+          bool dynamic_local =
+              sto == Storage::LOCAL && CCtx().MemReuse() &&
+              CCtx().GetTarget().SupportsDynamicAlignedLocalArrays(
+                  CCtx().GetArch(), array_ty->SlotAlignment());
+          if (!static_slots)
             Error1(n.LOC(), "explicitly aligned arrays of spans require "
-                            "static slot shapes and array dimensions.");
+                            "static array dimensions.");
+          else if (!static_shape && !dynamic_local)
+            Error1(n.LOC(),
+                   "dynamic aligned span arrays require local storage, "
+                   "memory reuse, and target support.");
         }
         nty = array_ty;
       } else

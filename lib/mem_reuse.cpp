@@ -191,7 +191,7 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
       ValueItem total_size;
       if (auto saty = dyn_cast<SpannedArrayType>(ty);
           saty && saty->HasAlignedSlots()) {
-        total_size = sbe::nu(saty->PhysicalSlotStrideBytes()) * elem_count;
+        total_size = saty->PhysicalSlotStrideValue() * elem_count;
       } else {
         total_size = sty->ByteSizeValue() * elem_count;
       }
@@ -200,6 +200,8 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
     } else {
       sto_have_dyn[cur_dev_fname][AllocPoolOf(sto)] = true;
       auto size_expr = sty->ByteSizeValue();
+      if (auto saty = dyn_cast<SpannedArrayType>(ty))
+        size_expr = saty->PhysicalSlotStrideValue();
       if (n.IsArray()) size_expr = size_expr * elem_count;
       buf_size.emplace(sname, size_expr);
       VST_DEBUG(dbgs() << "\tdynamic  size: " << size_expr << "\n";);
