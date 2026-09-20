@@ -46,7 +46,7 @@ The advantage is model-independent -- it widens on moderate-capacity models:
 | Model | Croqtile | Triton | TileLang | CUDA |
 |-------|:--------:|:------:|:--------:|:----:|
 | Opus 4.6 Max | 87.8% | 87.7% | 87.3% | 67.2% |
-| DeepSeek M2.5 | 82.3% | 65.8% | 63.4% | 37.5% |
+| MiniMax M2.5 | 82.3% | 65.8% | 63.4% | 37.5% |
 
 **Evaluation:** Claude Sonnet 4.6 High, NVIDIA H800 PCIe, 60-200 iterations/shape, identical system prompt and harness across all DSLs.
 
