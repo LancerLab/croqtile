@@ -312,6 +312,20 @@ bool BufferAccessAnalyzer::Visit(AST::MMA& n) {
 }
 
 bool BufferAccessAnalyzer::Visit(AST::Call& n) {
+  if (n.IsLibCall() && n.function->name == "__lib_reduce_sum" &&
+      n.arguments->Count() == 5) {
+    // The builtin has a known synchronous buffer contract. In particular its
+    // result is a thread write consumed by a later DMA, not an opaque read of
+    // an uninitialized output. A row reduction need not fill its whole buffer.
+    for (size_t i = 1; i < n.arguments->Count(); ++i)
+      RecordAll(AccessKind::READ, &n,
+                GetAllSymbolicOperands(n.arguments->ValueAt(i).get()),
+                AccessEntity::THREADS);
+    RecordAll(AccessKind::WRITE, &n,
+              GetAllSymbolicOperands(n.arguments->ValueAt(0).get()),
+              AccessEntity::THREADS);
+    return true;
+  }
   size_t first = events_.size();
   bool opaque =
       report_mode_ && !n.IsArith() && !n.CompileTimeEval() && !n.IsAnno();
