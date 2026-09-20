@@ -28,7 +28,7 @@ The claims above are measurable. Here's the evidence across three axes: token bu
 Croqtile encodes structural intent directly -- ~500 tokens per kernel versus ~2,200 for CUDA/CuTe and ~4,000 for CUTLASS. The savings compound: agents fit more iteration history, profiling data, and optimization rules in the same context window.
 
 <p align="center">
-  <img src="docs/assets/token-analysis.svg" alt="Token budget analysis: CroqTile vs CUDA+CuTe vs CUTLASS within an 8K context window" width="540">
+  <img src="docs/assets/context-budget.svg" alt="Context budget per tuning iteration across DSLs" width="540">
 </p>
 
 ### Agent Kernel-Writing Accuracy
@@ -44,6 +44,10 @@ Given a kernel specification, how often does an AI agent produce a correct imple
 
 Highest pass@1 among DSLs exposing warp-level controls, despite deeper structural edits that probe resource boundaries. On dynamic shapes, Croqtile drops only 4 pp (to 82.1%) while Triton falls to 48%, TileLang to 52%, and Helion to 45%.
 
+<p align="center">
+  <img src="docs/assets/pass-at-k.svg" alt="Compiler pass@1 and pass@5 across DSLs" width="540">
+</p>
+
 The advantage is model-independent -- it widens on moderate-capacity models:
 
 | Model | Croqtile | Triton | TileLang | CUDA |
@@ -52,6 +56,12 @@ The advantage is model-independent -- it widens on moderate-capacity models:
 | DeepSeek M2.5 | 82.3% | 65.8% | 63.4% | 37.5% |
 
 **Evaluation:** Claude Sonnet 4.6 High, NVIDIA H800 PCIe, 60-200 iterations/shape, identical system prompt and harness across all DSLs.
+
+### Code Sites per Feature
+
+<p align="center">
+  <img src="docs/assets/code-sites.svg" alt="Code sites required per feature across DSLs" width="540">
+</p>
 
 ### Compile-Time Safety
 
