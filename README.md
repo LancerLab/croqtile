@@ -35,13 +35,6 @@ Croqtile encodes structural intent directly -- ~500 tokens per kernel versus ~2,
 
 Given a kernel specification, how often does an AI agent produce a correct implementation on the first attempt? Croqtile's compact syntax and immediate compile-time feedback let agents get it right without trial-and-error debugging cycles:
 
-| DSL | pass@1 | pass@5 |
-|-----|:------:|:------:|
-| **Croqtile** | **85.7%** | **95.6%** |
-| Triton | 84.3% | -- |
-| TileLang | 84.8% | -- |
-| CUDA | 35.3% | -- |
-
 Highest pass@1 among DSLs exposing warp-level controls, despite deeper structural edits that probe resource boundaries. On dynamic shapes, Croqtile drops only 4 pp (to 82.1%) while Triton falls to 48%, TileLang to 52%, and Helion to 45%.
 
 <p align="center">
