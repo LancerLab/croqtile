@@ -4,6 +4,8 @@
 #include "loc.hpp"
 #include "symvals.hpp"
 #include <cassert>
+#include <initializer_list>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -39,6 +41,18 @@ enum class AssertionEmitPosition {
   IN_BLOCK,
 };
 
+inline const std::string STR(const UsageType& ut) {
+  switch (ut) {
+  case UsageType::UnClassified: return "unclassified";
+  case UsageType::ShapeCompatibility: return "shape-compat";
+  case UsageType::ElementAccess: return "elem-access";
+  case UsageType::LoopBound: return "loop-bound";
+  case UsageType::HardwareConstraint: return "hw-constraint";
+  }
+  choreo_unreachable("unsupported usage type.");
+  return "";
+}
+
 enum class AssertionCost {
   NONE,
   ENTRY,
@@ -65,12 +79,43 @@ enum class AssessOutcome {
   RUNTIME,      ///< Cannot evaluate -- runtime assertion emitted.
 };
 
+inline const std::string STR(const AssessOutcome& o) {
+  switch (o) {
+  case AssessOutcome::STATIC_TRUE: return "static-true";
+  case AssessOutcome::STATIC_FALSE: return "static-false";
+  case AssessOutcome::RUNTIME: return "runtime";
+  }
+  return "?";
+}
+
+/// Information dependence of an assessment's predicate (RQ4 capability-gap
+/// analysis): what class of information the discharge relies on.
+enum class AssessDependence {
+  CONSTANT,         ///< No symbolic content (constants only).
+  SCALAR_SYMBOLIC,  ///< Plain scalar symbols (params/dims) that survive
+                    ///< lowering as runtime values.
+  STRUCTURAL,       ///< References block/thread-parallel structure (symbols
+                    ///< scoped under paraby_/inthreads_) that lowering
+                    ///< dissolves into flat index arithmetic.
+};
+
+/// Resolution mechanism that decided an assessment (RQ6 mechanism
+/// breakdown). CANONICAL: structural normalization/constant folding of the
+/// predicate itself. INTERVAL: interval analysis over bounded-type ranges
+/// (TryProveWithIntervals in the semantic checker).
+enum class AssessMechanism {
+  CANONICAL,
+  INTERVAL,
+};
+
 /// Record of every assessment evaluation, regardless of outcome.
 struct AssessmentEntry {
   std::string message;
   location loc;
   AssessOutcome outcome;
   UsageType usage_type = UsageType::UnClassified;
+  AssessDependence dependence = AssessDependence::CONSTANT;
+  AssessMechanism mechanism = AssessMechanism::CANONICAL;
   /// Index into Assessor::assertions (RUNTIME only); SIZE_MAX otherwise.
   size_t assertion_idx = static_cast<size_t>(-1);
 };
@@ -80,6 +125,28 @@ struct AssessResult {
   bool warned = false;
   bool inserted = false;
 };
+
+// Classify the information dependence of an assessment predicate from the
+// symbols referenced by its (pre-decision) operands: structural symbols are
+// those scoped under block/thread-parallel boundaries (paraby_/inthreads_),
+// which exist only at the semantic stage.
+inline AssessDependence ClassifyDependence(
+    std::initializer_list<const ValueItem*> operands) {
+  bool has_symbol = false;
+  for (auto* op : operands) {
+    if (!op || !IsValidValueItem(*op)) continue;
+    for (const auto& sym : GetSymbols(*op)) {
+      has_symbol = true;
+      if (auto name = VISym(sym)) {
+        if (name->find("paraby_") != std::string::npos ||
+            name->find("inthreads_") != std::string::npos)
+          return AssessDependence::STRUCTURAL;
+      }
+    }
+  }
+  return has_symbol ? AssessDependence::SCALAR_SYMBOLIC
+                    : AssessDependence::CONSTANT;
+}
 
 struct Assertion {
   ptr<sbe::SymbolicExpression> expr;
@@ -118,7 +185,9 @@ private:
   /// Record a single assessment evaluation to the ordered log.
   void LogAssessment(const std::string& msg, const location& l,
                      AssessOutcome outcome, UsageType uty,
-                     size_t assertion_idx = static_cast<size_t>(-1));
+                     AssessDependence dep = AssessDependence::CONSTANT,
+                     size_t assertion_idx = static_cast<size_t>(-1),
+                     AssessMechanism mech = AssessMechanism::CANONICAL);
 
   bool DebugOn() const;
 
@@ -134,6 +203,16 @@ public:
   const std::vector<Assertion>& GetAssertions() const { return assertions; }
   const std::vector<AssessmentEntry>& GetAssessmentLog() const {
     return assessment_log;
+  }
+
+  /// Record an obligation that was assessed/materialized outside the Assess()
+  /// path (e.g. parameter shape-consistency checks emitted at codegen) so the
+  /// safety ledger remains complete. Does not affect stats aggregation, which
+  /// has already replayed the log by codegen time.
+  void RecordExternalObligation(const std::string& msg, const location& l,
+                                AssessOutcome outcome, UsageType uty,
+                                AssessDependence dep) {
+    LogAssessment(msg, l, outcome, uty, dep);
   }
 
   std::vector<Assertion> GetAssertions(AssessType aty) const {
@@ -162,7 +241,10 @@ public:
                       const std::string& message, UsageType uty, AssessType aty,
                       const location& l, AST::Node* node,
                       AST::Node* emit_node = nullptr,
-                      const ValueItem& guard = GetInvalidValueItem());
+                      const ValueItem& guard = GetInvalidValueItem(),
+                      std::optional<AssessDependence> dep_override =
+                          std::nullopt,
+                      AssessMechanism mech = AssessMechanism::CANONICAL);
 };
 
 } // end namespace Choreo

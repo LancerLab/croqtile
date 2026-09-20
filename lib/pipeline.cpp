@@ -18,9 +18,11 @@
 #include "shapeinfer.hpp"
 #include "symbexpr.hpp"
 #include "target_utils.hpp"
+#include "thread_sliced_shared.hpp"
 #include "typeinfer.hpp"
 #include "visualize.hpp"
 #include <chrono>
+#include <fstream>
 #include <iomanip>
 
 extern Choreo::AST::Program root;
@@ -117,6 +119,94 @@ void ASTPipeline::PrintPassTimings(const std::vector<PassTimingEntry>& timings,
 }
 
 void ASTPipeline::ValidatePassNames() const { Visitor::ValidatePassEnvVars(); }
+
+namespace {
+// --- Safety ledger dump (--dump-ledger) ---
+
+const char* LedgerDepName(Choreo::AssessDependence d) {
+  using Choreo::AssessDependence;
+  switch (d) {
+  case AssessDependence::CONSTANT: return "constant";
+  case AssessDependence::SCALAR_SYMBOLIC: return "scalar-symbolic";
+  case AssessDependence::STRUCTURAL: return "structural";
+  }
+  return "?";
+}
+
+const char* LedgerMechName(Choreo::AssessMechanism m) {
+  using Choreo::AssessMechanism;
+  switch (m) {
+  case AssessMechanism::CANONICAL: return "canonical";
+  case AssessMechanism::INTERVAL: return "interval";
+  }
+  return "?";
+}
+
+const char* LedgerCostName(Choreo::AssertionCost c) {
+  using Choreo::AssertionCost;
+  switch (c) {
+  case AssertionCost::ENTRY: return "entry";
+  case AssertionCost::LOW: return "low";
+  case AssertionCost::MEDIUM: return "medium";
+  case AssertionCost::HIGH: return "high";
+  case AssertionCost::NONE: return "none";
+  }
+  return "?";
+}
+
+std::string LedgerEscape(const std::string& s) {
+  std::string out;
+  out.reserve(s.size());
+  for (char c : s) {
+    switch (c) {
+    case '"': out += "\\\""; break;
+    case '\\': out += "\\\\"; break;
+    case '\n': out += "\\n"; break;
+    case '\t': out += "\\t"; break;
+    default: out += c;
+    }
+  }
+  return out;
+}
+
+// Dump every assessed obligation (the safety ledger) as JSON.
+void DumpAssessmentLedger(const std::string& path) {
+  using namespace Choreo;
+  std::ofstream out(path);
+  if (!out) {
+    errs() << "error: cannot open ledger output '" << path << "'\n";
+    return;
+  }
+  out << "{\n  \"obligations\": [\n";
+  bool first = true;
+  for (const auto& [fname, fctx] : CCtx().GetAllFunctionContexts()) {
+    const auto& log = fctx.GetAssessor().GetAssessmentLog();
+    const auto& assertions = fctx.GetAssessor().GetAssertions();
+    for (const auto& e : log) {
+      if (!first) out << ",\n";
+      first = false;
+      const auto& pos = e.loc.begin;
+      out << "    {\"function\": \"" << LedgerEscape(fname) << "\""
+          << ", \"loc\": \"" << LedgerEscape(pos.filename) << ":" << pos.line
+          << "." << pos.column << "\""
+          << ", \"message\": \"" << LedgerEscape(e.message) << "\""
+          << ", \"outcome\": \"" << STR(e.outcome) << "\""
+          << ", \"usage\": \"" << STR(e.usage_type) << "\""
+          << ", \"dependence\": \"" << LedgerDepName(e.dependence) << "\""
+          << ", \"mechanism\": \"" << LedgerMechName(e.mechanism) << "\"";
+      if (e.outcome == AssessOutcome::RUNTIME &&
+          e.assertion_idx < assertions.size()) {
+        const auto& a = assertions[e.assertion_idx];
+        out << ", \"cost\": \"" << LedgerCostName(a.cost) << "\""
+            << ", \"enabled\": " << (a.enabled ? "true" : "false");
+      }
+      out << "}";
+    }
+  }
+  out << "\n  ]\n}\n";
+}
+
+} // end anonymous namespace
 
 bool ASTPipeline::RunOnProgram(AST::Node& root) {
   if (debug) Dump();
@@ -259,6 +349,9 @@ bool ASTPipeline::RunOnProgram(AST::Node& root) {
            << "\n";
   }
 
+  if (!CCtx().DumpLedgerPath().empty())
+    DumpAssessmentLedger(CCtx().DumpLedgerPath());
+
   return !abend;
 }
 
@@ -310,8 +403,10 @@ ASTPipeline& ASTPipeline::PlanSemanticRoutine() {
         [](ASTPipeline& p) { CCtx().SetGlobalSymbolTable(p.LastSymTab()); });
   }
 
-  if (CCtx().TargetSupportMemAlloc() && CCtx().MemReuse())
+  if (CCtx().TargetSupportMemAlloc() && CCtx().MemReuse()) {
+    AddStage<ThreadSlicedShared>();
     AddStage<MemoryReuse>();
+  }
 
   // compute active thread counts for inthreads scopes (before semacheck
   // so the checker can validate events with thread count info)
@@ -373,6 +468,17 @@ void Choreo::PrintAssessmentStats(const AssessmentStats& s) {
   row(s.runtime_high, "Runtime assertions (high cost)");
   row(s.runtime_enabled, "Runtime assertions enabled");
   row(s.runtime_disabled, "Runtime assertions disabled (cost or duplicate)");
+  errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
+         << "\n";
+  row(s.st_structural, "Static-true needing block/thread structure");
+  row(s.st_scalar, "Static-true over scalar symbols only");
+  row(s.st_const, "Static-true constant-only");
+  row(s.rt_structural, "Runtime assertions referencing block/thread structure");
+  row(s.rt_scalar, "Runtime assertions over scalar symbols only");
+  row(s.rt_const, "Runtime assertions constant-only");
+  row(s.direct_checks, "Direct static checks (bypassing assessor)");
+  row(s.st_canonical, "Static-true via canonical normalization");
+  row(s.st_interval, "Static-true via interval/bounded-type proof");
   errs() << color::err(color::kDim) << "  ---" << color::err(color::kReset)
          << "\n";
   row(s.unclassified_total, "Assessments (unclassified)");

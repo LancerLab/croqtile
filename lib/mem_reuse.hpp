@@ -7,6 +7,7 @@
 #include "heap_simulator.hpp"
 #include "liveness_analysis.hpp"
 #include "symvals.hpp"
+#include "thread_sliced_shared.hpp"
 #include "typeresolve.hpp"
 #include "types.hpp"
 #include "visitor.hpp"
@@ -33,6 +34,10 @@ struct MemAnalyzer : public VisitorWithSymTab {
   std::unordered_map<std::string, std::string> buf_dev_func_name;
   std::unordered_map<std::string, size_t> buf_alignment;
   std::set<std::string> event_vars;
+  // Thread-sliced shared buffers: scoped name -> per-thread slice bytes
+  // (footprint before scaling by the thread count) and the slice count.
+  std::unordered_map<std::string, ValueItem> buf_tslice_bytes;
+  std::unordered_map<std::string, ValueItem> buf_tslice_count;
 
   MemAnalyzer() : VisitorWithSymTab("memanlz") {}
   ~MemAnalyzer() {}

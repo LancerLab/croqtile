@@ -37,8 +37,14 @@
   #include "private_target0_defines.h"
 #endif
 
+// Fallback abort when the target does not provide its own __co_abort__.
+// __builtin_trap is host-only under nvcc; device code must use __trap().
 #ifndef __co_abort__
-  #define __co_abort__() __builtin_trap()
+  #if defined(__CUDA_ARCH__)
+    #define __co_abort__() __trap()
+  #else
+    #define __co_abort__() __builtin_trap()
+  #endif
 #endif
 
 #ifdef __CHOREO_PRIVATE_TGT0__
@@ -394,8 +400,7 @@ public:
   template <size_t M = N>
   typename std::enable_if<(M == 1),
                           T&>::type // make sure to return the reference type
-      __co_any__
-      operator[](int index) {
+      __co_any__ operator[](int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
     choreo_assert((size_t)index < (*dims)[0], "Index out of bounds", __FILE__,
                   __LINE__);
@@ -782,8 +787,7 @@ public:
   template <size_t M = Rank>
   typename std::enable_if<(M == 1),
                           T&>::type // make sure to return the reference type
-      __co_any__
-      operator[](int index) {
+      __co_any__ operator[](int index) {
     choreo_assert(index >= 0, "Index out of bounds", __FILE__, __LINE__);
     choreo_assert((size_t)index < dims[0], "Index out of bounds", __FILE__,
                   __LINE__);
