@@ -2481,6 +2481,13 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
     if (e->op == Op::ElemOf) return false;
     if (e->op == Op::AddrOf) return false;
     if (e->op == Op::Cast) return false;
+    if (e->op == Op::DimOf && !CSign(GetSign(*e->GetR())))
+      // a non-constant dimof index (the M1.15 gap spec's trigger): its value
+      // is statically unknown, so it is simply never value-numbered --
+      // without this, GenValNo's constant-only path asserts the front-end
+      // down. The index's own range obligation is still emitted by the
+      // element-access checker, so the runtime check is not lost.
+      return false;
     return CanBeValueNumbered(e->GetR().get()) &&
            CanBeValueNumbered(e->GetL().get()) &&
            CanBeValueNumbered(e->GetC().get());
