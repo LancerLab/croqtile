@@ -4204,19 +4204,35 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     //
     // When batch_dims is set the outer tensors are unused -- the batch loop
     // creates its own sub-tensors with per-iteration pointer offsets.
+    // `.pad` is the exception: it fills the whole padded allocation and needs
+    // the outer destination tensor to build the pad offset, so it keeps the
+    // declaration even when batch dims are present.
     std::string f_mds_name, t_mds_name;
-    if (dma_plan->batch_dims.empty() && !dma_plan->dyn_box) {
+    // For `.pad` with batch dims the destination tensor spans the whole padded
+    // allocation (its shape includes the batch dims), so its strides must carry
+    // the batch strides ahead of the inner box strides; otherwise the layout
+    // ranks disagree.
+    std::string t_mds_stride_str = ValueSTR(t_stride, false, true);
+    if (n.operation == ".pad" && !dma_plan->batch_dims.empty()) {
+      std::ostringstream oss;
+      for (auto& bd : dma_plan->batch_dims)
+        oss << ValueSTR(bd.to_stride) << ", ";
+      oss << t_mds_stride_str;
+      t_mds_stride_str = oss.str();
+    }
+    const bool emit_outer_tensors =
+        dma_plan->batch_dims.empty() || n.operation == ".pad";
+    if (emit_outer_tensors && !dma_plan->dyn_box) {
       // Skip outer tensor decls when batch_dims or dyn_box is set -- those
       // paths create their own sub-tensors with per-iteration offsets.
       const auto f_mds = GenTensorDecl(
           RemoveSuffix(f_buf_name, ".data()"), f_buf.second,
           f_sty->GetStorage(), f_sty->ElementType(), f_mds_shape, false,
           f_mds_offset, ValueSTR(f_stride, false, true), {}, false);
-      const auto t_mds =
-          GenTensorDecl(RemoveSuffix(t_buf_name, ".data()"), t_buf.second,
-                        t_sty->GetStorage(), t_sty->ElementType(), t_mds_shape,
-                        false, t_mds_offset, ValueSTR(t_stride, false, true),
-                        {}, use_wgmma_layout_t, swizzle_mode);
+      const auto t_mds = GenTensorDecl(
+          RemoveSuffix(t_buf_name, ".data()"), t_buf.second,
+          t_sty->GetStorage(), t_sty->ElementType(), t_mds_shape, false,
+          t_mds_offset, t_mds_stride_str, {}, use_wgmma_layout_t, swizzle_mode);
       f_mds_name = f_mds.first;
       t_mds_name = t_mds.first;
       ds << f_mds.second;
@@ -4339,6 +4355,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     // the full padded tensor.  For .copy/.transp, it is t_mds directly.
     std::string copy_src = f_mds_name;
     std::string copy_dst = t_mds_name;
+    // For `.pad`, the element offset of the padded interior within the
+    // destination buffer.  Consumed by the batch loop below so per-iteration
+    // sub-tensors land inside the padded region rather than at its origin.
+    std::string pad_offset_expr;
     if (n.operation == ".pad") {
       static int pad_cnt = 0;
       auto pad_config = cast<PadConfig>(n.GetConfig());
@@ -4367,6 +4387,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       ds << d_indent << "auto " << pad_offset << " = " << t_mds_name
          << ".layout()("
          << "cute::make_coord(" << pcmvSTR(pad_config->pad_low) << "));\n";
+      pad_offset_expr = pad_offset;
 
       auto f_data_shape = dma_plan->IsTiledDMA() ? dma_plan->GetBoxOfFrom()
                                                  : dma_plan->from_ca_shape;
@@ -4396,6 +4417,12 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
       std::string f_off = f_mds_offset;
       std::string t_off = t_mds_offset;
+      // For `.pad`, the destination is the padded interior, so the batch
+      // sub-tensor must start at the pad offset rather than the buffer base.
+      if (!pad_offset_expr.empty())
+        t_off = (t_off.empty() || t_off == "0")
+                    ? pad_offset_expr
+                    : "(" + t_off + ") + " + pad_offset_expr;
       for (auto& bd : dma_plan->batch_dims) {
         auto bv = "__batch_i" + std::to_string(batch_cnt++);
         ds << d_indent << "for (int " << bv << " = 0; " << bv << " < "
