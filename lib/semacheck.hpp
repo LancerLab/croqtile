@@ -71,6 +71,10 @@ private:
                         AST::Node* emit_node = nullptr);
   ValueItem ActiveScopePredicate() const;
   bool ExpressionIsConstrained(const ValueItem&) const;
+  bool CheckExplicitVectorType(AST::Node&, ExplicitVectorRole, BaseType, size_t,
+                               BaseType = BaseType::UNKNOWN,
+                               ExplicitVectorTypeSupport* = nullptr);
+  bool IsLogicalAddressIndex(const ptr<AST::Node>&) const;
 
 public:
   SemaChecker() : TracedVisitorWithSymTab("check") {}
@@ -78,6 +82,8 @@ public:
 
   bool VisitNode(AST::IntLiteral&) override;
   bool VisitNode(AST::FloatLiteral&) override;
+  bool VisitNode(AST::VectorIndex&) override;
+  bool VisitNode(AST::VectorMemory&) override;
   bool VisitNode(AST::BoolLiteral&) override;
   bool VisitNode(AST::Expr&) override;
   bool VisitNode(AST::MultiDimSpans&) override;

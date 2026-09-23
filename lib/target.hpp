@@ -4,9 +4,11 @@
 #include "aux.hpp"
 #include "parallel_level.hpp"
 #include "preprocess.hpp"
+#include <cstddef>
 #include <iosfwd>
 #include <memory>
 #include <set>
+#include <string>
 
 namespace Choreo {
 
@@ -17,6 +19,34 @@ struct Node;
 enum class Storage;
 enum class BaseType;
 enum class ParallelLevel;
+
+enum class ExplicitVectorRole {
+  OrdinaryValue,
+  IndexValue,
+  LogicalAddressIndex,
+  AddressOffset,
+  DataValue,
+  Predicate,
+};
+
+struct ExplicitVectorTypeSupport {
+  bool legal = false;
+  bool materializable_as_one_vector = false;
+  bool is_partial = false;
+  size_t element_bytes = 0;
+  size_t logical_bytes = 0;
+  size_t physical_lanes = 0;
+  size_t registers = 0;
+  size_t max_offset_lanes = 0;
+  size_t offset_chunks = 0;
+  size_t payload_element_bytes = 0;
+  size_t payload_logical_bytes = 0;
+  size_t payload_physical_lanes = 0;
+  size_t payload_registers = 0;
+  std::string width_class;
+  std::string payload_width_class;
+  std::string reason;
+};
 enum class SwizMode;
 struct FenceKind; // (space, entity, order) fence requirement; see types.hpp
 struct FenceSelection;
@@ -232,6 +262,19 @@ public:
                                           BaseType /*element_type*/,
                                           size_t /*lane_count*/) const {
     return false;
+  }
+  // Role-aware explicit-vector validation. The default preserves the legacy
+  // element-type/lane-count query; targets with dtype-dependent address
+  // materialization may override this richer interface.
+  virtual ExplicitVectorTypeSupport
+  GetExplicitVectorTypeSupport(const ArchId& arch, ExplicitVectorRole /*role*/,
+                               BaseType element_type, size_t lane_count,
+                               BaseType /*payload_element_type*/) const {
+    ExplicitVectorTypeSupport result;
+    result.legal = SupportsExplicitVectorType(arch, element_type, lane_count);
+    result.materializable_as_one_vector = result.legal;
+    result.reason = result.legal ? "supported" : "unsupported_vector_type";
+    return result;
   }
   virtual std::string LowerAsmOperand(const std::string& varName) const {
     return varName;

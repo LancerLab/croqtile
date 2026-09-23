@@ -216,6 +216,112 @@ bool SemaChecker::ExpressionIsConstrained(const ValueItem& expr) const {
   return false;
 }
 
+static const char* ExplicitVectorRoleName(ExplicitVectorRole role) {
+  switch (role) {
+  case ExplicitVectorRole::OrdinaryValue: return "ordinary";
+  case ExplicitVectorRole::IndexValue: return "index";
+  case ExplicitVectorRole::LogicalAddressIndex: return "logical_address_index";
+  case ExplicitVectorRole::AddressOffset: return "address_offset";
+  case ExplicitVectorRole::DataValue: return "data";
+  case ExplicitVectorRole::Predicate: return "predicate";
+  }
+  return "unknown";
+}
+
+bool SemaChecker::CheckExplicitVectorType(
+    AST::Node& node, ExplicitVectorRole role, BaseType element_type,
+    size_t lane_count, BaseType payload_element_type,
+    ExplicitVectorTypeSupport* support_out) {
+  if (!CCtx().TargetSupportsExplicitVector() || lane_count == 0) return true;
+
+  auto support = CCtx().GetTarget().GetExplicitVectorTypeSupport(
+      CCtx().GetArch(), role, element_type, lane_count, payload_element_type);
+  if (support_out) *support_out = support;
+  node.AddNote("explicit_vector_role", ExplicitVectorRoleName(role));
+  node.AddNote("explicit_vector_legal", support.legal ? "true" : "false");
+  node.AddNote("explicit_vector_element_type", STR(element_type));
+  node.AddNote("explicit_vector_lanes", std::to_string(lane_count));
+  node.AddNote("explicit_vector_reason", support.reason);
+  if (support.legal) {
+    node.AddNote("explicit_vector_type_checked", "true");
+    if (!support.width_class.empty())
+      node.AddNote("explicit_vector_width_class", support.width_class);
+    node.AddNote("explicit_vector_logical_bytes",
+                 std::to_string(support.logical_bytes));
+    node.AddNote("explicit_vector_physical_lanes",
+                 std::to_string(support.physical_lanes));
+    node.AddNote("explicit_vector_registers",
+                 std::to_string(support.registers));
+    if (support.offset_chunks)
+      node.AddNote("explicit_vector_offset_chunks",
+                   std::to_string(support.offset_chunks));
+    if (role == ExplicitVectorRole::LogicalAddressIndex) {
+      node.AddNote("explicit_vector_index_materialization",
+                   support.materializable_as_one_vector ? "ordinary"
+                                                        : "chunked");
+    }
+    return true;
+  }
+
+  const auto target_name = CCtx().GetTarget().Name();
+  const auto arch = CCtx().GetArch();
+  std::string message;
+  switch (role) {
+  case ExplicitVectorRole::LogicalAddressIndex:
+    message = "logical vector address index with " +
+              std::to_string(lane_count) +
+              " lanes cannot be materialized for "
+              "payload type '" +
+              STR(payload_element_type) + "' on target '" + target_name +
+              "' (arch: " + arch + "): " + support.reason + ".";
+    break;
+  case ExplicitVectorRole::AddressOffset:
+    message =
+        "vector address offsets require a supported integer offset vector, "
+        "got vector<" +
+        STR(element_type) + "," + std::to_string(lane_count) + "> on target '" +
+        target_name + "' (arch: " + arch + "): " + support.reason + ".";
+    break;
+  case ExplicitVectorRole::DataValue:
+    message = "target '" + target_name + "' (arch: " + arch +
+              ") does not support vector<" + STR(element_type) + "," +
+              std::to_string(lane_count) +
+              "> as a data vector: " + support.reason + ".";
+    break;
+  case ExplicitVectorRole::Predicate:
+    message = "target '" + target_name + "' (arch: " + arch +
+              ") does not support predicate vector<bool," +
+              std::to_string(lane_count) + ">: " + support.reason + ".";
+    break;
+  case ExplicitVectorRole::IndexValue:
+  case ExplicitVectorRole::OrdinaryValue:
+    message = "vector<" + STR(element_type) + ", " +
+              std::to_string(lane_count) +
+              "> has no legal representation on "
+              "target '" +
+              target_name + "' (arch: " + arch + ").";
+    break;
+  }
+  if (role == ExplicitVectorRole::LogicalAddressIndex &&
+      !support.width_class.empty()) {
+    message += " (index_width_class=" + support.width_class +
+               ", offset_chunks=" + std::to_string(support.offset_chunks) + ")";
+  }
+  Error1(node.LOC(), message);
+  return false;
+}
+
+bool SemaChecker::IsLogicalAddressIndex(const ptr<AST::Node>& node) const {
+  if (!node || !isa<VectorType>(NodeType(*node))) return false;
+  if (isa<AST::VectorIndex>(node)) return true;
+  if (auto expr = dyn_cast<AST::Expr>(node)) {
+    if (auto ref = expr->GetReference(); ref && isa<AST::VectorIndex>(ref))
+      return true;
+  }
+  return node->HasNote("vector_pattern") &&
+         node->GetNote("vector_pattern") == "unit";
+}
+
 static int64_t GetForeachStaticExtent(const AST::ForeachBlock& fe) {
   auto& ranges = fe.GetRanges();
   if (ranges.empty()) return -1;
@@ -447,6 +553,132 @@ bool SemaChecker::VisitNode(AST::FloatLiteral& n) {
   return true;
 }
 
+bool SemaChecker::VisitNode(AST::VectorIndex& n) {
+  if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+  n.AddNote("explicit_vector_index", "true");
+  n.AddNote("explicit_vector_index_element_type", STR(BaseType::S32));
+  n.AddNote("explicit_vector_index_lanes", std::to_string(n.LaneCount()));
+  n.AddNote("explicit_vector_index_pattern", "iota");
+  n.AddNote("explicit_vector_index_stride", "1");
+  n.AddNote("explicit_vector_index_lower_bound", "0");
+  n.AddNote("explicit_vector_index_upper_bound", std::to_string(n.LaneCount()));
+  // A direct memory coordinate may be a logical index whose dtype and
+  // chunking are selected by the payload at its VectorMemory use site.
+  return true;
+}
+
+bool SemaChecker::VisitNode(AST::VectorMemory& n) {
+  if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+
+  size_t lane_count = 0;
+  for (const auto& index : n.Address()->GetIndices()) {
+    if (auto vty = dyn_cast<VectorType>(NodeType(*index))) {
+      if (lane_count == 0) lane_count = vty->ElemCount();
+      if (lane_count != vty->ElemCount()) return false;
+    }
+  }
+  if (!lane_count) return true;
+
+  auto spanned = GetSpannedType(GetSymbolType(n.Address()->GetDataName()));
+  if (!spanned) return true;
+  const auto payload_element_type = spanned->ElementType();
+
+  // Validate the payload layout even when the source operand is scalar and is
+  // broadcast to all lanes. This keeps unsupported target vector widths out
+  // of code generation and gives the memory use a single payload fact.
+  ExplicitVectorTypeSupport payload_support;
+  bool ok = CheckExplicitVectorType(n, ExplicitVectorRole::DataValue,
+                                    payload_element_type, lane_count,
+                                    payload_element_type, &payload_support);
+
+  auto record_support = [&](const std::string& prefix, BaseType element_type,
+                            size_t lanes,
+                            const ExplicitVectorTypeSupport& support) {
+    const auto key = [&](const char* suffix) {
+      return "explicit_vector_" + prefix + "_" + suffix;
+    };
+    n.AddNote(key("element_type"), STR(element_type));
+    n.AddNote(key("lanes"), std::to_string(lanes));
+    n.AddNote(key("legal"), support.legal ? "true" : "false");
+    n.AddNote(key("materializable"),
+              support.materializable_as_one_vector ? "true" : "false");
+    n.AddNote(key("logical_bytes"), std::to_string(support.logical_bytes));
+    n.AddNote(key("physical_lanes"), std::to_string(support.physical_lanes));
+    n.AddNote(key("registers"), std::to_string(support.registers));
+    n.AddNote(key("width_class"), support.width_class);
+    n.AddNote(key("reason"), support.reason);
+    n.AddNote(key("offset_chunks"), std::to_string(support.offset_chunks));
+  };
+  record_support("payload", payload_element_type, lane_count, payload_support);
+
+  for (const auto& index : n.Address()->GetIndices()) {
+    auto vty = dyn_cast<VectorType>(NodeType(*index));
+    if (!vty) continue;
+    ExplicitVectorTypeSupport index_support;
+    const auto role = IsLogicalAddressIndex(index)
+                          ? ExplicitVectorRole::LogicalAddressIndex
+                          : ExplicitVectorRole::AddressOffset;
+    const bool index_ok =
+        CheckExplicitVectorType(*index, role, vty->ElemType(), vty->ElemCount(),
+                                payload_element_type, &index_support);
+    ok = index_ok && ok;
+    record_support("index", vty->ElemType(), vty->ElemCount(), index_support);
+    n.AddNote("explicit_vector_index_role", ExplicitVectorRoleName(role));
+    n.AddNote("explicit_vector_index_materialization",
+              index_support.materializable_as_one_vector ? "ordinary"
+                                                         : "chunked");
+  }
+
+  auto check_data = [&](const ptr<AST::Node>& value) {
+    if (!value) return true;
+    auto ty = NodeType(*value);
+    auto vty = dyn_cast<VectorType>(ty);
+    if (!vty) return true;
+    if (vty->ElemCount() != lane_count) return false;
+    ExplicitVectorTypeSupport value_support;
+    const bool value_ok = CheckExplicitVectorType(
+        *value, ExplicitVectorRole::DataValue, vty->ElemType(),
+        vty->ElemCount(), payload_element_type, &value_support);
+    // The payload fact describes the memory operation, while this fact
+    // describes the actual vector operand. Keep both available for the
+    // planner/report without adding a second diagnostic for one failure.
+    record_support("value", vty->ElemType(), vty->ElemCount(), value_support);
+    return value_ok;
+  };
+
+  if (n.Mask()) {
+    auto mask_ty = NodeType(*n.Mask());
+    if (auto mask_vty = dyn_cast<VectorType>(mask_ty)) {
+      ExplicitVectorTypeSupport mask_support;
+      const bool mask_ok = CheckExplicitVectorType(
+          *n.Mask(), ExplicitVectorRole::Predicate, mask_vty->ElemType(),
+          mask_vty->ElemCount(), payload_element_type, &mask_support);
+      ok = mask_ok && ok;
+      record_support("predicate", mask_vty->ElemType(), mask_vty->ElemCount(),
+                     mask_support);
+      n.AddNote("explicit_vector_predicate_kind", "vector");
+    } else {
+      n.AddNote("explicit_vector_predicate_kind", "scalar");
+      n.AddNote("explicit_vector_predicate_legal", "true");
+      n.AddNote("explicit_vector_predicate_lanes", std::to_string(lane_count));
+    }
+  } else {
+    n.AddNote("explicit_vector_predicate_kind", "none");
+    n.AddNote("explicit_vector_predicate_legal", "true");
+    n.AddNote("explicit_vector_predicate_lanes", std::to_string(lane_count));
+  }
+  if (n.IsLoad())
+    ok = check_data(n.Other()) && ok;
+  else
+    ok = check_data(n.Value()) && ok;
+
+  n.AddNote("explicit_vector_lanes", std::to_string(lane_count));
+  n.AddNote("explicit_vector_payload_element", STR(payload_element_type));
+  n.AddNote("explicit_vector_payload_bytes",
+            std::to_string(lane_count * SizeOf(payload_element_type)));
+  return ok;
+}
+
 bool SemaChecker::VisitNode(AST::BoolLiteral& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
@@ -454,15 +686,13 @@ bool SemaChecker::VisitNode(AST::BoolLiteral& n) {
 
 bool SemaChecker::VisitNode(AST::Expr& n) {
   if (auto vty = dyn_cast<VectorType>(NodeType(n));
-      vty && CCtx().TargetSupportsExplicitVector() &&
-      !CCtx().GetTarget().SupportsExplicitVectorType(
-          CCtx().GetArch(), vty->ElemType(), vty->ElemCount())) {
-    Error1(n.LOC(), "vector<" + STR(vty->ElemType()) + ", " +
-                        std::to_string(vty->ElemCount()) +
-                        "> has no legal representation on target '" +
-                        CCtx().GetTarget().Name() +
-                        "' (arch: " + CCtx().GetArch() + ").");
-    return false;
+      vty && CCtx().TargetSupportsExplicitVector()) {
+    const bool direct_index =
+        n.GetReference() && isa<AST::VectorIndex>(n.GetReference());
+    if (!direct_index &&
+        !CheckExplicitVectorType(n, ExplicitVectorRole::OrdinaryValue,
+                                 vty->ElemType(), vty->ElemCount()))
+      return false;
   }
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
 
@@ -617,6 +847,21 @@ bool SemaChecker::VisitNode(AST::NamedTypeDecl& n) {
 
 bool SemaChecker::VisitNode(AST::NamedVariableDecl& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+  if (n.init_expr) {
+    if (auto vty = dyn_cast<VectorType>(NodeType(*n.init_expr));
+        vty && CCtx().TargetSupportsExplicitVector()) {
+      const bool direct_index =
+          isa<AST::VectorIndex>(n.init_expr) ||
+          (isa<AST::Expr>(n.init_expr) &&
+           cast<AST::Expr>(n.init_expr)->GetReference() &&
+           isa<AST::VectorIndex>(cast<AST::Expr>(n.init_expr)->GetReference()));
+      const auto role = direct_index ? ExplicitVectorRole::IndexValue
+                                     : ExplicitVectorRole::OrdinaryValue;
+      if (!CheckExplicitVectorType(*n.init_expr, role, vty->ElemType(),
+                                   vty->ElemCount()))
+        return false;
+    }
+  }
 
   auto ty = NodeType(n);
   auto s = GetShape(ty);
@@ -691,7 +936,8 @@ bool SemaChecker::VisitNode(AST::DataAccess& n) {
             //  - Not constrained (no scope predicate mentions the index): the
             //    type-declared bound is exact, so emit the bound check
             //    expr_bounds.ub < dim_bound (loop-invariant, hoistable).
-            //  - Constrained: prefer the variable-based check index < dim_bound,
+            //  - Constrained: prefer the variable-based check index <
+            //  dim_bound,
             //    which interval analysis proves statically when the scope
             //    predicate tightens a numeric bound (e.g. if (p < 4)).  When
             //    interval analysis cannot decide it (a symbolic loop bound such
@@ -755,6 +1001,21 @@ bool SemaChecker::VisitNode(AST::DataAccess& n) {
 
 bool SemaChecker::VisitNode(AST::Assignment& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+  if (n.value) {
+    if (auto vty = dyn_cast<VectorType>(NodeType(*n.value));
+        vty && CCtx().TargetSupportsExplicitVector()) {
+      const bool direct_index =
+          isa<AST::VectorIndex>(n.value) ||
+          (isa<AST::Expr>(n.value) &&
+           cast<AST::Expr>(n.value)->GetReference() &&
+           isa<AST::VectorIndex>(cast<AST::Expr>(n.value)->GetReference()));
+      const auto role = direct_index ? ExplicitVectorRole::IndexValue
+                                     : ExplicitVectorRole::OrdinaryValue;
+      if (!CheckExplicitVectorType(*n.value, role, vty->ElemType(),
+                                   vty->ElemCount()))
+        return false;
+    }
+  }
   return false;
 
   if ((*NodeType(n) != *NodeType(*n.value))) {
