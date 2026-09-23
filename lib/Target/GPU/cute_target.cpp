@@ -47,6 +47,25 @@ ArchId NVGPUTarget::ResolveNativeArch() const {
   return "";
 }
 
+FenceSelection NVGPUTarget::SelectDMAFences(const ArchId& arch, Storage src,
+                                            Storage dst) const {
+  (void)arch; // B1 table is arch-invariant; gate on sm_90+ only if regressions.
+  FenceSelection sel;
+  if (src == Storage::GLOBAL && dst == Storage::SHARED) {
+    // Producer: threads release global before the DMA engine reads it.
+    sel.producer.push_back(
+        FenceKind{Storage::GLOBAL, FenceEntity::THREADS, FenceOrder::RELEASE});
+    // Consumer: threads acquire shared after the DMA engine writes it.
+    sel.consumer.push_back(
+        FenceKind{Storage::SHARED, FenceEntity::THREADS, FenceOrder::ACQUIRE});
+  } else if (src == Storage::SHARED && dst == Storage::GLOBAL) {
+    // S2G store: threads release shared before the engine reads it.
+    sel.producer.push_back(
+        FenceKind{Storage::SHARED, FenceEntity::THREADS, FenceOrder::RELEASE});
+  }
+  return sel;
+}
+
 namespace {
 
 class CuteTarget : public NVGPUTarget {
