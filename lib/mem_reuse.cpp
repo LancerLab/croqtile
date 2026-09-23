@@ -237,6 +237,26 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
     parallel_level++;
     if (pb->IsDeviceEntry()) {
       cur_dev_fname = SSTab().ScopeName();
+      auto check_capacity = [&](size_t size, Storage sto) -> bool {
+        if (size == 0) return true;
+        const size_t cap = CCtx().GetMemCapacity(sto);
+        if (size <= cap) return true;
+        Error1(n.LOC(), __internal__::GetStringFrom(sto) +
+                            " memory OUT OF BOUND!\n\tIn the scope " +
+                            SSTab().ScopeName() + ", a " +
+                            __internal__::GetStringFrom(sto) +
+                            " allocation of " + std::to_string(size) +
+                            " bytes exceeds the limit of " +
+                            std::to_string(cap) + " bytes.");
+        return false;
+      };
+      bool capacity_ok =
+          check_capacity(DFCtx().shared_spm_size, Storage::SHARED);
+      capacity_ok =
+          check_capacity(DFCtx().local_spm_size, Storage::LOCAL) && capacity_ok;
+      for (size_t root_size : DFCtx().local_root_sizes)
+        capacity_ok = check_capacity(root_size, Storage::LOCAL) && capacity_ok;
+      if (!capacity_ok) return true;
       if (DFCtx().shared_spm_size != 0) {
         size_t shared_alignment =
             AlignmentForDevFunc(Storage::SHARED, cur_dev_fname);

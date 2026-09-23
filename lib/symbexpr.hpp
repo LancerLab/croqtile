@@ -796,6 +796,7 @@ public:
       switch (op) {
       case OpCode::AND: return bl(leftVal && rightVal);
       case OpCode::OR: return bl(leftVal || rightVal);
+      case OpCode::SUBTRACT: return nu(leftVal - rightVal);
       default: choreo_unreachable("Unknown operation");
       }
     }

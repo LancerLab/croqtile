@@ -603,6 +603,16 @@ public:
       VST_DEBUG(dbgs() << "[MemUsage] " << __internal__::GetStringFrom(sto)
                        << " `" << SSTab().ScopedName(n.name_str) << "` need "
                        << size << " bytes" << SizeForHuman(size) << ".\n");
+      if (mem_usage_limit.count(sto) && size > mem_usage_limit.at(sto)) {
+        Error1(n.LOC(), __internal__::GetStringFrom(sto) +
+                            " memory OUT OF BOUND!\n\tIn the scope " +
+                            SSTab().ScopeName() + ", buffer `" +
+                            SSTab().ScopedName(n.name_str) + "` requires " +
+                            std::to_string(size) + " bytes, exceeding the " +
+                            __internal__::GetStringFrom(sto) + " limit of " +
+                            std::to_string(mem_usage_limit.at(sto)) +
+                            " bytes.");
+      }
       ct_mem_usage_list.top()[sto] += size;
       ct_tot_mem_usage[sto] += size;
       ct_mem_alloc_inst_sets.back()[sto].push_back(
