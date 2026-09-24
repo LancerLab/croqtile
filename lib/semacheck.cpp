@@ -1764,12 +1764,23 @@ void SemaChecker::CheckChunkAtTileBounds(AST::ChunkAt& n, AST::DMA& dma) {
       auto message = "Tile coordinate `" + index_str +
                      "` is out of bounds of the " + Ordinal(d + 1) +
                      " dimension of chunkat '" + n.RefSymbol() + "'";
+      // Assess the coordinate's static range rather than the coordinate
+      // itself: `ub < tile_count` is loop-invariant and folds during semantic
+      // checking, so a coordinate whose declared range reaches the tile count
+      // is rejected at compile time (the same treatment element-access
+      // subscripts get).  Symbolic ranges - dynamic tiling factors or
+      // thread-derived coordinates - fall back to the per-use check.
+      auto expr_bounds = InferExprBounds(this, index);
+      auto upper_bound =
+          expr_bounds.IsValid()
+              ? sbe::oc_lt(expr_bounds.ub, tile_count)->Normalize()
+              : sbe::oc_lt(index, tile_count)->Normalize();
       FCtx(fname).GetAssessor(*this).Assess(
           AssessPolicy::Error, sbe::oc_ge(index, sbe::nu(0))->Normalize(),
           message + " (must be non-negative)", UsageType::ElementAccess,
           AssessType::USE_SITE, index_node->LOC(), &dma, &dma);
       FCtx(fname).GetAssessor(*this).Assess(
-          AssessPolicy::Error, sbe::oc_lt(index, tile_count)->Normalize(),
+          AssessPolicy::Error, upper_bound,
           message + " (valid range is [0, " + STR(tile_count) + "))",
           UsageType::ElementAccess, AssessType::USE_SITE, index_node->LOC(),
           &dma, &dma);
