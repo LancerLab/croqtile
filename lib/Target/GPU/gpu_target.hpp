@@ -62,11 +62,13 @@ public:
 
   size_t GetMemCapacity(const Storage& sto, const ArchId& arch) const override {
     int arch_num = ArchNum(arch);
-    // Per-SM shared-memory capacity, keyed by arch.
+    // Per-SM shared-memory capacity, keyed by arch (CUDA C PG "Memory
+    // Information per Compute Capability"; 12.x consumer Blackwell is in the
+    // same 100 KB class as 8.6/8.9, not the 228 KB datacenter class).
     static std::map<int, size_t> shared_caps = {
         {70, 48ull * 1024},   {75, 64ull * 1024},   {80, 164ull * 1024},
         {86, 100ull * 1024},  {89, 100ull * 1024},  {90, 228ull * 1024},
-        {100, 228ull * 1024}, {120, 300ull * 1024},
+        {100, 228ull * 1024}, {120, 100ull * 1024},
     };
 
     if (!shared_caps.count(arch_num))
