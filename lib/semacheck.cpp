@@ -1017,12 +1017,13 @@ bool SemaChecker::VisitNode(AST::WithIn& n) {
       if (!IsComputable(dim))
         continue; // not reporting error since there could be no use of the
                   // value
-      std::string message = "zero is detected for the " + Ordinal(index) +
-                            " dim of the mdspan inside the with-in statement";
-      auto asrt = sbe::cmp("!=", dim, sbe::nu(0))->Normalize();
+      std::string message = "The " + Ordinal(index) +
+                            " dim of the mdspan inside the with-in statement "
+                            "is invalid: should be greater than 0";
+      auto asrt = sbe::cmp(">", dim, sbe::nu(0))->Normalize();
       assert(IsValidValueItem(asrt));
 
-      // The assertion "dim != 0" is about the span BOUND (a parameter
+      // The assertion "dim > 0" is about the span BOUND (a parameter
       // expression), not the with-in iterator variable itself.  Since n.in
       // has BoundedType, CreateAssessment would escalate to USE_SITE - bypass
       // it and force ENTRY.
