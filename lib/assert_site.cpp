@@ -296,6 +296,16 @@ void AssertSite::HoistAssertions(AST::ChoreoFunction* fnode) {
     assert(node_order.count(ar.node));
     auto n_order = node_order[ar.node];
 
+    // A DMA element-access predicate protects this particular transfer.  It
+    // must execute before the copy, not after an enclosing parallel region
+    // merely because its tile coordinate is defined there.
+    if (ar.usage_type == UsageType::ElementAccess && isa<AST::DMA>(ar.node)) {
+      ar.type = AssessType::USE_SITE;
+      ar.emit_node = ar.node;
+      ar.emit_position = AssertionEmitPosition::BEFORE_NODE;
+      continue;
+    }
+
     // Collect all symbols referenced by the assertion expression.
     auto syms = GetSymbols(ar.expr);
 

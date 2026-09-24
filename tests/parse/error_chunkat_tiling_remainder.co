@@ -1,0 +1,14 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto illegal_chunkat_tiling(s32 [6] input) {
+  parallel p by 1 {
+    with {tile} in [4] {
+      foreach tile {
+        local_data = dma.copy input.chunkat(tile) => local;
+      }
+    }
+  }
+}
+
+// CHECK: error: tiling factor does not evenly partition data size (6 % 4 != 0) in dimension 0.
+// CHECK-NOT: error:

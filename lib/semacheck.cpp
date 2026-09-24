@@ -1140,6 +1140,11 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
            "The 'to' of DMA is not as expected: " + n.to->TypeNameString() +
                "(" + PSTR(n.from->GetType()) + ").");
 
+  if (isa<AST::ChunkAt>(n.from))
+    CheckChunkAtTileBounds(*cast<AST::ChunkAt>(n.from), n);
+  if (isa<AST::ChunkAt>(n.to))
+    CheckChunkAtTileBounds(*cast<AST::ChunkAt>(n.to), n);
+
   auto& fty = n.from->GetType();
   auto& tty = n.to->GetType();
 
@@ -1693,6 +1698,69 @@ bool SemaChecker::VisitNode(AST::ChunkAt& n) {
   }
 
   return true;
+}
+
+void SemaChecker::CheckChunkAtTileBounds(AST::ChunkAt& n, AST::DMA& dma) {
+  // A `chunkat(i, ...)` coordinate selects a tile, not an element. Shape
+  // inference diagnoses only statically-provable out-of-range coordinates,
+  // leaving symbolic offsets (for example, `k + 1`) unchecked. TileAt's
+  // declared factors are the per-dimension tile counts and are available
+  // during semantic checking. Anchor the assessment at DMA: ChunkAt itself
+  // is an expression and has no device-code emission hook.
+  if (!n.HasOperation()) return;
+
+  for (auto& op : n.AllOperations()) {
+    auto tile = dyn_cast<AST::SOP::TileAt>(op);
+    if (!tile) continue;
+
+    auto indices = tile->GetIndices();
+    auto factors = tile->GetTilingFactors();
+    if (!indices || !factors || indices->Count() != factors->Count()) continue;
+
+    for (size_t d = 0; d < indices->Count(); ++d) {
+      auto index_node = indices->ValueAt(d);
+      ptr<AST::Node> index_expr = index_node;
+      if (auto ii = dyn_cast<AST::IntIndex>(index_node))
+        index_expr = ii->Val();
+      ValueItem index = GetInvalidValueItem();
+      if (auto expr = dyn_cast<AST::Expr>(index_expr)) {
+        if (expr->Opts().HasVal()) index = expr->Opts().GetVal();
+      } else if (auto id = dyn_cast<AST::Identifier>(index_expr)) {
+        index = sbe::sym(InScopeName(id->name));
+      } else if (auto lit = dyn_cast<AST::IntLiteral>(index_expr)) {
+        index = sbe::nu(lit->Val());
+      }
+      if (!IsValidValueItem(index) || !IsComputable(index)) continue;
+
+      auto factor_node = factors->ValueAt(d);
+      ptr<AST::Node> factor_expr = factor_node;
+      if (auto ii = dyn_cast<AST::IntIndex>(factor_node))
+        factor_expr = ii->Val();
+      ValueItem tile_count = GetInvalidValueItem();
+      if (auto expr = dyn_cast<AST::Expr>(factor_expr)) {
+        if (expr->Opts().HasVal()) tile_count = expr->Opts().GetVal();
+      } else if (auto id = dyn_cast<AST::Identifier>(factor_expr)) {
+        tile_count = sbe::sym(InScopeName(id->name));
+      } else if (auto lit = dyn_cast<AST::IntLiteral>(factor_expr)) {
+        tile_count = sbe::nu(lit->Val());
+      }
+      if (!IsValidValueItem(tile_count) || !IsComputable(tile_count)) continue;
+
+      auto index_str = PSTR(index_node);
+      auto message = "Tile coordinate `" + index_str +
+                     "` is out of bounds of the " + Ordinal(d + 1) +
+                     " dimension of chunkat '" + n.RefSymbol() + "'";
+      FCtx(fname).GetAssessor(*this).Assess(
+          AssessPolicy::Error, sbe::oc_ge(index, sbe::nu(0))->Normalize(),
+          message + " (must be non-negative)", UsageType::ElementAccess,
+          AssessType::USE_SITE, index_node->LOC(), &dma, &dma);
+      FCtx(fname).GetAssessor(*this).Assess(
+          AssessPolicy::Error, sbe::oc_lt(index, tile_count)->Normalize(),
+          message + " (valid range is [0, " + STR(tile_count) + "))",
+          UsageType::ElementAccess, AssessType::USE_SITE, index_node->LOC(),
+          &dma, &dma);
+    }
+  }
 }
 
 bool SemaChecker::VisitNode(AST::Trigger& n) {
