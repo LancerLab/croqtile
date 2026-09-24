@@ -94,6 +94,9 @@ size_t AssertSite::EstimateLoopTripCount(AST::Node* n) const {
         if (auto cval = VIInt(ub + ub_addend - (lb + lb_addend))) span = *cval;
       }
       auto step = range->step == GetInvalidStep() ? 1 : std::abs(range->step);
+      // A zero step is a legal (and warned-about) degenerate iteration space;
+      // keep the cost estimate finite instead of dividing by zero here.
+      if (step == 0) step = 1;
       trip *=
           static_cast<size_t>(std::max<int64_t>(1, (span + step - 1) / step));
     }

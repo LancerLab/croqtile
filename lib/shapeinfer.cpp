@@ -2274,6 +2274,39 @@ bool ShapeInference::Visit(AST::RangeExpr& n) {
     }
   }
 
+  // A degenerate iteration space is legal, so it is reported, never rejected: a
+  // zero step is the "repeat this index" idiom and an empty range is a
+  // zero-trip loop, and both are occasionally intended (a fully clipped tail,
+  // for instance). This is the `foreach` half of the same surface the `subspan`
+  // zero step/stride note below covers. It is a warning rather than an error
+  // precisely because the program remains well-formed and runnable; without it
+  // a zero step reached codegen and divided by zero in the cost model.
+  if (auto src_ty = GetSymbolType(n.GetRVName())) {
+    if (IsActualBoundedIntegerType(src_ty)) {
+      auto addend = [](const ptr<AST::Node>& m) -> ValueItem {
+        if (auto e = dyn_cast<AST::Expr>(m))
+          if (e->Opts().HasVal()) return e->Opts().GetVal();
+        return sbe::nu(0);
+      };
+      auto src_step = GetSingleStep(src_ty);
+      int step =
+          IsValidStep(n.step) ? n.step : (IsValidStep(src_step) ? src_step : 1);
+      if (step == 0) {
+        Warning(n.LOC(),
+                "zero step in the iteration space; the loop variable never "
+                "advances. This is legal but usually unintended -- use a step "
+                "of at least 1 unless repeated access is intended.");
+      } else if (auto span =
+                     VIInt(GetSingleUpperBound(src_ty) + addend(n.ub_mutator) -
+                           addend(n.lb_mutator))) {
+        if (*span <= 0)
+          Warning(n.LOC(),
+                  "empty iteration space; the range is empty so the loop body "
+                  "never executes. This is legal but usually unintended.");
+      }
+    }
+  }
+
   return true;
 }
 
