@@ -42,6 +42,10 @@ private:
   AttributeDeriver input_deps{this, "input-deps", false};
   AttributeDeriver local_deps{this, "local-deps", false};
   std::vector<ValueItem> scope_pred_stack;
+  // Predicates from conditional scopes only (if/else, while, in-threads).
+  // Unlike structural scopes (foreach/with), these may not be entered, so
+  // only they justify deferring a constant-false check to runtime.
+  std::vector<ValueItem> conditional_pred_stack;
   std::vector<ParallelLevel> parallel_level_stack;
   std::vector<bool> cooperative_stack;
   std::map<std::string, AST::DMA*> shared_tensor_producers;
@@ -71,6 +75,7 @@ private:
                         AST::Node* emit_node = nullptr);
   void CheckChunkAtTileBounds(AST::ChunkAt&, AST::DMA&);
   ValueItem ActiveScopePredicate() const;
+  ValueItem ActiveConditionalGuard() const;
   bool ExpressionIsConstrained(const ValueItem&) const;
 
 public:

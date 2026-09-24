@@ -207,6 +207,15 @@ ValueItem SemaChecker::ActiveScopePredicate() const {
   return pred;
 }
 
+ValueItem SemaChecker::ActiveConditionalGuard() const {
+  ValueItem pred = sbe::bl(true);
+  for (const auto& p : conditional_pred_stack) {
+    assert(IsValidValueItem(p));
+    pred = sbe::bl_and(pred, p);
+  }
+  return pred;
+}
+
 bool SemaChecker::ExpressionIsConstrained(const ValueItem& expr) const {
   auto syms = GetSymbols(expr);
   auto constrained_syms = GetSymbols(ActiveScopePredicate());
@@ -240,6 +249,7 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
     data_future_scopes.clear();
     next_data_future_id = 1;
     scope_pred_stack.clear();
+    conditional_pred_stack.clear();
     parallel_level_stack.clear();
     cooperative_stack.clear();
     shared_tensor_producers.clear();
@@ -255,9 +265,10 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
       isa<AST::WithBlock>(&n) || isa<AST::ApplyBlock>(&n))
     waited_data_futures.clear();
 
-  if (auto block = dyn_cast<AST::PredBlock>(&n))
+  if (auto block = dyn_cast<AST::PredBlock>(&n)) {
     scope_pred_stack.push_back(block->GetScopePredicate());
-  else if (auto fe = dyn_cast<AST::ForeachBlock>(&n)) {
+    conditional_pred_stack.push_back(block->GetScopePredicate());
+  } else if (auto fe = dyn_cast<AST::ForeachBlock>(&n)) {
     scope_pred_stack.push_back(fe->GetScopePredicate());
     int unroll_factor = 0;
     if (AST::HasUnrollHint(*fe, unroll_factor) && unroll_factor > 0) {
@@ -397,6 +408,7 @@ bool SemaChecker::ConsumeAsyncFuture(const std::string& name,
 bool SemaChecker::AfterVisitImpl(AST::Node& n) {
   if (isa<AST::PredBlock>(&n) || isa<AST::ForeachBlock>(&n))
     scope_pred_stack.pop_back();
+  if (isa<AST::PredBlock>(&n)) conditional_pred_stack.pop_back();
   if (isa<AST::ParallelBy>(&n)) {
     parallel_level_stack.pop_back();
     cooperative_stack.pop_back();
@@ -426,6 +438,8 @@ bool SemaChecker::InMidVisitImpl(AST::Node& n) {
     if (block->HasElse()) {
       scope_pred_stack.pop_back();
       scope_pred_stack.push_back(block->GetElseScopePredicate());
+      conditional_pred_stack.pop_back();
+      conditional_pred_stack.push_back(block->GetElseScopePredicate());
 
       // The else branch starts from the state at the if entry, not from the
       // state accumulated while visiting the then branch.
@@ -2314,8 +2328,14 @@ void SemaChecker::CreateAssessment(const ValueItem& pred,
     }
   }
 
+  // The precondition used to *defer* a constant-false check to runtime must
+  // come from conditional scopes only.  A structural scope (foreach/with) is
+  // always entered, so if interval analysis cannot discharge the check there,
+  // the violation is unconditionally reachable and stays a compile error.
+  auto conditional_guard = ActiveConditionalGuard();
+
   FCtx(fname).GetAssessor(*this).Assess(AssessPolicy::Error, effective_pred,
                                         message, uty, aty, l, n.get(),
-                                        emit_node, active_guard,
+                                        emit_node, conditional_guard,
                                         ClassifyDependence({&pred}), mech);
 }
