@@ -1067,6 +1067,7 @@ bool SemaChecker::VisitNode(AST::SpanAs& n) {
 }
 
 bool SemaChecker::VisitNode(AST::DMA& n) {
+  extern Option<bool> strict_dma_shape;
   bool IsDummy = (n.operation == ".any");
   auto ty = n.GetType();
 
@@ -1239,6 +1240,19 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
       for (size_t i = 0; i < f_shape.Rank(); ++i) {
         const auto& src_dim = f_shape.ValueAt(i);
         const auto& dst_dim = t_shape.ValueAt(i);
+        // Under --strict-dma-shape, a source dimension that is provably
+        // different from its destination dimension is a hard error instead
+        // of the one-sided src <= dst relaxation.  Symbolic dimensions that
+        // cannot be proven unequal fall through to the runtime check.
+        if (strict_dma_shape && sbe::must_ne(src_dim, dst_dim)) {
+          Error1(n.LOC(),
+                 "DMA 'from'(" + PSTR(fty) + ") and 'to'(" + PSTR(tty) +
+                     ") must have identical shapes under --strict-dma-shape: "
+                     "dimension " +
+                     Ordinal(i + 1) + " is " + STR(src_dim) +
+                     " but the destination is " + STR(dst_dim) + ".");
+          continue;
+        }
         auto nonnegative =
             sbe::bop(OpCode::GE, src_dim, sbe::nu(0))->Normalize();
         auto fits = sbe::bop(OpCode::LE, src_dim, dst_dim)->Normalize();

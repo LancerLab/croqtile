@@ -69,6 +69,12 @@ Option<bool>
 Option<bool>
     use_prepack_v2(OptionKind::User, "--use-prepack-v2", "", false,
                    "Enable host prepacked-v2 metadata (fully coalesced loads)");
+Option<bool> strict_dma_shape(
+    OptionKind::User, "--strict-dma-shape", "-fdma-strict", false,
+    "Require DMA source and destination shapes to match exactly. Without "
+    "this, a source smaller than the destination is allowed and the extra "
+    "destination elements are zero-filled. Enable to reject such copies at "
+    "compile time.");
 } // namespace Choreo
 Option<bool> generate_debug_info(OptionKind::User, "-g", "", false,
                                  "Generate source-level debug information.");
