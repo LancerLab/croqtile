@@ -1,0 +1,38 @@
+// RUN: choreo -es --show-assess %s -o /dev/null 2>&1 | FileCheck %s
+//
+// A DMA chunkat tile coordinate that is non-negative by construction must fold
+// to a static-true assessment, not a cost-filtered runtime check.
+//
+// `p#q` is a parallel index (>= 0) and `__iv_j` is a foreach loop variable
+// whose bounded type starts at 0, so both the lower-bound (non-negative) and
+// upper-bound (valid-range) checks are compile-time decidable. The bug this
+// guards: the lower bound was assessed against the RAW coordinate
+// (`oc_ge(index, 0)`) while the upper bound used the inferred bound
+// (`oc_lt(bounds.ub, tile_count)`), so every loop/parallel tile coordinate
+// became a runtime obligation -- on a static kernel. Mirroring the upper-bound
+// treatment (`oc_ge(bounds.lb, 0)` when `lb >= 0`) makes it fold.
+
+__co__ auto tile_nonneg(f32 [4, 8, 16] input) {
+  f32 [input.span(0), input.span(1), input.span(2)] output;
+  parallel p by 2, q by 2 {
+    foreach {j} in [input.span(1)] {
+      l1 = dma.copy input.chunkat(p#q, j, _) => local;
+      local f32[1, l1.span(1), l1.span(2)] l1_out;
+      foreach {k} in [l1.span(2)]
+        l1_out.at(0, 0, k) = l1.data.at(0, 0, k);
+      dma.copy l1_out => output.chunkat(p#q, j, _);
+    }
+  }
+  return output;
+}
+
+// No runtime assessment: every coordinate is statically in range.
+// CHECK: [assertions] function: tile_nonneg  (36 assessed:  36 static-true,  0 static-false,  0 runtime)
+
+// The non-negative lower-bound check on the first chunkat coordinate.
+// CHECK: [0] static-true
+// CHECK:      message : Tile coordinate `anon_0` is out of bounds of the 1st dimension of chunkat 'input' (must be non-negative)
+
+// The non-negative check on the foreach loop coordinate.
+// CHECK: [2] static-true
+// CHECK:      message : Tile coordinate `__iv_j` is out of bounds of the 2nd dimension of chunkat 'input' (must be non-negative)

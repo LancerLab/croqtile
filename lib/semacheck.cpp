@@ -1790,8 +1790,20 @@ void SemaChecker::CheckChunkAtTileBounds(AST::ChunkAt& n, AST::DMA& dma) {
           expr_bounds.IsValid()
               ? sbe::oc_lt(expr_bounds.ub, tile_count)->Normalize()
               : sbe::oc_lt(index, tile_count)->Normalize();
+      // Mirror the upper bound for the LOWER bound: a coordinate whose inferred
+      // lower bound is provably >= 0 (a loop/parallel index whose bounded type
+      // starts at 0, or a non-negative combination of such) folds instead of
+      // becoming a cost-filtered runtime check. The guard is load-bearing: if
+      // the inferred lb is negative the coordinate can still be in range at run
+      // time (a scope predicate may narrow it), so falling back to the raw
+      // coordinate keeps it a per-use runtime check rather than a false
+      // `Error` rejection.
+      auto lower_bound =
+          (expr_bounds.IsValid() && sbe::cge(expr_bounds.lb, sbe::nu(0)))
+              ? sbe::oc_ge(expr_bounds.lb, sbe::nu(0))->Normalize()
+              : sbe::oc_ge(index, sbe::nu(0))->Normalize();
       FCtx(fname).GetAssessor(*this).Assess(
-          AssessPolicy::Error, sbe::oc_ge(index, sbe::nu(0))->Normalize(),
+          AssessPolicy::Error, lower_bound,
           message + " (must be non-negative)", UsageType::ElementAccess,
           AssessType::USE_SITE, index_node->LOC(), &dma, &dma);
       FCtx(fname).GetAssessor(*this).Assess(
