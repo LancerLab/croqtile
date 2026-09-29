@@ -66,7 +66,7 @@ public:
     static std::map<int, size_t> shared_caps = {
         {70, 48ull * 1024},   {75, 64ull * 1024},   {80, 164ull * 1024},
         {86, 100ull * 1024},  {89, 100ull * 1024},  {90, 228ull * 1024},
-        {100, 228ull * 1024}, {120, 300ull * 1024},
+        {100, 228ull * 1024}, {120, 100ull * 1024},
     };
 
     if (!shared_caps.count(arch_num))

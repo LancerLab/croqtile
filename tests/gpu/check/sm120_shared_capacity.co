@@ -1,0 +1,14 @@
+// CC 12.0 (consumer Blackwell) provides 100 KB of shared memory per SM -- the
+// same class as 8.6/8.9, not the 228 KB datacenter class.  A 128 KB block
+// allocation must be rejected for sm_120 instead of silently accepted.
+//
+// RUN: not choreo -es -t cute -arch=sm_120 %s -o /dev/null 2>&1 | FileCheck %s
+
+__co__ void sm120_shared_over_capacity() {
+  parallel p by 1 {
+    shared f32[32768] buf;
+    buf.at(0) = 1.0f;
+  }
+}
+
+// CHECK: Used: 131072 bytes, Limit: 102400 bytes.
