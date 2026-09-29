@@ -94,6 +94,10 @@ size_t AssertSite::EstimateLoopTripCount(AST::Node* n) const {
         if (auto cval = VIInt(ub + ub_addend - (lb + lb_addend))) span = *cval;
       }
       auto step = range->step == GetInvalidStep() ? 1 : std::abs(range->step);
+      // Defensive: a zero step is rejected during shape inference, so this
+      // should be unreachable; clamp anyway so the cost model can never divide
+      // by zero on a range that slipped through.
+      if (step == 0) step = 1;
       trip *=
           static_cast<size_t>(std::max<int64_t>(1, (span + step - 1) / step));
     }

@@ -1,0 +1,26 @@
+// An empty `foreach` range is a legal zero-trip loop, so it is only warned
+// about; a non-zero step with a non-empty range must stay silent.
+//
+// RUN: choreo -es -t cc %s -o /dev/null 2>&1 | FileCheck %s
+
+__co__ void empty_range(f32 [6, 4] x) {
+  parallel p by 1 : block {
+    with {b} in [6] {
+      foreach b(:-6:1) {
+        x.at(b, 0) = 1.0f;
+      }
+    }
+  }
+}
+// CHECK: warning: empty iteration space; the range is empty so the loop body never executes. This is legal but usually unintended.
+// CHECK-NOT: error:
+
+__co__ void stepped_range(f32 [6, 4] x) {
+  parallel p by 1 : block {
+    with {c} in [6] {
+      foreach c(0:6:2) {
+        x.at(c, 0) = 1.0f;
+      }
+    }
+  }
+}

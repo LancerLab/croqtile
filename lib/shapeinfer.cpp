@@ -2273,6 +2273,40 @@ bool ShapeInference::Visit(AST::RangeExpr& n) {
     }
   }
 
+  // Validate the effective iteration step and report a degenerate iteration
+  // space. A zero step has no useful semantics -- the induction variable never
+  // advances, so the lowered loop (`iv += 0`) does not terminate -- and is
+  // rejected, matching the step>0 requirement of every other language. An
+  // empty range (a zero-trip loop) is well-formed and occasionally intended
+  // (for instance a fully clipped tail), so it is only warned about.
+  if (auto src_ty = GetSymbolType(n.GetRVName())) {
+    if (IsActualBoundedIntegerType(src_ty)) {
+      auto addend = [](const ptr<AST::Node>& m) -> ValueItem {
+        if (auto e = dyn_cast<AST::Expr>(m))
+          if (e->Opts().HasVal()) return e->Opts().GetVal();
+        return sbe::nu(0);
+      };
+      auto src_step = GetSingleStep(src_ty);
+      int step =
+          IsValidStep(n.step) ? n.step : (IsValidStep(src_step) ? src_step : 1);
+      if (step == 0) {
+        Error1(n.LOC(),
+               "invalid step 0 in the iteration space; the loop variable never "
+               "advances, so the loop would not terminate. Use a step of at "
+               "least 1.");
+        return false;
+      }
+      if (auto span =
+              VIInt(GetSingleUpperBound(src_ty) + addend(n.ub_mutator) -
+                    addend(n.lb_mutator))) {
+        if (*span <= 0)
+          Warning(n.LOC(),
+                  "empty iteration space; the range is empty so the loop body "
+                  "never executes. This is legal but usually unintended.");
+      }
+    }
+  }
+
   return true;
 }
 
