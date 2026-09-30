@@ -1,0 +1,44 @@
+// REQUIRES: TARGET-GPU
+// RUN: choreo -t cute -gs %s | bash -s -- --execute | FileCheck --match-full-lines %s
+//
+// `.pad` with runtime-derived padded extents peels outer dims into batch
+// loops; the padded destination tensor must still be emitted.
+
+__co__ auto batch_pad(f32 [4, 8, 16, 16] i, int padding) {
+  Hpad = 16 + 2 * padding;
+  Wpad = 16 + 2 * padding;
+  f32 [4, 8, Hpad, Wpad] out;
+
+  parallel p by 4 : block
+    parallel q by 32 : thread {
+      il = dma.pad<{0, 0, padding, padding}, {0, 0, padding, padding}, {0, 0, 0, 0}, 0.0f> i.chunkat(p, _, _, _) => shared;
+      dma.copy il => out.chunkat(p, _, _, _);
+    }
+  return out;
+}
+
+int main() {
+  const int padding = 1;
+  auto a = choreo::make_spandata<choreo::f32>(4, 8, 16, 16);
+  a.fill_random(-1.0, 1.0);
+
+  auto r = batch_pad(a.view(), padding);
+
+  for (size_t b = 0; b < 4; ++b)
+    for (size_t c = 0; c < 8; ++c)
+      for (size_t h = 0; h < 18; ++h)
+        for (size_t w = 0; w < 18; ++w) {
+          float expect = 0.0f;
+          if (h >= (size_t)padding && h < 16 + (size_t)padding &&
+              w >= (size_t)padding && w < 16 + (size_t)padding)
+            expect = a[b][c][h - padding][w - padding];
+          if (r[b][c][h][w] != expect) {
+            std::cout << "batch pad mismatch" << std::endl;
+            return 1;
+          }
+        }
+
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed
