@@ -517,9 +517,12 @@ struct TMAAtom {
 
 using AsyncCopyAtom = cute::AutoCopyAsync;
 
+// Guarded: choreo.h may already define `__co_abort__` as a macro.
+#ifndef __co_abort__
 __device__ __attribute__((always_inline)) static inline void __co_abort__() {
   __trap();
 }
+#endif
 
 // this facilitate the wait-N implementation for sm_80+
 // it is must be warp-wise since async copy is warp-wise.
