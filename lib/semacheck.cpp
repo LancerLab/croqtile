@@ -347,6 +347,7 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
     next_data_future_id = 1;
     scope_pred_stack.clear();
     parallel_level_stack.clear();
+    pv_levels_.clear();
     cooperative_stack.clear();
     shared_tensor_producers.clear();
     async_dma_producers.clear();
@@ -383,6 +384,17 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
 
     parallel_level_stack.push_back(pb->GetLevel());
     cooperative_stack.push_back(pb->IsCooperative());
+
+    // The parallel variables carry their level (the scope they are declared
+    // in); indexing a variable at a given level is what makes a DMA
+    // thread-varying or block-uniform.
+    pv_levels_[InScopeName(pb->BPV()->name)] = pb->GetLevel();
+    pb->BPV()->SetLevel(pb->GetLevel());
+    for (auto id : pb->AllSubPVs()) {
+      pv_levels_[InScopeName(cast<AST::Identifier>(id)->name)] =
+          pb->GetLevel();
+      cast<AST::Identifier>(id)->SetLevel(pb->GetLevel());
+    }
 
     // Cooperative annotation is validated after normalization (PB
     // level has been fully inferred).  Warn when the level is not
@@ -1343,6 +1355,65 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     }
     data_future_bindings[InScopeName(n.future)] = 0;
     return true;
+  }
+
+  // The level states who fulfils the copy: the `: <level>` annotation, or the
+  // enclosing parallel scope.  Set it for every DMA so codegen reads a single
+  // field; whether an address is per-lane is read off the parallel variables
+  // it indexes (never by walking the scope).
+  {
+    ParallelLevel enclosing = parallel_level_stack.empty()
+                                  ? ParallelLevel::NONE
+                                  : parallel_level_stack.back();
+    if (n.GetLevel() == ParallelLevel::NONE) n.SetLevel(enclosing);
+
+    auto is_thread_indexed = [this](AST::ChunkAt* ca) {
+      if (!ca) return false;
+      std::set<std::string> syms;
+      if (ca->indices) {
+        auto s = ReferredSymbols(ca->indices.get(), this);
+        syms.insert(s.begin(), s.end());
+      }
+      auto s = ReferredSymbols(ca, this);
+      syms.insert(s.begin(), s.end());
+      syms.erase(InScopeName(ca->RefSymbol()));
+      for (auto& sym : syms) {
+        auto it = pv_levels_.find(sym);
+        if (it != pv_levels_.end() && it->second == ParallelLevel::THREAD)
+          return true;
+      }
+      return false;
+    };
+
+    // The source of a DMA is always a chunkat; the destination is a chunkat or
+    // the inferred storage keyword (`=> shared`).
+    auto from_ca = cast<AST::ChunkAt>(n.from.get());
+    auto to_ca = cast<AST::ChunkAt>(n.to.get());
+    ParallelLevel lvl = n.GetLevel();
+
+    // (a) A block/group-level copy may not index a thread-level variable: the
+    // address is per-lane data, not block data.  Mixing the two is risky, so
+    // the system forbids it for safety.
+    if ((lvl == ParallelLevel::BLOCK || lvl == ParallelLevel::GROUP) &&
+        (is_thread_indexed(from_ca) || is_thread_indexed(to_ca)))
+      Error1(n.LOC(),
+             "indexing a thread-level parallel variable in a block-level DMA "
+             "is risky -- the address is per-lane data, not block data; the "
+             "current system forbids it for safety. Remove the `: block` "
+             "annotation or index at block level.");
+
+    // (b) A thread-level copy with a per-lane source must write a
+    // lane-indexed destination; otherwise every lane writes the same
+    // location.  The per-lane layout is stated in the source, never inferred.
+    if (lvl == ParallelLevel::THREAD) {
+      auto tty = GetSpannedType(NodeType(*n.to));
+      if (tty && tty->GetStorage() == Storage::SHARED &&
+          is_thread_indexed(from_ca) && !is_thread_indexed(to_ca))
+        Error1(n.LOC(),
+               "a thread-level DMA with a thread-indexed source must index the "
+               "thread-level parallel variable on the destination (each lane "
+               "writes its own part); declare the lane dimension or index it.");
+    }
   }
 
   // Check swizzle: only report error if swizzle is explicitly specified

@@ -43,6 +43,9 @@ private:
   AttributeDeriver local_deps{this, "local-deps", false};
   std::vector<ValueItem> scope_pred_stack;
   std::vector<ParallelLevel> parallel_level_stack;
+  // parallel variable -> its level (the scope it is declared in); the level of
+  // a chunk index is the level of the variable it refers to.
+  std::unordered_map<std::string, ParallelLevel> pv_levels_;
   std::vector<bool> cooperative_stack;
   std::map<std::string, AST::DMA*> shared_tensor_producers;
   std::map<std::string, AST::DMA*> async_dma_producers;

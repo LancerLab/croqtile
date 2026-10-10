@@ -11,8 +11,8 @@ __co__ auto batch_pad(f32 [4, 8, 16, 16] i, int padding) {
 
   parallel p by 4 : block
     parallel q by 32 : thread {
-      il = dma.pad<{0, 0, padding, padding}, {0, 0, padding, padding}, {0, 0, 0, 0}, 0.0f> i.chunkat(p, _, _, _) => shared;
-      dma.copy il => out.chunkat(p, _, _, _);
+      il = dma.pad<{0, 0, padding, padding}, {0, 0, padding, padding}, {0, 0, 0, 0}, 0.0f> i.chunkat(p, _, _, _) => shared : block;
+      dma.copy il => out.chunkat(p, _, _, _) : block;
     }
   return out;
 }

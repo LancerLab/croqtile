@@ -853,11 +853,6 @@ public:
                             " (" + STR(fst) + " -> " + STR(tst) + ").");
     }
 
-    if (fst == Storage::GLOBAL && tst == Storage::SHARED && n.IsTMA())
-      n.SetLevel(ParallelLevel::BLOCK); // single instance in a block
-    else
-      n.SetLevel(ParallelLevel::THREAD); // threads-cooperative
-
     if (n.IsTMA())
       CheckTMA(n);
     else

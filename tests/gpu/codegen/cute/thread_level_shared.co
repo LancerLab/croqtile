@@ -1,0 +1,25 @@
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - | FileCheck %s --implicit-check-not=__CHOREO_BLOCK_SINGLE__
+//
+// A thread-level copy into shared stages one slice per lane.  The per-lane
+// layout is stated in the source: the buffer's leading extent carries the lane
+// count and the destination is lane-indexed.  The level (the enclosing thread
+// scope, or `: thread`) makes each lane perform its own copy -- the target may
+// not merge lanes.
+
+__co__ auto foo(f32 [64, 64] input) {
+  f32 [input.span(0), input.span(1)] output;
+  parallel p by 4, q by 8 {
+    shared f32 [#q * (input.span(0) / #p / #q), input.span(1)] l1_a;
+    dma.copy input.chunkat(p#q, _) => l1_a.chunkat(q, _) : thread;
+    dma.copy l1_a.chunkat(q, _) => output.chunkat(p#q, _) : thread;
+  }
+  return output;
+}
+
+// One block-common instance holds every lane's slice.
+// CHECK: __shared__ alignas(16) unsigned char anon_{{[0-9]+}}[4096];
+// Each lane addresses its own slice from the lane index (chunkat(q)).
+// CHECK: (float*)l1_a + (__choreo_vtid_x * 128)
+// CHECK: choreo::naive_copy
+// CHECK: (float*)l1_a + (__choreo_vtid_x * 128)
+// CHECK: choreo::naive_copy

@@ -2184,7 +2184,7 @@ tdma_async
     ;
 
 dma_stmt
-    : IDENTIFIER ASSIGN tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select {
+    : IDENTIFIER ASSIGN tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select note_pl {
         if ($4 == ".load" && !$3)
           Parser::error(@4, "'.load' is a TMA-only operation.");
         if ($7.l2_cache_hint != TMAL2CacheHint::NONE &&
@@ -2192,9 +2192,11 @@ dma_stmt
           Parser::error(
               @4, "TMA L2 eviction modifiers are only valid on 'tma.load'.");
         symtab.AddSymbol($1, MakeDummyFutureType($6.Async()));
-        $$ = AST::Make<AST::DMA>(@3, $4, $1, $8, $10, $6, $7, $3, $5);
+        auto d = AST::Make<AST::DMA>(@3, $4, $1, $8, $10, $6, $7, $3, $5);
+        if ($11.level != ParallelLevel::NONE) d->SetLevel($11.level);
+        $$ = d;
       }
-    | IDENTIFIER ASSIGN tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
+    | IDENTIFIER ASSIGN tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER note_pl {
         if ($4 == ".load" && !$3)
           Parser::error(@4, "'.load' is a TMA-only operation.");
         if ($7.l2_cache_hint != TMAL2CacheHint::NONE &&
@@ -2202,25 +2204,31 @@ dma_stmt
           Parser::error(
               @4, "TMA L2 eviction modifiers are only valid on 'tma.load'.");
         symtab.AddSymbol($1, MakeDummyFutureType($6.Async()));
-        $$ = AST::Make<AST::DMA>(@3, $4, $1, $12, $8, $10, $6, $7, $3, $5);
+        auto d = AST::Make<AST::DMA>(@3, $4, $1, $12, $8, $10, $6, $7, $3, $5);
+        if ($13.level != ParallelLevel::NONE) d->SetLevel($13.level);
+        $$ = d;
       }
-    | tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select {
+    | tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select note_pl {
         if ($2 == ".load" && !$1)
           Parser::error(@2, "'.load' is a TMA-only operation.");
         if ($5.l2_cache_hint != TMAL2CacheHint::NONE &&
             (!$1 || $2 != ".load"))
           Parser::error(
               @2, "TMA L2 eviction modifiers are only valid on 'tma.load'.");
-        $$ = AST::Make<AST::DMA>(@1, $2, "", $6, $8, $4, $5, $1, $3);
+        auto d = AST::Make<AST::DMA>(@1, $2, "", $6, $8, $4, $5, $1, $3);
+        if ($9.level != ParallelLevel::NONE) d->SetLevel($9.level);
+        $$ = d;
       }
-    | tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
+    | tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER note_pl {
         if ($2 == ".load" && !$1)
           Parser::error(@2, "'.load' is a TMA-only operation.");
         if ($5.l2_cache_hint != TMAL2CacheHint::NONE &&
             (!$1 || $2 != ".load"))
           Parser::error(
               @2, "TMA L2 eviction modifiers are only valid on 'tma.load'.");
-        $$ = AST::Make<AST::DMA>(@1, $2, "", $10, $6, $8, $4, $5, $1, $3);
+        auto d = AST::Make<AST::DMA>(@1, $2, "", $10, $6, $8, $4, $5, $1, $3);
+        if ($11.level != ParallelLevel::NONE) d->SetLevel($11.level);
+        $$ = d;
       }
     | IDENTIFIER ASSIGN tdma NONE {
         symtab.AddSymbol($1, MakePlaceHolderFutureType());

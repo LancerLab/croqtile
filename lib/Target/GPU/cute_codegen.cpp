@@ -4240,15 +4240,37 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       bool to_or_from_shared = dma_plan->direction == DMADirection::G2S ||
                                dma_plan->direction == DMADirection::S2G ||
                                dma_plan->direction == DMADirection::S2S;
-      if (to_or_from_shared) {
-        ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      // The copy's level was resolved in sema (annotation or enclosing
+      // scope): block/group scope copies run once; a thread scope copy runs
+      // per lane. This applies regardless of the copy direction.
+      ParallelLevel lvl = n.GetLevel();
+      std::string guard;
+      switch (lvl) {
+      case ParallelLevel::BLOCK:
+        guard = "if (__CHOREO_BLOCK_SINGLE__) ";
+        break;
+      case ParallelLevel::GROUP:
+      case ParallelLevel::GROUPx4:
+        guard = "if (__CHOREO_GROUP_SINGLE__) ";
+        break;
+      default:
+        break; // THREAD: every lane copies its own slice.
+      }
+      if (!guard.empty()) {
+        ds << d_indent << guard << "{\n";
         ds << d_indent << "  choreo::naive_copy(" << src << ", " << dst
            << ");\n";
         ds << d_indent << "}\n";
-        ds << d_indent << "__syncthreads();\n";
       } else {
         ds << d_indent << "choreo::naive_copy(" << src << ", " << dst << ");\n";
       }
+      // A barrier is needed when the copy touches shared memory (the data must
+      // become visible across threads) or when it was guarded to run on a
+      // subset of threads (block/group level): the other threads must wait
+      // before consuming the result. It stays outside the guard so every
+      // thread reaches it.
+      if (to_or_from_shared || !guard.empty())
+        ds << d_indent << "__syncthreads();\n";
     };
 
     auto emit_tiled_copy = [&](const TiledCopyParams& params,
