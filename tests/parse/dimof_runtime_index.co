@@ -1,0 +1,17 @@
+// RUN: choreo -gs -t cute %s -o /dev/null 2>&1 | FileCheck %s
+
+// Regression: a runtime-index dimof (ituple t(i)) used to hit
+// `assert(cv && "expect a const signature.")` in shapeinfer and crash the
+// front-end (M1.15 gap spec). It must now fail with a clean type error, not
+// an assertion.
+// CHECK: error: Expect `i' to be a integer type.
+__co__ auto dimof_runtime_index(f32 [4] inp) {
+  f32 [3] out;
+  parallel p by 1 : block
+    parallel q by 1 : thread {
+      t : [2, 3];
+      foreach {i} in [3]
+        out.at(i) = t(i);
+    }
+  return out;
+}
