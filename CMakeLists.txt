@@ -27,6 +27,23 @@ if(NOT CHOREO_GIT_REVISION_RESULT EQUAL 0 OR
   set(CHOREO_GIT_REVISION "unknown")
 endif()
 
+# Short revision (CommitID) for the package description.
+execute_process(
+  COMMAND git -C "${CMAKE_SOURCE_DIR}" rev-parse --short HEAD
+  OUTPUT_VARIABLE CHOREO_COMMIT_SHORT
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET
+  RESULT_VARIABLE CHOREO_COMMIT_SHORT_RESULT
+)
+if(NOT CHOREO_COMMIT_SHORT_RESULT EQUAL 0 OR
+   CHOREO_COMMIT_SHORT STREQUAL "")
+  if(CHOREO_GIT_REVISION STREQUAL "unknown")
+    set(CHOREO_COMMIT_SHORT "unknown")
+  else()
+    string(SUBSTRING "${CHOREO_GIT_REVISION}" 0 7 CHOREO_COMMIT_SHORT)
+  endif()
+endif()
+
 # Function to check compiler compatibility
 function(check_compiler_compatibility)
   set(COMPATIBLE_COMPILER FALSE)
@@ -728,6 +745,17 @@ set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
 set(CPACK_GENERATOR "DEB;TGZ;ZIP")
 
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_CONTACT}")
+if(EXISTS "${CMAKE_SOURCE_DIR}/cmake/deb_meta_internal.cmake")
+  include("${CMAKE_SOURCE_DIR}/cmake/deb_meta_internal.cmake")
+endif()
+
+# Emit a single combined package per generator (must precede include(CPack)).
+set(CPACK_COMPONENTS_GROUPING "ALL_COMPONENTS_IN_ONE")
+set(CPACK_DEB_COMPONENTS_GROUPING "ALL_COMPONENTS_IN_ONE")
+set(CPACK_ARCHIVE_COMPONENTS_GROUPING "ALL_COMPONENTS_IN_ONE")
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
+
 include(CPack)
 
 configure_file(${CMAKE_SOURCE_DIR}/cmake/CPackCompiler.cmake.in
@@ -757,6 +785,7 @@ add_custom_target(package-compiler
   DEPENDS choreo copp
   COMMAND ${CMAKE_CPACK_COMMAND}
     -D CPACK_PROJECT_CONFIG_FILE=${CMAKE_BINARY_DIR}/CPackCompiler.cmake
+  COMMAND bash ${CMAKE_SOURCE_DIR}/cmake/wrap_toplevel.sh ${CMAKE_BINARY_DIR}/package
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
   COMMENT "Building standalone compiler package"
 )
