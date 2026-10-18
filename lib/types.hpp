@@ -2971,6 +2971,21 @@ inline std::string ElemCountExprOf(const Type& ty) {
   return {};
 }
 
+// Byte span of a whole declaration. Every slot of a spanned array occupies a
+// complete PhysicalSlotStrideValue(), which already folds in explicit slot
+// alignment padding. SizeExprOf reports a single slot, so it under-covers a
+// declaration, a host allocation, or an initialization whose byte size is
+// derived from it. Kept symbolic for runtime-shaped slot counts/strides.
+inline std::string TotalSizeExprOf(const Type& ty, bool ULL_suffix = false) {
+  auto aty = dyn_cast<SpannedArrayType>(&ty);
+  if (!aty) return SizeExprOf(ty, ULL_suffix);
+  auto total = (aty->PhysicalSlotStrideValue() * aty->ElemCount())->Normalize();
+  if (auto bytes = VIInt(total))
+    return std::to_string(static_cast<size_t>(*bytes)) +
+           (ULL_suffix ? "ULL" : "");
+  return "(" + total->ToString() + ")";
+}
+
 inline BaseType GetBaseType(const Type& ty) {
   if (isa<VoidType>(&ty))
     return BaseType::VOID;

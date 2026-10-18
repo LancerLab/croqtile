@@ -148,6 +148,37 @@ private:
            std::to_string(SizeOf(sty.ElementType()));
   }
 
+  // Byte span of a whole declaration. A spanned array owns one slot per array
+  // element, and an explicitly aligned one rounds every slot up to
+  // PhysicalSlotStrideValue() - the stride the slot addressing walks. A
+  // per-slot ByteSize() therefore under-covers both the declared storage and
+  // any extent derived from it.
+  std::optional<std::string> HostDeclByteSizeExpression(const ptr<Type>& ty,
+                                                        const location& loc) {
+    if (!ty) return std::nullopt;
+    auto sty = dyn_cast<SpannedType>(ty);
+    if (!sty) return std::nullopt;
+    auto slot_bytes = HostByteSizeExpression(*sty, loc);
+    if (!slot_bytes) return std::nullopt;
+
+    auto aty = dyn_cast<SpannedArrayType>(ty);
+    if (!aty) return slot_bytes;
+    // Round on the host-resolved bytes rather than using
+    // PhysicalSlotStrideValue(): the latter keeps device-side symbols, which a
+    // host-side check cannot evaluate.
+    std::string per_slot = *slot_bytes;
+    if (aty->HasAlignedSlots()) {
+      const size_t alignment = aty->SlotAlignment();
+      per_slot = "((" + per_slot + " + " + std::to_string(alignment - 1) +
+                 ") / " + std::to_string(alignment) + ") * " +
+                 std::to_string(alignment);
+    }
+    auto slots = VIInt(aty->ElemCount());
+    if (!slots) return std::nullopt;
+    return std::to_string(static_cast<size_t>(*slots)) + " * (" + per_slot +
+           ")";
+  }
+
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
     if (isa<AST::ChoreoFunction>(&n)) {
@@ -550,11 +581,13 @@ public:
     }
     if (n.HasNote("ref")) {
       if (auto sa = dyn_cast<AST::SpanAs>(AST::Ref(n.init_expr))) {
-        auto backing = GetSpannedType(GetSymbolType(sa->id->name));
-        if (backing && (sty->RuntimeShaped() || backing->RuntimeShaped())) {
-          auto alias_bytes = HostByteSizeExpression(*sty, n.LOC());
+        auto backing_ty = GetSymbolType(sa->id->name);
+        auto backing = GetSpannedType(backing_ty);
+        if (backing_ty && backing &&
+            (sty->RuntimeShaped() || backing->RuntimeShaped())) {
+          auto alias_bytes = HostDeclByteSizeExpression(sym_ty, n.LOC());
           if (!alias_bytes) return true;
-          auto backing_bytes = HostByteSizeExpression(*backing, n.LOC());
+          auto backing_bytes = HostDeclByteSizeExpression(backing_ty, n.LOC());
           if (!backing_bytes) return true;
           rt_alias_capacity_check_list.push_back({*alias_bytes, *backing_bytes,
                                                   n.LOC(), n.name_str,
@@ -574,12 +607,9 @@ public:
       // Runtime memory-limit checks are emitted in the host launcher. Resolve
       // immutable extent bindings to host-visible inputs, and reject extents
       // that fundamentally depend on a device-only value.
-      auto host_byte_size = HostByteSizeExpression(*sty, n.LOC());
+      auto host_byte_size = HostDeclByteSizeExpression(sym_ty, n.LOC());
       if (!host_byte_size) return true;
       std::string byte_size = *host_byte_size;
-      if (array_dim_product != 1)
-        byte_size =
-            std::to_string(array_dim_product) + " * (" + byte_size + ")";
       VST_DEBUG(dbgs() << "[MemUsage] " << __internal__::GetStringFrom(sto)
                        << " `" << SSTab().ScopedName(n.name_str) << "` need "
                        << sty->ByteSizeExpression(false) << " bytes.\n");
@@ -598,8 +628,12 @@ public:
              SumUpCtRtUsage(Storage::SHARED), n.LOC(), pool.replicas_per_pool,
              pool.pool_bytes});
     } else {
-      // compile time usage
-      auto size = sty->ByteSize() * array_dim_product;
+      // compile time usage. PhysicalSlotStrideBytes() folds in the per-slot
+      // padding of an explicitly aligned array.
+      auto slot_array = dyn_cast<SpannedArrayType>(sym_ty);
+      auto slot_bytes =
+          slot_array ? slot_array->PhysicalSlotStrideBytes() : sty->ByteSize();
+      auto size = slot_bytes * array_dim_product;
       VST_DEBUG(dbgs() << "[MemUsage] " << __internal__::GetStringFrom(sto)
                        << " `" << SSTab().ScopedName(n.name_str) << "` need "
                        << size << " bytes" << SizeForHuman(size) << ".\n");
