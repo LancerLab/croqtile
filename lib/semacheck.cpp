@@ -1402,17 +1402,31 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
              "current system forbids it for safety. Remove the `: block` "
              "annotation or index at block level.");
 
-    // (b) A thread-level copy with a per-lane source must write a
-    // lane-indexed destination; otherwise every lane writes the same
-    // location.  The per-lane layout is stated in the source, never inferred.
+    // (b) A thread-level copy into shared storage must index the lane on the
+    // destination.  With a per-lane source an unindexed destination is a
+    // correctness bug (every lane writes the same location).  With a
+    // block-uniform source the repeated writes are idempotent, but every lane
+    // still issues the whole movement -- a severe performance defect -- so warn
+    // instead of rejecting.
     if (lvl == ParallelLevel::THREAD) {
       auto tty = GetSpannedType(NodeType(*n.to));
-      if (tty && tty->GetStorage() == Storage::SHARED &&
-          is_thread_indexed(from_ca) && !is_thread_indexed(to_ca))
-        Error1(n.LOC(),
-               "a thread-level DMA with a thread-indexed source must index the "
-               "thread-level parallel variable on the destination (each lane "
-               "writes its own part); declare the lane dimension or index it.");
+      bool shared_dest =
+          tty && (tty->GetStorage() == Storage::SHARED ||
+                  tty->GetStorage() == Storage::GROUP_SHARED);
+      if (shared_dest && !is_thread_indexed(to_ca)) {
+        if (tty->GetStorage() == Storage::SHARED && is_thread_indexed(from_ca))
+          Error1(n.LOC(),
+                 "a thread-level DMA with a thread-indexed source must index "
+                 "the thread-level parallel variable on the destination (each "
+                 "lane writes its own part); declare the lane dimension or "
+                 "index it.");
+        else
+          Note(n.LOC(),
+               "a thread-level DMA into shared storage does not index the lane "
+               "on the destination, so every lane issues the whole copy. Index "
+               "the lane on the destination or annotate the copy `: block` if "
+               "the movement is block-uniform.");
+      }
     }
   }
 

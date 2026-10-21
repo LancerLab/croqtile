@@ -15,7 +15,7 @@ __co__ auto test_4d_flat_s32(s32 [2, 3, 4, 8] input) {
 
   parallel p by 1 : block
     parallel q by 32 : thread {
-      tile = dma.copy input.subspan(2, 3, 4, 8) => shared;
+      tile = dma.copy input.subspan(2, 3, 4, 8) => shared : block;
       dma.copy tile => output;
     }
 
@@ -28,7 +28,7 @@ __co__ auto test_4d_flat_f16(f16 [2, 2, 4, 16] input) {
 
   parallel p by 1 : block
     parallel q by 32 : thread {
-      tile = dma.copy input.subspan(2, 2, 4, 16) => shared;
+      tile = dma.copy input.subspan(2, 2, 4, 16) => shared : block;
       dma.copy tile => output;
     }
 
@@ -45,7 +45,7 @@ __co__ auto test_4d_dyn_s32(s32 [M, N, K, L] input) {
 
   parallel p by 1 : block
     parallel q by 32 : thread {
-      tile = dma.copy input.subspan(M, N, K, L) => shared;
+      tile = dma.copy input.subspan(M, N, K, L) => shared : block;
       dma.copy tile => output;
     }
 
@@ -58,7 +58,7 @@ __co__ auto test_4d_mixed(s32 [2, 3, K, L] input) {
 
   parallel p by 1 : block
     parallel q by 32 : thread {
-      tile = dma.copy input.subspan(2, 3, K, L) => shared;
+      tile = dma.copy input.subspan(2, 3, K, L) => shared : block;
       dma.copy tile => output;
     }
 
@@ -71,7 +71,7 @@ __co__ auto test_4d_dyn_outer(s32 [M, 3, 4, 8] input) {
 
   parallel p by 1 : block
     parallel q by 32 : thread {
-      tile = dma.copy input.subspan(M, 3, 4, 8) => shared;
+      tile = dma.copy input.subspan(M, 3, 4, 8) => shared : block;
       dma.copy tile => output;
     }
 
@@ -88,7 +88,7 @@ __co__ auto test_5d_flat_s32(s32 [2, 2, 3, 4, 8] input) {
 
   parallel p by 1 : block
     parallel q by 32 : thread {
-      tile = dma.copy input.subspan(2, 2, 3, 4, 8) => shared;
+      tile = dma.copy input.subspan(2, 2, 3, 4, 8) => shared : block;
       dma.copy tile => output;
     }
 
@@ -101,7 +101,7 @@ __co__ auto test_5d_dyn(s32 [A, B, C, D, E] input) {
 
   parallel p by 1 : block
     parallel q by 32 : thread {
-      tile = dma.copy input.subspan(A, B, C, D, E) => shared;
+      tile = dma.copy input.subspan(A, B, C, D, E) => shared : block;
       dma.copy tile => output;
     }
 
@@ -114,7 +114,7 @@ __co__ auto test_5d_mixed(s32 [2, B, 3, 4, 8] input) {
 
   parallel p by 1 : block
     parallel q by 32 : thread {
-      tile = dma.copy input.subspan(2, B, 3, 4, 8) => shared;
+      tile = dma.copy input.subspan(2, B, 3, 4, 8) => shared : block;
       dma.copy tile => output;
     }
 
