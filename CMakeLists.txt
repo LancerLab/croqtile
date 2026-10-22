@@ -615,6 +615,14 @@ if(CHOREO_BUILD_CHOREO)
     -Wl,--whole-archive targets -Wl,--no-whole-archive
     ${EXTERN_LIBS} Threads::Threads
   )
+
+  # Release packages ship self-contained, stripped executables so they run on
+  # hosts whose system libstdc++ is older than the GCC used to build them.
+  # Normal builds keep the default dynamic linking and unstripped binaries.
+  if(PUBLIC_PACKAGE)
+    target_link_options(choreo PRIVATE -static-libstdc++ -static-libgcc -s)
+    target_link_options(copp PRIVATE -static-libstdc++ -static-libgcc -s)
+  endif()
 endif()
 
 endif() # NOT EMSCRIPTEN
