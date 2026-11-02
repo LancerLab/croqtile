@@ -381,6 +381,9 @@ public:
     std::string signal_in;
     std::string signal_out;
     std::set<std::string> buffers_accessed;
+    // Access-domain tags per buffer ("use", "def", "dma-from", "dma-to");
+    // recorded alongside buffers_accessed for the sync-recovery pass.
+    std::map<std::string, std::set<std::string>> buffer_access_kinds;
     bool is_async = false;
     bool multi_instance = false;
     int multi_instance_count = 0;

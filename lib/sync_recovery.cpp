@@ -58,6 +58,53 @@ std::vector<int> PhasesOf(const HBGraph& g, const std::string& buf) {
   return out;
 }
 
+// --- C3: coarse access-domain typing ---
+// Canonical domains: GR generic-read, GW generic-write, ER engine-read,
+// EW engine-write. Tags recorded by the liveness analyzer: "AddUse" (GR),
+// "def" (GW), "DMA-from" (ER), "DMA-to" (EW). MMA operands currently land
+// as generic (fine for sm_120: no tcgen05/wgmma; TODO for sm_90a/sm_100).
+std::set<std::string> TenantDomains(const HBGraph& g,
+                                    const std::vector<int>& phases,
+                                    const std::string& buf) {
+  std::set<std::string> doms;
+  for (int p : phases) {
+    auto it = g.phases[p].buffer_access_kinds.find(buf);
+    if (it == g.phases[p].buffer_access_kinds.end()) continue;
+    for (const auto& tag : it->second) {
+      if (tag == "AddUse")
+        doms.insert("GR");
+      else if (tag == "def")
+        doms.insert("GW");
+      else if (tag == "DMA-from")
+        doms.insert("ER");
+      else if (tag == "DMA-to")
+        doms.insert("EW");
+      else
+        doms.insert(tag);
+    }
+  }
+  return doms;
+}
+
+// Coarse obligation hints for a handover A -> B, per writer domain of A
+// and reader domain of B (plan C4 table, NVIDIA instantiation).
+std::vector<std::string> ObligationHints(const std::set<std::string>& a,
+                                         const std::set<std::string>& b) {
+  std::vector<std::string> out;
+  auto has = [](const std::set<std::string>& s, const char* k) {
+    return s.count(k) != 0;
+  };
+  if ((has(a, "GW") || has(a, "GR")) && has(b, "ER"))
+    out.push_back("visibility:fence.proxy.async");
+  if (has(a, "EW") && (has(b, "GR") || has(b, "GW")))
+    out.push_back("completion:engine-wait");
+  if (has(a, "ER") && (has(b, "GW") || has(b, "EW")))
+    out.push_back("completion:drain-before-overwrite");
+  if ((has(a, "GW") || has(a, "GR")) && (has(b, "GR") || has(b, "GW")))
+    out.push_back("hb-only");
+  return out;
+}
+
 // Signal names on the phase boundaries strictly between phase `from`
 // (exclusive) and phase `to` (inclusive) that separate the two tenants.
 // Same-workgroup boundaries come from intermediate phases; the cross-
@@ -152,6 +199,11 @@ void SyncRecovery::RunRecovery() {
         continue;
       }
 
+      std::vector<std::set<std::string>> tenant_doms;
+      for (size_t i = 0; i < slot.size(); ++i)
+        tenant_doms.push_back(
+            TenantDomains(*g, phase_lists[i], slot[i].buffer_id));
+
       for (size_t i = 0; i < slot.size(); ++i)
         for (size_t j = 0; j < slot.size(); ++j) {
           if (i == j || phase_lists[i].empty() || phase_lists[j].empty())
@@ -181,6 +233,11 @@ void SyncRecovery::RunRecovery() {
           if (!sigs.empty()) {
             dbgs() << " witness:";
             for (const auto& s : sigs) dbgs() << " " << s;
+          }
+          auto hints = ObligationHints(tenant_doms[i], tenant_doms[j]);
+          if (!hints.empty()) {
+            dbgs() << " obligations:";
+            for (const auto& h : hints) dbgs() << " " << h;
           }
           dbgs() << "\n";
         }

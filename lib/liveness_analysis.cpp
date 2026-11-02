@@ -250,6 +250,9 @@ void LivenessAnalyzer::AddDef(const Stmt* s, const std::string& var,
   VST_DEBUG(dbgs() << "DEF: " << svar << "\n");
   stmt_linfo[s].def.insert(svar);
   var_events[svar].push_back({EventKind::Def, SSTab().ScopeName()});
+  // TODO(sync-recovery): declaration-time defs are recorded as generic
+  // writes; conservative for obligation derivation, refine later.
+  if (cur_hb_phase) RecordHBBufferAccess(svar, "def");
   if (is_buffer_or_future) {
     std::string svar_span = svar + ".span";
     VST_DEBUG(dbgs() << "\tand .span: " << svar_span << "\n");
@@ -686,12 +689,13 @@ void LivenessAnalyzer::FinalizeHBPhase() {
 
 void LivenessAnalyzer::RecordHBBufferAccess(const std::string& sname,
                                             const char* caller) {
-  (void)caller;
   if (!cur_hb_state || !sbuffers.count(sname)) return;
-  if (cur_hb_phase)
+  if (cur_hb_phase) {
     cur_hb_phase->buffers_accessed.insert(sname);
-  else
+    if (caller) cur_hb_phase->buffer_access_kinds[sname].insert(caller);
+  } else {
     cur_hb_state->globally_live_bufs.insert(sname);
+  }
 }
 
 void LivenessAnalyzer::RecordHBResourceAccess(const std::string& sname) {
