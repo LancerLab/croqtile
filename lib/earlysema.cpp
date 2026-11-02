@@ -2655,6 +2655,13 @@ bool EarlySemantics::Visit(AST::MMA& n) {
     std::string op0_sym = AST::FragName(op.ExecOperand(0));
     auto op0_ty = op.ExecOperand(0)->GetType();
     auto op0_sty = dyn_cast<SpannedType>(op0_ty);
+    // The accumulator symbol must exist before the classification below can
+    // look it up; report the diagnostic here instead of letting InScopeName
+    // assert on an undeclared symbol.
+    if (!SSTab().IsDeclared(op0_sym)) {
+      Error1(n.LOC(), "symbol `" + op0_sym + "' is used before declaration.");
+      break;
+    }
     auto op0_scoped = SSTab().InScopeName(op0_sym);
     bool fragment_accumulator =
         mma_fragment_symbols.count(op0_scoped) ||
@@ -2713,6 +2720,16 @@ bool EarlySemantics::Visit(AST::MMA& n) {
     auto sty = op.StoreTo()->GetType();
     if (!isa<SpannedType>(sty))
       Error1(n.LOC(), "Expected a spanned buffer for MMA store.");
+    else if (auto ce = dyn_cast<AST::CastExpr>(op.StoreFrom())) {
+      // `mma.store __to<T>(acc), dst` names the conversion the store already
+      // performs. A different T is a mistake, not a request to convert twice.
+      auto dst_bt = cast<SpannedType>(sty)->ElementType();
+      if (ce->ToType() != dst_bt)
+        Error1(ce->LOC(),
+               "mma.store explicit conversion to '" + STR(ce->ToType()) +
+                   "' does not match the destination element type '" +
+                   STR(dst_bt) + "'.");
+    }
   } break;
   case AST::MMAOperation::Scale: {
     std::string acc_sym = AST::FragName(op.ScaleAccumulator());

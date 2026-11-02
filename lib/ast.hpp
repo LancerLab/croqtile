@@ -4920,6 +4920,9 @@ inline bool FragIsArrayElem(const ptr<AST::Expr>& e) {
 }
 
 inline const std::string FragName(const ptr<AST::Expr>& e) {
+  // `mma.store __to<T>(frag), dst` wraps the fragment operand in an explicit
+  // cast. The fragment identity is the value the cast reads.
+  if (isa<AST::CastExpr>(e)) return FragName(cast<AST::Expr>(e->GetR()));
   if (auto id = e->GetSymbol()) return id->name;
   if (auto ref = e->GetReference())
     if (auto ca = dyn_cast<AST::ChunkAt>(ref)) return ca->RefSymbol();

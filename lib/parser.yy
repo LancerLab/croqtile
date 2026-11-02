@@ -2563,6 +2563,16 @@ mma_stmt
         auto op = AST::Make<AST::MMAOperation>($4, $6, false, $8, nullptr);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
+    | MMA STORE TOCAST LT fundamental_type GT LPAREN frag_expr RPAREN COMMA chunkat_expr {
+        // Explicit spelling of the store-boundary conversion. The type must
+        // match the destination element type; it does not request a second
+        // conversion (checked in early semantics).
+        auto ce = AST::Make<AST::CastExpr>(@3, $8);
+        ce->SetTo($5);
+        ce->SetExplicit(true);
+        auto op = AST::Make<AST::MMAOperation>(ce, $11);
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
     | MMA SCALE frag_expr COMMA chunkat_expr COMMA s_expr {
       auto op = AST::Make<AST::MMAOperation>($3, $5, $7);
       $$ = AST::Make<AST::MMA>(@1, op);
