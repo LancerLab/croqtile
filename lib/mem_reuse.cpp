@@ -705,7 +705,7 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
     HeapSimulator simulator;
     HeapSimulator::HBOverride hb_override = nullptr;
     HeapSimulator::HBMustInterfere hb_must_interfere = nullptr;
-    std::vector<std::pair<std::string, std::string>> hb_overlapped_pairs;
+    auto& hb_overlapped_pairs = ctx.hb_overlapped_pairs;
     if (sto == Storage::SHARED) {
       const auto& hb_graphs = la.HBGraphs();
       const LivenessAnalyzer::HBGraph* hb_graph_ptr = nullptr;

@@ -81,6 +81,7 @@ set(CORE_SOURCES
   mem_reuse.cpp
   resource_allocator.cpp
   dma_completion_analysis.cpp
+  sync_recovery.cpp
   diversity_analysis.cpp
   scalar_evolution.cpp
   pipeline.cpp

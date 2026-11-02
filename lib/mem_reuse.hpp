@@ -1,6 +1,8 @@
 #ifndef __CHOREO_MEM_REUSE_HPP__
 #define __CHOREO_MEM_REUSE_HPP__
 
+#include "sync_recovery.hpp"
+
 #include "ast.hpp"
 #include "codegen.hpp"
 #include "context.hpp"
@@ -74,6 +76,10 @@ private:
     std::vector<size_t> local_root_sizes;
     std::vector<std::string> local_root_names;
     std::map<std::string, size_t> local_buffer_roots;
+    // Buffer pairs that liveness-interfere but were merged because the HB
+    // override proved them separated. Recorded during allocation; consumed
+    // by the sync-recovery pass (handover candidates).
+    std::vector<std::pair<std::string, std::string>> hb_overlapped_pairs;
     void SortBuffers() {
       for (auto& b : buffers) b.Sort();
       for (auto& b : dynamic_buffers) b.Sort();
@@ -138,6 +144,12 @@ public:
   }
   ~MemReuse() {}
 
+  // --- sync-recovery seam (read-only views for the SyncRecovery pass) ---
+  const LivenessAnalyzer& LA() const { return la; }
+  const std::map<std::string, DevFuncMemReuseCtx>& RecoveryDFCtxs() const {
+    return df_ctxs;
+  }
+
 private:
   bool BeforeVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
@@ -178,9 +190,10 @@ private:
 class MemoryReuse : public VisitorGroup {
 private:
   MemReuse mr;
+  SyncRecovery sr;
 
 public:
-  MemoryReuse() : VisitorGroup("MemoryReuse", mr) {}
+  MemoryReuse() : VisitorGroup("MemoryReuse", mr, sr) { sr.Bind(&mr); }
 };
 
 } // end namespace Choreo
