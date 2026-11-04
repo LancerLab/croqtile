@@ -452,6 +452,15 @@ public:
   LibCallArgRange(const std::string& /*name*/) const {
     return {-1, -1};
   }
+  // Whether this lib call is a row reduction with a synchronous buffer
+  // contract: it reads its whole input, writes one element per reduced row and
+  // is complete when it returns. Analyses that would otherwise treat the call
+  // as opaque use this to record the real effects instead (in particular, a
+  // reduction legitimately leaves the tail of the destination untouched). The
+  // reduce family's membership is target-specific, so the target answers.
+  virtual bool IsSynchronousReduceLibCall(const std::string& /*name*/) const {
+    return false;
+  }
   // Arch gate for the elementwise ("arithmetic") builtins.  Some of them only
   // have a device entry point from a later architecture on, so naming them for
   // an older one cannot work and has to be rejected rather than lowered to a

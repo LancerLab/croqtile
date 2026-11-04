@@ -312,7 +312,8 @@ bool BufferAccessAnalyzer::Visit(AST::MMA& n) {
 }
 
 bool BufferAccessAnalyzer::Visit(AST::Call& n) {
-  if (n.IsLibCall() && n.function->name == "__lib_reduce_sum" &&
+  if (n.IsLibCall() &&
+      CCtx().GetTarget().IsSynchronousReduceLibCall(n.function->name) &&
       n.arguments->Count() == 5) {
     // The builtin has a known synchronous buffer contract. In particular its
     // result is a thread write consumed by a later DMA, not an opaque read of
