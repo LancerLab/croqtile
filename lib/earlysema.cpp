@@ -148,9 +148,31 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
         SSTab().DefineSymbol(scoped_p, MakeIntegerType());
     }
   } else if (auto fr = dyn_cast<AST::FragReduce>(&n)) {
-    if (!fr->IsAllReduce() && fr->dim != 1)
-      Error1(fr->LOC(),
-             "frag.reduce currently only supports dim=1 (column reduction).");
+    // The node is shared by the fragment lowering (a `frag` source, one value
+    // per row) and the buffer lowering (a span or an MMA accumulator, either
+    // direction). The operand types decide which one
+    // applies, and type inference has not run yet, so the direction table is
+    // the target's own statement of what it can lower: a bit set means this
+    // op/direction has a lowering on the selected arch. Anything outside the
+    // table is a diagnostic here rather than a statement a code generator
+    // silently drops.
+    if (fr->IsAllReduce()) {
+      if (!CCtx().TargetSupportMMAUKernel() &&
+          !CCtx().HasFeature(ChoreoFeature::MMA, CCtx().GetArch()))
+        Error1(fr->LOC(), "'all_reduce_sum' requires a fragment layout target "
+                          "and is not available on '" +
+                              CCtx().GetTarget().Name() + "'.");
+    } else if (fr->dim != 0 && fr->dim != 1) {
+      Error1(fr->LOC(), fr->OpName() + std::string(": dim must be 0 or 1."));
+    } else if (!(CCtx().GetTarget().ReduceStatementDirections(
+                     CCtx().GetArch()) &
+                 Target::ReduceStatementBit(fr->OpSuffix(), fr->dim))) {
+      Error1(fr->LOC(), std::string(fr->OpName()) + " is not lowered on '" +
+                            CCtx().GetTarget().Name() + "' in the " +
+                            (fr->dim == 0 ? "column" : "row") +
+                            " direction (dim=" + std::to_string(fr->dim) +
+                            ").");
+    }
   }
 
   return true;

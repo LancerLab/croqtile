@@ -311,6 +311,24 @@ bool BufferAccessAnalyzer::Visit(AST::MMA& n) {
   return true;
 }
 
+bool BufferAccessAnalyzer::Visit(AST::FragReduce& n) {
+  // The buffer-form reduction has the same synchronous contract as
+  // `__lib_reduce_*`: it reads the source view and writes the destination
+  // before the next statement runs. Recording both edges is what lets fence
+  // insertion see the reduction as a consumer of the source DMA and a
+  // producer of the destination DMA.
+  if (n.IsAllReduce()) {
+    RecordAll(AccessKind::READ, &n, GetAllSymbolicOperands(n.src.get()),
+              AccessEntity::THREADS);
+    return true;
+  }
+  RecordAll(AccessKind::READ, &n, GetAllSymbolicOperands(n.src.get()),
+            AccessEntity::THREADS);
+  RecordAll(AccessKind::WRITE, &n, GetAllSymbolicOperands(n.dst.get()),
+            AccessEntity::THREADS);
+  return true;
+}
+
 bool BufferAccessAnalyzer::Visit(AST::Call& n) {
   if (n.IsLibCall() &&
       CCtx().GetTarget().IsSynchronousReduceLibCall(n.function->name) &&

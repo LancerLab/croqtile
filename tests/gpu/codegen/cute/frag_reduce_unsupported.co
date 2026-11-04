@@ -1,0 +1,33 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s --check-prefix=MIN
+// RUN: not choreo -es -t cute -arch=sm_90a -DDIM0=1 %s -o - 2>&1 | FileCheck %s --check-prefix=COL
+
+// The fragment lowering reduces the last dimension and implements the two ops
+// its runtime header has functors for. A direction or an op outside that set
+// used to be lowered as something else without a diagnostic: reduce_min came
+// out as a sum, and a dim=0 reduction came out as a row reduction, i.e. the
+// transposed answer.
+
+#if DIM0
+__co__ void column_direction() {
+  parallel b by 1 : block {
+    parallel g by 1 : group-4 {
+      frag f32[64, 128] scores {1.0f};
+      frag f32[64] out;
+      reduce_max(out, scores, 0);
+    }
+  }
+}
+// COL: frag.reduce_max is not lowered on 'cute' in the column direction (dim=0).
+#else
+__co__ void min_op() {
+  parallel b by 1 : block {
+    parallel g by 1 : group-4 {
+      frag f32[64, 128] scores {1.0f};
+      frag f32[64] out;
+      reduce_min(out, scores, 1);
+    }
+  }
+}
+// MIN: frag.reduce_min is not lowered on 'cute' in the row direction (dim=1).
+#endif

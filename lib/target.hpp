@@ -461,6 +461,25 @@ public:
   virtual bool IsSynchronousReduceLibCall(const std::string& /*name*/) const {
     return false;
   }
+  // Which directions of the `reduce_<op>(dst, src, dim)` statement the target
+  // lowers, as a 4-bit mask over {max, sum, min, prod} x {row (dim 1), column
+  // (dim 0)}. The default is zero: no direction, so a target that does not
+  // override this has no lowering and sema rejects the statement instead of
+  // letting it vanish from the generated kernel.
+  virtual unsigned ReduceStatementDirections(const ArchId& /*arch*/) const {
+    return 0;
+  }
+  // The direction bit for one statement. Bit 0 is max, 1 sum, 2 min, 3 prod;
+  // the high half is the column direction.
+  static unsigned ReduceStatementBit(const std::string& op_suffix, int dim) {
+    unsigned index = op_suffix == "max"    ? 0
+                     : op_suffix == "sum"  ? 1
+                     : op_suffix == "min"  ? 2
+                     : op_suffix == "prod" ? 3
+                                           : 4;
+    if (index == 4) return 0;
+    return 1u << (index + (dim == 0 ? 4 : 0));
+  }
   // Arch gate for the elementwise ("arithmetic") builtins.  Some of them only
   // have a device entry point from a later architecture on, so naming them for
   // an older one cannot work and has to be rejected rather than lowered to a

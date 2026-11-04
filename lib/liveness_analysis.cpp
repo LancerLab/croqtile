@@ -43,7 +43,7 @@ using namespace Choreo;
 //   4. Update kNumStmtTypes below
 // The runtime assert in HasStmt() will fire if the count is wrong.
 // ==========================================================================
-static constexpr size_t kNumStmtTypes = 21;
+static constexpr size_t kNumStmtTypes = 22;
 static_assert(kNumStmtTypes == LivenessAnalyzer::NumVisitOverrides(),
               "HasStmt type count and Visit override count are out of sync. "
               "When adding a new statement node type, update both HasStmt() "
@@ -71,7 +71,7 @@ inline bool LivenessAnalyzer::IsRef(const AST::Node& n) {
 
 bool LivenessAnalyzer::HasStmt(const AST::Node& n) const {
   // Each type here must have a Visit() override and DumpStmtBriefly() case.
-  // Count must match kNumStmtTypes (currently 18).
+  // Count must match kNumStmtTypes.
   bool is_stmt = isa<AST::NamedTypeDecl>(&n) ||     // 1
                  isa<AST::NamedVariableDecl>(&n) || // 2
                  isa<AST::Assignment>(&n) ||        // 3
@@ -92,7 +92,8 @@ bool LivenessAnalyzer::HasStmt(const AST::Node& n) const {
                  isa<AST::InThreadsBlock>(&n) ||    // 18
                  isa<AST::IfElseBlock>(&n) ||       // 19
                  isa<AST::ChoreoFunction>(&n) ||    // 20
-                 isa<AST::AsmStmt>(&n);             // 21
+                 isa<AST::AsmStmt>(&n) ||           // 21
+                 isa<AST::FragReduce>(&n);          // 22
   return is_stmt;
 }
 
@@ -1178,6 +1179,8 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
   } else if (const auto ret = dyn_cast<AST::Return>(&n)) {
     os << "return";
     if (ret->value) os << " " << PSTR(ret->value);
+  } else if (const auto fr = dyn_cast<AST::FragReduce>(&n)) {
+    os << STR(*fr);
   } else if (const auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     os << "parallel ";
     os << pb->BPV()->name << " = {";
@@ -2054,6 +2057,19 @@ bool LivenessAnalyzer::Visit(AST::MMA& n) {
   } break;
   default: break;
   }
+  return true;
+}
+
+bool LivenessAnalyzer::Visit(AST::FragReduce& n) {
+  TraceEachVisit(n);
+  // A reduction reads its source and writes its destination. The write is a
+  // USE, not a DEF: the destination buffer's live range starts at its own
+  // declaration, and a reduce statement that does not keep the source alive
+  // would let a later allocation reuse the source's storage while the
+  // reduction still reads it.
+  stmt_linfo[current_stmt].buffer_related = true;
+  AddUse(current_stmt, n.SrcName());
+  if (!n.IsAllReduce()) AddUse(current_stmt, n.DstName());
   return true;
 }
 

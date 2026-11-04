@@ -719,6 +719,8 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
   "apply"    return Choreo::Parser::make_APPLY(yytext, loc);
   "reduce_max" return Choreo::Parser::make_REDUCE_MAX_STMT(yytext, loc);
   "reduce_sum" return Choreo::Parser::make_REDUCE_SUM_STMT(yytext, loc);
+  "reduce_min" return Choreo::Parser::make_REDUCE_MIN_STMT(yytext, loc);
+  "reduce_prod" return Choreo::Parser::make_REDUCE_PROD_STMT(yytext, loc);
   "all_reduce_sum" return Choreo::Parser::make_ALL_REDUCE_SUM_STMT(yytext, loc);
   "copy"     return Choreo::Parser::make_COPY_STMT(yytext, loc);
   "wait"     return Choreo::Parser::make_WAIT(yytext, loc);

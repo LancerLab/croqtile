@@ -3755,12 +3755,18 @@ struct FragTransfer : public Node, public TypeIDProvider<FragTransfer> {
   __UDT_TYPE_INFO__(Node, FragTransfer)
 };
 
-// frag.reduce_max src, dst, dim;
-// frag.reduce_sum src, dst, dim;
-// Row-wise (dim=1) reduction of a 2D fragment into a 1D fragment.
-// frag.all_reduce_sum value;
+// reduce_max src, dst, dim;
+// reduce_sum src, dst, dim;
+// Row-wise (dim=1) reduction of a 2D source into a 1D destination.
+// all_reduce_sum value;
 // Cross-owner reduction and broadcast of a replicated 1D fragment.
-enum class FragReduceOp { MAX, SUM, ALL_REDUCE_SUM };
+//
+// The same node carries both layers: the fragment targets reduce `frag`
+// values, while a buffer target accepts a plain span (and an MMA accumulator)
+// and turns the statement into the buffer-reduction lowering, so
+// `reduce_*(...)` is the source-level spelling of
+// `__lib_reduce_*(dst, src, count, width, width)`.
+enum class FragReduceOp { MAX, SUM, MIN, PROD, ALL_REDUCE_SUM };
 
 struct FragReduce : public Node, public TypeIDProvider<FragReduce> {
   FragReduceOp op;
@@ -3776,9 +3782,24 @@ struct FragReduce : public Node, public TypeIDProvider<FragReduce> {
     switch (op) {
     case FragReduceOp::MAX: return "frag.reduce_max";
     case FragReduceOp::SUM: return "frag.reduce_sum";
+    case FragReduceOp::MIN: return "frag.reduce_min";
+    case FragReduceOp::PROD: return "frag.reduce_prod";
     case FragReduceOp::ALL_REDUCE_SUM: return "frag.all_reduce_sum";
     }
     return "frag.reduce_?";
+  }
+
+  // The source-level spelling of the operation, which is also the suffix the
+  // buffer lowering uses for both the library entry point and its fallback.
+  const char* OpSuffix() const {
+    switch (op) {
+    case FragReduceOp::MAX: return "max";
+    case FragReduceOp::SUM: return "sum";
+    case FragReduceOp::MIN: return "min";
+    case FragReduceOp::PROD: return "prod";
+    case FragReduceOp::ALL_REDUCE_SUM: return "sum";
+    }
+    return "";
   }
 
   ptr<Node> CloneImpl() const override {

@@ -231,6 +231,7 @@ extern int yylex();
 %token <std::string> LIB_CALL
 %token <std::string> FRAG
 %token <std::string> APPLY REDUCE_MAX_STMT REDUCE_SUM_STMT ALL_REDUCE_SUM_STMT COPY_STMT
+%token <std::string> REDUCE_MIN_STMT REDUCE_PROD_STMT
 %token <std::string> ASM ASM_VOLATILE ASM_GOTO
 %token <std::string> INTRINSIC_PREFIX
 %token <std::string> INTRINSIC_NAMESPACE
@@ -2624,6 +2625,12 @@ frag_stmt
       }
     | REDUCE_SUM_STMT LPAREN frag_expr COMMA frag_expr COMMA integer_value RPAREN {
         $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::SUM, $5, $3, $7);
+      }
+    | REDUCE_MIN_STMT LPAREN frag_expr COMMA frag_expr COMMA integer_value RPAREN {
+        $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::MIN, $5, $3, $7);
+      }
+    | REDUCE_PROD_STMT LPAREN frag_expr COMMA frag_expr COMMA integer_value RPAREN {
+        $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::PROD, $5, $3, $7);
       }
     | ALL_REDUCE_SUM_STMT LPAREN frag_expr RPAREN {
         $$ = AST::Make<AST::FragReduce>(

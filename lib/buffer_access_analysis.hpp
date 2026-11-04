@@ -40,6 +40,7 @@ struct BufferAccessAnalyzer : public VisitorWithSymTab {
   bool Visit(AST::DMA& n) override;
   bool Visit(AST::BufferMap& n) override;
   bool Visit(AST::MMA& n) override;
+  bool Visit(AST::FragReduce& n) override;
   bool Visit(AST::Call& n) override;
   bool Visit(AST::Rotate& n) override;
 
