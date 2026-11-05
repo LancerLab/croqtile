@@ -1,0 +1,18 @@
+// An oversize allocation reports the exact used/limit byte counts of the
+// selected target, and the envelope aggregates the failure by category.
+//
+// RUN: not choreo -es -t cute -arch=sm_86 -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s
+
+__co__ void oversized_shared() {
+  parallel p by 1 {
+    shared s8[3000000000] buf;
+    buf.at(0) = 1;
+  }
+}
+
+// CHECK: <compile_result status="rejected"{{.*}}categories="memory-capacity:1" grouped="0"{{.*}}>
+// CHECK-NEXT: <diagnostic severity="error" category="memory-capacity"{{.*}}occurrences="1"{{.*}}>
+// CHECK-NEXT: <constraint>Compile-time on-chip memory budget; predicate: used_bytes &lt;= limit_bytes</constraint>
+// CHECK-NEXT: <observed>storage = shared; used_bytes = 3000000000; limit_bytes = 102400; valid: used_bytes &lt;= 102400</observed>
+// CHECK: <do>Shrink the buffer or reduce the pipeline stages.</do>
+// CHECK: </compile_result>

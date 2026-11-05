@@ -1789,10 +1789,26 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
         for (size_t index = 0; index < cur_vns.size(); ++index) {
           auto tfi = vn.GenValueItemFromValueNumber(tfs_vns[index]);
           auto idi = vn.GenValueItemFromValueNumber(idx_vns[index]);
-          if (StaticFail(sbe::clt(tfi, idi)))
-            Error1(idx->LOC(), "index out of bounds for dimension " +
-                                   std::to_string(index) + " (" + STR(idi) +
-                                   " >= " + PSTR(tfi) + ").");
+          if (StaticFail(sbe::clt(tfi, idi))) {
+            AgentFacts facts;
+            facts.category = "oob-index";
+            facts.constraint = "Index within tensor extent";
+            facts.predicate = "index < extent";
+            facts.observed.push_back("dim = " + std::to_string(index));
+            facts.observed.push_back("index = " + STR(idi));
+            facts.observed.push_back("extent = " + PSTR(tfi));
+            facts.valid = "0 <= index < extent";
+            facts.repair_do = "Use an index below the dimension extent.";
+            facts.repair_why = "The index reaches or exceeds the declared "
+                               "extent.";
+            facts.repair_alt = "Guard dynamic indices with a runtime check.";
+            facts.confidence = "certain";
+            ErrorWithFacts(idx->LOC(),
+                           "index out of bounds for dimension " +
+                               std::to_string(index) + " (" + STR(idi) +
+                               " >= " + PSTR(tfi) + ").",
+                           facts);
+          }
           // TODO: index upper-bound check
         }
       }

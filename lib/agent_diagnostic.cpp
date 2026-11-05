@@ -387,6 +387,10 @@ void EmitAgentDiagnostics(std::ostream& os, const std::string& status,
   if (status == "in_progress") agent_entries.clear();
   std::vector<std::string> bodies;
   size_t total_tokens = 0;
+  // Aggregated view for the harness: how many failures of each kind, and how
+  // many duplicate emissions were folded into the emitted diagnostics.
+  std::map<std::string, size_t> category_counts;
+  size_t grouped = 0;
   for (const auto& [key, original] : agent_entries) {
     (void)key;
     if (bodies.size() == kMaxDiagnostics) break;
@@ -406,10 +410,19 @@ void EmitAgentDiagnostics(std::ostream& os, const std::string& status,
     InsertTokenCount(body, tokens);
     bodies.push_back(std::move(body));
     total_tokens += tokens;
+    category_counts[e.facts.category] += e.occurrences;
+    grouped += e.occurrences - 1;
   }
 
   const size_t omitted = agent_entries.size() - bodies.size();
   const TargetFacts tf = CollectTargetFacts();
+  std::ostringstream categories;
+  bool first_category = true;
+  for (const auto& [category, count] : category_counts) {
+    if (!first_category) categories << ',';
+    first_category = false;
+    categories << category << ':' << count;
+  }
   // Target limits and assessment outcomes travel as envelope attributes (not
   // another line), so the diagnostics stay the first lines an agent reads.
   os << "<compile_result status=\"" << XmlEscape(status) << "\" target=\""
@@ -418,7 +431,9 @@ void EmitAgentDiagnostics(std::ostream& os, const std::string& status,
      << "\" shared_mem_bytes=\"" << tf.shared_mem_bytes
      << "\" assessments_proved=\"" << tf.proved
      << "\" assessments_violated=\"" << tf.violated
-     << "\" assessments_runtime=\"" << tf.runtime << "\" stage=\""
+     << "\" assessments_runtime=\"" << tf.runtime
+     << "\" categories=\"" << XmlEscape(categories.str())
+     << "\" grouped=\"" << grouped << "\" stage=\""
      << XmlEscape(stage) << "\" exit_code=\"" << exit_code
      << "\" diagnostics=\"" << bodies.size() << "\" omitted=\"" << omitted
      << "\" tokens=\"" << total_tokens << "\" budget_per_diagnostic=\""

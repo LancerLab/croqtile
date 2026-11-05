@@ -1,0 +1,23 @@
+// An out-of-bounds index publishes the dimension, the offending index and
+// the declared extent. The envelope also shows how many failures of each
+// category were emitted, including ones still on the generic fallback.
+//
+// RUN: not choreo -es -t cute -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s
+
+__co__ void foo(s32 [77, 320] data, int i) {
+  parallel p by 2 foreach x in 3 {
+    f = dma.copy data.subspan(32, 44).at(0, i) => shared;
+    f1 = dma.copy f.data.modspan(18, 20).at(x, 7) => shared;
+    index = {3, 2};
+    dma.copy f1.data.subspan(1, 4).at(index) => shared;
+    dma.copy f1.data.modspan(4, 3).at(f.data.at(i, 7), 5) => shared;
+    dma.copy f1.view([2, 2]).from(101, 7) => shared;
+  }
+}
+
+// CHECK: <compile_result status="rejected"{{.*}}categories="{{.*}}oob-index:3{{.*}}" grouped="0"{{.*}}>
+// CHECK: <diagnostic severity="error" category="oob-index"{{.*}}occurrences="1"{{.*}}>
+// CHECK-NEXT: <constraint>Index within tensor extent; predicate: index &lt; extent</constraint>
+// CHECK-NEXT: <observed>dim = 1; index = 7; extent = 2; valid: 0 &lt;= index &lt; extent</observed>
+// CHECK: <do>Use an index below the dimension extent.</do>
+// CHECK: </compile_result>

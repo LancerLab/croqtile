@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <numeric>
 
+#include "agent_diagnostic.hpp"
 #include "ast.hpp"
 #include "context.hpp"
 #include "visitor.hpp"
@@ -329,7 +330,24 @@ private:
           error_msg += "\n\tNote: For " + CCtx().TargetName() +
                        " target, the local memory limits can be set via "
                        "`--max-local-mem-capacity` option.";
-        Error1(n.LOC(), error_msg);
+        AgentFacts facts;
+        facts.category = "memory-capacity";
+        facts.constraint = "Compile-time on-chip memory budget";
+        facts.predicate = "used_bytes <= limit_bytes";
+        facts.observed.push_back("storage = " +
+                                 __internal__::GetStringFrom(sto));
+        facts.observed.push_back(
+            "used_bytes = " + std::to_string(ct_tot_mem_usage[sto]));
+        facts.observed.push_back(
+            "limit_bytes = " + std::to_string(mem_usage_limit[sto]));
+        facts.valid = "used_bytes <= " +
+                      std::to_string(mem_usage_limit[sto]);
+        facts.repair_do = "Shrink the buffer or reduce the pipeline stages.";
+        facts.repair_why = "The declared footprint exceeds the target's "
+                           "on-chip capacity.";
+        facts.repair_alt = "Move the buffer to global memory.";
+        facts.confidence = "certain";
+        ErrorWithFacts(n.LOC(), error_msg, facts);
       } else if (sto == Storage::LOCAL) {
         // Warn-only band between the best-practice budget and the hard cap.
         const size_t budget = CCtx().GetLocalMemBudget();

@@ -1,4 +1,5 @@
 #include "mem_reuse.hpp"
+#include "agent_diagnostic.hpp"
 #include "ast.hpp"
 #include "aux.hpp"
 #include "context.hpp"
@@ -232,13 +233,29 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
       auto check_capacity = [&](size_t size, Storage sto) -> bool {
         if (size <= (size_t)std::numeric_limits<int>::max()) return true;
         const size_t cap = CCtx().GetMemCapacity(sto);
-        Error1(n.LOC(), __internal__::GetStringFrom(sto) +
-                            " memory OUT OF BOUND!\n\tIn the scope " +
-                            SSTab().ScopeName() + ", a " +
-                            __internal__::GetStringFrom(sto) +
-                            " allocation of " + std::to_string(size) +
-                            " bytes exceeds the limit of " +
-                            std::to_string(cap) + " bytes.");
+        AgentFacts facts;
+        facts.category = "memory-capacity";
+        facts.constraint = "Compile-time on-chip memory budget";
+        facts.predicate = "used_bytes <= limit_bytes";
+        facts.observed.push_back("storage = " +
+                                 __internal__::GetStringFrom(sto));
+        facts.observed.push_back("used_bytes = " + std::to_string(size));
+        facts.observed.push_back("limit_bytes = " + std::to_string(cap));
+        facts.valid = "used_bytes <= " + std::to_string(cap);
+        facts.repair_do = "Shrink the buffer or reduce the pipeline stages.";
+        facts.repair_why = "The declared footprint exceeds the target's "
+                           "on-chip capacity.";
+        facts.repair_alt = "Move the buffer to global memory.";
+        facts.confidence = "certain";
+        ErrorWithFacts(n.LOC(),
+                       __internal__::GetStringFrom(sto) +
+                           " memory OUT OF BOUND!\n\tIn the scope " +
+                           SSTab().ScopeName() + ", a " +
+                           __internal__::GetStringFrom(sto) +
+                           " allocation of " + std::to_string(size) +
+                           " bytes exceeds the limit of " +
+                           std::to_string(cap) + " bytes.",
+                       facts);
         return false;
       };
       bool capacity_ok =
