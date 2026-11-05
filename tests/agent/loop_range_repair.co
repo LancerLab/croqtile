@@ -1,0 +1,23 @@
+// A second rule family: the loop-range check keeps the whole rejection inside
+// the per-diagnostic token budget, including the source statement and repair.
+//
+// RUN: not choreo -es -t cc -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s
+
+__co__ void zero_step(f32 [6, 4] x) {
+  parallel p by 1 : block {
+    with {a} in [6] {
+      foreach a(0:6:0) {
+        x.at(a, 0) = 1.0f;
+      }
+    }
+  }
+}
+
+// CHECK: <compile_result status="rejected" {{.*}} diagnostics="1" omitted="0" {{.*}}>
+// CHECK-NEXT: <diagnostic severity="error" category="loop-range" {{.*}} tokens="{{[1-9][0-9]?}}">
+// CHECK-NEXT: <constraint>foreach iteration space; predicate: step and extent positive</constraint>
+// CHECK-NEXT: <observed>message = {{.*}}; valid: step at least 1</observed>
+// CHECK-NEXT: <location file="{{.*}}loop_range_repair.co" line="{{[0-9]+}}" column="{{[0-9]+}}">foreach a(0:6:0) {</location>
+// CHECK-NEXT: <repair {{.*}}><do>Use a positive step{{.*}}</do><why>{{.*}}</why><alt>{{.*}}</alt></repair>
+// CHECK-NEXT: </diagnostic>
+// CHECK-NEXT: </compile_result>

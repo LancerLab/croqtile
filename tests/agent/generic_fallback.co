@@ -1,0 +1,29 @@
+// Checks without a dedicated rule still get all four blocks: an agent never
+// has to parse prose to find the location and a next action. Diagnostics are
+// grouped, so repeated template instantiations do not flood the context.
+//
+// RUN: not choreo -es -t cc -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s
+
+__co__ void reassign_int() {
+  int a = 1;
+  a = 2;
+}
+
+__co__ void reassign_bool() {
+  bool b = true;
+  b = false;
+}
+
+__co__ void reassign_third() {
+  int c = 1;
+  c = 3;
+}
+
+// CHECK: <compile_result status="rejected" {{.*}} diagnostics="3" omitted="0" {{.*}}>
+// CHECK-NEXT: <diagnostic severity="error" category="general"{{.*}}occurrences="1"{{.*}}>
+// CHECK-NEXT: <constraint>only mutables can be re-assigned{{.*}}</constraint>
+// CHECK-NEXT: <observed>message = {{.*}}; valid: see -target-info</observed>
+// CHECK-NEXT: <location file="{{.*}}generic_fallback.co" line="{{[0-9]+}}" column="{{[0-9]+}}">a = 2;</location>
+// CHECK-NEXT: <repair {{.*}}><do>Fix the construct at this location.</do><why>{{.*}}</why><alt>{{.*}}</alt></repair>
+// CHECK: </compile_result>
+// CHECK-NOT: <compile_result

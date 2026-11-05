@@ -1,4 +1,5 @@
 #include "command_line.hpp"
+#include "agent_diagnostic.hpp"
 #include "context.hpp"
 #include "static_check_info.hpp"
 #include <cstdlib>
@@ -315,6 +316,9 @@ bool CommandLine::Parse(int argc, char** argv) {
         value == "-static-check-info" || value == "--static-check-info" ||
         value.rfind("-static-check-info=", 0) == 0 ||
         value.rfind("--static-check-info=", 0) == 0 ||
+        value == "-agent-diagnostics" || value == "--agent-diagnostics" ||
+        value.rfind("-agent-diagnostics=", 0) == 0 ||
+        value.rfind("--agent-diagnostics=", 0) == 0 ||
         value.rfind("-Rperformance", 0) == 0)
       continue;
     append_option(value);
@@ -339,6 +343,10 @@ bool CommandLine::Parse(int argc, char** argv) {
     }
     if (arg == "-static-check-info" || arg == "--static-check-info") {
       static_check_info = "-";
+      continue;
+    }
+    if (arg == "-agent-diagnostics" || arg == "--agent-diagnostics") {
+      agent_diagnostics = "-";
       continue;
     }
 
@@ -423,6 +431,12 @@ bool CommandLine::Parse(int argc, char** argv) {
     ret_code = 1;
     return false;
   }
+  if (!agent_diagnostics.GetValue().empty() && !r.StdinAsInput() &&
+      r.GetInputFileName().empty()) {
+    std::cerr << "error: -agent-diagnostics requires an input file.\n";
+    ret_code = 1;
+    return false;
+  }
 
   // set the compilation targets
   if (!CCtx().SetTarget(TargetRegistry::Create(ToLower(target.GetValue())))) {
@@ -443,7 +457,8 @@ bool CommandLine::Parse(int argc, char** argv) {
     // A target query is useful without a source file. Returning false with a
     // zero code lets the driver terminate successfully without entering the
     // source pipeline. If a source/static report is also present, continue.
-    if (r.GetInputFileName().empty() && static_check_info.GetValue().empty()) {
+    if (r.GetInputFileName().empty() && static_check_info.GetValue().empty() &&
+        agent_diagnostics.GetValue().empty()) {
       ret_code = 0;
       return false;
     }

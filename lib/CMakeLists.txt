@@ -97,6 +97,7 @@ set(CODEGEN_SOURCES
 )
 
 set(CL_SOURCES
+  agent_diagnostic.cpp
   command_line.cpp
   static_check_info.cpp
 )

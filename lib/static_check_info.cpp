@@ -1,5 +1,6 @@
 #include "static_check_info.hpp"
 
+#include "agent_diagnostic.hpp"
 #include "choreo_template.hpp"
 #include "codegen.hpp"
 #include "context.hpp"
@@ -144,7 +145,8 @@ void EmitStaticCheckContextJson(std::ostream& os) {
   bool first_option = true;
   for (const auto& [name, value] : registry.EffectiveOptions()) {
     if (name == "-static-check-info" || name == "-target-info" ||
-        name == "-fstatic-check-details" || name == "-Rperformance")
+        name == "-fstatic-check-details" || name == "-Rperformance" ||
+        name == "-agent-diagnostics" || name == "--agent-diagnostics")
       continue;
     if (!first_option) os << ',';
     first_option = false;
@@ -484,6 +486,9 @@ void RecordStaticCheckError(const std::string& file, int line, int column,
                             const std::string& message) {
   if (!static_check_info.GetValue().empty())
     ++report_errors[{file, line, column, message}];
+  // Every error emission (semantic passes, parser, template instantiation)
+  // funnels through here, so the agent envelope covers all checks for free.
+  RecordAgentDiagnostic(file, line, column, "error", message);
 }
 
 void EmitIncompleteStaticCheckInfo(std::ostream& os, const std::string& status,

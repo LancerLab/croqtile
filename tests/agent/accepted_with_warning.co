@@ -1,0 +1,21 @@
+// A successful compilation still publishes a machine-readable result, and a
+// warning is reported with the same envelope (the agent can choose to act).
+//
+// RUN: choreo -es -t cc -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s
+
+__co__ void empty_range(f32 [6, 4] x) {
+  parallel p by 1 : block {
+    with {b} in [6] {
+      foreach b(:-6:1) {
+        x.at(b, 0) = 1.0f;
+      }
+    }
+  }
+}
+
+// CHECK: <compile_result status="accepted"{{.*}}exit_code="0"{{.*}}diagnostics="1" omitted="0"{{.*}}>
+// CHECK-NEXT: <diagnostic severity="warning" category="loop-range"
+// CHECK-NEXT: <constraint>foreach iteration space; predicate: step and extent positive</constraint>
+// CHECK: <repair
+// CHECK: </diagnostic>
+// CHECK-NEXT: </compile_result>

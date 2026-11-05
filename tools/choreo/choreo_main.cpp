@@ -1,3 +1,4 @@
+#include "agent_diagnostic.hpp"
 #include "ast.hpp"
 #include "choreo_api.hpp"
 #include "command_line.hpp"
@@ -309,11 +310,17 @@ static int CompileInput() {
 
 static int SingleFileCompile() {
   const auto path = static_check_info.GetValue();
+  const auto agent_path = agent_diagnostics.GetValue();
   // Invalidate an older successful result before starting compilation. If the
   // process is interrupted, consumers see "in_progress", never stale success.
   if (!path.empty() && path != "-" &&
       !WriteReportFile(path, [](std::ostream& os) {
         EmitIncompleteStaticCheckInfo(os, "in_progress", "start", 0);
+      }))
+    return 1;
+  if (!agent_path.empty() && agent_path != "-" &&
+      !WriteReportFile(agent_path, [](std::ostream& os) {
+        EmitAgentDiagnostics(os, "in_progress", "start", 0);
       }))
     return 1;
   int status = CompileInput();
@@ -335,6 +342,17 @@ static int SingleFileCompile() {
              report_complete) {
     std::ostringstream unused;
     CCtx().GetTarget().EmitStaticCheckInfo(CompilerAPI::GetAST(), unused);
+  }
+  if (!agent_path.empty()) {
+    // A rejection is a directive, not a bare pass/fail bit: publish the
+    // structured messages for the harness to feed back to the agent.
+    const std::string agent_status = status ? "rejected"
+                                    : report_complete ? "accepted"
+                                                      : "incomplete";
+    if (!WriteReportFile(agent_path, [&](std::ostream& os) {
+          EmitAgentDiagnostics(os, agent_status, report_stage, status);
+        }))
+      return 1;
   }
   return status;
 }

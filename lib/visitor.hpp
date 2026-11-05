@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <unordered_set>
 
+#include "agent_diagnostic.hpp"
 #include "ast.hpp"
 #include "choreo_template.hpp"
 #include "colors.hpp"
@@ -370,6 +371,8 @@ public:
       Error1(loc, message);
       return;
     }
+    RecordAgentDiagnostic(loc.begin.get_filename(), loc.begin.get_line(),
+                          loc.begin.get_column(), "warning", message);
     errs() << loc << ": " << (should_use_colors() ? color_yellow : "")
            << "warning: " << (should_use_colors() ? color_reset : "");
     errs() << message << "\n";
@@ -401,7 +404,9 @@ public:
   int ErrorCount() const { return error_count; }
   virtual bool HasError() const {
     if (error_count > 0) {
-      dbgs() << "Totally " << error_count << " errors have been detected.\n";
+      // A machine-readable report on stdout must not be polluted with prose.
+      if (!(AgentDiagnosticsEnabled() && agent_diagnostics.GetValue() == "-"))
+        dbgs() << "Totally " << error_count << " errors have been detected.\n";
       return true;
     }
     return false;

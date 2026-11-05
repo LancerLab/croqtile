@@ -1,0 +1,18 @@
+// Compiler-harness co-design: a rejected candidate must come back as a short
+// structured directive -- violated constraint, observed values with the valid
+// range, exact location with the offending statement, and a Do/Why/Alt repair.
+//
+// RUN: not choreo -es -t cc -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s
+
+__co__ void shape_mismatch(s32 [2, 16] src) {
+  s32[4, 8] dst;
+  dma.transp<1, 0> src => dst;
+}
+
+// CHECK: <compile_result status="rejected" {{.*}} diagnostics="2" {{.*}} budget_per_diagnostic="100">
+// CHECK-NEXT: <diagnostic severity="error" category="shape-compat" {{.*}} tokens="{{[1-9][0-9]?}}">
+// CHECK-NEXT: <constraint>DMA shape compatibility; predicate: from.d[i] == to.d[i]</constraint>
+// CHECK-NEXT: <observed>from = {{.*}}; to = {{.*}}; valid: from.d[i] == to.d[i]</observed>
+// CHECK-NEXT: <location file="{{.*}}dma_shape_repair.co" line="{{[0-9]+}}" column="{{[0-9]+}}">dma.transp{{.*}}</location>
+// CHECK-NEXT: <repair priority="high" confidence="certain"><do>Append .zfill{{.*}}</do><why>{{.*}}</why><alt>{{.*}}</alt></repair>
+// CHECK: </compile_result>
