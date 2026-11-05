@@ -1,5 +1,8 @@
 // An oversize allocation reports the exact used/limit byte counts of the
 // selected target, and the envelope aggregates the failure by category.
+// Device gating is unnecessary here: -es runs the compiler front end only,
+// so no GPU or CUDA toolchain is needed (as in tests/gpu/check/ front-end
+// tests). The -arch value is a compiler lookup, not a device requirement.
 //
 // RUN: not choreo -es -t cute -arch=sm_86 -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s
 

@@ -1,8 +1,11 @@
 // An out-of-bounds index publishes the dimension, the offending index and
 // the declared extent. The envelope also shows how many failures of each
 // category were emitted, including ones still on the generic fallback.
+// Device gating is unnecessary here: -es runs the compiler front end only
+// (as in tests/gpu/check/ front-end tests). Pin -arch so this does not depend
+// on whatever default architecture a build happens to select.
 //
-// RUN: not choreo -es -t cute -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s
+// RUN: not choreo -es -t cute -arch=sm_86 -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s
 
 __co__ void foo(s32 [77, 320] data, int i) {
   parallel p by 2 foreach x in 3 {
