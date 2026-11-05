@@ -55,6 +55,11 @@ Option<bool> make_lib(OptionKind::User, "--lib", "", false,
 Option<bool> suppress_main(OptionKind::Hidden, "--suppress-main", "", false,
                            "Suppress user main() in generated code. "
                            "Automatically set by --lib.");
+Option<bool> lock_free(
+    OptionKind::User, "--lock-free", "", false,
+    "Emit lock-free warp-specialised code: skip compiler-injected group "
+    "barriers and per-stage WGMMA drains. Off by default; with the flag off "
+    "the generated code is unchanged.");
 Option<size_t> parallel_jobs(OptionKind::User, "-j", "", 1,
                              "Number of parallel compilation jobs for "
                              "multi-file --lib mode.",

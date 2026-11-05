@@ -1,0 +1,7 @@
+// Hard compatibility contract: with --lock-free absent or explicitly false,
+// generated CUDA must be byte-identical to today. A plain diff over the same
+// warp-specialised kernel is the strictest assertion and also covers emitted
+// barriers, drains and event waits. Removing the XFAIL is part of landing the
+// flag: this test now guards every subsequent feature stage.
+//
+// RUN: choreo -es -t cute -arch=sm_90a tests/gpu/codegen/cute/lock-free/gap_baseline_sync_drain.co -o %s.default.cu; choreo -es -t cute -arch=sm_90a --lock-free=false tests/gpu/codegen/cute/lock-free/gap_baseline_sync_drain.co -o %s.explicit.cu; diff %s.default.cu %s.explicit.cu; status=$?; rm -f %s.default.cu %s.explicit.cu; test $status -eq 0

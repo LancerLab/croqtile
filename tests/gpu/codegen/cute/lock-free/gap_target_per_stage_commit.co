@@ -1,0 +1,16 @@
+// XFAIL:*
+// F6 target after --lock-free: the per-stage mma.commit is commit-only, and
+// warpgroup_wait<0>() survives only at the final drain (section 4.3 / F6
+// acceptance). Same kernel as gap_baseline_per_stage_commit.co, flag on.
+//
+// XFAIL for the same grammar gap: the input kernel does not parse on current
+// main. The codegen guard for force_wait=false finalizes is already in place;
+// this test starts driving it once an explicit commit form is restored.
+//
+// RUN: choreo -es -t cute -arch=sm_90a --lock-free tests/gpu/codegen/cute/lock-free/gap_baseline_per_stage_commit.co -o - | grep -v '^ *//' | FileCheck %s --implicit-check-not='named_barrier_sync'
+
+// CHECK: warpgroup_commit_batch();
+// CHECK-NOT: warpgroup_wait<0>();
+// CHECK: warpgroup_commit_batch();
+// CHECK: warpgroup_wait<0>();
+// CHECK-NOT: warpgroup_wait<0>();

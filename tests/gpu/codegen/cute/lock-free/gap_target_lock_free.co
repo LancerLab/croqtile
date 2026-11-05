@@ -1,0 +1,12 @@
+// Target structure for F4.1 after --lock-free: no compiler-injected
+// named_barrier_sync on the consumer critical path. F6's per-stage behaviour
+// is split out into gap_target_per_stage_commit.co; here the single finalize at
+// mma.store is the final drain, so commit+wait legitimately stay together.
+//
+// The grep strips source comments (Choreo copies them into the generated .cu),
+// otherwise the CHECK lines would match themselves.
+//
+// RUN: choreo -es -t cute -arch=sm_90a --lock-free tests/gpu/codegen/cute/lock-free/gap_baseline_sync_drain.co -o - | grep -v '^ *//' | FileCheck %s --implicit-check-not='named_barrier_sync'
+
+// CHECK: warpgroup_commit_batch();
+// CHECK-NEXT: warpgroup_wait<0>();

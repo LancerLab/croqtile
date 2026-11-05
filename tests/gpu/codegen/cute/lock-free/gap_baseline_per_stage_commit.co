@@ -1,0 +1,64 @@
+// XFAIL:*
+// F6 stage split. An explicit mma.commit inside the K loop forces one
+// EmitWGMMAFinalize per stage, plus the final drain at mma.store. Default
+// behaviour: every finalize emits commit_batch followed by wait<0>(), so the
+// generated loop body carries a per-stage drain (section 4.2 of the note).
+//
+// XFAIL: mma_stmt in the current main grammar (lib/parser.yy:2457+) has no
+// Commit production, so `mma.commit;` (used by the campaign's seed.co) no
+// longer parses. This is the F6 syntax gap itself; the stage split becomes a
+// live test once an explicit commit form exists again.
+//
+// The grep strips source comments, which Choreo copies into the generated .cu;
+// without it the CHECK lines below would match themselves.
+//
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v '^ *//' | FileCheck %s
+
+#define WARP_M 64
+#define WARP_N 128
+#define TILE_K 64
+#define WARP_K 16
+#define STAGES 2
+
+__co__ void foo(global f16 [M, K] lhs,
+                global f16 [N, K] rhs,
+                global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, WARP_M), cdiv(N, WARP_N)] : block {
+    shared event full[STAGES], empty[STAGES];
+    shared f16 [WARP_M, TILE_K] lhs_s[STAGES];
+    shared f16 [WARP_N, TILE_K] rhs_s[STAGES];
+    shared f16 [WARP_M, WARP_N] output_s;
+
+    parallel p by 2 : group-4, t by 128 : thread {
+      inthreads.async (p == 0) {
+        foreach {iv_k} in [cdiv(K, TILE_K)] {
+          stage = iv_k % STAGES;
+          wait empty.at(iv_k);
+          lhs_load = tma.copy.async.swiz<128> lhs.subspan(WARP_M, TILE_K).at(block_m, iv_k) => lhs_s[stage];
+          rhs_load = tma.copy.async.swiz<128> rhs.subspan(WARP_N, TILE_K).at(block_n, iv_k) => rhs_s[stage];
+          trigger full.at(iv_k) after lhs_load, rhs_load;
+        }
+      }
+
+      inthreads.async (p == 1) {
+        mc = mma.fill.f16 0.0f;
+        foreach {s} in [STAGES]
+          trigger empty.at(s);
+        foreach {iv_k} in [cdiv(K, TILE_K)] {
+          stage = iv_k % STAGES;
+          wait full.at(iv_k);
+          foreach {iv_wk} in [cdiv(TILE_K, WARP_K)] {
+            mma.row.row mc, lhs_s[stage].chunkat(_, iv_wk),
+                            rhs_s[stage].chunkat(_, iv_wk);
+          }
+          mma.commit;
+          trigger empty.at(iv_k);
+        }
+        mma.store mc, output_s;
+        tma.copy output_s => output.subspan(WARP_M, WARP_N).at(block_m, block_n);
+      }
+    }
+  }
+}
+
+// CHECK-COUNT-2: warpgroup_wait<0>();

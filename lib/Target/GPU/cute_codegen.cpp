@@ -115,6 +115,7 @@ extern Option<bool> use_pic;
 extern Option<bool> use_fast_math;
 extern Option<bool> tma_cluster_aware;
 extern Option<bool> use_stmatrix;
+extern Option<bool> lock_free;
 
 namespace Choreo {
 extern Option<bool> sim_sparse;
@@ -478,6 +479,7 @@ CuteCodeGen::GetDMABufferExpr(const std::string& sym,
 void CuteCodeGen::EmitGroupX4Sync(std::ostringstream& os,
                                   const std::string& indent,
                                   int thread_count) const {
+  if (lock_free.GetValue()) return;
   int tc =
       thread_count > 0
           ? thread_count
@@ -490,14 +492,18 @@ void CuteCodeGen::EmitWGMMAFinalize(std::ostringstream& os,
                                     const std::string& indent,
                                     bool force_wait) {
   os << indent << "warpgroup_commit_batch();\n";
-  if (!has_managed_mma_completion || force_wait)
+  // F6: under --lock-free a per-stage finalize is commit-only. force_wait marks
+  // the final drain (mma.store / fragment transfer), where the wait remains.
+  const bool emit_wait = (!has_managed_mma_completion || force_wait) &&
+                         !(lock_free.GetValue() && !force_wait);
+  if (emit_wait)
     os << indent << "warpgroup_wait<0>();\n";
   if (!pending_wgmma_acc_sym.empty())
     os << indent << "warpgroup_fence_operand(" << pending_wgmma_acc_sym
        << ");\n";
   has_pending_wgmma_finalize = false;
   pending_wgmma_acc_sym.clear();
-  if (!has_managed_mma_completion || force_wait) warpspec_wgmma_arrived = false;
+  if (emit_wait) warpspec_wgmma_arrived = false;
 }
 
 std::optional<CuteCodeGen::HoistedScaleAccumInfo>
