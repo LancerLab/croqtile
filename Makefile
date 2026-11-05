@@ -142,6 +142,7 @@ define build-choreo-only
 	@echo "=== Building choreo only ($(1)) ==="
 	$(CMAKE) -S $(WORK_DIR) -B $(2) -G Ninja \
 		-DCMAKE_BUILD_TYPE=$(1) \
+		-DPUBLIC_PACKAGE=$(PUBLIC_PACKAGE) \
 		-DCHOREO_DEFAULT_TARGET=$(CHOREO_DEFAULT_TARGET) \
 		'-DCROQ_PROJECT=choreo' \
 		'-DSTANDALONE=OFF' \
