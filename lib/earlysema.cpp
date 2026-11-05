@@ -2834,13 +2834,16 @@ bool EarlySemantics::Visit(AST::ChunkAt& n) {
         }
       }
       if (src_dims) {
-        size_t squeezed = 0;
+        size_t surviving = 0;
         for (auto& v : src_dims->AllValues()) {
           auto il = GetIntLiteral(v);
           if (il && il->Val() == 1) continue;
-          ++squeezed;
+          ++surviving;
         }
-        if (squeezed > 0) rank = squeezed;
+        // Squeezing every axis still leaves one dimension: the squeezed shape
+        // is rank 1, exactly as ShapeInference later builds it. Keeping the
+        // pre-squeeze rank here made a rank-1 destination look like a mismatch.
+        rank = surviving > 0 ? surviving : 1;
       }
       continue;
     }
