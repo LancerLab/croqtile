@@ -1,0 +1,18 @@
+// A target-feature rejection is not an MMA shape problem: the check names the
+// missing feature and the architecture, and prescribes the right fallback.
+//
+// RUN: not choreo -es -t cute -arch=sm_86 -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s
+
+__co__ void tma_probe(global f16[64, 64] input) {
+  parallel b by 1 : block {
+    shared f16[64, 64] tile;
+    tma.copy input => tile;
+  }
+}
+
+// CHECK: <compile_result status="rejected" target="cute" arch="sm_86"{{.*}}categories="target-feature:1"{{.*}}>
+// CHECK-NEXT: <diagnostic severity="error" category="target-feature"{{.*}}occurrences="1"{{.*}}>
+// CHECK-NEXT: <constraint>Target-supported DMA feature; predicate: feature in target.features(arch)</constraint>
+// CHECK-NEXT: <observed>feature = TMA; arch = sm_86; valid: TMA requires an arch with the TMA feature</observed>
+// CHECK: <do>Use a plain dma.copy, or switch -arch to one with TMA.</do>
+// CHECK: </compile_result>

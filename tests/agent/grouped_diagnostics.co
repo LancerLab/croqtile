@@ -1,0 +1,17 @@
+// Two template instantiations emit the same message at the same source site.
+// The envelope must report them once with occurrences=2 and account for the
+// folded duplicate in grouped, instead of flooding the agent's context.
+//
+// RUN: not choreo -t cc -es -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s
+
+template <int N>
+__co__ void invalid_instance(s32 [1] data) {
+  data.at(0) = missing_symbol + N;
+}
+template __co__ invalid_instance<4>;
+template __co__ invalid_instance<5>;
+
+// CHECK: <compile_result status="rejected"{{.*}}categories="general:4" grouped="2"{{.*}}diagnostics="2"{{.*}}>
+// CHECK-NEXT: <diagnostic severity="error" category="general"{{.*}}occurrences="2"{{.*}}>
+// CHECK: <do>Fix the construct at this location.</do>
+// CHECK: </compile_result>

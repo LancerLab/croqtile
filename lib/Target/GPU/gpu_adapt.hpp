@@ -3,6 +3,7 @@
 
 // This apply the GPU target specific check and information annotation
 
+#include "agent_diagnostic.hpp"
 #include "assess.hpp"
 #include "ast.hpp"
 #include "codegen.hpp"
@@ -797,8 +798,21 @@ public:
 #endif
 
     if (n.IsTMA() && !CCtx().TargetSupportTMA()) {
-      Error1(n.LOC(), "TMA is not supported by current architecture: " +
-                          CCtx().GetArch() + ".");
+      AgentFacts facts;
+      facts.category = "target-feature";
+      facts.constraint = "Target-supported DMA feature";
+      facts.predicate = "feature in target.features(arch)";
+      facts.observed.push_back("feature = TMA");
+      facts.observed.push_back("arch = " + CCtx().GetArch());
+      facts.valid = "TMA requires an arch with the TMA feature";
+      facts.repair_do = "Use a plain dma.copy, or switch -arch to one with TMA.";
+      facts.repair_why = "TMA descriptors have no lowering on this arch.";
+      facts.repair_alt = "Query -target-info for supported features.";
+      facts.confidence = "certain";
+      ErrorWithFacts(n.LOC(),
+                     "TMA is not supported by current architecture: " +
+                         CCtx().GetArch() + ".",
+                     facts);
       return false;
     }
 
@@ -1002,11 +1016,24 @@ public:
       auto mma_ty = GetMMAType(mma_config);
 
       // WGMMA requires SM90+ architecture
-      if (mma_ty == MMAType::WGMMA && arch < 90)
-        Error1(n.LOC(), "WGMMA [" + MMAShapeSTR(mma_shape) +
-                            "] requires SM90+ architecture, "
-                            "but target is SM" +
-                            std::to_string(arch) + ".");
+      if (mma_ty == MMAType::WGMMA && arch < 90) {
+        AgentFacts facts;
+        facts.category = "mma-shape";
+        facts.constraint = "WGMMA minimum architecture";
+        facts.predicate = "arch >= 90";
+        facts.observed.push_back("mma.shape = " + MMAShapeSTR(mma_shape));
+        facts.observed.push_back("arch = SM" + std::to_string(arch));
+        facts.valid = "arch >= SM90 for WGMMA";
+        facts.repair_do = "Switch -arch to SM90+ or use a non-WGMMA MMA.";
+        facts.repair_why = "WGMMA instructions are unavailable before SM90.";
+        facts.repair_alt = "Use -target-info to list supported MMA shapes.";
+        facts.confidence = "certain";
+        ErrorWithFacts(n.LOC(), "WGMMA [" + MMAShapeSTR(mma_shape) +
+                                    "] requires SM90+ architecture, "
+                                    "but target is SM" +
+                                    std::to_string(arch) + ".",
+                       facts);
+      }
 
       // WGMMA may consume shared-memory operands directly. Other MMA families
       // consume register fragments, so accepting a shared operand here would

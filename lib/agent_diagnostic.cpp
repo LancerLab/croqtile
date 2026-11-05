@@ -182,8 +182,7 @@ AgentFacts Classify(const std::string& message) {
     return f;
   }
 
-  if (Contains(message, "is not supported by current architecture") ||
-      (Contains(message, "MMA [") && Contains(message, "not supported"))) {
+  if (Contains(message, "MMA [") && Contains(message, "not supported")) {
     f.category = "mma-shape";
     f.constraint = "Target-supported MMA/WGMMA shape and precision";
     f.predicate = "mma.shape in target.supported_shapes(arch)";
