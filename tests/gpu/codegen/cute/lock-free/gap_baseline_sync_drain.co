@@ -3,10 +3,10 @@
 // CUDA best 1845 TFLOPS vs CroqTile best 1279 TFLOPS with an identical macro
 // configuration -- the gap is in what the generated code can express.
 //
-// Feature map (F1..F7 in the note) and where each is pinned today:
-//   F4 group barrier   -> this file: compiler-injected named_barrier_sync(...,15)
-//   F6 commit/drain    -> this file: commit_batch always followed by wait<0>()
-//   F1 metadata operand-> gap_baseline_metadata.co (current rejection)
+// Feature map (F1..F7 in the note) and stage status:
+//   F4 group barrier   -> DONE under --lock-free; this file pins the default
+//   F6 commit/drain    -> DONE under --lock-free; split in the per-stage tests
+//   F1 metadata operand-> NEXT: gap_baseline_metadata.co + gap_f1_register_metadata.co
 //   F2 decoupled ring  -> needs event-ring semantics; no baseline assertion yet
 //   F3 TMA box split   -> runtime cuTensorMapEncodeTiled failure (section 5)
 //   F5 scoped arena    -> shared-lifetime model; needs a budget assertion

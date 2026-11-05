@@ -1,0 +1,34 @@
+// XFAIL:*
+// F1 (section 2.3): the next stage after F4.1 + F6. The CUDA winner consumes
+// sparse metadata from a register prefetched by its own TMA ring; Choreo
+// insists the E operand comes from mma.load of a shared buffer. Target: a
+// plain u32 register lowers with no shared-memory load for metadata.
+//
+// XFAIL: a scalar E currently SIGSEGVs (rc 139) at
+// lib/codegen_prepare.hpp:816-821 (GetSpannedType(...)->ElementType() on a
+// scalar symbol), with or without the flag. Landing this stage needs all of:
+//   - type capture in codegen_prepare.hpp for a non-spanned E operand
+//   - the explicit_mma_loads_ rejection at cute_codegen.cpp:6240
+//   - FRAG_E emission at cute_codegen.cpp:5300 and :7181 for a register value
+// plus a bit-exact round, which this environment cannot run.
+//
+// RUN: choreo -es -t cute -arch=sm_90a --lock-free %s -o - | FileCheck %s
+
+__co__ auto f1_register_metadata(
+    f16 [64, 32] lhs_packed, u8 [64, 4] lhs_meta, f16 [8, 32] rhs) {
+  f32 [64, 8] output{0.0f};
+  parallel by 1 : block {
+    lhs_s = dma.copy lhs_packed => shared;
+    rhs_s = dma.copy rhs => shared;
+    mc = mma.fill.f32 0.0f;
+    parallel by 1 : group-4 {
+      u32 me = 0;
+      mma.row.row.sp mc, lhs_s, rhs_s, me;
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// CHECK: __global__ void __choreo_device_f1_register_metadata
+// CHECK-NOT: sparse WGMMA metadata must be loaded
