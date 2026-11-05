@@ -1643,13 +1643,19 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
       }
       mv->SetDelimiter(", ");
 
+      auto bshape = GenShape(vn.MakePluralSign(cur_vns));
+      auto squeezed_shape = GenShape(vn.MakePluralSign(new_vns));
+
       cur_vns = new_vns;
       cur_strd = new_strd;
-      auto bshape = GenShape(vn.MakePluralSign(cur_vns));
 
       auto reshape = AST::Make<AST::SOP::Reshape>(op->LOC(), mv, true);
-      reshape->SetBlockShape(bshape);
+      reshape->SetBlockShape(squeezed_shape);
       reshape->SetBlockStrides(cur_strd);
+      // The removed axes are gone from every shape the rest of the compiler
+      // sees, but a DMA operand still needs the pre-squeeze geometry to build a
+      // descriptor that clips against the parent buffer. Keep it on the node.
+      reshape->parent_shape = bshape;
       n.ReplaceOperation(op_idx, reshape);
 
       VST_DEBUG(dbgs() << " |-<sop: .sqz => .SpanAs(" << STR(mv)
@@ -2297,9 +2303,8 @@ bool ShapeInference::Visit(AST::RangeExpr& n) {
                "least 1.");
         return false;
       }
-      if (auto span =
-              VIInt(GetSingleUpperBound(src_ty) + addend(n.ub_mutator) -
-                    addend(n.lb_mutator))) {
+      if (auto span = VIInt(GetSingleUpperBound(src_ty) + addend(n.ub_mutator) -
+                            addend(n.lb_mutator))) {
         if (*span <= 0)
           Warning(n.LOC(),
                   "empty iteration space; the range is empty so the loop body "

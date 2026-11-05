@@ -2684,6 +2684,11 @@ struct View : public SpannedOperation, public TypeIDProvider<View> {
 struct Reshape : public SpannedOperation, public TypeIDProvider<Reshape> {
   ptr<MultiValues> newspan = nullptr; // new shape
   bool from_squeeze = false;
+  // The pre-squeeze shape a squeeze removed. The squeezed axes are gone from
+  // every shape the rest of the compiler sees, but a DMA destination still
+  // needs them to keep the parent buffer's extents, so the DTE clips against
+  // the real geometry instead of the declared tile.
+  Shape parent_shape;
   Reshape(const location& l, const ptr<MultiValues>& s, bool sqz = false)
       : SpannedOperation(l), newspan(s), from_squeeze(sqz) {
     if (s == nullptr) choreo_unreachable("must provide the sub-span.");
@@ -2694,7 +2699,9 @@ struct Reshape : public SpannedOperation, public TypeIDProvider<Reshape> {
     return MakeNodeList(newspan);
   }
   const ptr<SpannedOperation> CloneImpl() const override {
-    return Make<Reshape>(LOC(), CloneP(newspan), from_squeeze);
+    auto r = Make<Reshape>(LOC(), CloneP(newspan), from_squeeze);
+    r->parent_shape = parent_shape;
+    return r;
   }
 
   void accept(Visitor& v) override;
