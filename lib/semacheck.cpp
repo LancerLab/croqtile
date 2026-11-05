@@ -1,4 +1,5 @@
 #include "semacheck.hpp"
+#include "agent_diagnostic.hpp"
 #include "interval.hpp"
 #include "target_utils.hpp"
 #include "types.hpp"
@@ -2101,10 +2102,24 @@ bool SemaChecker::VisitNode(AST::Trigger& n) {
       auto future_name = InScopeName(id->name);
       bool native_future = true;
       if (observed_async.count(future_name)) {
-        Error1(dependency->LOC(),
-               "trigger-after cannot bind future '" + future_name +
-                   "' after it was explicitly waited; trigger the event "
-                   "directly after the wait.");
+        AgentFacts facts;
+        facts.category = "async-ordering";
+        facts.constraint = "trigger-after future binding";
+        facts.predicate = "future not in waited_futures";
+        facts.observed.push_back("future = " + future_name);
+        facts.observed.push_back("in waited_futures = true");
+        facts.valid = "trigger(event) directly after wait(event)";
+        facts.repair_do = "Replace trigger-after with an explicit wait "
+                          "followed by a direct trigger.";
+        facts.repair_why = "The future was explicitly waited, so trigger-after "
+                           "cannot re-bind it.";
+        facts.repair_alt = "Remove the redundant wait and keep trigger-after.";
+        facts.confidence = "certain";
+        ErrorWithFacts(dependency->LOC(),
+                       "trigger-after cannot bind future '" + future_name +
+                           "' after it was explicitly waited; trigger the event "
+                           "directly after the wait.",
+                       facts);
         native_future = false;
       } else if (isa<OperationFutureType>(dependency_ty)) {
         Error1(dependency->LOC(),

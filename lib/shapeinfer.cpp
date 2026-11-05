@@ -1,5 +1,7 @@
 #include "shapeinfer.hpp"
 
+#include "agent_diagnostic.hpp"
+
 using namespace Choreo::valno;
 
 namespace Choreo {
@@ -2290,10 +2292,21 @@ bool ShapeInference::Visit(AST::RangeExpr& n) {
       int step =
           IsValidStep(n.step) ? n.step : (IsValidStep(src_step) ? src_step : 1);
       if (step == 0) {
-        Error1(n.LOC(),
-               "invalid step 0 in the iteration space; the loop variable never "
-               "advances, so the loop would not terminate. Use a step of at "
-               "least 1.");
+        AgentFacts facts;
+        facts.category = "loop-range";
+        facts.constraint = "foreach step";
+        facts.predicate = "step != 0";
+        facts.observed.push_back("step = 0");
+        facts.valid = "step >= 1 or step <= -1";
+        facts.repair_do = "Set the foreach step to at least 1.";
+        facts.repair_why = "A zero step never advances the induction variable.";
+        facts.repair_alt = "Guard a dynamic step with a runtime check.";
+        facts.confidence = "certain";
+        ErrorWithFacts(n.LOC(),
+                       "invalid step 0 in the iteration space; the loop variable "
+                       "never advances, so the loop would not terminate. Use a "
+                       "step of at least 1.",
+                       facts);
         return false;
       }
       if (auto span =

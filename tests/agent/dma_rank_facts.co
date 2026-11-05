@@ -1,0 +1,18 @@
+// The DMA rank check reports both symbolic ranks as compiler facts. The
+// un-migrated type-mismatch check in the same pass still falls back to the
+// generic envelope, so both paths are exercised by this input.
+//
+// RUN: not choreo -es -t cc -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s
+
+__co__ void rank_mismatch(f32 [1, 2, 3] src) {
+  s32 [3, 2, 1, 4] dst;
+  dma.copy src => dst;
+}
+
+// CHECK: <compile_result status="rejected"{{.*}}>
+// CHECK: <diagnostic severity="error" category="general"{{.*}}occurrences="1"{{.*}}>
+// CHECK: <diagnostic severity="error" category="dma-rank"{{.*}}occurrences="1"{{.*}}>
+// CHECK-NEXT: <constraint>DMA source/destination rank; predicate: from.rank == to.rank</constraint>
+// CHECK-NEXT: <observed>from.rank = 3; to.rank = 4; valid: from.rank == to.rank</observed>
+// CHECK: <do>Make the DMA source and destination ranks equal.</do>
+// CHECK: </compile_result>

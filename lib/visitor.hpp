@@ -400,6 +400,16 @@ public:
     error_count++;
   }
 
+  // Emit the same human-readable error, but attach compiler-derived facts to
+  // the agent envelope. Call after the check has computed its symbolic values
+  // so the harness sees numbers and names instead of prose to re-parse.
+  void ErrorWithFacts(const location& loc, const std::string& message,
+                      const AgentFacts& facts) const {
+    Error1(loc, message);
+    RecordAgentDiagnostic(loc.begin.get_filename(), loc.begin.get_line(),
+                          loc.begin.get_column(), "error", message, &facts);
+  }
+
   virtual int Status() { return error_count; }
   int ErrorCount() const { return error_count; }
   virtual bool HasError() const {

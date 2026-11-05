@@ -1,4 +1,5 @@
 #include "earlysema.hpp"
+#include "agent_diagnostic.hpp"
 #include "target_registry.hpp"
 #include "target_utils.hpp"
 #include "types.hpp"
@@ -2482,10 +2483,23 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     bool is_tma_async = n.IsAsync() && n.HasEvent();
     if (!CompatibleRank(src_dims, dst_dims) && !allow_auto_threading &&
         !is_tma_async) {
-      Error1(n.LOC(),
-             "DMA statement has a rank mismatch between 'from' and 'to': " +
-                 std::to_string(src_dims) + " != " + std::to_string(dst_dims) +
-                 ".");
+      AgentFacts facts;
+      facts.category = "dma-rank";
+      facts.constraint = "DMA source/destination rank";
+      facts.predicate = "from.rank == to.rank";
+      facts.observed.push_back("from.rank = " + std::to_string(src_dims));
+      facts.observed.push_back("to.rank = " + std::to_string(dst_dims));
+      facts.valid = "from.rank == to.rank";
+      facts.repair_do = "Make the DMA source and destination ranks equal.";
+      facts.repair_why = "Tiled DMA copies need matching ranks on both sides.";
+      facts.repair_alt = "Use .sqz or .view to align ranks before the copy.";
+      facts.confidence = "certain";
+      ErrorWithFacts(n.LOC(),
+                     "DMA statement has a rank mismatch between 'from' and "
+                     "'to': " +
+                         std::to_string(src_dims) + " != " +
+                         std::to_string(dst_dims) + ".",
+                     facts);
     }
     if (sty->ElementType() != tty->ElementType()) {
       Error1(n.LOC(),

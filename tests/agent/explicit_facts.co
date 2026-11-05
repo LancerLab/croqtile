@@ -1,0 +1,24 @@
+// A pass that already knows the symbolic values should publish them directly:
+// the async check names the waited future instead of relying on message
+// classification, and attaching facts to an already-emitted error must not
+// inflate occurrences.
+//
+// RUN: not choreo -es -t cc -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s
+
+__co__ void trigger_after_wait(global f16[64, 64] input) {
+  parallel b by 1 : block {
+    shared f16[64, 64] tile;
+    shared event full;
+    load = tma.copy.async input => tile;
+    wait load;
+    trigger full after load;
+    wait full;
+  }
+}
+
+// CHECK: <compile_result status="rejected"{{.*}}diagnostics="1" omitted="0"{{.*}}>
+// CHECK-NEXT: <diagnostic severity="error" category="async-ordering"{{.*}}occurrences="1"{{.*}}>
+// CHECK-NEXT: <constraint>trigger-after future binding; predicate: future not in waited_futures</constraint>
+// CHECK-NEXT: <observed>future = {{.*}}load; in waited_futures = true; valid: trigger(event) directly after wait(event)</observed>
+// CHECK: <do>Replace trigger-after with an explicit wait followed by a direct trigger.</do>
+// CHECK: </compile_result>
