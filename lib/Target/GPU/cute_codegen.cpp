@@ -494,16 +494,23 @@ void CuteCodeGen::EmitWGMMAFinalize(std::ostringstream& os,
   os << indent << "warpgroup_commit_batch();\n";
   // F6: under --lock-free a per-stage finalize is commit-only. force_wait marks
   // the final drain (mma.store / fragment transfer), where the wait remains.
+  const bool suppressed_wait = lock_free.GetValue() && !force_wait &&
+                               !has_managed_mma_completion;
   const bool emit_wait = (!has_managed_mma_completion || force_wait) &&
-                         !(lock_free.GetValue() && !force_wait);
+                         !suppressed_wait;
   if (emit_wait)
     os << indent << "warpgroup_wait<0>();\n";
+  else if (suppressed_wait)
+    lock_free_pending_drain = true;
   if (!pending_wgmma_acc_sym.empty())
     os << indent << "warpgroup_fence_operand(" << pending_wgmma_acc_sym
        << ");\n";
   has_pending_wgmma_finalize = false;
   pending_wgmma_acc_sym.clear();
-  if (emit_wait) warpspec_wgmma_arrived = false;
+  if (emit_wait) {
+    warpspec_wgmma_arrived = false;
+    lock_free_pending_drain = false;
+  }
 }
 
 std::optional<CuteCodeGen::HoistedScaleAccumInfo>
@@ -6637,6 +6644,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     } break;
     case AST::MMAOperation::Store: {
       if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent, true);
+      if (lock_free_pending_drain) {
+        ds << d_indent << "warpgroup_wait<0>();\n";
+        lock_free_pending_drain = false;
+        warpspec_wgmma_arrived = false;
+      }
       auto ca = op.StoreTo();
       auto t_sym = ca->data->name;
       auto ty = GetSymbolType(t_sym);

@@ -2578,6 +2578,16 @@ mma_stmt
       auto op = AST::Make<AST::MMAOperation>($3, $5, $7);
       $$ = AST::Make<AST::MMA>(@1, op);
     }
+    | MMA DOT IDENTIFIER {
+        // Explicit WGMMA commit. The default lowering still finalises with a
+        // wait; --lock-free makes a non-forced finalize commit-only so the
+        // per-stage drain can be hoisted to the final drain.
+        if ($3 != "commit") {
+          error(@3, "unknown mma attribute '" + $3 + "'");
+          YYERROR;
+        }
+        $$ = AST::Make<AST::MMA>(@1, AST::Make<AST::MMAOperation>());
+      }
     ;
 
 mma_exec_method

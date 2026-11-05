@@ -256,6 +256,9 @@ private:
   std::string deferred_spm_decls;
   std::deque<std::string> recent_tma_tx_bytes;
   bool has_pending_wgmma_finalize = false;
+  // --lock-free: a stage finalised with commit-only still needs one wait at
+  // the final drain before the accumulator is consumed.
+  bool lock_free_pending_drain = false;
   std::string pending_wgmma_acc_sym;
   struct PendingWGMMAZeroFill {
     std::string frag_sym;
@@ -507,6 +510,7 @@ private:
     post_site_assertions.clear();
     recent_tma_tx_bytes.clear();
     has_pending_wgmma_finalize = false;
+    lock_free_pending_drain = false;
     pending_wgmma_zero_fill_.reset();
     has_managed_mma_completion = false;
     wgmma_arrive_state_declared = false;

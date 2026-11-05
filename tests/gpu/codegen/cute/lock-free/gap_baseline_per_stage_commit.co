@@ -1,13 +1,10 @@
-// XFAIL:*
 // F6 stage split. An explicit mma.commit inside the K loop forces one
-// EmitWGMMAFinalize per stage, plus the final drain at mma.store. Default
-// behaviour: every finalize emits commit_batch followed by wait<0>(), so the
-// generated loop body carries a per-stage drain (section 4.2 of the note).
+// EmitWGMMAFinalize per stage. Default behaviour: the finalize emits
+// commit_batch followed by wait<0>() inside the loop body, so every K stage
+// drains (section 4.2 of the note).
 //
-// XFAIL: mma_stmt in the current main grammar (lib/parser.yy:2457+) has no
-// Commit production, so `mma.commit;` (used by the campaign's seed.co) no
-// longer parses. This is the F6 syntax gap itself; the stage split becomes a
-// live test once an explicit commit form exists again.
+// mma.commit syntax was restored in lib/parser.yy as part of the F6 stage;
+// the default lowering is deliberately unchanged.
 //
 // The grep strips source comments, which Choreo copies into the generated .cu;
 // without it the CHECK lines below would match themselves.
@@ -61,4 +58,6 @@ __co__ void foo(global f16 [M, K] lhs,
   }
 }
 
-// CHECK-COUNT-2: warpgroup_wait<0>();
+// CHECK: warpgroup_commit_batch();
+// CHECK-NEXT: warpgroup_wait<0>();
+// CHECK-NOT: warpgroup_wait<0>();
