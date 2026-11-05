@@ -1,0 +1,17 @@
+// A template instantiation error must name the instance the agent has to
+// edit. When -static-check-info is also requested, the envelope points at
+// that machine-readable report instead of duplicating its contents.
+//
+// RUN: not choreo -t cc -es -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck --check-prefix=CTX %s
+// RUN: not choreo -t cc -es -agent-diagnostics=- -static-check-info=- %s -o /dev/null 2>/dev/null | FileCheck --check-prefix=LINK %s
+
+template <int N>
+__co__ void invalid_instance(s32 [1] data) {
+  data.at(0) = missing_symbol + N;
+}
+template __co__ invalid_instance<4>;
+
+// CTX: <compile_result status="rejected"{{.*}}>
+// CTX: <diagnostic severity="error"{{.*}}instantiation="invalid_instance&lt;4&gt;"{{.*}}>
+
+// LINK: <compile_result status="rejected"{{.*}}facts_report="-"{{.*}}>

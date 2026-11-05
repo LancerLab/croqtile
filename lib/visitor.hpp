@@ -396,6 +396,9 @@ public:
                     static_cast<int>(instance->request_column)),
            "in instantiation of Choreo template '" + instance->display_name +
                "' requested here");
+      AttachAgentInstantiation(loc.begin.get_filename(), loc.begin.get_line(),
+                               loc.begin.get_column(), "error", message,
+                               instance->display_name);
     }
     error_count++;
   }

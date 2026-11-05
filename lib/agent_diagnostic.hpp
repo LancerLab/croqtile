@@ -39,6 +39,13 @@ void RecordAgentDiagnostic(const std::string& file, int line, int column,
                            const std::string& message,
                            const AgentFacts* facts = nullptr);
 
+// Attach the Choreo-template instance behind an already-recorded error, so an
+// agent knows which instantiation to edit rather than only the template body.
+void AttachAgentInstantiation(const std::string& file, int line, int column,
+                              const std::string& severity,
+                              const std::string& message,
+                              const std::string& instance);
+
 // Render the <compile_result> envelope. `status` is one of in_progress,
 // accepted, rejected, incomplete.
 void EmitAgentDiagnostics(std::ostream& os, const std::string& status,

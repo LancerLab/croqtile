@@ -3,6 +3,7 @@
 #include "assess.hpp"
 #include "context.hpp"
 #include "parallel_level.hpp"
+#include "static_check_info.hpp"
 #include "target.hpp"
 #include "types.hpp"
 
@@ -43,6 +44,7 @@ struct Entry {
   std::string message;
   std::string source_line;
   AgentFacts facts;
+  std::string instantiation;
   size_t occurrences = 0;
 };
 
@@ -300,7 +302,10 @@ std::string RenderDiagnostic(const Entry& e) {
   std::ostringstream os;
   os << "<diagnostic severity=\"" << XmlEscape(e.severity)
      << "\" category=\"" << XmlEscape(f.category) << "\" occurrences=\""
-     << e.occurrences << "\">\n";
+     << e.occurrences << "\"";
+  if (!e.instantiation.empty())
+    os << " instantiation=\"" << XmlEscape(e.instantiation) << "\"";
+  os << ">\n";
   os << "  <constraint>" << XmlEscape(f.constraint) << "; predicate: "
      << XmlEscape(f.predicate) << "</constraint>\n";
   const std::string observed = Join(f.observed);
@@ -379,6 +384,15 @@ void RecordAgentDiagnostic(const std::string& file, int line, int column,
   }
 }
 
+void AttachAgentInstantiation(const std::string& file, int line, int column,
+                              const std::string& severity,
+                              const std::string& message,
+                              const std::string& instance) {
+  if (!AgentDiagnosticsEnabled()) return;
+  auto it = agent_entries.find(EntryKey{file, line, column, severity, message});
+  if (it != agent_entries.end()) it->second.instantiation = instance;
+}
+
 void EmitAgentDiagnostics(std::ostream& os, const std::string& status,
                           const std::string& stage, int exit_code) {
   // A report is published once. Reset on the in_progress barrier so a driver
@@ -432,8 +446,13 @@ void EmitAgentDiagnostics(std::ostream& os, const std::string& status,
      << "\" assessments_violated=\"" << tf.violated
      << "\" assessments_runtime=\"" << tf.runtime
      << "\" categories=\"" << XmlEscape(categories.str())
-     << "\" grouped=\"" << grouped << "\" stage=\""
-     << XmlEscape(stage) << "\" exit_code=\"" << exit_code
+     << "\" grouped=\"" << grouped << "\"";
+  // Point the harness at the full machine-readable facts report when both
+  // flags are used, so it can drill down without re-running the compiler.
+  const std::string facts_path = static_check_info.GetValue();
+  if (!facts_path.empty())
+    os << " facts_report=\"" << XmlEscape(facts_path) << "\"";
+  os << " stage=\"" << XmlEscape(stage) << "\" exit_code=\"" << exit_code
      << "\" diagnostics=\"" << bodies.size() << "\" omitted=\"" << omitted
      << "\" tokens=\"" << total_tokens << "\" budget_per_diagnostic=\""
      << kTokenBudget << "\">\n";
