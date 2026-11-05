@@ -156,6 +156,11 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     // op/direction has a lowering on the selected arch. Anything outside the
     // table is a diagnostic here rather than a statement a code generator
     // silently drops.
+    //
+    // The table describes lowering only, so it does not apply when no code
+    // generator runs: an interpreter executes the reduction itself and is
+    // not limited to the shapes a backend can emit.
+    if (CCtx().NoCodegen()) { return true; }
     if (fr->IsAllReduce()) {
       if (!CCtx().TargetSupportMMAUKernel() &&
           !CCtx().HasFeature(ChoreoFeature::MMA, CCtx().GetArch()))
