@@ -1,6 +1,10 @@
 #include "agent_diagnostic.hpp"
 
+#include "assess.hpp"
 #include "context.hpp"
+#include "parallel_level.hpp"
+#include "target.hpp"
+#include "types.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -45,6 +49,42 @@ struct Entry {
 using EntryKey =
     std::tuple<std::string, int, int, std::string, std::string>;
 std::map<EntryKey, Entry> agent_entries;
+
+// Legality boundary of the selected target plus the state of the symbolic
+// assessment engine. Both come from the same sources as -target-info and
+// -static-check-info, so the envelope stays consistent with those reports.
+struct TargetFacts {
+  std::string name;
+  std::string arch;
+  size_t max_threads_per_block = 0;
+  size_t shared_mem_bytes = 0;
+  size_t proved = 0;
+  size_t violated = 0;
+  size_t runtime = 0;
+  size_t unproven = 0;
+};
+
+TargetFacts CollectTargetFacts() {
+  TargetFacts f;
+  const auto& target = CCtx().GetTarget();
+  f.name = target.Name();
+  f.arch = CCtx().GetArch();
+  f.max_threads_per_block = target.GetMaxThreadsPerBlock(f.arch);
+  // Every target exposes the plain SHARED tier; GROUP_SHARED is opt-in only.
+  f.shared_mem_bytes = target.GetMemCapacity(Storage::SHARED, f.arch);
+  for (const auto& [function, context] : CCtx().GetAllFunctionContexts()) {
+    (void)function;
+    for (const auto& check : context.GetAssessor().GetAssessmentLog()) {
+      switch (check.outcome) {
+      case AssessOutcome::STATIC_TRUE: ++f.proved; break;
+      case AssessOutcome::STATIC_FALSE: ++f.violated; break;
+      case AssessOutcome::RUNTIME: ++f.runtime; break;
+      case AssessOutcome::UNKNOWN: ++f.unproven; break;
+      }
+    }
+  }
+  return f;
+}
 
 bool Contains(const std::string& text, const std::string& needle) {
   auto lower = [](std::string s) {
@@ -129,12 +169,15 @@ AgentFacts Classify(const std::string& message) {
     f.constraint = "Warp-group thread topology";
     f.predicate = "total_threads % " + value + " == 0";
     f.observed.push_back("total_threads is not a multiple of " + value);
-    f.valid = "total_threads in {" + value + ", 2*" + value + ", ...}";
+    const TargetFacts tf = CollectTargetFacts();
+    f.valid = "total_threads = k * " + value;
+    if (tf.max_threads_per_block)
+      f.valid += " and <= " + std::to_string(tf.max_threads_per_block);
     f.repair_do = "Set the thread 'by' bound to a multiple of " + value + ".";
     f.repair_why = "Warp-group levels require complete groups of " + value +
                    " threads.";
-    f.repair_alt = "Drop the 'group'/'group-4' level if fewer threads are "
-                   "needed.";
+    f.repair_alt = "Drop the group-4 level (max_threads_per_block=" +
+                   std::to_string(tf.max_threads_per_block) + ").";
     f.confidence = "certain";
     return f;
   }
@@ -145,11 +188,14 @@ AgentFacts Classify(const std::string& message) {
     f.constraint = "Target-supported MMA/WGMMA shape and precision";
     f.predicate = "mma.shape in target.supported_shapes(arch)";
     f.observed.push_back("shape = " + FirstClause(message));
-    f.valid = "see -target-info for the legal shapes on the selected arch";
+    const TargetFacts tf = CollectTargetFacts();
+    f.valid = "mma_supported=" +
+              std::string(CCtx().GetTarget().IsMMASupported() ? "true" : "false") +
+              " on " + tf.name + "/" + tf.arch;
     f.repair_do = "Use an MMA shape/precision listed by -target-info.";
     f.repair_why = "The requested WGMMA configuration has no lowering on the "
                    "selected architecture.";
-    f.repair_alt = "Switch -arch to an architecture that supports the shape.";
+    f.repair_alt = "Switch -arch from " + tf.name + "/" + tf.arch + ".";
     f.confidence = "likely";
     return f;
   }
@@ -363,7 +409,16 @@ void EmitAgentDiagnostics(std::ostream& os, const std::string& status,
   }
 
   const size_t omitted = agent_entries.size() - bodies.size();
-  os << "<compile_result status=\"" << XmlEscape(status) << "\" stage=\""
+  const TargetFacts tf = CollectTargetFacts();
+  // Target limits and assessment outcomes travel as envelope attributes (not
+  // another line), so the diagnostics stay the first lines an agent reads.
+  os << "<compile_result status=\"" << XmlEscape(status) << "\" target=\""
+     << XmlEscape(tf.name) << "\" arch=\"" << XmlEscape(tf.arch)
+     << "\" max_threads_per_block=\"" << tf.max_threads_per_block
+     << "\" shared_mem_bytes=\"" << tf.shared_mem_bytes
+     << "\" assessments_proved=\"" << tf.proved
+     << "\" assessments_violated=\"" << tf.violated
+     << "\" assessments_runtime=\"" << tf.runtime << "\" stage=\""
      << XmlEscape(stage) << "\" exit_code=\"" << exit_code
      << "\" diagnostics=\"" << bodies.size() << "\" omitted=\"" << omitted
      << "\" tokens=\"" << total_tokens << "\" budget_per_diagnostic=\""

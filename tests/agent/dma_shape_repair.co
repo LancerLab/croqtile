@@ -9,7 +9,7 @@ __co__ void shape_mismatch(s32 [2, 16] src) {
   dma.transp<1, 0> src => dst;
 }
 
-// CHECK: <compile_result status="rejected" {{.*}} diagnostics="2" {{.*}} budget_per_diagnostic="100">
+// CHECK: <compile_result status="rejected" target="cc" arch="x86_64"{{.*}}assessments_violated="2"{{.*}}diagnostics="2"{{.*}}budget_per_diagnostic="100">
 // CHECK-NEXT: <diagnostic severity="error" category="shape-compat" {{.*}} tokens="{{[1-9][0-9]?}}">
 // CHECK-NEXT: <constraint>DMA shape compatibility; predicate: from.d[i] == to.d[i]</constraint>
 // CHECK-NEXT: <observed>from = {{.*}}; to = {{.*}}; valid: from.d[i] == to.d[i]</observed>

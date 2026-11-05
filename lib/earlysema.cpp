@@ -2502,11 +2502,23 @@ bool EarlySemantics::Visit(AST::DMA& n) {
                      facts);
     }
     if (sty->ElementType() != tty->ElementType()) {
-      Error1(n.LOC(),
-             "DMA statement contains a type mismatch: the element types of "
-             "the 'from'(" +
-                 STR(sty->ElementType()) + ") and 'to'(" +
-                 STR(tty->ElementType()) + ") are inconsistent.");
+      AgentFacts facts;
+      facts.category = "dma-type";
+      facts.constraint = "DMA element type compatibility";
+      facts.predicate = "from.elem == to.elem";
+      facts.observed.push_back("from.elem = " + STR(sty->ElementType()));
+      facts.observed.push_back("to.elem = " + STR(tty->ElementType()));
+      facts.valid = "from.elem == to.elem";
+      facts.repair_do = "Make both DMA sides use the same element type.";
+      facts.repair_why = "Tiled copies cannot convert element types.";
+      facts.repair_alt = "Copy through a temporary buffer of to.elem.";
+      facts.confidence = "certain";
+      ErrorWithFacts(n.LOC(),
+                     "DMA statement contains a type mismatch: the element "
+                     "types of the 'from'(" +
+                         STR(sty->ElementType()) + ") and 'to'(" +
+                         STR(tty->ElementType()) + ") are inconsistent.",
+                     facts);
     }
   }
 

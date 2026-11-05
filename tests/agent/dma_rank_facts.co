@@ -1,6 +1,5 @@
-// The DMA rank check reports both symbolic ranks as compiler facts. The
-// un-migrated type-mismatch check in the same pass still falls back to the
-// generic envelope, so both paths are exercised by this input.
+// Both DMA checks in the same pass now publish explicit facts: element types
+// and ranks. This also exercises two enriched diagnostics at one source site.
 //
 // RUN: not choreo -es -t cc -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s
 
@@ -10,7 +9,9 @@ __co__ void rank_mismatch(f32 [1, 2, 3] src) {
 }
 
 // CHECK: <compile_result status="rejected"{{.*}}>
-// CHECK: <diagnostic severity="error" category="general"{{.*}}occurrences="1"{{.*}}>
+// CHECK: <diagnostic severity="error" category="dma-type"{{.*}}occurrences="1"{{.*}}>
+// CHECK-NEXT: <constraint>DMA element type compatibility; predicate: from.elem == to.elem</constraint>
+// CHECK-NEXT: <observed>from.elem = f32; to.elem = s32; valid: from.elem == to.elem</observed>
 // CHECK: <diagnostic severity="error" category="dma-rank"{{.*}}occurrences="1"{{.*}}>
 // CHECK-NEXT: <constraint>DMA source/destination rank; predicate: from.rank == to.rank</constraint>
 // CHECK-NEXT: <observed>from.rank = 3; to.rank = 4; valid: from.rank == to.rank</observed>

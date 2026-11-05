@@ -1,0 +1,19 @@
+// The envelope publishes the same legality boundary as -target-info, so an
+// agent gets the real per-block thread limit and shared-memory capacity
+// without a second compiler invocation. CPU and GPU targets must differ.
+//
+// RUN: not choreo -es -t cc -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck --check-prefix=CC %s
+// RUN: not choreo -es -t cute -arch=sm_90a -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck --check-prefix=GPU %s
+
+__co__ void rank_mismatch(f32 [1, 2, 3] src) {
+  s32 [3, 2, 1, 4] dst;
+  dma.copy src => dst;
+}
+
+// CC: <compile_result status="rejected" target="cc" arch="x86_64" max_threads_per_block="0" shared_mem_bytes="1048576"{{.*}}assessments_violated="{{[0-9]+}}"{{.*}}>
+// CC: category="dma-type"
+// CC: category="dma-rank"
+
+// GPU: <compile_result status="rejected" target="cute" arch="sm_90a" max_threads_per_block="1024" shared_mem_bytes="233472"{{.*}}assessments_violated="{{[0-9]+}}"{{.*}}>
+// GPU: category="dma-type"
+// GPU: category="dma-rank"
