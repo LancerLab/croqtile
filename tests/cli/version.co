@@ -1,0 +1,16 @@
+// --version reports the version recorded in VERSION.txt and the build's source
+// revision, needs no input file, and appears in --help.
+//
+// RUN: choreo --version | FileCheck %s --check-prefix=VERSION
+// RUN: choreo -V | FileCheck %s --check-prefix=VERSION
+// RUN: choreo --help | FileCheck %s --check-prefix=HELP
+// RUN: choreo --version %s | FileCheck %s --check-prefix=VERSION
+
+// VERSION: choreo version {{[0-9]+\.[0-9]+\.[0-9]+[^ ]*}} ({{[0-9a-f]{40}|unknown}})
+// HELP: --version
+
+// The flag reports and exits without entering the source pipeline, so the
+// file below is never compiled.
+__co__ void unreachable_for_version() {
+  this_is_not_valid_choreo
+}

@@ -126,6 +126,9 @@ Option<bool>
     print_features(OptionKind::User, "--print-features", "", false,
                    "Print the supported language and target features and "
                    "exit. One feature per line (upper-cased).");
+Option<bool> print_version(OptionKind::User, "--version", "-V", false,
+                           "Print the compiler version and source revision, "
+                           "then exit.");
 Option<bool> verbose(OptionKind::User, "--verbose", "-v", false,
                      "Display the programs invoked by the compiler.");
 Option<bool> inhibit_warning(OptionKind::User, "-w", "", false,
@@ -421,6 +424,23 @@ bool CommandLine::Parse(int argc, char** argv) {
       if (!r.Message().empty()) errs() << r.Message() << "\n";
       exit(r.ReturnCode());
     }
+  }
+
+  if (print_version.GetValue()) {
+    std::cout << "choreo version ";
+#ifdef CHOREO_SDK_VERSION
+    std::cout << CHOREO_SDK_VERSION;
+#else
+    std::cout << "unknown";
+#endif
+    std::cout << " (";
+#ifdef CHOREO_GIT_REVISION
+    std::cout << CHOREO_GIT_REVISION;
+#else
+    std::cout << "unknown";
+#endif
+    std::cout << ")\n";
+    exit(0);
   }
 
   if (!print_features.GetValue() && !r.StdinAsInput() &&
