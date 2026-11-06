@@ -1,0 +1,15 @@
+// A host-level scalar foreach enclosing a device block passes its iteration
+// variable to the kernel. The bounded type is compile-time metadata; at the
+// device ABI boundary it must be a plain int, not `{int}->[N]`.
+//
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v '^ *//' | FileCheck %s
+
+__co__ void host_foreach_parallel(f32 [64] x) {
+  foreach {i} in [2] {
+    parallel p by 1 : block {
+      println(1);
+    }
+  }
+}
+
+// CHECK: __global__ void __choreo_device_host_foreach_parallel({{.*}}int __iv_i)

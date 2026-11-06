@@ -8648,6 +8648,15 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
     ssm.RemapHostSymbol(InScopeName(m1->name), "__iv_" + iv_suffix);
     ssm.RemapDeviceSymbol(InScopeName(n.with->name), "__iv_" + iv_suffix);
     ssm.RemapHostSymbol(InScopeName(n.with->name), "__iv_" + iv_suffix);
+    // Keep the IV declared in the enclosing device scope, not just in the
+    // loop header: peeled pipeline prologues (TMA/async copies) reference it
+    // before the `for` statement. It is unused for plain loops, hence
+    // [[maybe_unused]]. Host code does not have such prologues, and a host
+    // declaration would leak the bounded IV type into device parameter
+    // collection.
+    if (!IsHost())
+      ds << d_indent << "[[maybe_unused]] int __iv_" << iv_suffix
+         << " = 0;\n";
     return true;
   }
 
@@ -10467,54 +10476,58 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
 }
 
 static inline const std::string
-DeviceParamTypeStringify(const Choreo::Type& ty) {
-  if (isa<VoidType>(&ty))
+DeviceParamTypeStringify(const ptr<Type>& ty) {
+  if (isa<VoidType>(ty))
     return "void";
-  else if (isa<S8Type>(&ty))
+  else if (isa<S8Type>(ty))
     return "signed char";
-  else if (isa<U8Type>(&ty))
+  else if (isa<U8Type>(ty))
     return "unsigned char";
-  else if (isa<S16Type>(&ty))
+  else if (isa<S16Type>(ty))
     return "short";
-  else if (isa<U16Type>(&ty))
+  else if (isa<U16Type>(ty))
     return "unsigned short";
-  else if (isa<S32Type>(&ty))
+  else if (isa<S32Type>(ty))
     return "int";
-  else if (isa<U32Type>(&ty))
+  else if (isa<U32Type>(ty))
     return "unsigned int";
-  else if (isa<S64Type>(&ty))
+  else if (isa<S64Type>(ty))
     return "int64_t";
-  else if (isa<U64Type>(&ty))
+  else if (isa<U64Type>(ty))
     return "uint64_t";
-  else if (isa<BooleanType>(&ty))
+  else if (isa<BooleanType>(ty))
     return "bool";
-  else if (isa<FloatE4M3Type>(&ty))
+  else if (isa<FloatE4M3Type>(ty))
     return "choreo::float_e4m3_t";
-  else if (isa<FloatE5M2Type>(&ty))
+  else if (isa<FloatE5M2Type>(ty))
     return "choreo::float_e5m2_t";
-  else if (isa<FloatE2M3Type>(&ty))
+  else if (isa<FloatE2M3Type>(ty))
     return "choreo::float_e2m3_t";
-  else if (isa<FloatE3M2Type>(&ty))
+  else if (isa<FloatE3M2Type>(ty))
     return "choreo::float_e3m2_t";
-  else if (isa<FloatE2M1Type>(&ty))
+  else if (isa<FloatE2M1Type>(ty))
     return "choreo::float_e2m1_t";
-  else if (isa<F16Type>(&ty))
+  else if (isa<F16Type>(ty))
     return "choreo::half";
-  else if (isa<BF16Type>(&ty))
+  else if (isa<BF16Type>(ty))
     return "choreo::bfp16";
-  else if (isa<F32Type>(&ty))
+  else if (isa<F32Type>(ty))
     return "float";
-  else if (isa<F64Type>(&ty))
+  else if (isa<F64Type>(ty))
     return "double";
-  else if (isa<EventArrayType>(&ty))
+  else if (isa<EventArrayType>(ty))
     return "bool *";
-  else if (isa<EventType>(&ty))
+  else if (isa<EventType>(ty))
     return "bool"; // use bool for event
-  else if (auto sty = dyn_cast<SpannedType>(&ty))
+  else if (auto sty = dyn_cast<SpannedType>(ty))
     return std::string(NameBaseType(sty->ElementType())) + " *";
+  else if (IsActualBoundedIntegerType(ty))
+    // A 1-D bounded iteration variable is a plain scalar at the device
+    // boundary; its bounds are compile-time metadata.
+    return NameBaseType(GetUnderlyingType(ty));
   else
     choreo_unreachable(
-        "unexpected compile-time type in device parameter: " + STR(ty) + ".");
+        "unexpected compile-time type in device parameter: " + STR(*ty) + ".");
 
   return "";
 }
@@ -10647,7 +10660,7 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
     if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(item.name))) continue;
     auto dname = (item.need_iv_prefix ? "__iv_" : "") + UnScopedName(item.name);
     if (index++ > 0) oss << ", ";
-    oss << DeviceParamTypeStringify(*item.type) << " " << dname;
+    oss << DeviceParamTypeStringify(item.type) << " " << dname;
     ssm.MapDeviceSymbolIfNotExist(item.name, dname);
   }
 

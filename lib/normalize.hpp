@@ -196,7 +196,11 @@ public:
       ctx.emplace_back(name, fresh);
       ++pushed;
     }
-    if (pushed > 0) pops.push_back(pushed);
+    // Push one entry per ForeachBlock (0 when it introduced no canonical
+    // context) so AfterVisitImpl pops exactly the context this block pushed.
+    // A nested foreach with an explicit IV must not consume an enclosing
+    // block's entry and end the outer canonicalization context early.
+    pops.push_back(pushed);
     return true;
   }
 };
