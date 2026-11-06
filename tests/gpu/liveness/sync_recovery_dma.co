@@ -10,7 +10,7 @@
 // CHECK: slot @0
 // CHECK-DAG: tenant {{.*}}y{{.*}} phases
 // CHECK-DAG: tenant {{.*}}x{{.*}} phases
-// CHECK: handover {{.*}}y{{.*}} -> {{.*}}x{{.*}} [hb-merged]{{.*}}witness:{{.*}}sig{{.*}}obligations:{{.*}}completion:engine-wait
+// CHECK: handover {{.*}}y{{.*}} -> {{.*}}x{{.*}} [hb-merged]{{.*}}witness:{{.*}}sig{{.*}}obligations: {{.*}}WAW{{.*}}EW->GW{{.*}}completion:engine-wait
 
 __co__ s32 [16] reuse_dma(s32 [16] src) {
   s32 [16] out;
