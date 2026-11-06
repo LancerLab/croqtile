@@ -415,6 +415,13 @@ CuteCodeGen::FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const {
   return nullptr;
 }
 
+bool CuteCodeGen::IsU32RegisterMetadata(const ptr<Type>& ty,
+                                       const std::string& scoped) const {
+  auto scty = dyn_cast<ScalarType>(ty);
+  return scty && scty->GetBaseType() == BaseType::U32 &&
+         !shared_scalar_syms_.count(scoped);
+}
+
 std::string CuteCodeGen::ArraySlotOffsetExpr(
     const ptr<ArrayType>& array_ty, const AST::NodeList& subs,
     bool is_host) const {
@@ -2499,6 +2506,9 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
   // if a symbol is declared but have no symbol value(optimized value)
   // pass it to device func even it is unused.
   auto sname = InScopeName(sym);
+  if (isa<ScalarType>(nty))
+    if (auto mem = n.GetMemory(); mem && mem->Get() == Storage::SHARED)
+      shared_scalar_syms_.insert(sname);
   if (!FCtx(fname).HasSymbolValues(sname))
     updating_cgi.AddSymbolDetail(fname, {sname, GetSymbolType(sym), true});
   else {
@@ -6187,10 +6197,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         // on the LDS path.
         if (metadata_sym) {
           auto mty = GetSymbolType(metadata_name);
-          if (auto scty = dyn_cast<ScalarType>(mty))
-            metadata_is_register =
-                scty->GetBaseType() == BaseType::U32 &&
-                scty->GetStorage() != Storage::SHARED;
+          metadata_is_register = IsU32RegisterMetadata(mty, metadata_scoped);
         }
         if (metadata_name.empty() ||
             (!metadata_is_register &&
@@ -6213,11 +6220,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                         "auto-split K iterations.");
         return false;
       }
-      if (metadata_is_register && wgmma_k_iters > 1) {
+      if (policy_is_sparse && wgmma_k_iters > 1) {
         Error1(n.LOC(),
-               "sparse WGMMA metadata in a register cannot be reused across "
-               "auto-split K iterations; load metadata per K tile or provide "
-               "it via mma.load");
+               "sparse WGMMA metadata cannot be reused across auto-split K "
+               "iterations; per-atom metadata transport is not implemented");
         return false;
       }
 
@@ -7215,7 +7221,17 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       std::string meta_var;
       if (policy_is_sparse) {
         if (e_sym_provided) {
-          meta_var = AST::FragName(e_sym_provided);
+          auto e_sym = AST::FragName(e_sym_provided);
+          auto e_ty = GetSymbolType(e_sym);
+          auto e_scoped = InScopeName(e_sym);
+          bool ok = IsU32RegisterMetadata(e_ty, e_scoped) ||
+                    static_cast<bool>(GetSpannedType(e_ty));
+          if (!ok) {
+            Error1(n.LOC(), "sparse CTMMA metadata must be a plain u32 "
+                            "register or loaded with mma.load");
+            return false;
+          }
+          meta_var = e_sym;
         } else {
           auto& ssmi_a = cgi.GetSymbolMMA(InScopeName(a_sym));
           meta_var = a_sym + "_meta";
@@ -8566,34 +8582,39 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
 
   assert(n.with_matchers && "expected matchers exist.");
 
+  auto emit_iv_decl = [&](const std::string& name, const std::string& scoped,
+                          const ptr<Type>& ty, bool maybe_unused) {
+    const std::string attr = maybe_unused ? "[[maybe_unused]] " : "";
+    if (IsHost()) {
+      hs << h_indent << attr << "int " << name << " = 0;\n";
+      updating_cgi.AddSymbolDetail(
+          fname, {scoped, ty, true, -1, ParamAttr::NONE, "", true});
+    } else {
+      ds << d_indent << attr << "int " << name << " = 0;\n";
+    }
+  };
+
   // A single-matcher `with` source is scalar: the foreach emits the loop
-  // directly, so the source and its matcher must resolve to the same
-  // canonical iteration variable. Synthetic matchers (`with a in [N]`) are
-  // named `<a>__elem__N` and the body references the source `<a>`, so the IV
-  // is `__iv_<a>`. Explicit matchers (`with a = {x}`) are referenced by their
-  // own name, so the IV is `__iv_<x>`.
+  // directly over the source, so the source and its matcher must resolve to
+  // the source's canonical iteration variable `__iv_<source>`. This also
+  // covers explicit matchers (`with a = {x}`): the body's `x` is the same
+  // loop variable as the source `a`.
   if (n.with && n.GetMatchers().size() == 1 &&
       IsActualBoundedIntegerType(
           cast<AST::Identifier>(n.GetMatchers()[0])->GetType())) {
     auto m1 = cast<AST::Identifier>(n.GetMatchers()[0]);
-    const std::string elem_prefix = n.with->name + "__elem__";
-    const std::string iv_suffix =
-        m1->name.compare(0, elem_prefix.size(), elem_prefix) == 0
-            ? n.with->name
-            : m1->name;
-    ssm.RemapDeviceSymbol(InScopeName(m1->name), "__iv_" + iv_suffix);
-    ssm.RemapHostSymbol(InScopeName(m1->name), "__iv_" + iv_suffix);
-    ssm.RemapDeviceSymbol(InScopeName(n.with->name), "__iv_" + iv_suffix);
-    ssm.RemapHostSymbol(InScopeName(n.with->name), "__iv_" + iv_suffix);
-    // Keep the IV declared in the enclosing device scope, not just in the
-    // loop header: peeled pipeline prologues (TMA/async copies) reference it
-    // before the `for` statement. It is unused for plain loops, hence
-    // [[maybe_unused]]. Host code does not have such prologues, and a host
-    // declaration would leak the bounded IV type into device parameter
-    // collection.
-    if (!IsHost())
-      ds << d_indent << "[[maybe_unused]] int __iv_" << iv_suffix
-         << " = 0;\n";
+    const std::string iv_name = "__iv_" + n.with->name;
+    // The foreach over an explicit matcher (`foreach x`) canonicalizes to
+    // __iv_<matcher>; map it to the with source's IV.
+    single_matcher_iv_["__iv_" + m1->name] = iv_name;
+    ssm.RemapDeviceSymbol(InScopeName(m1->name), iv_name);
+    ssm.RemapHostSymbol(InScopeName(m1->name), iv_name);
+    ssm.RemapDeviceSymbol(InScopeName(n.with->name), iv_name);
+    ssm.RemapHostSymbol(InScopeName(n.with->name), iv_name);
+    // Keep the IV declared in the enclosing scope, not just in the loop
+    // header: peeled pipeline prologues (TMA/async copies) reference it
+    // before the `for` statement, and host code may use it directly.
+    emit_iv_decl(iv_name, InScopeName(n.with->name), m1->GetType(), true);
     return true;
   }
 
@@ -8601,15 +8622,10 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
     auto id = cast<AST::Identifier>(v);
     ssm.RemapDeviceSymbol(InScopeName(id->name), "__iv_" + id->name);
     ssm.RemapHostSymbol(InScopeName(id->name), "__iv_" + id->name);
-    // Keep the device side decl, even for host side iv.
-    // for visibility of shapes
-    if (IsHost()) {
-      hs << h_indent << "int __iv_" << id->name << " = 0;\n";
-      updating_cgi.AddSymbolDetail(fname,
-                                   {InScopeName(id->name), id->GetType(), true,
-                                    -1, ParamAttr::NONE, "", true});
-    } else
-      ds << d_indent << "int __iv_" << id->name << " = 0;\n";
+    // Keep the device side decl, even for host side iv, for visibility of
+    // shapes.
+    emit_iv_decl("__iv_" + id->name, InScopeName(id->name), id->GetType(),
+                 false);
   }
 
   // When the range source (n.in) is a 1D mdspan referencing a declared
@@ -9299,6 +9315,9 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
                             "variable after normalization.");
           auto iv_bty = cast<BoundedType>(rng->GetIV()->GetType());
           auto iv_name = UnScopedName(iv_scoped);
+          if (auto iv_it = single_matcher_iv_.find(iv_name);
+              iv_it != single_matcher_iv_.end())
+            iv_name = iv_it->second;
           auto lb = UnScopedExpr(ValueSTR(iv_bty->GetLowerBound()));
           auto ub = UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()));
           auto step = iv_bty->GetStep();

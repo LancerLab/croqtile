@@ -20,4 +20,4 @@ __co__ auto f1_reject_auto_split(f16 [64, 32] lhs_packed, f16 [8, 64] rhs) {
   return output;
 }
 
-// CHECK: error: sparse WGMMA metadata in a register cannot be reused across auto-split K iterations
+// CHECK: error: sparse WGMMA metadata cannot be reused across auto-split K iterations

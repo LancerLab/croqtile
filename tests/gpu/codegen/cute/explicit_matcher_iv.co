@@ -1,0 +1,33 @@
+// A single explicit matcher (`with index = {x}`) is the same loop variable as
+// the with source. The foreach iterates the source's canonical __iv_index, so
+// the body's `x`/`index` references must resolve to __iv_index as well,
+// whether the loop is written `foreach index` or `foreach x`.
+//
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v '^ *//' | FileCheck %s
+
+__co__ void explicit_matcher_iv(f32 [2, 8, 4] a) {
+  parallel p by 1 : block {
+    with index = {x} in [2] {
+      foreach index {
+        dma.copy a.subspan(1, 8, 4).at(x, 0, 0) => local;
+      }
+    }
+  }
+}
+
+__co__ void explicit_matcher_iv_x(f32 [2, 8, 4] a) {
+  parallel p by 1 : block {
+    with index = {x} in [2] {
+      foreach x {
+        dma.copy a.subspan(1, 8, 4).at(index, 0, 0) => local;
+      }
+    }
+  }
+}
+
+// CHECK-LABEL: __global__{{.*}}explicit_matcher_iv
+// CHECK: for (int __iv_index = 0; __iv_index < 2; ++__iv_index)
+// CHECK: (float*)a + (__iv_index * 32)
+// CHECK-LABEL: __global__{{.*}}explicit_matcher_iv_x
+// CHECK: for (int __iv_index = 0; __iv_index < 2; ++__iv_index)
+// CHECK: (float*)a + (__iv_index * 32)

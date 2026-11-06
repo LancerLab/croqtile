@@ -170,7 +170,7 @@ __co__ void test_subspan_span_as_chunkat(f32 [32, 8, 4] a) {
 // chunkat offset = x * (16/2) * 8 = x * 64
 // total          = p * 128 + x * 64
 // CHECK-LABEL: __global__{{.*}}test_subspan_span_as_chunkat
-// CHECK: (float*)a + (blockIdx.x * 128 + __iv_x * 64)
+// CHECK: (float*)a + (blockIdx.x * 128 + __iv_index * 64)
 
 // ---------------------------------------------------------------------------
 // 11. span_as before view.from with multiple chunkat indices
@@ -357,7 +357,7 @@ __co__ void test_subspan_sqz_multi(f32 [10, 20, 9, 8] a) {
 }
 // offset = p * 1 * (20*9*8) + x * 1 * (9*8) = p * 1440 + x * 72
 // CHECK-LABEL: __global__{{.*}}test_subspan_sqz_multi
-// CHECK: (float*)a + (blockIdx.x * 1440 + __iv_x * 72)
+// CHECK: (float*)a + (blockIdx.x * 1440 + __iv_index * 72)
 
 // ---------------------------------------------------------------------------
 // 24. .sqz with wildcard _ resolving to 1 via ShapeInference
@@ -475,7 +475,7 @@ __co__ void test_sqz_mid_chunkat(f32 [10, 18, 8] a) {
 // chunkat(x, _) with x in [2] => tile dim 0 by 2 => shape (9, 8)
 // offset = p * 144 + x * 72
 // CHECK-LABEL: __global__{{.*}}test_sqz_mid_chunkat
-// CHECK: (float*)a + (blockIdx.x * 144 + __iv_x * 72)
+// CHECK: (float*)a + (blockIdx.x * 144 + __iv_index * 72)
 // CHECK: make_shape(cute::Int<9>{}, cute::Int<8>{})
 
 // ---------------------------------------------------------------------------

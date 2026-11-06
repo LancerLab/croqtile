@@ -364,6 +364,8 @@ private:
   std::vector<std::vector<ExplicitScaleAccumInfo>> explicit_scale_accum_scopes;
   std::unordered_map<std::string, ptr<AST::ChunkAt>> live_chunk_aliases;
   std::unordered_set<std::string> explicit_mma_loads_;
+  std::unordered_set<std::string> shared_scalar_syms_;
+  std::unordered_map<std::string, std::string> single_matcher_iv_;
   std::unordered_map<std::string, SwizMode> shared_buf_swiz_;
 
   struct TMAInnerSplit {
@@ -525,6 +527,8 @@ private:
     hoisted_scale_accum_scopes.clear();
     live_chunk_aliases.clear();
     explicit_mma_loads_.clear();
+    shared_scalar_syms_.clear();
+    single_matcher_iv_.clear();
     shared_buf_swiz_.clear();
     tma_inner_splits_.clear();
     frag_chunk_rs_aliases_.clear();
@@ -707,6 +711,8 @@ private:
                          bool force_wait = false);
   // Offset of a span-array slot in elements. Uses the physical slot stride
   // (which folds alignas padding) and folds unawarded trailing array dims.
+  bool IsU32RegisterMetadata(const ptr<Type>& ty,
+                             const std::string& scoped) const;
   std::string ArraySlotOffsetExpr(const ptr<ArrayType>& array_ty,
                                   const AST::NodeList& subs,
                                   bool is_host) const;
