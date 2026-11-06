@@ -79,6 +79,8 @@ std::set<std::string> TenantDomains(const HBGraph& g,
         doms.insert("ER");
       else if (tag == "DMA-to")
         doms.insert("EW");
+      else if (tag == "observe")
+        continue; // completion observation, not a data access
       else
         doms.insert(tag);
     }
@@ -86,22 +88,68 @@ std::set<std::string> TenantDomains(const HBGraph& g,
   return doms;
 }
 
-// Coarse obligation hints for a handover A -> B, per writer domain of A
-// and reader domain of B (plan C4 table, NVIDIA instantiation).
-std::vector<std::string> ObligationHints(const std::set<std::string>& a,
-                                         const std::set<std::string>& b) {
-  std::vector<std::string> out;
+// --- C4: obligation derivation (Table 2, NVIDIA instantiation) ---
+// Per handover A -> B, each (domain-of-A, domain-of-B) combination yields a
+// dependence class (RAW/WAR/WAW) and the obligations it carries, with the
+// selected primitive (P-numbers as in the paper's Table 1). Phase-granular
+// for now; per-site refinement is the precision ladder's next rung.
+struct Obligation {
+  std::string dep;       // RAW | WAR | WAW
+  std::string pair;      // e.g. EW->GR
+  std::string cls;       // completion | visibility | ordering
+  std::string primitive; // P-tag with the concrete discharge op
+};
+
+std::vector<Obligation> DeriveObligations(const std::set<std::string>& a,
+                                          const std::set<std::string>& b) {
+  std::vector<Obligation> out;
   auto has = [](const std::set<std::string>& s, const char* k) {
     return s.count(k) != 0;
   };
-  if ((has(a, "GW") || has(a, "GR")) && has(b, "ER"))
-    out.push_back("visibility:fence.proxy.async");
-  if (has(a, "EW") && (has(b, "GR") || has(b, "GW")))
-    out.push_back("completion:engine-wait");
-  if (has(a, "ER") && (has(b, "GW") || has(b, "EW")))
-    out.push_back("completion:drain-before-overwrite");
-  if ((has(a, "GW") || has(a, "GR")) && (has(b, "GR") || has(b, "GW")))
-    out.push_back("hb-only");
+  auto emit = [&](const char* dep, const char* pair, const char* cls,
+                  const char* prim) {
+    out.push_back(Obligation{dep, pair, cls, prim});
+  };
+  for (const char* ad : {"GR", "GW", "ER", "EW"}) {
+    if (!has(a, ad)) continue;
+    for (const char* bd : {"GR", "GW", "ER", "EW"}) {
+      if (!has(b, bd)) continue;
+      bool a_writes = ad[1] == 'W', a_reads = !a_writes;
+      bool b_writes = bd[1] == 'W', b_reads = !b_writes;
+      bool a_eng = ad[0] == 'E', b_eng = bd[0] == 'E';
+      std::string pair = std::string(ad) + "->" + bd;
+      if (a_writes && b_reads) { // RAW
+        if (!a_eng && !b_eng)
+          emit("RAW", pair.c_str(), "ordering", "P1:sync-edge");
+        else if (!a_eng && b_eng)
+          emit("RAW", pair.c_str(), "visibility", "P6:fence.proxy.async");
+        else if (a_eng && !b_eng)
+          emit("RAW", pair.c_str(), "completion", "engine-wait(P8/P9)");
+        else
+          emit("RAW", pair.c_str(), "completion", "P9:wait_group");
+      } else if (a_reads && b_writes) { // WAR
+        if (!a_eng && !b_eng)
+          emit("WAR", pair.c_str(), "ordering", "P1:sync-edge");
+        else if (!a_eng && b_eng)
+          emit("WAR", pair.c_str(), "completion", "P1:before-reissue");
+        else if (a_eng && !b_eng)
+          emit("WAR", pair.c_str(), "completion", "read-drain(P9.read/P8)");
+        else
+          emit("WAR", pair.c_str(), "completion", "read-drain(P9.read)");
+      } else if (a_writes && b_writes) { // WAW
+        if (!a_eng && !b_eng)
+          emit("WAW", pair.c_str(), "ordering", "P1:sync-edge");
+        else if (!a_eng && b_eng) {
+          emit("WAW", pair.c_str(), "ordering", "P1:sync-edge");
+          emit("WAW", pair.c_str(), "visibility", "P6:publish-before-write");
+        } else if (a_eng && !b_eng)
+          emit("WAW", pair.c_str(), "completion", "engine-wait(P8/P9)");
+        else
+          emit("WAW", pair.c_str(), "completion", "P9:wait_group(full)");
+      }
+      // GR->GR / ER->GR / GR->ER: no writer, no obligation (RAR control).
+    }
+  }
   return out;
 }
 
@@ -192,7 +240,20 @@ void SyncRecovery::RunRecovery() {
         if (ps.empty())
           dbgs() << " (no HB phases)\n";
         else
-          dbgs() << " phases [" << ps.front() << ".." << ps.back() << "]\n";
+          dbgs() << " phases [" << ps.front() << ".." << ps.back() << "]";
+        auto doms =
+            g ? TenantDomains(*g, ps, t.buffer_id) : std::set<std::string>{};
+        if (!doms.empty()) {
+          dbgs() << " domains {";
+          bool first = true;
+          for (const auto& d : doms) {
+            if (!first) dbgs() << ",";
+            dbgs() << d;
+            first = false;
+          }
+          dbgs() << "}";
+        }
+        dbgs() << "\n";
       }
       if (!g) {
         dbgs() << "    (no HB graph for scope; handovers unordered)\n";
@@ -234,10 +295,12 @@ void SyncRecovery::RunRecovery() {
             dbgs() << " witness:";
             for (const auto& s : sigs) dbgs() << " " << s;
           }
-          auto hints = ObligationHints(tenant_doms[i], tenant_doms[j]);
-          if (!hints.empty()) {
+          auto obligations = DeriveObligations(tenant_doms[i], tenant_doms[j]);
+          if (!obligations.empty()) {
             dbgs() << " obligations:";
-            for (const auto& h : hints) dbgs() << " " << h;
+            for (const auto& o : obligations)
+              dbgs() << " " << o.dep << "[" << o.pair << "](" << o.cls << ":"
+                     << o.primitive << ")";
           }
           dbgs() << "\n";
         }

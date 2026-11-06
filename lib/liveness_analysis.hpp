@@ -285,6 +285,11 @@ private:
   std::unordered_map<std::string, VarSet> async_inthreads_vars;
   bool visiting_synchronize = false;
   bool adding_synthetic_uses = false;
+  // When set, AddUse records this tag into the HB phase's access-kind map
+  // instead of "AddUse" (used to distinguish element writes and
+  // completion-observing waits from genuine data reads). Liveness-uses are
+  // unaffected; only the sync-recovery typing tag changes.
+  const char* hb_access_tag_override_ = nullptr;
 
   // -- Liveness info per statement --
   std::unordered_map<const Stmt*, LivenessInfo> stmt_linfo;
