@@ -1,7 +1,7 @@
-// `with a = {x} in [N]` installs a canonical-IV rename for the explicit
-// matcher x. The rename is only valid inside the with block: body references
-// canonicalized to __iv_x must resolve to the source IV, and a later foreach
-// that reuses the matcher name must not inherit the stale rename.
+// The canonical IV of a single-matcher `with` is named after its source.
+// Body references canonicalized to __iv_<matcher> resolve to it, nested withs
+// with the same source name get distinct C++ variables, and a later foreach
+// cannot inherit a stale rename from an earlier with block.
 //
 // RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v '^ *//' | FileCheck %s
 
@@ -28,6 +28,29 @@ __co__ void later_foreach_not_renamed(f32 [3, 8, 4] a) {
   }
 }
 
+__co__ void nested_source_shadow() {
+  parallel p by 1 : block {
+    with a = {x} in [2] {
+      foreach x {
+        with a = {y} in [3] {
+          println(x + y);
+        }
+      }
+    }
+  }
+}
+
+__co__ void event_wait_redirect(f32 [2] a) {
+  parallel p by 1 : block {
+    shared event ev[2];
+    with index = {x} in [2] {
+      foreach x {
+        wait ev[x];
+      }
+    }
+  }
+}
+
 __co__ void shadowed_host_iv(f32 [64] x) {
   with i in [2] {
     with i in [3] {
@@ -44,5 +67,11 @@ __co__ void shadowed_host_iv(f32 [64] x) {
 // CHECK-LABEL: __global__{{.*}}later_foreach_not_renamed
 // CHECK: for (int __iv_index = 0; __iv_index < 2; ++__iv_index)
 // CHECK: for (int __iv_x = 0; __iv_x < 3; ++__iv_x)
-// CHECK-LABEL: __global__ void __choreo_device_shadowed_host_iv({{.*}}int __iv_i)
-// CHECK-NOT: int __iv_i, int __iv_i
+// CHECK: (float*)a + (__iv_x * 32)
+// CHECK-LABEL: __global__{{.*}}nested_source_shadow
+// CHECK: for (int __iv_a = 0; __iv_a < 2; ++__iv_a)
+// CHECK: int __iv_a__2 = 0;
+// CHECK: __iv_a + __iv_a__2
+// CHECK-LABEL: __global__{{.*}}event_wait_redirect
+// CHECK: ev[__iv_index].wait(((__iv_index & 3) >> 1));
+// CHECK-LABEL: __global__ void __choreo_device_shadowed_host_iv({{.*}}int __iv_i, int __iv_i__2)

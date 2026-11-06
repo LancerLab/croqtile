@@ -422,22 +422,16 @@ bool CuteCodeGen::IsU32RegisterMetadata(const ptr<Type>& ty,
          !shared_scalar_syms_.count(scoped);
 }
 
-bool CuteCodeGen::IsPooledArray(const std::string& sym) const {
-  if (pooled_array_syms_.empty()) return false;
-  return pooled_array_syms_.count(InScopeNameForRef(sym)) > 0;
-}
-
 ValueItem CuteCodeGen::SlotStrideElementsValue(
-    const ptr<ArrayType>& array_ty, const std::string& sym) const {
+    const ptr<ArrayType>& array_ty) const {
   if (auto sat = dyn_cast<SpannedArrayType>(array_ty))
-    return IsPooledArray(sym) ? sat->PhysicalSlotStrideElementsValue()
-                              : sat->spty->GetShape().ElementCountValue();
+    return sat->SlotElemCountValue();
   return sbe::nu(1);
 }
 
 std::string CuteCodeGen::ArraySlotOffsetExpr(
-    const ptr<ArrayType>& array_ty, const AST::NodeList& subs, bool is_host,
-    const std::string& sym) const {
+    const ptr<ArrayType>& array_ty, const AST::NodeList& subs,
+    bool is_host) const {
   if (subs.empty()) return "0";
   const ValueList& dims = array_ty->Dimensions();
   assert(subs.size() <= dims.size());
@@ -451,7 +445,7 @@ std::string CuteCodeGen::ArraySlotOffsetExpr(
   }
   for (size_t i = subs.size(); i < dims.size(); ++i)
     idx = "(" + idx + ")*" + ValueSTR(dims[i]);
-  return "(" + idx + ")*(" + ValueSTR(SlotStrideElementsValue(array_ty, sym)) +
+  return "(" + idx + ")*(" + ValueSTR(SlotStrideElementsValue(array_ty)) +
          ")";
 }
 
@@ -481,7 +475,7 @@ void CuteCodeGen::AppendArraySlotOffset(std::string& buf_expr,
   buf_expr.insert(0, std::string("(") + NameBaseType(sty->ElementType()) +
                          "*)");
   buf_expr += " + ";
-  buf_expr += ArraySlotOffsetExpr(array_ty, subs, is_host, sym);
+  buf_expr += ArraySlotOffsetExpr(array_ty, subs, is_host);
 }
 
 std::pair<std::string, std::string>
@@ -2551,16 +2545,6 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
   if (isa<ScalarType>(nty))
     if (auto mem = n.GetMemory(); mem && mem->Get() == Storage::SHARED)
       shared_scalar_syms_.insert(sname);
-  if (n.HasNote("reuse")) {
-    pooled_array_syms_.insert(sname);
-  } else if (n.HasNote("ref")) {
-    if (auto e = dyn_cast<AST::Expr>(n.init_expr);
-        e && e->op == Op::ElemOf) {
-      auto base = AST::GetArrayBaseSymbol(*e);
-      if (base && pooled_array_syms_.count(InScopeNameForRef(base->name)))
-        pooled_array_syms_.insert(sname);
-    }
-  }
   if (!FCtx(fname).HasSymbolValues(sname))
     updating_cgi.AddSymbolDetail(fname, {sname, GetSymbolType(sym), true});
   else {
@@ -2790,6 +2774,14 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       if (n.HasNote("alignment"))
         alignment_specifier = "alignas(" + n.GetNote("alignment") + ") ";
 
+      // One slot occupies this many elements; the same value sizes the
+      // declaration and addresses its slots.
+      auto SlotElemExpr = [&]() -> std::string {
+        if (auto sat = dyn_cast<SpannedArrayType>(nty))
+          return ValueSTR(sat->SlotElemCountValue());
+        return ElemCountExprOf(*sty);
+      };
+
       if (!CCtx().MemReuse()) {
         if (n.HasNote("ref"))
           Error1(
@@ -2799,7 +2791,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
            << sym;
         for (const auto& dim : GetArrayDimensions(nty))
           ds << "[" << ValueSTR(dim) << "]";
-        ds << "[" << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
+        ds << "[" << UnScopedExpr(SlotElemExpr()) << "];\n";
         return;
       }
 
@@ -2841,7 +2833,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         } else {
           // The buffer is declared but never used.
           // TODO: should we DCE the unused buffer?
-          std::string total_elem_expr = UnScopedExpr(ElemCountExprOf(*sty));
+          std::string total_elem_expr = UnScopedExpr(SlotElemExpr());
           for (const auto& dim : GetArrayDimensions(nty))
             total_elem_expr =
                 "(" + ValueSTR(dim) + ")*(" + total_elem_expr + ")";
@@ -3672,6 +3664,12 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
               alignment, SharedAlignmentBytes(CCtx(), op->GetSwizzleMode()));
           return;
         }
+        if (auto nvd = dyn_cast<AST::NamedVariableDecl>(node)) {
+          if (auto saty = dyn_cast<SpannedArrayType>(NodeType(*nvd));
+              saty && saty->HasAlignedSlots())
+            alignment = std::max(alignment, saty->SlotAlignment());
+          return;
+        }
         if (auto block = dyn_cast<AST::Block>(node)) {
           self(self, block->GetBody());
           return;
@@ -3784,10 +3782,16 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     // non-cooperative launch paths.
     std::vector<std::string> kernel_arg_refs;
     {
+      std::unordered_set<std::string> seen_iv_params;
       for (auto& item : GetDeviceFuncIns(updating_cgi)) {
         auto sname = item.name;
         if (isa<SpannedType>(item.type)) sname += "__device";
         if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(sname))) continue;
+        // Nested with blocks may shadow an IV name; only the outermost
+        // in-scope registration is a kernel parameter.
+        if (item.need_iv_prefix &&
+            !seen_iv_params.insert("__iv_" + UnScopedName(item.name)).second)
+          continue;
         if (ssm.HasHostName(sname))
           kernel_arg_refs.push_back(ssm.HostName(sname));
         else
@@ -5843,13 +5847,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                   info.stage_array_index_expr =
                       ExprSTR(subscripts.front(), false);
                   info.stage_array_elem_count_expr = ValueSTR(
-                      SlotStrideElementsValue(array_ty, elemof_base->name));
+                      SlotStrideElementsValue(array_ty));
                   info.stage_array_extent = *extent;
                 }
               }
               return elem_base + " + " +
-                     ArraySlotOffsetExpr(array_ty, subscripts, false,
-                                         elemof_base->name);
+                     ArraySlotOffsetExpr(array_ty, subscripts, false);
             }
           }
           if (sym) {
@@ -8605,19 +8608,8 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
     const std::string attr = maybe_unused ? "[[maybe_unused]] " : "";
     if (IsHost()) {
       hs << h_indent << attr << "int " << name << " = 0;\n";
-      // Shadowing IVs in nested `with` blocks must not emit duplicate kernel
-      // parameters; the first registration with this emitted name suffices.
-      bool registered = false;
-      for (const auto& sd : updating_cgi.GetFunctionSymbols(fname)) {
-        if (sd.need_iv_prefix &&
-            "__iv_" + UnScopedName(sd.name) == name) {
-          registered = true;
-          break;
-        }
-      }
-      if (!registered)
-        updating_cgi.AddSymbolDetail(
-            fname, {scoped, ty, true, -1, ParamAttr::NONE, "", true});
+      updating_cgi.AddSymbolDetail(
+          fname, {scoped, ty, true, -1, ParamAttr::NONE, "", true});
     } else {
       ds << d_indent << attr << "int " << name << " = 0;\n";
     }
@@ -8625,39 +8617,55 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
 
   // A single-matcher `with` source is scalar: the foreach emits the loop
   // directly over the source, so the source and its matcher must resolve to
-  // the source's canonical iteration variable `__iv_<source>`. This also
-  // covers explicit matchers (`with a = {x}`): the body's `x` is the same
-  // loop variable as the source `a`.
+  // the source's canonical iteration variable. This also covers explicit
+  // matchers (`with a = {x}`): the body's `x` is the same loop variable as
+  // the source `a`.
   if (n.with && n.GetMatchers().size() == 1 &&
       IsActualBoundedIntegerType(
           cast<AST::Identifier>(n.GetMatchers()[0])->GetType())) {
     auto m1 = cast<AST::Identifier>(n.GetMatchers()[0]);
-    const std::string iv_name = "__iv_" + n.with->name;
-    // The foreach over an explicit matcher (`foreach x`) canonicalizes to
-    // __iv_<matcher>; map it to the with source's IV.
-    const std::string matcher_iv = "__iv_" + m1->name;
-    if (!single_matcher_iv_scopes_.empty()) {
+    const std::string base = "__iv_" + n.with->name;
+    // A nested with may reuse the same source name; give the inner IV a
+    // distinct C++ name so the outer matcher still resolves to the outer IV.
+    auto iv_in_use = [&](const std::string& candidate) {
+      for (const auto& [key, value] : single_matcher_iv_)
+        if (value == candidate) return true;
+      return false;
+    };
+    std::string iv_name = base;
+    for (size_t suffix = 2; iv_in_use(iv_name); ++suffix)
+      iv_name = base + "__" + std::to_string(suffix);
+    // The kernel parameter name is derived from the registered scoped name;
+    // keep it equal to the emitted IV name for a suffixed (shadowed) IV.
+    const std::string scoped_param =
+        iv_name == base ? InScopeName(n.with->name)
+                        : InScopeName(n.with->name) + iv_name.substr(base.size());
+    // Both the matcher (`foreach x`) and the source (`foreach a`) canonical
+    // names resolve to the with's IV.
+    auto record_scope = [&](const std::string& key) {
+      if (single_matcher_iv_scopes_.empty()) return;
       auto& saved = single_matcher_iv_scopes_.back();
-      bool recorded = false;
-      for (const auto& [key, old] : saved)
-        if (key == matcher_iv) recorded = true;
-      if (!recorded) {
-        auto it = single_matcher_iv_.find(matcher_iv);
-        saved.emplace_back(matcher_iv,
-                           it == single_matcher_iv_.end()
-                               ? std::nullopt
-                               : std::optional<std::string>(it->second));
-      }
-    }
-    single_matcher_iv_[matcher_iv] = iv_name;
+      for (const auto& [saved_key, old] : saved)
+        if (saved_key == key) return;
+      auto it = single_matcher_iv_.find(key);
+      saved.emplace_back(key, it == single_matcher_iv_.end()
+                                  ? std::nullopt
+                                  : std::optional<std::string>(it->second));
+    };
+    record_scope("__iv_" + m1->name);
+    record_scope("__iv_" + n.with->name);
+    single_matcher_iv_["__iv_" + m1->name] = iv_name;
+    single_matcher_iv_["__iv_" + n.with->name] = iv_name;
     ssm.RemapDeviceSymbol(InScopeName(m1->name), iv_name);
     ssm.RemapHostSymbol(InScopeName(m1->name), iv_name);
     ssm.RemapDeviceSymbol(InScopeName(n.with->name), iv_name);
     ssm.RemapHostSymbol(InScopeName(n.with->name), iv_name);
+    ssm.RemapDeviceSymbol(scoped_param, iv_name);
+    ssm.RemapHostSymbol(scoped_param, iv_name);
     // Keep the IV declared in the enclosing scope, not just in the loop
     // header: peeled pipeline prologues (TMA/async copies) reference it
     // before the `for` statement, and host code may use it directly.
-    emit_iv_decl(iv_name, InScopeName(n.with->name), m1->GetType(), true);
+    emit_iv_decl(iv_name, scoped_param, m1->GetType(), true);
     return true;
   }
 
@@ -9365,6 +9373,10 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
             // to the with source's declared iteration variable.
             ssm.RemapDeviceSymbol(iv_scoped, iv_name);
             ssm.RemapHostSymbol(iv_scoped, iv_name);
+            // Event-wait phases fall back to the stack entry; it must name
+            // the redirected loop variable.
+            if (!foreach_iv_stack_.empty())
+              foreach_iv_stack_.back() = iv_name;
           }
           auto lb = UnScopedExpr(ValueSTR(iv_bty->GetLowerBound()));
           auto ub = UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()));
@@ -10660,9 +10672,13 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
   }
 
   size_t index = 0;
+  std::unordered_set<std::string> seen_iv_params;
   for (auto& item : GetDeviceFuncIns(updating_cgi)) {
     if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(item.name))) continue;
     auto dname = (item.need_iv_prefix ? "__iv_" : "") + UnScopedName(item.name);
+    // Nested with blocks may shadow an IV name; only the outermost in-scope
+    // registration is a kernel parameter.
+    if (item.need_iv_prefix && !seen_iv_params.insert(dname).second) continue;
     if (index++ > 0) oss << ", ";
     oss << DeviceParamTypeStringify(item.type) << " " << dname;
     ssm.MapDeviceSymbolIfNotExist(item.name, dname);
@@ -11494,7 +11510,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
                   dyn_cast<ArrayType>(GetSymbolType(da->data->name))) {
             oss << " + "
                 << ArraySlotOffsetExpr(array_ty, da->GetArrayIndices(),
-                                       is_host, da->data->name);
+                                       is_host);
           }
         }
         size_t idx = 0;

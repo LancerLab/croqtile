@@ -1,0 +1,16 @@
+// A user per-slot alignas on a shared span array raises the runtime dynamic
+// shared pool's base alignment, so every padded slot is aligned as requested.
+//
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - | grep -v '^ *//' | FileCheck %s
+
+__co__ void dyn_shared_aligned(int n) {
+  parallel by 1 : block {
+    shared u8 [n] dyn;
+    alignas(1024) shared f32 [8] a[2];
+    a[1].at(0) = 1.0f;
+    call kernel(dyn);
+  }
+}
+
+// CHECK: aligned_up_ptr<1024 * 8>(
+// CHECK: *((float*)a + (1)*(256)) = 1.000000f;

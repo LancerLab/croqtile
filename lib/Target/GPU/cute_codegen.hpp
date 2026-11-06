@@ -365,7 +365,6 @@ private:
   std::unordered_map<std::string, ptr<AST::ChunkAt>> live_chunk_aliases;
   std::unordered_set<std::string> explicit_mma_loads_;
   std::unordered_set<std::string> shared_scalar_syms_;
-  std::unordered_set<std::string> pooled_array_syms_;
   std::unordered_map<std::string, std::string> single_matcher_iv_;
   // Canonical IV remaps installed by a WithBlock's `with` clauses, saved so
   // they cannot leak into a later block that reuses the same matcher name.
@@ -533,7 +532,6 @@ private:
     live_chunk_aliases.clear();
     explicit_mma_loads_.clear();
     shared_scalar_syms_.clear();
-    pooled_array_syms_.clear();
     single_matcher_iv_.clear();
     single_matcher_iv_scopes_.clear();
     shared_buf_swiz_.clear();
@@ -718,15 +716,13 @@ private:
                          bool force_wait = false);
   bool IsU32RegisterMetadata(const ptr<Type>& ty,
                              const std::string& scoped) const;
-  bool IsPooledArray(const std::string& sym) const;
   // Effective slot stride in elements: the physical (alignas-padded) stride
-  // for a pooled array, the packed element count for a regular C++ array.
-  ValueItem SlotStrideElementsValue(const ptr<ArrayType>& array_ty,
-                                    const std::string& sym) const;
+  // for aligned slots, the packed element count otherwise.
+  ValueItem SlotStrideElementsValue(const ptr<ArrayType>& array_ty) const;
   // Offset of a span-array slot in elements, using the effective slot stride.
   std::string ArraySlotOffsetExpr(const ptr<ArrayType>& array_ty,
-                                  const AST::NodeList& subs, bool is_host,
-                                  const std::string& sym) const;
+                                  const AST::NodeList& subs,
+                                  bool is_host) const;
   // Rewrite `buf_expr` to address a span-array slot: cast the base to the
   // element pointer, then add the slot offset. This is valid for both
   // pointer and regular C++ array declarations.

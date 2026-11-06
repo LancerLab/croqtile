@@ -1,6 +1,6 @@
-// A span-array slot stride follows the emitted declaration: a pooled
-// (mem-reuse) array is a pointer with alignas-padded slots, while a regular
-// C++ array declaration is tightly packed.
+// A span-array slot is padded to its physical (alignas-rounded) stride in
+// every mode, so each slot is aligned as requested. Unaligned arrays use the
+// packed element count.
 //
 // RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v '^ *//' | FileCheck %s --check-prefix=DEFAULT
 // RUN: choreo -es -t cute -arch=sm_90a --mem-reuse=false %s -o - | grep -v '^ *//' | FileCheck %s --check-prefix=NOMEM
@@ -37,8 +37,8 @@ __co__ void span_as_slot(f32 [8] x) {
 }
 
 // DEFAULT-LABEL: __global__{{.*}}packed_local
-// DEFAULT: alignas(64) unsigned int buf[(2)*(8)];
-// DEFAULT: *((unsigned int*)buf + (1)*(8) + 2)
+// DEFAULT: alignas(64) unsigned int buf[(2)*(16)];
+// DEFAULT: *((unsigned int*)buf + (1)*(16) + 2)
 // DEFAULT-LABEL: __global__{{.*}}packed_shared
 // DEFAULT: *((float*)a + (1)*(64))
 // DEFAULT-LABEL: __global__{{.*}}pooled_buf
@@ -47,13 +47,13 @@ __co__ void span_as_slot(f32 [8] x) {
 // DEFAULT: (float*)s + (1)*(8)
 
 // NOMEM-LABEL: __global__{{.*}}packed_local
-// NOMEM: alignas(64) unsigned int buf[2][8];
-// NOMEM: *((unsigned int*)buf + (1)*(8) + 2)
+// NOMEM: alignas(64) unsigned int buf[2][16];
+// NOMEM: *((unsigned int*)buf + (1)*(16) + 2)
 // NOMEM-LABEL: __global__{{.*}}packed_shared
-// NOMEM: float a[2][8];
-// NOMEM: *((float*)a + (1)*(8))
+// NOMEM: float a[2][64];
+// NOMEM: *((float*)a + (1)*(64))
 // NOMEM-LABEL: __global__{{.*}}pooled_buf
-// NOMEM: f16 buf[2][256];
-// NOMEM: *((f16*)buf + (1)*(256))
+// NOMEM: f16 buf[2][512];
+// NOMEM: *((f16*)buf + (1)*(512))
 // NOMEM-LABEL: __global__{{.*}}span_as_slot
 // NOMEM: (float*)s + (1)*(8)
