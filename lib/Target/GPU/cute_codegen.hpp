@@ -705,11 +705,11 @@ private:
   FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const;
   void EmitWGMMAFinalize(std::ostringstream& os, const std::string& indent,
                          bool force_wait = false);
-  std::string LinearizeArrayOffset(const std::string& base_expr,
-                                   const std::vector<AST::ptr<AST::Node>>& subs,
-                                   const ValueList& array_dims,
-                                   const ValueItem& elem_count,
-                                   bool is_host) const;
+  // Offset of a span-array slot in elements. Uses the physical slot stride
+  // (which folds alignas padding) and folds unawarded trailing array dims.
+  std::string ArraySlotOffsetExpr(const ptr<ArrayType>& array_ty,
+                                  const AST::NodeList& subs,
+                                  bool is_host) const;
   std::pair<std::string, std::string>
   GetDMABufferExpr(const std::string& sym,
                    const ptr<AST::MultiValues> subscription,

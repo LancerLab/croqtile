@@ -1,0 +1,128 @@
+// F2 end-to-end: sparse metadata is shipped on its own depth-4 TMA event ring,
+// independent of the two operand stages. The consumer waits two stages ahead
+// and reads the per-lane descriptor into a u32 register (F1), so the metadata
+// path has no global load in the consumer. The 2:4 pattern is uniform, so one
+// 0x44444444 descriptor is valid for every stage and row.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -t cute -gs %cuda_arch --lock-free %s | bash -s -- --execute | FileCheck --match-full-lines %s
+
+#define M 64
+#define N 8
+#define K 128
+#define TILE_K 32
+#define STAGES 2
+#define META_STAGES 4
+#define META_WORDS (K / TILE_K)
+
+__co__ auto f2_metadata_ring(f16 [M, K / 2] lhs_packed, u32 [M, META_WORDS] meta,
+                             f16 [N, K] rhs) {
+  f32 [M, N] output{0.0f};
+  parallel by 1 : block {
+    shared event full[STAGES], empty[STAGES];
+    shared event meta_full[META_STAGES], meta_empty[META_STAGES];
+    shared f16 [M, TILE_K / 2] lhs_s[STAGES];
+    shared f16 [N, TILE_K] rhs_s[STAGES];
+    shared u32 [M, META_WORDS] meta_s[META_STAGES];
+
+    parallel wg by 2 : group-4, t by 128 : thread {
+      inthreads.async (wg == 0) {
+        foreach {iv_k} in [cdiv(K, TILE_K)] {
+          stage = iv_k % STAGES;
+          mstage = iv_k % META_STAGES;
+          // Metadata ring first: it is deeper than the operand ring and must
+          // run ahead so the consumer can prefetch the next stage.
+          wait meta_empty.at(iv_k);
+          meta_load = tma.copy.async meta => meta_s[mstage];
+          trigger meta_full.at(iv_k) after meta_load;
+          wait empty.at(iv_k);
+          lhs_load = tma.copy.async.swiz<32> lhs_packed.subspan(M, TILE_K / 2).at(0, iv_k) => lhs_s[stage];
+          rhs_load = tma.copy.async.swiz<64> rhs.subspan(N, TILE_K).at(0, iv_k) => rhs_s[stage];
+          trigger full.at(iv_k) after lhs_load, rhs_load;
+        }
+      }
+      inthreads.async (wg == 1) {
+        mc = mma.fill.f32 0.0f;
+        foreach {s} in [STAGES] trigger empty.at(s);
+        foreach {s} in [META_STAGES] trigger meta_empty.at(s);
+        mutable u32 me_cur;
+        mutable u32 me_next = __to<u32>(0);
+        wait meta_full.at(0);
+        me_cur = meta_s[0].at(0, 0);
+        foreach {iv_k} in [cdiv(K, TILE_K)] {
+          stage = iv_k % STAGES;
+          pm = (iv_k + 1) % META_STAGES;
+          wait full.at(iv_k);
+          mma.row.row.sp mc, lhs_s[stage], rhs_s[stage], me_cur;
+          // Prefetch the next descriptor after issuing the current atom, so
+          // the metadata wait overlaps the WGMMA.
+          if (iv_k + 1 < cdiv(K, TILE_K)) {
+            wait meta_full.at(iv_k + 1);
+            me_next = meta_s[pm].at(0, 0);
+          }
+          me_cur = me_next;
+          trigger empty.at(iv_k);
+          trigger meta_empty.at(iv_k);
+        }
+        mma.store mc, output;
+      }
+    }
+  }
+  return output;
+}
+
+int main() { /// host program
+  std::mt19937 gen(123);
+  std::uniform_real_distribution<float> dist(0.25f, 1.0f);
+
+  auto dense = choreo::make_spandata<choreo::f16>(M, K);
+  auto packed = choreo::make_spandata<choreo::f16>(M, K / 2);
+  auto meta_bytes = choreo::make_spandata<choreo::u8>(M, K / 8);
+  auto meta = choreo::make_spandata<choreo::u32>(M, META_WORDS);
+  auto rhs = choreo::make_spandata<choreo::f16>(N, K);
+
+  // Uniform 2:4 pattern: indices 0 and 1 nonzero in every group of four.
+  for (size_t i = 0; i < M; ++i)
+    for (size_t g = 0; g < K / 4; ++g) {
+      dense[i][4 * g + 0] =
+          choreo::utils::from_f32<choreo::f16>(dist(gen));
+      dense[i][4 * g + 1] =
+          choreo::utils::from_f32<choreo::f16>(dist(gen));
+      dense[i][4 * g + 2] =
+          choreo::utils::from_f32<choreo::f16>(0.0f);
+      dense[i][4 * g + 3] =
+          choreo::utils::from_f32<choreo::f16>(0.0f);
+    }
+
+  for (size_t j = 0; j < N; ++j)
+    for (size_t k = 0; k < K; ++k)
+      rhs[j][k] = choreo::utils::from_f32<choreo::f16>(dist(gen));
+
+  choreo::utils::SparsePolicyWGMMA<choreo::f16>::encode(dense, packed,
+                                                        meta_bytes);
+  // One 0x44444444 descriptor per K tile; META_WORDS tiles fit in the tile.
+  meta.fill(0x44444444u);
+
+  int meta_errors = 0;
+  for (size_t i = 0; i < M; ++i)
+    for (size_t c = 0; c < K / 8; ++c)
+      if (static_cast<unsigned>(meta_bytes[i][c]) != 0x44u) ++meta_errors;
+  choreo::choreo_assert(meta_errors == 0, "metadata bytes are not uniform 0x44");
+
+  auto res = f2_metadata_ring(packed.view(), meta.view(), rhs.view());
+
+  int errors = 0;
+  for (size_t i = 0; i < M; ++i)
+    for (size_t j = 0; j < N; ++j) {
+      float ref = 0.0f;
+      for (size_t k = 0; k < K; ++k)
+        ref += choreo::to_f32(dense[i][k]) * choreo::to_f32(rhs[j][k]);
+      if (std::abs(res[i][j] - ref) > 1.0e-1f) ++errors;
+    }
+
+  std::cout << "errors=" << errors << std::endl;
+  choreo::choreo_assert(errors == 0, "results are not equal");
+  std::cout << "Test Passed\n" << std::endl;
+}
+
+// CHECK: Test Passed

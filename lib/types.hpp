@@ -2810,10 +2810,14 @@ struct SpannedArrayType final : public ArrayType,
     assert(bytes && "slot stride is not static");
     return *bytes;
   }
+  ValueItem PhysicalSlotStrideElementsValue() const {
+    return (PhysicalSlotStrideValue() / sbe::nu(SizeOf(spty->ElementType())))
+        ->Normalize();
+  }
   size_t PhysicalSlotStrideElements() const {
-    const size_t elem_bytes = SizeOf(spty->ElementType());
-    assert(PhysicalSlotStrideBytes() % elem_bytes == 0);
-    return PhysicalSlotStrideBytes() / elem_bytes;
+    auto elems = VIInt(PhysicalSlotStrideElementsValue());
+    assert(elems && "slot stride is not static");
+    return *elems;
   }
 
   size_t Dims() const override { return ArrayType::ArrayRank(); }

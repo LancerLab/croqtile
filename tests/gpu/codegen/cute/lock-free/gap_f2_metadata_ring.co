@@ -1,0 +1,15 @@
+// F2 (section 2.3): a metadata event ring whose depth is independent of the
+// operand stages. The producer ships metadata on its own depth-4 ring and the
+// consumer prefetches the per-lane descriptor into a u32 register (F1) after
+// issuing the current WGMMA atom. The metadata read is from shared memory, not
+// a per-stage global load. The kernel lives in the end-to-end test so the two
+// cannot drift.
+//
+// RUN: choreo -es -t cute -arch=sm_90a --lock-free tests/gpu/end2end/sparse_metadata_ring.co -o - | grep -v '^ *//' | FileCheck %s --implicit-check-not='named_barrier_sync'
+
+// CHECK: meta_full__mem[4]
+// CHECK: meta_empty__mem[4]
+// CHECK: ::fma({{.*}}, me_cur);
+// CHECK: meta_full[(__iv_iv_k + 1) % 4].wait
+// CHECK: me_next = *((unsigned int*)meta_s + (pm)*(256));
+// CHECK: me_cur = me_next;
