@@ -56,4 +56,4 @@ __co__ void span_as_slot(f32 [8] x) {
 // NOMEM: f16 buf[2][256];
 // NOMEM: *((f16*)buf + (1)*(256))
 // NOMEM-LABEL: __global__{{.*}}span_as_slot
-// NOMEM: (float*)s[1]
+// NOMEM: (float*)s + (1)*(8)

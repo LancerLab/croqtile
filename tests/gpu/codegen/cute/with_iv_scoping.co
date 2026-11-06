@@ -1,0 +1,48 @@
+// `with a = {x} in [N]` installs a canonical-IV rename for the explicit
+// matcher x. The rename is only valid inside the with block: body references
+// canonicalized to __iv_x must resolve to the source IV, and a later foreach
+// that reuses the matcher name must not inherit the stale rename.
+//
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v '^ *//' | FileCheck %s
+
+__co__ void explicit_matcher_canonical_body(f32 [2, 8, 4] a) {
+  parallel p by 1 : block {
+    with index = {x} in [2] {
+      foreach x {
+        dma.copy a.subspan(1, 8, 4).at(x, 0, 0) => local;
+      }
+    }
+  }
+}
+
+__co__ void later_foreach_not_renamed(f32 [3, 8, 4] a) {
+  parallel p by 1 : block {
+    with index = {x} in [2] {
+      foreach index {
+        dma.copy a.subspan(1, 8, 4).at(index, 0, 0) => local;
+      }
+    }
+    foreach {x} in [3] {
+      dma.copy a.subspan(1, 8, 4).at(x, 0, 0) => local;
+    }
+  }
+}
+
+__co__ void shadowed_host_iv(f32 [64] x) {
+  with i in [2] {
+    with i in [3] {
+      parallel p by 1 : block {
+        println(i);
+      }
+    }
+  }
+}
+
+// CHECK-LABEL: __global__{{.*}}explicit_matcher_canonical_body
+// CHECK: for (int __iv_index = 0; __iv_index < 2; ++__iv_index)
+// CHECK: (float*)a + (__iv_index * 32)
+// CHECK-LABEL: __global__{{.*}}later_foreach_not_renamed
+// CHECK: for (int __iv_index = 0; __iv_index < 2; ++__iv_index)
+// CHECK: for (int __iv_x = 0; __iv_x < 3; ++__iv_x)
+// CHECK-LABEL: __global__ void __choreo_device_shadowed_host_iv({{.*}}int __iv_i)
+// CHECK-NOT: int __iv_i, int __iv_i

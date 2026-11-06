@@ -455,26 +455,33 @@ std::string CuteCodeGen::ArraySlotOffsetExpr(
          ")";
 }
 
-void CuteCodeGen::AppendArraySlotOrSubscripts(
-    std::string& buf_expr, const std::string& sym, const ptr<Type>& sym_ty,
-    const ptr<ArrayType>& array_ty,
-    const ptr<AST::MultiValues>& indices) const {
-  if (!indices) return;
+void CuteCodeGen::AppendArraySlotOffset(
+    std::string& buf_expr, const std::string& sym,
+    const ptr<AST::MultiValues>& indices, bool is_host) const {
+  if (indices)
+    AppendArraySlotOffset(buf_expr, sym, indices->AllValues(), is_host);
+}
+
+void CuteCodeGen::AppendArraySlotOffset(std::string& buf_expr,
+                                       const std::string& sym,
+                                       const AST::NodeList& subs,
+                                       bool is_host) const {
+  if (subs.empty()) return;
+  auto sym_ty = GetSymbolType(sym);
+  auto array_ty = dyn_cast<ArrayType>(sym_ty);
   auto sty = GetSpannedType(sym_ty);
-  const bool pointer_decl =
-      (sty && sty->GetStorage() == Storage::GLOBAL) ||
-      pointer_array_syms_.count(InScopeNameForRef(sym)) > 0;
-  if (array_ty && (CCtx().MemReuse() || pointer_decl)) {
-    buf_expr += " + ";
-    buf_expr += ArraySlotOffsetExpr(array_ty, indices->AllValues(), IsHost(),
-                                    sym);
-  } else {
-    for (auto expr : indices->AllValues()) {
+  if (!array_ty || !sty) {
+    for (auto sub : subs) {
       buf_expr += "[";
-      buf_expr += ExprSTR(expr, IsHost());
+      buf_expr += ExprSTR(sub, is_host);
       buf_expr += "]";
     }
+    return;
   }
+  buf_expr.insert(0, std::string("(") + NameBaseType(sty->ElementType()) +
+                         "*)");
+  buf_expr += " + ";
+  buf_expr += ArraySlotOffsetExpr(array_ty, subs, is_host, sym);
 }
 
 std::pair<std::string, std::string>
@@ -496,8 +503,7 @@ CuteCodeGen::GetDMABufferExpr(const std::string& sym,
   }
 
   std::string buf_name = buf_expr;
-  AppendArraySlotOrSubscripts(buf_expr, sym, sym_ty,
-                              dyn_cast<ArrayType>(sym_ty), subscription);
+  AppendArraySlotOffset(buf_expr, sym, subscription, IsHost());
   return std::make_pair(buf_name, buf_expr);
 }
 
@@ -1008,6 +1014,9 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
       if (pb->IsEnforced()) bdim_level = pb->GetLevel();
     }
   } else if (isa<AST::WithBlock>(&n)) {
+    // `with` clauses are visited before the block's own Visit, so the
+    // canonical-IV scope must open here, before the children.
+    single_matcher_iv_scopes_.emplace_back();
     IndStream() << "// with-in: " << n.LOC() << "\n";
     IndStream() << "{\n";
     IncrIndent();
@@ -1433,6 +1442,15 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
       current_thread_count_expr.clear();
     }
   } else if (isa<AST::WithBlock>(&n)) {
+    if (!single_matcher_iv_scopes_.empty()) {
+      for (const auto& [key, old] : single_matcher_iv_scopes_.back()) {
+        if (old)
+          single_matcher_iv_[key] = *old;
+        else
+          single_matcher_iv_.erase(key);
+      }
+      single_matcher_iv_scopes_.pop_back();
+    }
     if (!explicit_scale_accum_scopes.empty())
       explicit_scale_accum_scopes.pop_back();
     DecrIndent();
@@ -2535,9 +2553,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       shared_scalar_syms_.insert(sname);
   if (n.HasNote("reuse")) {
     pooled_array_syms_.insert(sname);
-    pointer_array_syms_.insert(sname);
   } else if (n.HasNote("ref")) {
-    pointer_array_syms_.insert(sname);
     if (auto e = dyn_cast<AST::Expr>(n.init_expr);
         e && e->op == Op::ElemOf) {
       auto base = AST::GetArrayBaseSymbol(*e);
@@ -2629,10 +2645,10 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         std::string base_expr =
             isa<FutureType>(tty) ? base_dev + ".data()" : base_dev;
         if (sa->subscriptions && sa->subscriptions->Count() > 0) {
-          auto sat = dyn_cast<SpannedArrayType>(tty);
-          assert(sat && "span_as with subscriptions requires array type.");
-          AppendArraySlotOrSubscripts(base_expr, sa->id->name, tty, sat,
-                                      sa->subscriptions);
+          assert(dyn_cast<SpannedArrayType>(tty) &&
+                 "span_as with subscriptions requires array type.");
+          AppendArraySlotOffset(base_expr, sa->id->name, sa->subscriptions,
+                                IsHost());
         }
         ds << d_indent << "auto* " << raw_sym << " = ";
         ds << "static_cast<"
@@ -5461,8 +5477,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto ty = GetSymbolType(f_sym);
       auto f_sty = GetSpannedType(ty);
       std::string buf_expr = isa<FutureType>(ty) ? f_sym + ".data()" : f_sym;
-      AppendArraySlotOrSubscripts(buf_expr, f_sym, ty,
-                                  dyn_cast<ArrayType>(ty), ca->indices);
+      if (ca->indices)
+        AppendArraySlotOffset(buf_expr, f_sym, ca->indices, IsHost());
       const auto f_mds = GenTensorDecl(
           RemoveSuffix(f_sym, ".data()"), buf_expr, f_sty->GetStorage(),
           f_sty->ElementType(), ca->GetBlockShape(), false,
@@ -5795,6 +5811,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         }
 
         auto strides = ca ? GenStrides(ca) : sty->GetStrides();
+        auto elem_ty = NameBaseType(sty->ElementType());
         if (k_axis >= strides.size()) {
           info.is_direct = true;
           info.error = "failed to derive direct WGMMA operand stride";
@@ -5814,12 +5831,15 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             std::reverse(subscripts.begin(), subscripts.end());
             auto base_ty = GetSymbolType(elemof_base->name);
             if (auto array_ty = dyn_cast<ArrayType>(base_ty)) {
+              const std::string base_dev =
+                  ssm.DeviceName(InScopeName(elemof_base->name));
+              const std::string elem_base =
+                  std::string("(") + elem_ty + "*)" + base_dev;
               if (subscripts.size() == 1 &&
                   array_ty->Dimensions().size() == 1) {
                 if (auto extent = VIInt(array_ty->Dimensions().front());
                     extent && *extent == 2) {
-                  info.stage_array_base_expr =
-                      ssm.DeviceName(InScopeName(elemof_base->name));
+                  info.stage_array_base_expr = elem_base;
                   info.stage_array_index_expr =
                       ExprSTR(subscripts.front(), false);
                   info.stage_array_elem_count_expr = ValueSTR(
@@ -5827,7 +5847,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                   info.stage_array_extent = *extent;
                 }
               }
-              return ssm.DeviceName(InScopeName(elemof_base->name)) + " + " +
+              return elem_base + " + " +
                      ArraySlotOffsetExpr(array_ty, subscripts, false,
                                          elemof_base->name);
             }
@@ -5838,7 +5858,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           }
           return ExprSTR(operand_expr, false);
         }();
-        auto elem_ty = NameBaseType(sty->ElementType());
         auto stride_expr = ValueSTR(strides.at(k_axis));
         SwizMode swizzle = SwizMode::NONE;
         if (auto it = shared_buf_swiz_.find(source_sym);
@@ -5876,17 +5895,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
 
             sbe::ExprSum phys;
 
-            if (ca->indices != nullptr) {
-              auto sym_ty = GetSymbolType(ca->data->name);
-              if (auto array_ty = dyn_cast<ArrayType>(sym_ty)) {
-                phys += sbe::sym(ArraySlotOffsetExpr(
-                    array_ty, ca->indices->AllValues(), false,
-                    ca->data->name));
-              }
-            }
-
-            if (ca->NoOperation() && ValueSTR(phys.Get()) == "0")
-              return raw_base;
+            if (ca->indices != nullptr)
+              AppendArraySlotOffset(raw_base, ca->data->name, ca->indices,
+                                    false);
 
             for (size_t i = 0; i < ca->OpCount(); ++i) {
               const auto& sop = ca->OpAt(i);
@@ -6652,8 +6663,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto f_sty = GetSpannedType(ty);
       auto accum_type = ssmi.ty;
       std::string buf_expr = isa<FutureType>(ty) ? t_sym + ".data()" : t_sym;
-      AppendArraySlotOrSubscripts(buf_expr, ca->data->name, ty,
-                                  dyn_cast<ArrayType>(ty), ca->indices);
+      if (ca->indices)
+        AppendArraySlotOffset(buf_expr, ca->data->name, ca->indices,
+                              IsHost());
       const auto f_mds = GenTensorDecl(
           RemoveSuffix(t_sym, ".data()"), buf_expr, f_sty->GetStorage(),
           f_sty->ElementType(), ca->GetBlockShape(), false,
@@ -7106,8 +7118,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto ty = GetSymbolType(f_sym);
       auto f_sty = GetSpannedType(ty);
       std::string buf_expr = isa<FutureType>(ty) ? f_sym + ".data()" : f_sym;
-      AppendArraySlotOrSubscripts(buf_expr, ca->data->name, ty,
-                                  dyn_cast<ArrayType>(ty), ca->indices);
+      if (ca->indices)
+        AppendArraySlotOffset(buf_expr, ca->data->name, ca->indices,
+                              IsHost());
       const auto f_mds = GenTensorDecl(
           RemoveSuffix(f_sym, ".data()"), buf_expr, f_sty->GetStorage(),
           f_sty->ElementType(), ca->GetBlockShape(), false,
@@ -7323,8 +7336,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto f_sty = GetSpannedType(ty);
       auto fca_sty = GetSpannedType(NodeType(*ca));
       std::string buf_expr = isa<FutureType>(ty) ? f_sym + ".data()" : f_sym;
-      AppendArraySlotOrSubscripts(buf_expr, ca->data->name, ty,
-                                  dyn_cast<ArrayType>(ty), ca->indices);
+      if (ca->indices)
+        AppendArraySlotOffset(buf_expr, ca->data->name, ca->indices,
+                              IsHost());
       const auto f_mds =
           GenTensorDecl(RemoveSuffix(f_sym, ".data()"), buf_expr,
                         f_sty->GetStorage(), f_sty->ElementType(),
@@ -8591,8 +8605,19 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
     const std::string attr = maybe_unused ? "[[maybe_unused]] " : "";
     if (IsHost()) {
       hs << h_indent << attr << "int " << name << " = 0;\n";
-      updating_cgi.AddSymbolDetail(
-          fname, {scoped, ty, true, -1, ParamAttr::NONE, "", true});
+      // Shadowing IVs in nested `with` blocks must not emit duplicate kernel
+      // parameters; the first registration with this emitted name suffices.
+      bool registered = false;
+      for (const auto& sd : updating_cgi.GetFunctionSymbols(fname)) {
+        if (sd.need_iv_prefix &&
+            "__iv_" + UnScopedName(sd.name) == name) {
+          registered = true;
+          break;
+        }
+      }
+      if (!registered)
+        updating_cgi.AddSymbolDetail(
+            fname, {scoped, ty, true, -1, ParamAttr::NONE, "", true});
     } else {
       ds << d_indent << attr << "int " << name << " = 0;\n";
     }
@@ -8610,7 +8635,21 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
     const std::string iv_name = "__iv_" + n.with->name;
     // The foreach over an explicit matcher (`foreach x`) canonicalizes to
     // __iv_<matcher>; map it to the with source's IV.
-    single_matcher_iv_["__iv_" + m1->name] = iv_name;
+    const std::string matcher_iv = "__iv_" + m1->name;
+    if (!single_matcher_iv_scopes_.empty()) {
+      auto& saved = single_matcher_iv_scopes_.back();
+      bool recorded = false;
+      for (const auto& [key, old] : saved)
+        if (key == matcher_iv) recorded = true;
+      if (!recorded) {
+        auto it = single_matcher_iv_.find(matcher_iv);
+        saved.emplace_back(matcher_iv,
+                           it == single_matcher_iv_.end()
+                               ? std::nullopt
+                               : std::optional<std::string>(it->second));
+      }
+    }
+    single_matcher_iv_[matcher_iv] = iv_name;
     ssm.RemapDeviceSymbol(InScopeName(m1->name), iv_name);
     ssm.RemapHostSymbol(InScopeName(m1->name), iv_name);
     ssm.RemapDeviceSymbol(InScopeName(n.with->name), iv_name);
@@ -9320,8 +9359,13 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
           auto iv_bty = cast<BoundedType>(rng->GetIV()->GetType());
           auto iv_name = UnScopedName(iv_scoped);
           if (auto iv_it = single_matcher_iv_.find(iv_name);
-              iv_it != single_matcher_iv_.end())
+              iv_it != single_matcher_iv_.end()) {
             iv_name = iv_it->second;
+            // Body references use the canonical __iv_<matcher> symbol; map it
+            // to the with source's declared iteration variable.
+            ssm.RemapDeviceSymbol(iv_scoped, iv_name);
+            ssm.RemapHostSymbol(iv_scoped, iv_name);
+          }
           auto lb = UnScopedExpr(ValueSTR(iv_bty->GetLowerBound()));
           auto ub = UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()));
           auto step = iv_bty->GetStep();
@@ -11208,27 +11252,17 @@ const std::string CuteCodeGen::ExprSTR(AST::ptr<AST::Node> e,
 
 const ValueItem CuteCodeGen::TileAddr(const ptr<AST::ChunkAt>& ca, bool is_host,
                                       ValueItem scale) const {
-  auto caty = cast<SpannedType>(ca->GetType());
-
   auto offset = GenOffset(ca) * scale;
-  ValueItem base;
+  std::string base_str;
   if (auto fty = dyn_cast<FutureType>(NodeType(*ca->data))) {
-    base = sbe::sym(std::string("(") + NameBaseType(fty->ElementType()) + "*)" +
-                    ExprSTR(ca->data, is_host) + ".data()");
+    base_str = std::string("(") + NameBaseType(fty->ElementType()) + "*)" +
+               ExprSTR(ca->data, is_host) + ".data()";
   } else
-    base = sbe::sym(ExprSTR(ca->data, is_host));
+    base_str = ExprSTR(ca->data, is_host);
 
-  if (ca->indices != nullptr) {
-    auto sym_ty = GetSymbolType(ca->data->name);
-    if (auto array_ty = dyn_cast<ArrayType>(sym_ty);
-        array_ty && CCtx().MemReuse()) {
-      offset = offset + sbe::sym(ArraySlotOffsetExpr(
-                             array_ty, ca->indices->AllValues(), is_host,
-                             ca->data->name));
-    }
-  }
+  AppendArraySlotOffset(base_str, ca->data->name, ca->indices, is_host);
 
-  return base + offset;
+  return sbe::sym(base_str) + offset;
 }
 
 const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
@@ -11652,7 +11686,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
         auto base_id = AST::GetArrayBaseSymbol(*expr);
         auto base_ty = GetSymbolType(base_id->name);
         if (auto sat = dyn_cast<SpannedArrayType>(base_ty);
-            sat && CCtx().MemReuse() && !e->HasNote("mma_frag")) {
+            sat && !e->HasNote("mma_frag")) {
           std::vector<ptr<AST::Node>> subscripts;
           ptr<AST::Expr> cur = expr;
           while (cur->GetOp() == Op::ElemOf) {
@@ -11661,9 +11695,10 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
             cur = cast<AST::Expr>(cur->GetL());
           }
           std::reverse(subscripts.begin(), subscripts.end());
-          auto base_dev = ssm.DeviceName(InScopeNameForRef(base_id->name));
-          oss << base_dev << " + "
-              << ArraySlotOffsetExpr(sat, subscripts, is_host, base_id->name);
+          std::string base =
+              ssm.DeviceName(InScopeNameForRef(base_id->name));
+          AppendArraySlotOffset(base, base_id->name, subscripts, is_host);
+          oss << base;
         } else {
           oss << OpExprSTR(expr->GetL(), "[]", true, is_host) << "["
               << OpExprSTR(expr->GetR(), "", true, is_host) << "]";

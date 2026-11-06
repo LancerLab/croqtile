@@ -1,7 +1,7 @@
 // RUN: choreo -es -t cute -arch=sm_86 %s -o - | FileCheck %s
 //
-// Verify that array element references on spanned arrays with memory reuse
-// produce correct linearized pointer offsets (LinearizeArrayOffset).
+// Verify that array element and span_as references on spanned arrays produce
+// correct slot offsets (packed stride for regular C++ array declarations).
 
 // --- Full subscription on a 2D array ---
 __co__ void test_array_ref_full() {
@@ -11,7 +11,7 @@ __co__ void test_array_ref_full() {
   }
 }
 // CHECK-LABEL: __global__
-// CHECK: float* s0 = (float*)(s + ((1)*2+1)*(32));
+// CHECK: float* s0 = (float*)((float*)s + ((1)*2+1)*(32));
 
 // --- Partial subscription on a 1D array ---
 __co__ void test_array_ref_partial() {
@@ -20,7 +20,7 @@ __co__ void test_array_ref_partial() {
     s0 = s[2];
   }
 }
-// CHECK: float* s0 = (float*)(s + (2)*(16));
+// CHECK: float* s0 = (float*)((float*)s + (2)*(16));
 
 // --- Full subscription with span_as ---
 __co__ void test_array_span_as() {
@@ -29,7 +29,7 @@ __co__ void test_array_span_as() {
     s0 = s[1][1].span_as(4, 8);
   }
 }
-// CHECK: auto* s0 = static_cast<float*>(s + ((1)*2+1)*(32));
+// CHECK: auto* s0 = static_cast<float*>((float*)s + ((1)*2+1)*(32));
 
 // --- Partial subscription with span_as ---
 __co__ void test_array_span_as_partial() {
@@ -38,7 +38,7 @@ __co__ void test_array_span_as_partial() {
     s0 = s[3].span_as(4, 8);
   }
 }
-// CHECK: auto* s0 = static_cast<float*>(s + ((3)*2)*(32));
+// CHECK: auto* s0 = static_cast<float*>((float*)s + ((3)*2)*(32));
 
 // --- 3D array full subscription ---
 __co__ void test_3d_array_ref() {
@@ -47,7 +47,7 @@ __co__ void test_3d_array_ref() {
     s0 = s[1][2][3];
   }
 }
-// CHECK: float* s0 = (float*)(s + (((1)*3+2)*4+3)*(8));
+// CHECK: float* s0 = (float*)((float*)s + (((1)*3+2)*4+3)*(8));
 
 
 __co__ void test_array_ref_full_local(int x, int N) {
@@ -57,4 +57,4 @@ __co__ void test_array_ref_full_local(int x, int N) {
   }
 }
 // CHECK: float* sdyn = (float*)(anon_{{.*}} + {{.*}});
-// CHECK: float* sdyn0 = (float*)(sdyn + ((x % N))*(N));
+// CHECK: float* sdyn0 = (float*)((float*)sdyn + ((x % N))*(N));

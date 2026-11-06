@@ -325,7 +325,7 @@ __co__ void test_array_span_as_2(f32 [8, 16] a) {
 }
 // Array offset = ((1)*2+1)*32 = 96 elements
 // CHECK-LABEL: __global__{{.*}}test_array_span_as_2
-// CHECK: auto* s0 = static_cast<float*>(s + ((1)*2+1)*(32))
+// CHECK: auto* s0 = static_cast<float*>((float*)s + ((1)*2+1)*(32))
 
 // ---------------------------------------------------------------------------
 // 22. .sqz sugar: squeeze singleton dims (equivalent to test 4 with .span_as)

@@ -11,5 +11,5 @@ __co__ void ref_alias_slot(f32 [8] x) {
   }
 }
 
-// CHECK: float* t0 = (float*)(tiles + ((1)*2)*(64));
+// CHECK: float* t0 = (float*)((float*)tiles + ((1)*2)*(64));
 // CHECK: (float*)t0 + (1)*(64)

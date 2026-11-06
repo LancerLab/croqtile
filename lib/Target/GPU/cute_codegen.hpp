@@ -366,8 +366,11 @@ private:
   std::unordered_set<std::string> explicit_mma_loads_;
   std::unordered_set<std::string> shared_scalar_syms_;
   std::unordered_set<std::string> pooled_array_syms_;
-  std::unordered_set<std::string> pointer_array_syms_;
   std::unordered_map<std::string, std::string> single_matcher_iv_;
+  // Canonical IV remaps installed by a WithBlock's `with` clauses, saved so
+  // they cannot leak into a later block that reuses the same matcher name.
+  std::vector<std::vector<std::pair<std::string, std::optional<std::string>>>>
+      single_matcher_iv_scopes_;
   std::unordered_map<std::string, SwizMode> shared_buf_swiz_;
 
   struct TMAInnerSplit {
@@ -531,8 +534,8 @@ private:
     explicit_mma_loads_.clear();
     shared_scalar_syms_.clear();
     pooled_array_syms_.clear();
-    pointer_array_syms_.clear();
     single_matcher_iv_.clear();
+    single_matcher_iv_scopes_.clear();
     shared_buf_swiz_.clear();
     tma_inner_splits_.clear();
     frag_chunk_rs_aliases_.clear();
@@ -724,14 +727,14 @@ private:
   std::string ArraySlotOffsetExpr(const ptr<ArrayType>& array_ty,
                                   const AST::NodeList& subs, bool is_host,
                                   const std::string& sym) const;
-  // Rewrite `buf_expr` to address a span-array slot: an element-pointer
-  // offset when the declaration is a pointer (pooled, global, ref alias), or
-  // a subscript for a regular C++ array declaration.
-  void AppendArraySlotOrSubscripts(std::string& buf_expr,
-                                   const std::string& sym,
-                                   const ptr<Type>& sym_ty,
-                                   const ptr<ArrayType>& array_ty,
-                                   const ptr<AST::MultiValues>& indices) const;
+  // Rewrite `buf_expr` to address a span-array slot: cast the base to the
+  // element pointer, then add the slot offset. This is valid for both
+  // pointer and regular C++ array declarations.
+  void AppendArraySlotOffset(std::string& buf_expr, const std::string& sym,
+                             const ptr<AST::MultiValues>& indices,
+                             bool is_host) const;
+  void AppendArraySlotOffset(std::string& buf_expr, const std::string& sym,
+                             const AST::NodeList& subs, bool is_host) const;
   std::pair<std::string, std::string>
   GetDMABufferExpr(const std::string& sym,
                    const ptr<AST::MultiValues> subscription,

@@ -55,7 +55,7 @@ __co__ void test_mma_store_shared_array(
 }
 // out_s[g0]: linearized array offset = g0 * 256  (16*16 = 256 elements)
 // CHECK-LABEL: __global__{{.*}}test_mma_store_shared_array
-// CHECK: store_matrix_sync(((__choreo_vgid_x)*(256) + out_s)
+// CHECK: store_matrix_sync((f16*)out_s + (__choreo_vgid_x)*(256)
 
 // ---------------------------------------------------------------------------
 // 3. mma.store to 2D shared array  (multi-dimensional array subscription)
@@ -79,7 +79,7 @@ __co__ void test_mma_store_2d_array(
 }
 // out_s[g0][g1]: linearized = (g0*1+g1) * 256
 // CHECK-LABEL: __global__{{.*}}test_mma_store_2d_array
-// CHECK: store_matrix_sync((((__choreo_vgid_x)*1+__choreo_vgid_y)*(256) + out_s)
+// CHECK: store_matrix_sync((f16*)out_s + ((__choreo_vgid_x)*1+__choreo_vgid_y)*(256)
 
 // ---------------------------------------------------------------------------
 // 4. mma.load from shared array  (array subscription on load side)
@@ -106,7 +106,7 @@ __co__ void test_mma_load_shared_array(
 }
 // lhs_s[g0]: linearized array offset = g0 * 256
 // CHECK-LABEL: __global__{{.*}}test_mma_load_shared_array
-// CHECK: load_matrix_sync(ma, ((__choreo_vgid_x)*(256) + lhs_s), 16)
+// CHECK: load_matrix_sync(ma, (f16*)lhs_s + (__choreo_vgid_x)*(256), 16)
 // CHECK: store_matrix_sync(((blockIdx.x * 4 + __choreo_vgid_x) * 2048 + (blockIdx.y + __choreo_vgid_y) * 16 + output)
 
 // ---------------------------------------------------------------------------
