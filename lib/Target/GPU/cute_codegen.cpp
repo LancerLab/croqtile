@@ -3759,8 +3759,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
         auto oname = UnScopedName(item.name);
         if (item.attr != ParamAttr::GLOBAL_INPUT && item.IsReference())
           hs << h_indent << "choreo::abend_true(cudaMemcpy(" << oname
-             << ".data(), " << oname + "__device" << ", "
-             << UnScopedSizeExpr(*item.type) << ", cudaMemcpyDeviceToHost));\n";
+             << ".data(), " << oname + "__device"
+             << ", " << UnScopedSizeExpr(*item.type)
+             << ", cudaMemcpyDeviceToHost));\n";
       }
     }
 
@@ -4623,8 +4624,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       if (event_only) {
         completion_event_eval = PrepareEventGenerationEvaluation(n.Event());
         if (completion_event_eval.before)
-          ds << d_indent
-             << ExprSTR(completion_event_eval.side_effect, false) << ";\n";
+          ds << d_indent << ExprSTR(completion_event_eval.side_effect, false)
+             << ";\n";
       }
 
       auto rev_indices = Reverse(GenIndices(f_ca));
@@ -5067,9 +5068,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   return true;
 }
 
-bool CuteCodeGen::Visit(AST::BufferMap&) {
-  return true;
-}
+bool CuteCodeGen::Visit(AST::BufferMap&) { return true; }
 
 bool CuteCodeGen::Visit(AST::MMA& n) {
   auto& op = *n.GetOperation();
@@ -7491,6 +7490,15 @@ bool CuteCodeGen::Visit(AST::Barrier& n) {
 bool CuteCodeGen::Visit(AST::Fence& n) {
   TraceEachVisit(n);
 
+  // Proxy fences publish the generic path to an async engine path; the
+  // memory space selects the scope (shared -> shared::cta).
+  if (n.GetEntity() == FenceEntity::DMA || n.GetEntity() == FenceEntity::TMA) {
+    if (n.GetMemory() != Storage::SHARED)
+      choreo_unreachable("only shared-memory proxy fences are emitted so far.");
+    ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
+    return true;
+  }
+
   // GPU fences always cover shared+global; visibility distinguishes the scope.
   switch (n.GetVisibility()) {
   case ParallelLevel::THREAD:
@@ -7655,12 +7663,10 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
           auto bty =
               cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
           GenerateSubscriptions(ds, d_indent + ExprSTR(expr, false),
-                                " = false;\n",
-                                bty->RemainderDimensions(lvl));
+                                " = false;\n", bty->RemainderDimensions(lvl));
         } else
           GenerateSubscriptions(ds, d_indent + ExprSTR(expr, false),
-                                " = false;\n",
-                                ety->RemainderDimensions(0));
+                                " = false;\n", ety->RemainderDimensions(0));
         EndEventCritical(guarded);
       } break;
       case Storage::SHARED: {
@@ -7800,8 +7806,7 @@ bool CuteCodeGen::Visit(AST::Wait& n) {
           auto bty =
               cast<EventArrayType>(GetSymbolType(UnScopedName(bid->name)));
           GenerateSubscriptions(ds, d_indent + ExprSTR(expr, false),
-                                " = false;\n",
-                                bty->RemainderDimensions(lvl));
+                                " = false;\n", bty->RemainderDimensions(lvl));
         } else
           ds << d_indent << ExprSTR(expr, false)
              << " = false; // reset event\n";
@@ -7891,8 +7896,7 @@ bool CuteCodeGen::Visit(AST::AsmStmt& n) {
       t.op = op;
       t.tempName = SymbolTable::GetAnonName();
       t.isOutput = isOutput;
-      t.isReadWrite =
-          !op->constraint.empty() && op->constraint[0] == '+';
+      t.isReadWrite = !op->constraint.empty() && op->constraint[0] == '+';
       tempOps.push_back(t);
     }
   };
@@ -7901,8 +7905,7 @@ bool CuteCodeGen::Visit(AST::AsmStmt& n) {
   for (auto& op : n.inputOperands) CollectTemps(op, false);
 
   // Emit compiler barrier before volatile asm
-  if (n.isVolatile)
-    IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
+  if (n.isVolatile) IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
 
   // Emit temp variable declarations with copy-in from the expression.
   for (auto& t : tempOps) {
@@ -7979,8 +7982,7 @@ bool CuteCodeGen::Visit(AST::AsmStmt& n) {
       for (auto& op : n.outputOperands) {
         if (!first) IndStream() << ",\n      ";
         first = false;
-        IndStream() << "\"" << op->constraint << "\"("
-                    << OpName(op) << ")";
+        IndStream() << "\"" << op->constraint << "\"(" << OpName(op) << ")";
       }
     }
   }
@@ -7994,8 +7996,7 @@ bool CuteCodeGen::Visit(AST::AsmStmt& n) {
       for (auto& op : n.inputOperands) {
         if (!first) IndStream() << ",\n      ";
         first = false;
-        IndStream() << "\"" << op->constraint << "\"("
-                    << OpName(op) << ")";
+        IndStream() << "\"" << op->constraint << "\"(" << OpName(op) << ")";
       }
     }
   }
@@ -8016,14 +8017,13 @@ bool CuteCodeGen::Visit(AST::AsmStmt& n) {
   // Write back temps for output and read-write operands.
   for (auto& t : tempOps) {
     if (t.isOutput) {
-      IndStream() << ExprSTR(t.op->expression, IsHost()) << " = "
-                  << t.tempName << ";\n";
+      IndStream() << ExprSTR(t.op->expression, IsHost()) << " = " << t.tempName
+                  << ";\n";
     }
   }
 
   // Emit compiler barrier after volatile asm
-  if (n.isVolatile)
-    IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
+  if (n.isVolatile) IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
 
   return true;
 }
@@ -8109,8 +8109,8 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
     auto event_eval = PrepareEventGenerationEvaluation(f);
     auto expr = event_eval.event;
     if (event_eval.before)
-      event_stream << event_indent
-                   << ExprSTR(event_eval.side_effect, IsHost()) << ";\n";
+      event_stream << event_indent << ExprSTR(event_eval.side_effect, IsHost())
+                   << ";\n";
     bool is_array_ref = (expr->op == Op::ElemOf);
     assert(IsSymbolOrArrayRef(*f) &&
            "expect either symbol or array reference.");
@@ -8139,8 +8139,8 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
         assert(ety->GetStorage() == Storage::GLOBAL);
         // TODO: make & into OpExprSTR?
         hs << h_indent << "choreo::abend_true(cudaMemset(&"
-           << ExprSTR(expr, true)
-           << ", 1, " << ety->ElemCount() << ")); // trigger event\n";
+           << ExprSTR(expr, true) << ", 1, " << ety->ElemCount()
+           << ")); // trigger event\n";
         // TODO: support array reference
       } else {
         switch (ety->GetStorage()) {
@@ -8203,8 +8203,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
                    << tx_bytes_expr << " : 0);\n";
               } else {
                 ds << d_indent << ExprSTR(expr, false)
-                   << ".arrive_and_expect_tx("
-                   << tx_bytes_expr << ");\n";
+                   << ".arrive_and_expect_tx(" << tx_bytes_expr << ");\n";
               }
             } else {
               if (conditional_tx) {
@@ -8226,11 +8225,9 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
               ds << d_indent << "(void)" << ExprSTR(expr, false)
                  << ".arrive();\n";
             } else {
-              GenerateSubscriptions(ds,
-                                    d_indent + "(void)" +
-                                        ExprSTR(expr, false),
-                                    ".arrive();\n",
-                                    ety->RemainderDimensions(0));
+              GenerateSubscriptions(
+                  ds, d_indent + "(void)" + ExprSTR(expr, false),
+                  ".arrive();\n", ety->RemainderDimensions(0));
             }
           }
           break;
@@ -8245,8 +8242,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
       if (IsHost()) {
         assert(ety->GetStorage() == Storage::GLOBAL);
         hs << h_indent << "choreo::abend_true(cudaMemset(&"
-           << ExprSTR(expr, true)
-           << ", 1, 1)); // trigger event\n";
+           << ExprSTR(expr, true) << ", 1, 1)); // trigger event\n";
         // TODO: support array reference
       } else {
         switch (ety->GetStorage()) {
@@ -8294,8 +8290,7 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
                  << ".arrive_and_expect_tx(__CHOREO_GROUPX4_SINGLE__ ? "
                  << tx_bytes_expr << " : 0); // trigger event(barrier)\n";
             } else {
-              ds << d_indent << ExprSTR(expr, false)
-                 << ".arrive_and_expect_tx("
+              ds << d_indent << ExprSTR(expr, false) << ".arrive_and_expect_tx("
                  << tx_bytes_expr << "); // trigger event(barrier)\n";
             }
             recent_tma_tx_bytes.clear();
@@ -8313,8 +8308,8 @@ bool CuteCodeGen::Visit(AST::Trigger& n) {
       }
     }
     if (event_eval.after)
-      event_stream << event_indent
-                   << ExprSTR(event_eval.side_effect, IsHost()) << ";\n";
+      event_stream << event_indent << ExprSTR(event_eval.side_effect, IsHost())
+                   << ";\n";
   }
   return true;
 }
@@ -9964,8 +9959,8 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
       // scalars, hence scalar-symbolic dependence. Stats aggregation already
       // happened (assert-site pass), so this does not double-count.
       FCtx(fname).GetAssessor().RecordExternalObligation(
-          msg, location(), AssessOutcome::RUNTIME, UsageType::ShapeCompatibility,
-          AssessDependence::SCALAR_SYMBOLIC);
+          msg, location(), AssessOutcome::RUNTIME,
+          UsageType::ShapeCompatibility, AssessDependence::SCALAR_SYMBOLIC);
     }
   }
 

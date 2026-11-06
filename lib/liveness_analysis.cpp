@@ -847,11 +847,11 @@ void LivenessAnalyzer::FinalizeHBPhase() {
 
 void LivenessAnalyzer::RecordHBBufferAccess(const std::string& sname,
                                             const char* caller) {
-  if (caller && std::string(caller) == "skip") return; // suppressed context
   if (!cur_hb_state || !sbuffers.count(sname)) return;
+  bool skip = caller && std::string(caller) == "skip";
   if (cur_hb_phase) {
     cur_hb_phase->buffers_accessed.insert(sname);
-    if (caller) cur_hb_phase->buffer_access_kinds[sname].insert(caller);
+    if (caller && !skip) cur_hb_phase->buffer_access_kinds[sname].insert(caller);
   } else {
     cur_hb_state->globally_live_bufs.insert(sname);
   }
