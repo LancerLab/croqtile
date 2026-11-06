@@ -284,9 +284,13 @@ bool TypeInference::SetAsCurrentType(AST::Node& nd, const std::string& n) {
   }
 
   // complement the storage information when exists
-  if (auto st = dyn_cast<SpannedType>(cur_type))
+  if (auto st = dyn_cast<SpannedType>(cur_type)) {
     if (auto n = dyn_cast<AST::NamedVariableDecl>(&nd))
       if (n->mem) st->SetStorage(n->mem->st);
+  } else if (auto st = dyn_cast<ScalarType>(cur_type)) {
+    if (auto n = dyn_cast<AST::NamedVariableDecl>(&nd))
+      if (n->mem) st->SetStorage(n->mem->st);
+  }
 
   // The type is successfully inferred, set the node
   SetNodeType(nd, ShadowTypeStorage(cur_type));

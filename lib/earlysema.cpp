@@ -1436,6 +1436,14 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
     }
     ReportErrorWhenViolateODR(n.LOC(), n.name_str + ".span", __FILE__, __LINE__,
                               ty->GetMDSpanType());
+  } else if (auto ty = dyn_cast<ScalarType>(n.GetType())) {
+    // Carry declared storage on scalar types too, so later passes can tell a
+    // register value from a shared-memory scalar without a side table.
+    if (n.GetMemory()) {
+      ty->SetStorage(n.GetMemory()->Get());
+      auto sym_ty = dyn_cast<ScalarType>(GetSymbolType(n.name_str));
+      if (sym_ty) sym_ty->SetStorage(n.GetMemory()->Get());
+    }
   } else if (auto ty = dyn_cast<FutureType>(n.GetType())) {
     ReportErrorWhenViolateODR(n.LOC(), n.name_str + ".span", __FILE__, __LINE__,
                               MakeRankedMDSpanType(ty->Dims()));

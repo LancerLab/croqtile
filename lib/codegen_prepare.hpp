@@ -815,10 +815,15 @@ public:
 
       if (op.IsSparse() && op.ExecOperand(3)) {
         auto e_sym = AST::FragName(op.ExecOperand(3));
-        auto e_ty = GetSpannedType(GetSymbolType(e_sym));
-        cgi.AddSymbolMMA(InScopeName(e_sym),
-                         MMAInfo{e_ty->ElementType(), mma_shape,
-                                 MMAInfo::FRAG_E, op.GetMethod()});
+        if (auto e_ty = GetSpannedType(GetSymbolType(e_sym))) {
+          cgi.AddSymbolMMA(InScopeName(e_sym),
+                           MMAInfo{e_ty->ElementType(), mma_shape,
+                                   MMAInfo::FRAG_E, op.GetMethod()});
+        }
+        // F1: a plain integer register carries sparse metadata directly
+        // rather than as a fragment loaded from shared memory. There is no
+        // FRAG_E layout to record; the WGMMA exec site consumes the symbol
+        // as-is.
       }
 
       VST_DEBUG(dbgs() << "mma type: " << STR(a_ety) << ", " << STR(b_ety)

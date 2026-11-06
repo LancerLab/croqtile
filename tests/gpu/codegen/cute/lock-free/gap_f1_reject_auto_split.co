@@ -1,0 +1,23 @@
+// F1 guard: a register metadata descriptor is per-atom. If WGMMA auto-splits
+// K across several atoms, reusing one descriptor silently drops the metadata
+// for every tile but the first, so the compiler must reject it. Per-tile
+// metadata transport is F2 work.
+//
+// RUN: not choreo -es -t cute -arch=sm_90a --lock-free %s 2>&1 | FileCheck %s
+
+__co__ auto f1_reject_auto_split(f16 [64, 32] lhs_packed, f16 [8, 64] rhs) {
+  f32 [64, 8] output{0.0f};
+  parallel by 1 : block {
+    a_s = dma.copy lhs_packed => shared;
+    b_s = dma.copy rhs => shared;
+    mc = mma.fill.f32 0.0f;
+    parallel p by 1 : group-4 {
+      u32 me = __to<u32>(0x44444444);
+      mma.row.row.sp mc, a_s, b_s, me;
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// CHECK: error: sparse WGMMA metadata in a register cannot be reused across auto-split K iterations

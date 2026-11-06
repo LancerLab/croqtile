@@ -6236,13 +6236,29 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       try_hoist_direct_desc(direct_a);
       try_hoist_direct_desc(direct_b);
 
+      bool metadata_is_register = false;
       if (policy_is_sparse) {
         auto metadata = op.ExecOperand(3);
         auto metadata_sym = metadata ? metadata->GetSymbol() : nullptr;
         auto metadata_name = metadata_sym ? metadata_sym->name : "";
+        auto metadata_scoped =
+            metadata_sym ? InScopeName(metadata_name) : std::string();
+        // F1: a plain u32 register may carry sparse metadata directly, e.g.
+        // prefetched by the kernel, instead of mma.load from shared memory.
+        // SM90 sparse atoms take one uint32_t metadata register (u64 would be
+        // truncated), and a shared-storage scalar would put the metadata back
+        // on the LDS path.
+        if (metadata_sym) {
+          auto mty = GetSymbolType(metadata_name);
+          if (auto scty = dyn_cast<ScalarType>(mty))
+            metadata_is_register =
+                scty->GetBaseType() == BaseType::U32 &&
+                scty->GetStorage() != Storage::SHARED;
+        }
         if (metadata_name.empty() ||
-            (!explicit_mma_loads_.count(metadata_name) &&
-             !explicit_mma_loads_.count(InScopeName(metadata_name)))) {
+            (!metadata_is_register &&
+             !explicit_mma_loads_.count(metadata_name) &&
+             !explicit_mma_loads_.count(metadata_scoped))) {
           Error1(n.LOC(),
                  "sparse WGMMA metadata must be loaded into a register with "
                  "mma.load before use");
@@ -6258,6 +6274,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           (direct_b.is_direct && direct_b.k_iters != wgmma_k_iters)) {
         Error1(n.LOC(), "direct WGMMA operands must agree on the number of "
                         "auto-split K iterations.");
+        return false;
+      }
+      if (metadata_is_register && wgmma_k_iters > 1) {
+        Error1(n.LOC(),
+               "sparse WGMMA metadata in a register cannot be reused across "
+               "auto-split K iterations; load metadata per K tile or provide "
+               "it via mma.load");
         return false;
       }
 
@@ -7003,6 +7026,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
     } break;
     case AST::MMAOperation::Exec: {
+      // The WMMA path has no sparse atom: it would silently emit a dense
+      // mma_sync and drop the E selector. Reject rather than miscompile.
+      if (op.IsSparse()) {
+        Error1(n.LOC(), "sparse MMA is not supported by the WMMA path; use "
+                        "the WGMMA target");
+        return false;
+      }
       ds << d_indent << "nvcuda::wmma::mma_sync("
          << ExprSTR(op.ExecOperand(0), false) << ", "
          << ExprSTR(op.ExecOperand(1), false) << ", "
