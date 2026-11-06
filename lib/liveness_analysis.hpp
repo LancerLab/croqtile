@@ -411,6 +411,11 @@ public:
   };
 
   const std::map<std::string, HBGraph>& HBGraphs() const { return hb_graphs; }
+  // stmt id -> AST node, in the liveness preorder (the id space used by
+  // HBPhase first/last_stmt_id). Read-only seam for the sync-recovery pass.
+  const std::vector<const Stmt*>& PreorderStmts() const {
+    return preorder_stmts;
+  }
 
 private:
   std::map<std::string, HBGraph> hb_graphs;

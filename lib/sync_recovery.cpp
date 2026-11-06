@@ -8,6 +8,9 @@
 #include <utility>
 #include <vector>
 
+#include <map>
+#include <set>
+
 #include "aux.hpp"
 #include "context.hpp"
 #include "liveness_analysis.hpp"
@@ -15,11 +18,34 @@
 
 using namespace Choreo;
 
-bool SyncRecovery::RunOnProgramImpl(AST::Node&) {
+bool SyncRecovery::RunOnProgramImpl(AST::Node& root) {
   // TODO: proper CCtx flag; env var keeps the scaffold unintrusive.
   if (!std::getenv("CHOREO_SYNC_RECOVERY")) return true;
   if (mr == nullptr) return true;
+  root_ = &root;
   RunRecovery();
+  // C6: drive the traversal that inserts the pending fences.
+  if (!pending_fences_.empty()) root.accept(*this);
+  dbgs() << "[sync-recovery] summary: " << total_slots_ << " shared slots, "
+         << total_handovers_ << " handovers (" << hb_merged_handovers_
+         << " hb-merged), " << inserted_fences_ << " fences inserted\n";
+  return true;
+}
+
+bool SyncRecovery::Visit(AST::MultiNodes& n) {
+  if (pending_fences_.empty()) return true;
+  for (size_t i = 0; i < n.Count(); ++i) {
+    auto it = pending_fences_.find(n.SubAt(i).get());
+    if (it == pending_fences_.end()) continue;
+    for (FenceEntity e : it->second) {
+      auto fence = AST::Make<AST::Fence>(
+          n.SubAt(i)->LOC(), ParallelLevel::GROUP, Storage::SHARED, e);
+      dbgs() << "[sync-recovery] insert fence [" << STR(e) << "] before stmt\n";
+      n.Insert(fence, i++);
+      ++inserted_fences_;
+    }
+    pending_fences_.erase(it);
+  }
   return true;
 }
 
@@ -180,8 +206,6 @@ void SyncRecovery::RunRecovery() {
   const auto& df_ctxs = mr->RecoveryDFCtxs();
   const auto& hb_graphs = mr->LA().HBGraphs();
 
-  size_t total_slots = 0, total_handovers = 0, hb_merged_handovers = 0;
-
   for (const auto& [df_name, ctx] : df_ctxs) {
     // --- C1: tenant reconstruction from post-coloring offsets ---
     std::vector<Tenant> tenants;
@@ -218,7 +242,7 @@ void SyncRecovery::RunRecovery() {
 
     for (const auto& slot : slots) {
       if (slot.size() < 2) continue;
-      ++total_slots;
+      ++total_slots_;
       if (!printed_df) {
         dbgs() << "[sync-recovery] device function: " << df_name << "\n";
         printed_df = true;
@@ -275,7 +299,7 @@ void SyncRecovery::RunRecovery() {
           if (g->Reaches(phase_lists[j].back(), phase_lists[i].front()))
             continue; // concurrent in both directions; not a handover
 
-          ++total_handovers;
+          ++total_handovers_;
           bool hb_merged = false;
           for (const auto& [x, y] : ctx.hb_overlapped_pairs)
             if ((x == slot[i].buffer_id && y == slot[j].buffer_id) ||
@@ -283,7 +307,7 @@ void SyncRecovery::RunRecovery() {
               hb_merged = true;
               break;
             }
-          if (hb_merged) ++hb_merged_handovers;
+          if (hb_merged) ++hb_merged_handovers_;
 
           dbgs() << "    handover " << UnScopedExpr(slot[i].buffer_id) << " -> "
                  << UnScopedExpr(slot[j].buffer_id)
@@ -302,12 +326,26 @@ void SyncRecovery::RunRecovery() {
               dbgs() << " " << o.dep << "[" << o.pair << "](" << o.cls << ":"
                      << o.primitive << ")";
           }
+          // C6: frontier insertion targets (always-insert; the elimination
+          // pass removes the redundant ones later). A visibility fence is
+          // per-thread: it must execute on the *writing* threads, after
+          // their last write to the slot and before the sync that hands the
+          // slot over --- i.e. inside the producer tenant, before the phase
+          // boundary's last statement (the trigger site).
+          const auto& po = mr->LA().PreorderStmts();
+          for (const auto& o : obligations)
+            if (o.cls == "visibility") {
+              // The phase boundary may be a synthetic ScopeEnd (not in the
+              // AST); walk back to the last real statement (the trigger).
+              size_t sid = g->phases[a_last].last_stmt_id;
+              while (sid > g->phases[a_last].first_stmt_id &&
+                     isa<LivenessAnalyzer::ScopeEnd>(po[sid]))
+                --sid;
+              if (sid < po.size() && !isa<LivenessAnalyzer::ScopeEnd>(po[sid]))
+                pending_fences_[po[sid]].insert(FenceEntity::TMA);
+            }
           dbgs() << "\n";
         }
     }
   }
-
-  dbgs() << "[sync-recovery] summary: " << total_slots << " shared slots, "
-         << total_handovers << " handovers (" << hb_merged_handovers
-         << " hb-merged)\n";
 }

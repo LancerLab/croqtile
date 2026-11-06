@@ -3803,8 +3803,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
         auto oname = UnScopedName(item.name);
         if (item.attr != ParamAttr::GLOBAL_INPUT && item.IsReference())
           hs << h_indent << "choreo::abend_true(cudaMemcpy(" << oname
-             << ".data(), " << oname + "__device" << ", "
-             << UnScopedSizeExpr(*item.type) << ", cudaMemcpyDeviceToHost));\n";
+             << ".data(), " << oname + "__device"
+             << ", " << UnScopedSizeExpr(*item.type)
+             << ", cudaMemcpyDeviceToHost));\n";
       }
     }
 
@@ -7592,6 +7593,15 @@ bool CuteCodeGen::Visit(AST::Barrier& n) {
 bool CuteCodeGen::Visit(AST::Fence& n) {
   TraceEachVisit(n);
 
+  // Proxy fences publish the generic path to an async engine path; the
+  // memory space selects the scope (shared -> shared::cta).
+  if (n.GetEntity() == FenceEntity::DMA || n.GetEntity() == FenceEntity::TMA) {
+    if (n.GetMemory() != Storage::SHARED)
+      choreo_unreachable("only shared-memory proxy fences are emitted so far.");
+    ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
+    return true;
+  }
+
   // GPU fences always cover shared+global; visibility distinguishes the scope.
   //
   // The order axis selects between the two standalone fence forms CUDA
@@ -10129,8 +10139,8 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
       // scalars, hence scalar-symbolic dependence. Stats aggregation already
       // happened (assert-site pass), so this does not double-count.
       FCtx(fname).GetAssessor().RecordExternalObligation(
-          msg, location(), AssessOutcome::RUNTIME, UsageType::ShapeCompatibility,
-          AssessDependence::SCALAR_SYMBOLIC);
+          msg, location(), AssessOutcome::RUNTIME,
+          UsageType::ShapeCompatibility, AssessDependence::SCALAR_SYMBOLIC);
     }
   }
 

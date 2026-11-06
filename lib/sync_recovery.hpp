@@ -1,6 +1,9 @@
 #ifndef __CHOREO_SYNC_RECOVERY_HPP__
 #define __CHOREO_SYNC_RECOVERY_HPP__
 
+#include <map>
+#include <set>
+
 #include "visitor.hpp"
 
 namespace Choreo {
@@ -19,6 +22,13 @@ struct MemReuse;
 struct SyncRecovery : public VisitorWithSymTab {
 private:
   const MemReuse* mr = nullptr;
+  AST::Node* root_ = nullptr;
+  // Fence insertions, keyed by the statement before which they go (the
+  // receiving tenant's first access). Several handovers may target the same
+  // statement; duplicates of the same entity collapse.
+  std::map<const AST::Node*, std::set<FenceEntity>> pending_fences_;
+  size_t inserted_fences_ = 0;
+  size_t total_slots_ = 0, total_handovers_ = 0, hb_merged_handovers_ = 0;
 
 public:
   SyncRecovery() : VisitorWithSymTab("SyncRecovery") {}
@@ -26,6 +36,10 @@ public:
 
   bool RunOnProgramImpl(AST::Node& root) override;
   void RunRecovery();
+
+  // Inserts the pending fences into the statement list containing their
+  // target statement.
+  bool Visit(AST::MultiNodes& n) override;
 
 private:
   // RunOnProgramImpl skips the traversal entirely; these exist only to

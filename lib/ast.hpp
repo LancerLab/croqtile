@@ -4077,18 +4077,24 @@ struct Barrier : public Node, public TypeIDProvider<Barrier> {
 struct Fence : public Node, public TypeIDProvider<Fence> {
   ParallelLevel visibility;
   Storage memory;
-  FenceOrder order;
+  // Which engine path the fence publishes to: THREADS = plain threadfence;
+  // DMA/TMA = publish generic-proxy writes to the async engine path
+  // (fence.proxy.async). MARA sync-recovery insertion sets this.
+  FenceEntity entity = FenceEntity::THREADS;
+  FenceOrder order = FenceOrder::ACQ_REL;
 
   Fence(const location& loc, ParallelLevel v, Storage m = Storage::NONE,
-        FenceOrder o = FenceOrder::ACQ_REL)
-      : Node(loc), visibility(v), memory(m), order(o) {}
+        FenceOrder o = FenceOrder::ACQ_REL,
+        FenceEntity e = FenceEntity::THREADS)
+      : Node(loc), visibility(v), memory(m), entity(e), order(o) {}
 
   ptr<Node> CloneImpl() const override {
-    return Make<Fence>(LOC(), visibility, memory, order);
+    return Make<Fence>(LOC(), visibility, memory, order, entity);
   }
 
   ParallelLevel GetVisibility() const { return visibility; }
   Storage GetMemory() const { return memory; }
+  FenceEntity GetEntity() const { return entity; }
   FenceOrder GetOrder() const { return order; }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -4097,6 +4103,7 @@ struct Fence : public Node, public TypeIDProvider<Fence> {
        << prefix << "`- "
        << "Fence: " << STR(visibility);
     if (memory != Storage::NONE) os << "<" << STR(memory) << ">";
+    if (entity != FenceEntity::THREADS) os << " [" << STR(entity) << "]";
     os << " " << STR(order);
   }
   void accept(Visitor&) override;
@@ -4577,7 +4584,7 @@ struct DeviceFunctionDecl final : public Node,
     DeviceTemplateParam(const std::string& name = "", Kind k = UNKNOWN,
                         const std::string& type = "",
                         const std::string& def = "")
-        : kind(k), param_name(name), type_name(type), default_value(def) {};
+        : kind(k), param_name(name), type_name(type), default_value(def){};
   };
   std::vector<DeviceTemplateParam> template_params;
   bool IsTemplated() const { return !template_params.empty(); }
