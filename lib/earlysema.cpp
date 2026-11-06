@@ -78,6 +78,16 @@ void EarlySemantics::RecordIntegerConstant(const std::string& name,
     integer_constants[scoped] = *value;
 }
 
+namespace {
+// Whether the selected target lowers reductions through fragment layouts. Only
+// those read the operation as a `frag.*`; the buffer targets spell the
+// statement the way the source does.
+bool FragmentTarget() {
+  auto target = CCtx().GetTarget().Name();
+  return target == "cute" || target == "gpu";
+}
+} // namespace
+
 bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
   if (isa<AST::Program>(&n)) {
     type_equals.Reset();
@@ -168,15 +178,22 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
                           "and is not available on '" +
                               CCtx().GetTarget().Name() + "'.");
     } else if (fr->dim != 0 && fr->dim != 1) {
-      Error1(fr->LOC(), fr->OpName() + std::string(": dim must be 0 or 1."));
+      // Shape inference has not run, so the operand type is unknown and the
+      // node's fragment/buffer role with it. Name it the way the selected
+      // backend does: the fragment targets read it as a `frag` operation, while
+      // the buffer targets spell the statement as written.
+      const bool fragment_form = FragmentTarget();
+      Error1(fr->LOC(),
+             std::string(fragment_form ? fr->OpName() : fr->StmtName()) +
+                 ": dim must be 0 or 1.");
     } else if (!(CCtx().GetTarget().ReduceStatementDirections(
                      CCtx().GetArch()) &
                  Target::ReduceStatementBit(fr->OpSuffix(), fr->dim))) {
-      Error1(fr->LOC(), std::string(fr->OpName()) + " is not lowered on '" +
-                            CCtx().GetTarget().Name() + "' in the " +
-                            (fr->dim == 0 ? "column" : "row") +
-                            " direction (dim=" + std::to_string(fr->dim) +
-                            ").");
+      Error1(fr->LOC(),
+             std::string(FragmentTarget() ? fr->OpName() : fr->StmtName()) +
+                 " is not lowered on '" + CCtx().GetTarget().Name() +
+                 "' in the " + (fr->dim == 0 ? "column" : "row") +
+                 " direction (dim=" + std::to_string(fr->dim) + ").");
     }
   }
 

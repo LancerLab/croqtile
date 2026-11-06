@@ -3785,6 +3785,9 @@ struct FragReduce : public Node, public TypeIDProvider<FragReduce> {
              const ptr<Expr>& d, int dm)
       : Node(l), op(o), src(s), dst(d), dim(dm) {}
 
+  // The fragment form of the name, used where the operation acts on a `frag`
+  // value. A buffer target is not a fragment at all, so its diagnostics use
+  // StmtName() below instead.
   const char* OpName() const {
     switch (op) {
     case FragReduceOp::MAX: return "frag.reduce_max";
@@ -3794,6 +3797,18 @@ struct FragReduce : public Node, public TypeIDProvider<FragReduce> {
     case FragReduceOp::ALL_REDUCE_SUM: return "frag.all_reduce_sum";
     }
     return "frag.reduce_?";
+  }
+
+  // The statement as the source spells it.
+  const char* StmtName() const {
+    switch (op) {
+    case FragReduceOp::MAX: return "reduce_max";
+    case FragReduceOp::SUM: return "reduce_sum";
+    case FragReduceOp::MIN: return "reduce_min";
+    case FragReduceOp::PROD: return "reduce_prod";
+    case FragReduceOp::ALL_REDUCE_SUM: return "all_reduce_sum";
+    }
+    return "reduce_?";
   }
 
   // The source-level spelling of the operation, which is also the suffix the
@@ -3829,10 +3844,15 @@ struct FragReduce : public Node, public TypeIDProvider<FragReduce> {
     return id->name;
   }
 
-  const std::string& DstName() const {
-    auto id = GetIdentifier(*dst);
-    assert(id && "frag.reduce dst must be an identifier");
-    return id->name;
+  // The destination may be a plain buffer or a window of one
+  // (`acc.subspan(R)`), so the name is the storage the store lands in. Callers
+  // use it to track the buffer, not to reproduce the exact spelling.
+  std::string DstName() const {
+    if (auto id = GetIdentifier(*dst)) return id->name;
+    if (auto expr = dyn_cast<AST::Expr>(dst))
+      if (auto ca = dyn_cast<AST::ChunkAt>(expr->GetReference()))
+        return ca->RefSymbol();
+    choreo_unreachable("frag.reduce dst must name a buffer");
   }
 
   bool IsAllReduce() const { return op == FragReduceOp::ALL_REDUCE_SUM; }
