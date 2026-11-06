@@ -1,0 +1,15 @@
+// A ref alias into a mem-reuse pool is a raw pointer; its slot stride is the
+// pool's physical (alignas-padded) slot stride, not the packed element count.
+//
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v '^ *//' | FileCheck %s
+
+__co__ void ref_alias_slot(f32 [8] x) {
+  parallel p by 1 : block {
+    alignas(256) shared f32 [8] tiles[2][2];
+    t0 = tiles[1];
+    dma.copy x => t0[1];
+  }
+}
+
+// CHECK: float* t0 = (float*)(tiles + ((1)*2)*(64));
+// CHECK: (float*)t0 + (1)*(64)

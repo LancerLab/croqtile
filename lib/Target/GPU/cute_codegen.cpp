@@ -422,9 +422,22 @@ bool CuteCodeGen::IsU32RegisterMetadata(const ptr<Type>& ty,
          !shared_scalar_syms_.count(scoped);
 }
 
+bool CuteCodeGen::IsPooledArray(const std::string& sym) const {
+  if (pooled_array_syms_.empty()) return false;
+  return pooled_array_syms_.count(InScopeNameForRef(sym)) > 0;
+}
+
+ValueItem CuteCodeGen::SlotStrideElementsValue(
+    const ptr<ArrayType>& array_ty, const std::string& sym) const {
+  if (auto sat = dyn_cast<SpannedArrayType>(array_ty))
+    return IsPooledArray(sym) ? sat->PhysicalSlotStrideElementsValue()
+                              : sat->spty->GetShape().ElementCountValue();
+  return sbe::nu(1);
+}
+
 std::string CuteCodeGen::ArraySlotOffsetExpr(
-    const ptr<ArrayType>& array_ty, const AST::NodeList& subs,
-    bool is_host) const {
+    const ptr<ArrayType>& array_ty, const AST::NodeList& subs, bool is_host,
+    const std::string& sym) const {
   if (subs.empty()) return "0";
   const ValueList& dims = array_ty->Dimensions();
   assert(subs.size() <= dims.size());
@@ -438,10 +451,30 @@ std::string CuteCodeGen::ArraySlotOffsetExpr(
   }
   for (size_t i = subs.size(); i < dims.size(); ++i)
     idx = "(" + idx + ")*" + ValueSTR(dims[i]);
-  ValueItem stride = sbe::nu(1);
-  if (auto sat = dyn_cast<SpannedArrayType>(array_ty))
-    stride = sat->PhysicalSlotStrideElementsValue();
-  return "(" + idx + ")*(" + ValueSTR(stride) + ")";
+  return "(" + idx + ")*(" + ValueSTR(SlotStrideElementsValue(array_ty, sym)) +
+         ")";
+}
+
+void CuteCodeGen::AppendArraySlotOrSubscripts(
+    std::string& buf_expr, const std::string& sym, const ptr<Type>& sym_ty,
+    const ptr<ArrayType>& array_ty,
+    const ptr<AST::MultiValues>& indices) const {
+  if (!indices) return;
+  auto sty = GetSpannedType(sym_ty);
+  const bool pointer_decl =
+      (sty && sty->GetStorage() == Storage::GLOBAL) ||
+      pointer_array_syms_.count(InScopeNameForRef(sym)) > 0;
+  if (array_ty && (CCtx().MemReuse() || pointer_decl)) {
+    buf_expr += " + ";
+    buf_expr += ArraySlotOffsetExpr(array_ty, indices->AllValues(), IsHost(),
+                                    sym);
+  } else {
+    for (auto expr : indices->AllValues()) {
+      buf_expr += "[";
+      buf_expr += ExprSTR(expr, IsHost());
+      buf_expr += "]";
+    }
+  }
 }
 
 std::pair<std::string, std::string>
@@ -463,17 +496,8 @@ CuteCodeGen::GetDMABufferExpr(const std::string& sym,
   }
 
   std::string buf_name = buf_expr;
-  if (subscription != nullptr) {
-    if (auto array_ty = dyn_cast<ArrayType>(sym_ty);
-        array_ty && CCtx().MemReuse()) {
-      buf_expr += " + " +
-                  ArraySlotOffsetExpr(array_ty, subscription->AllValues(),
-                                      IsHost());
-    } else {
-      for (auto expr : subscription->AllValues())
-        buf_expr += "[" + ExprSTR(expr, IsHost()) + "]";
-    }
-  }
+  AppendArraySlotOrSubscripts(buf_expr, sym, sym_ty,
+                              dyn_cast<ArrayType>(sym_ty), subscription);
   return std::make_pair(buf_name, buf_expr);
 }
 
@@ -2509,6 +2533,18 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
   if (isa<ScalarType>(nty))
     if (auto mem = n.GetMemory(); mem && mem->Get() == Storage::SHARED)
       shared_scalar_syms_.insert(sname);
+  if (n.HasNote("reuse")) {
+    pooled_array_syms_.insert(sname);
+    pointer_array_syms_.insert(sname);
+  } else if (n.HasNote("ref")) {
+    pointer_array_syms_.insert(sname);
+    if (auto e = dyn_cast<AST::Expr>(n.init_expr);
+        e && e->op == Op::ElemOf) {
+      auto base = AST::GetArrayBaseSymbol(*e);
+      if (base && pooled_array_syms_.count(InScopeNameForRef(base->name)))
+        pooled_array_syms_.insert(sname);
+    }
+  }
   if (!FCtx(fname).HasSymbolValues(sname))
     updating_cgi.AddSymbolDetail(fname, {sname, GetSymbolType(sym), true});
   else {
@@ -2595,9 +2631,8 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         if (sa->subscriptions && sa->subscriptions->Count() > 0) {
           auto sat = dyn_cast<SpannedArrayType>(tty);
           assert(sat && "span_as with subscriptions requires array type.");
-          base_expr += " + " +
-                       ArraySlotOffsetExpr(sat, sa->subscriptions->AllValues(),
-                                           false);
+          AppendArraySlotOrSubscripts(base_expr, sa->id->name, tty, sat,
+                                      sa->subscriptions);
         }
         ds << d_indent << "auto* " << raw_sym << " = ";
         ds << "static_cast<"
@@ -5426,10 +5461,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto ty = GetSymbolType(f_sym);
       auto f_sty = GetSpannedType(ty);
       std::string buf_expr = isa<FutureType>(ty) ? f_sym + ".data()" : f_sym;
-      if (ca->indices != nullptr) {
-        for (auto expr : ca->indices->AllValues())
-          buf_expr += "[" + ExprSTR(expr, IsHost()) + "]";
-      }
+      AppendArraySlotOrSubscripts(buf_expr, f_sym, ty,
+                                  dyn_cast<ArrayType>(ty), ca->indices);
       const auto f_mds = GenTensorDecl(
           RemoveSuffix(f_sym, ".data()"), buf_expr, f_sty->GetStorage(),
           f_sty->ElementType(), ca->GetBlockShape(), false,
@@ -5789,17 +5822,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                       ssm.DeviceName(InScopeName(elemof_base->name));
                   info.stage_array_index_expr =
                       ExprSTR(subscripts.front(), false);
-                  if (auto sat = dyn_cast<SpannedArrayType>(array_ty))
-                    info.stage_array_elem_count_expr =
-                        ValueSTR(sat->PhysicalSlotStrideElementsValue());
-                  else
-                    info.stage_array_elem_count_expr =
-                        ValueSTR(sty->GetShape().ElementCountValue());
+                  info.stage_array_elem_count_expr = ValueSTR(
+                      SlotStrideElementsValue(array_ty, elemof_base->name));
                   info.stage_array_extent = *extent;
                 }
               }
               return ssm.DeviceName(InScopeName(elemof_base->name)) + " + " +
-                     ArraySlotOffsetExpr(array_ty, subscripts, false);
+                     ArraySlotOffsetExpr(array_ty, subscripts, false,
+                                         elemof_base->name);
             }
           }
           if (sym) {
@@ -5850,7 +5880,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
               auto sym_ty = GetSymbolType(ca->data->name);
               if (auto array_ty = dyn_cast<ArrayType>(sym_ty)) {
                 phys += sbe::sym(ArraySlotOffsetExpr(
-                    array_ty, ca->indices->AllValues(), false));
+                    array_ty, ca->indices->AllValues(), false,
+                    ca->data->name));
               }
             }
 
@@ -6621,17 +6652,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto f_sty = GetSpannedType(ty);
       auto accum_type = ssmi.ty;
       std::string buf_expr = isa<FutureType>(ty) ? t_sym + ".data()" : t_sym;
-      if (ca->indices != nullptr) {
-        if (auto array_ty = dyn_cast<ArrayType>(ty);
-            array_ty && CCtx().MemReuse()) {
-          buf_expr += " + " +
-                      ArraySlotOffsetExpr(array_ty, ca->indices->AllValues(),
-                                          IsHost());
-        } else {
-          for (auto expr : ca->indices->AllValues())
-            buf_expr += "[" + ExprSTR(expr, IsHost()) + "]";
-        }
-      }
+      AppendArraySlotOrSubscripts(buf_expr, ca->data->name, ty,
+                                  dyn_cast<ArrayType>(ty), ca->indices);
       const auto f_mds = GenTensorDecl(
           RemoveSuffix(t_sym, ".data()"), buf_expr, f_sty->GetStorage(),
           f_sty->ElementType(), ca->GetBlockShape(), false,
@@ -7084,17 +7106,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto ty = GetSymbolType(f_sym);
       auto f_sty = GetSpannedType(ty);
       std::string buf_expr = isa<FutureType>(ty) ? f_sym + ".data()" : f_sym;
-      if (ca->indices != nullptr) {
-        if (auto array_ty = dyn_cast<ArrayType>(ty);
-            array_ty && CCtx().MemReuse()) {
-          buf_expr += " + " +
-                      ArraySlotOffsetExpr(array_ty, ca->indices->AllValues(),
-                                          IsHost());
-        } else {
-          for (auto expr : ca->indices->AllValues())
-            buf_expr += "[" + ExprSTR(expr, IsHost()) + "]";
-        }
-      }
+      AppendArraySlotOrSubscripts(buf_expr, ca->data->name, ty,
+                                  dyn_cast<ArrayType>(ty), ca->indices);
       const auto f_mds = GenTensorDecl(
           RemoveSuffix(f_sym, ".data()"), buf_expr, f_sty->GetStorage(),
           f_sty->ElementType(), ca->GetBlockShape(), false,
@@ -7310,17 +7323,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto f_sty = GetSpannedType(ty);
       auto fca_sty = GetSpannedType(NodeType(*ca));
       std::string buf_expr = isa<FutureType>(ty) ? f_sym + ".data()" : f_sym;
-      if (ca->indices != nullptr) {
-        if (auto array_ty = dyn_cast<ArrayType>(ty);
-            array_ty && CCtx().MemReuse()) {
-          buf_expr += " + " +
-                      ArraySlotOffsetExpr(array_ty, ca->indices->AllValues(),
-                                          IsHost());
-        } else {
-          for (auto expr : ca->indices->AllValues())
-            buf_expr += "[" + ExprSTR(expr, IsHost()) + "]";
-        }
-      }
+      AppendArraySlotOrSubscripts(buf_expr, ca->data->name, ty,
+                                  dyn_cast<ArrayType>(ty), ca->indices);
       const auto f_mds =
           GenTensorDecl(RemoveSuffix(f_sym, ".data()"), buf_expr,
                         f_sty->GetStorage(), f_sty->ElementType(),
@@ -11219,7 +11223,8 @@ const ValueItem CuteCodeGen::TileAddr(const ptr<AST::ChunkAt>& ca, bool is_host,
     if (auto array_ty = dyn_cast<ArrayType>(sym_ty);
         array_ty && CCtx().MemReuse()) {
       offset = offset + sbe::sym(ArraySlotOffsetExpr(
-                             array_ty, ca->indices->AllValues(), is_host));
+                             array_ty, ca->indices->AllValues(), is_host,
+                             ca->data->name));
     }
   }
 
@@ -11455,7 +11460,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
                   dyn_cast<ArrayType>(GetSymbolType(da->data->name))) {
             oss << " + "
                 << ArraySlotOffsetExpr(array_ty, da->GetArrayIndices(),
-                                       is_host);
+                                       is_host, da->data->name);
           }
         }
         size_t idx = 0;
@@ -11658,7 +11663,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           std::reverse(subscripts.begin(), subscripts.end());
           auto base_dev = ssm.DeviceName(InScopeNameForRef(base_id->name));
           oss << base_dev << " + "
-              << ArraySlotOffsetExpr(sat, subscripts, is_host);
+              << ArraySlotOffsetExpr(sat, subscripts, is_host, base_id->name);
         } else {
           oss << OpExprSTR(expr->GetL(), "[]", true, is_host) << "["
               << OpExprSTR(expr->GetR(), "", true, is_host) << "]";

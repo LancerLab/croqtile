@@ -1,0 +1,59 @@
+// A span-array slot stride follows the emitted declaration: a pooled
+// (mem-reuse) array is a pointer with alignas-padded slots, while a regular
+// C++ array declaration is tightly packed.
+//
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v '^ *//' | FileCheck %s --check-prefix=DEFAULT
+// RUN: choreo -es -t cute -arch=sm_90a --mem-reuse=false %s -o - | grep -v '^ *//' | FileCheck %s --check-prefix=NOMEM
+
+__co__ void packed_local() {
+  parallel p by 1 : block {
+    alignas(64) local u32 [8] buf[2];
+    parallel t by 1 : thread {
+      buf[1].at(2) = 1;
+    }
+  }
+}
+
+__co__ void packed_shared() {
+  parallel p by 1 : block {
+    alignas(256) shared f32 [8] a[2];
+    a[1].at(0) = 2.0f;
+  }
+}
+
+__co__ void pooled_buf(f16 [16, 16] x) {
+  parallel p by 1 : block {
+    alignas(1024) shared f16 [16, 16] buf[2];
+    buf[1].at(0, 0) = x.at(0, 0);
+  }
+}
+
+__co__ void span_as_slot(f32 [8] x) {
+  parallel p by 1 : block {
+    shared f32 [8] s[2];
+    dma.copy s[1].span_as([8]) => local;
+    dma.copy x.span_as([8]) => local;
+  }
+}
+
+// DEFAULT-LABEL: __global__{{.*}}packed_local
+// DEFAULT: alignas(64) unsigned int buf[(2)*(8)];
+// DEFAULT: *((unsigned int*)buf + (1)*(8) + 2)
+// DEFAULT-LABEL: __global__{{.*}}packed_shared
+// DEFAULT: *((float*)a + (1)*(64))
+// DEFAULT-LABEL: __global__{{.*}}pooled_buf
+// DEFAULT: *((f16*)buf + (1)*(512))
+// DEFAULT-LABEL: __global__{{.*}}span_as_slot
+// DEFAULT: (float*)s + (1)*(8)
+
+// NOMEM-LABEL: __global__{{.*}}packed_local
+// NOMEM: alignas(64) unsigned int buf[2][8];
+// NOMEM: *((unsigned int*)buf + (1)*(8) + 2)
+// NOMEM-LABEL: __global__{{.*}}packed_shared
+// NOMEM: float a[2][8];
+// NOMEM: *((float*)a + (1)*(8))
+// NOMEM-LABEL: __global__{{.*}}pooled_buf
+// NOMEM: f16 buf[2][256];
+// NOMEM: *((f16*)buf + (1)*(256))
+// NOMEM-LABEL: __global__{{.*}}span_as_slot
+// NOMEM: (float*)s[1]
