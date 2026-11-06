@@ -265,7 +265,7 @@ extern int yylex();
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls named_fragment_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims step_list opt_step_list opt_stride_list at_list opt_at_list opt_from_list
 %nterm <std::pair<AST::ptr<AST::MultiValues>, AST::ptr<AST::MultiValues>>> shape_stride
-%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr vec_index_expr vec_load_expr ituple_derivation internal_sizeof_expr sizeof_expr frag_expr mma_exec_operand_expr opt_stream_bind vector_width_expr
+%nterm <AST::ptr<AST::Expr>> reduce_dst_expr s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr vec_index_expr vec_load_expr ituple_derivation internal_sizeof_expr sizeof_expr frag_expr mma_exec_operand_expr opt_stream_bind vector_width_expr
 %nterm <AST::ptr<AST::AttributeExpr>> suffix_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type mdspan_as_type
 %nterm <AST::ptr<AST::DataAccess>> data_element
@@ -2619,17 +2619,30 @@ mma_schedule_attribute
       }
     ;
 
+// A reduce destination may name a window of a buffer (`acc.subspan(R)`), so it
+// accepts the same spanned-operation suffix as a DMA operand. It stays a
+// separate nonterminal from `frag_expr`: the MMA rules also use `frag_expr`, and
+// widening it there introduces conflicts.
+reduce_dst_expr
+    : frag_expr { $$ = $1; }
+    | ids_expr spanned_ops {
+        auto ide = ElementMultiValues($1);
+        $$ = AST::Make<AST::Expr>(
+            @1, AST::Make<AST::ChunkAt>(@1, ide.first, ide.second, $2));
+      }
+    ;
+
 frag_stmt
-    : REDUCE_MAX_STMT LPAREN frag_expr COMMA frag_expr COMMA integer_value RPAREN {
+    : REDUCE_MAX_STMT LPAREN reduce_dst_expr COMMA frag_expr COMMA integer_value RPAREN {
         $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::MAX, $5, $3, $7);
       }
-    | REDUCE_SUM_STMT LPAREN frag_expr COMMA frag_expr COMMA integer_value RPAREN {
+    | REDUCE_SUM_STMT LPAREN reduce_dst_expr COMMA frag_expr COMMA integer_value RPAREN {
         $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::SUM, $5, $3, $7);
       }
-    | REDUCE_MIN_STMT LPAREN frag_expr COMMA frag_expr COMMA integer_value RPAREN {
+    | REDUCE_MIN_STMT LPAREN reduce_dst_expr COMMA frag_expr COMMA integer_value RPAREN {
         $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::MIN, $5, $3, $7);
       }
-    | REDUCE_PROD_STMT LPAREN frag_expr COMMA frag_expr COMMA integer_value RPAREN {
+    | REDUCE_PROD_STMT LPAREN reduce_dst_expr COMMA frag_expr COMMA integer_value RPAREN {
         $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::PROD, $5, $3, $7);
       }
     | ALL_REDUCE_SUM_STMT LPAREN frag_expr RPAREN {

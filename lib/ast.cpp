@@ -309,6 +309,11 @@ void FragTransfer::accept(Choreo::Visitor& v) {
 
 void FragReduce::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
+  // An operand can name a window of a buffer (`acc.subspan(R)`), so both have
+  // to reach the passes that infer their shape before the reduction is
+  // lowered. An all-reduce has no destination: its `dst` aliases `src`.
+  src->accept(v);
+  if (op != FragReduceOp::ALL_REDUCE_SUM) dst->accept(v);
   v.Visit(*this);
   v.AfterVisit(*this);
 }
