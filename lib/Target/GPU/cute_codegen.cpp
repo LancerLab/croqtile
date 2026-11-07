@@ -552,7 +552,10 @@ void CuteCodeGen::EmitGroupX4Sync(std::ostringstream& os,
                                 candidate);
           if (!taken && slot != available_named_barrier_ids_.end()) {
             id = candidate;
-            available_named_barrier_ids_.erase(slot);
+            // Keep the pool position so an event's precomputed slot still
+            // maps to the same id; -1 makes a later event with this slot
+            // fall back to mbarrier instead of sharing the id.
+            *slot = -1;
           }
         }
         it = group_barrier_ids_.emplace(wg, id).first;
@@ -2099,7 +2102,9 @@ bool CuteCodeGen::TryConfigureNamedEvent(const std::string& name, bool is_array,
       if (it != plan->event_slots.end()) slot = it->second;
     }
   }
-  if (slot >= available_named_barrier_ids_.size()) return false;
+  if (slot >= available_named_barrier_ids_.size() ||
+      available_named_barrier_ids_[slot] < 0)
+    return false;
 
   NamedEventLowering lowering;
   lowering.barrier_id = available_named_barrier_ids_[slot];
