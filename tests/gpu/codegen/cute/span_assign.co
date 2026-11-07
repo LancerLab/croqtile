@@ -8,7 +8,7 @@ __co__ void foo(f32 [64, 32] a) {
   }
 }
 
-// CHECK: auto b = (a + 258);
+// CHECK: auto b = (a + 562);
 // CHECK: auto c = (blockIdx.x * 96 + blockIdx.x * 12 + b);
 // CHECK: auto __shape1_c = cute::make_shape(cute::Int<8>{}, cute::Int<4>{});
 // CHECK: auto __stride1_c = cute::make_stride(cute::Int<12>{}, cute::Int<3>{});

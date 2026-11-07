@@ -1980,7 +1980,10 @@ std::string HIPCodeGen::GenOffset(const AST::ptr<AST::ChunkAt>& ca) const {
 
   for (size_t i = 0; i < ca->OpCount(); ++i) {
     const auto& sop = ca->OpAt(i);
-    if (isa<AST::SOP::Reshape>(sop)) continue;
+    if (isa<AST::SOP::Reshape>(sop)) {
+      cur_strd = sop->GetBlockStrides();
+      continue;
+    }
 
     if (isa<AST::SOP::Tiling>(sop) || isa<AST::SOP::TileAt>(sop) ||
         isa<AST::SOP::SubSpan>(sop)) {
@@ -2000,10 +2003,14 @@ std::string HIPCodeGen::GenOffset(const AST::ptr<AST::ChunkAt>& ca) const {
       }
       cur_strd = strd;
     } else if (isa<AST::SOP::View>(sop)) {
-      auto off = sop->GetOffsets()->Opts();
-      auto strd = sop->GetBlockStrides();
-      for (size_t dim = 0; dim < off.GetVals().size(); ++dim)
-        offset += off.GetVals()[dim] * strd[dim];
+      // `.view(shape)` without `.from(...)` carries no offset; from
+      // coordinates are pre-view coordinates.
+      if (sop->GetOffsets()) {
+        const auto& offs = sop->GetOffsets()->Opts().GetVals();
+        for (size_t dim = 0; dim < offs.size(); ++dim)
+          if (dim < cur_strd.size())
+            offset += offs[dim] * cur_strd[dim];
+      }
       cur_strd = sop->GetBlockStrides();
     } else {
       choreo_unreachable("unsupported spanned operation in HIP GenOffset.");

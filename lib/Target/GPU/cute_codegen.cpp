@@ -1879,6 +1879,9 @@ const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
   for (size_t i = 0; i < end_idx; ++i) {
     const auto& sop = ca->OpAt(i);
     if (isa<AST::SOP::Reshape>(sop)) {
+      // The reshape changes the stride frame that later .from offsets and
+      // views are linearized against.
+      cur_strd = sop->GetBlockStrides();
       continue;
     } else if (isa<AST::SOP::Tiling>(sop) || isa<AST::SOP::TileAt>(sop) ||
                isa<AST::SOP::SubSpan>(sop)) {
@@ -1901,18 +1904,15 @@ const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
       }
       cur_strd = strd;
     } else if (isa<AST::SOP::View>(sop)) {
-      // `.view(shape)` without `.from(...)` carries no offset.
+      // `.view(shape)` without `.from(...)` carries no offset.  The from
+      // coordinates are pre-view coordinates (shapeinfer bounds-checks them
+      // against the pre-view shape), so they are linearized with the
+      // current (pre-view) stride frame.
       if (sop->GetOffsets()) {
         const auto& offs = sop->GetOffsets()->Opts().GetVals();
-        const auto& strd = sop->GetBlockStrides();
-        // A rank-changing view's from-coordinates are expressed in the
-        // pre-view shape; use the pre-view strides for them.
-        const bool rank_changed = offs.size() > strd.size();
-        for (size_t ith = 0; ith < offs.size(); ++ith) {
-          const ValueList& use = rank_changed ? cur_strd : strd;
-          if (ith < use.size())
-            offset += offs[ith] * use[ith];
-        }
+        for (size_t ith = 0; ith < offs.size(); ++ith)
+          if (ith < cur_strd.size())
+            offset += offs[ith] * cur_strd[ith];
       }
       cur_strd = sop->GetBlockStrides();
     } else
@@ -2574,22 +2574,26 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       live_chunk_aliases.erase(sname);
     }
 
-    // Propagate swizzle for ElemOf-based declarations (e.g., `ma = arr[idx]`).
+    // Propagate swizzle for ElemOf/span_as aliases (e.g., `ma = arr[idx]`,
+    // `qa = buf.span_as(...)`).
     auto decl_sty = GetSpannedType(NodeType(n));
     if (decl_sty && decl_sty->GetStorage() == Storage::SHARED && n.init_expr) {
       auto rhs_expr = dyn_cast<AST::Expr>(n.init_expr.get());
-      if (rhs_expr && rhs_expr->GetOp() == Op::ElemOf) {
-        auto base_sym_node = AST::GetArrayBaseSymbol(*rhs_expr);
-        if (base_sym_node) {
-          auto base_name = base_sym_node->name;
-          auto base_scoped = InScopeName(base_name);
-          auto sit = shared_buf_swiz_.find(base_scoped);
-          if (sit == shared_buf_swiz_.end())
-            sit = shared_buf_swiz_.find(base_name);
-          if (sit != shared_buf_swiz_.end()) {
-            shared_buf_swiz_[sym] = sit->second;
-            shared_buf_swiz_[sname] = sit->second;
-          }
+      ptr<AST::Identifier> base_sym_node = nullptr;
+      if (rhs_expr && rhs_expr->GetOp() == Op::ElemOf)
+        base_sym_node = AST::GetArrayBaseSymbol(*rhs_expr);
+      else if (rhs_expr)
+        if (auto sa = dyn_cast<AST::SpanAs>(rhs_expr->GetReference()))
+          base_sym_node = sa->id;
+      if (base_sym_node) {
+        auto base_name = base_sym_node->name;
+        auto base_scoped = InScopeName(base_name);
+        auto sit = shared_buf_swiz_.find(base_scoped);
+        if (sit == shared_buf_swiz_.end())
+          sit = shared_buf_swiz_.find(base_name);
+        if (sit != shared_buf_swiz_.end()) {
+          shared_buf_swiz_[sym] = sit->second;
+          shared_buf_swiz_[sname] = sit->second;
         }
       }
     }
@@ -2787,7 +2791,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       // declaration and addresses its slots.
       auto SlotElemExpr = [&]() -> std::string {
         if (auto sat = dyn_cast<SpannedArrayType>(nty))
-          return ValueSTR(sat->SlotElemCountValue());
+          return ValueSTR(SlotStrideElementsValue(sat));
         return ElemCountExprOf(*sty);
       };
 
@@ -3674,6 +3678,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
           return;
         }
         if (auto nvd = dyn_cast<AST::NamedVariableDecl>(node)) {
+          auto nsty = GetSpannedType(NodeType(*nvd));
+          // Only shared declarations constrain the dynamic shared pool.
+          if (!nsty || nsty->GetStorage() != Storage::SHARED) return;
           if (auto saty = dyn_cast<SpannedArrayType>(NodeType(*nvd));
               saty && saty->HasAlignedSlots())
             alignment = std::max(alignment, saty->SlotAlignment());
@@ -5907,6 +5914,16 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             const auto& sop = ca->OpAt(i);
             if (isa<AST::SOP::View>(sop)) {
               auto view = cast<AST::SOP::View>(sop);
+              // A view that remaps strides reinterprets the swizzled layout
+              // even without a from-offset.
+              if (view->GetStrides()) {
+                info.is_direct = true;
+                info.error =
+                    "swizzled WGMMA operand views that remap strides are not "
+                    "supported (the tiled-swizzle physical mapping is not "
+                    "implemented).";
+                return info;
+              }
               // `.view(shape)` without `.from(...)` carries no offset.
               if (!view->GetOffsets()) continue;
               const auto& offs = view->GetOffsets()->Opts().GetVals();
@@ -8652,6 +8669,11 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
   if (n.with)
     ssm.MapDeviceSymbol(InScopeName(n.with->name), "__iv_" + n.with->name);
 
+  // Resolve the source and matcher names to this with scope in the live
+  // scoped table; otherwise InScopeNameForRef falls back to an enclosing
+  // symbol of the same name (e.g. a kernel parameter).
+  DeclareWithSymbols(n);
+
   assert(n.with_matchers && "expected matchers exist.");
 
   auto emit_iv_decl = [&](const std::string& name, const std::string& scoped,
@@ -8675,6 +8697,9 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
       IsActualBoundedIntegerType(
           cast<AST::Identifier>(n.GetMatchers()[0])->GetType())) {
     auto m1 = cast<AST::Identifier>(n.GetMatchers()[0]);
+    // Without an enclosing WithBlock frame the remaps below could not be
+    // restored; leave the default matcher mapping in place.
+    if (single_matcher_iv_scopes_.empty()) return true;
     const std::string base = "__iv_" + n.with->name;
     // A nested with may reuse the same source name; give the inner IV a
     // distinct C++ name so the outer matcher still resolves to the outer IV.

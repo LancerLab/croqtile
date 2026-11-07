@@ -10,4 +10,20 @@ __co__ void rank_reduce_view(f32 [64, 32] a) {
   }
 }
 
+__co__ void rank_raise_view(f32 [64] a) {
+  parallel p by 32 : block {
+    dma.copy a.view(8, 8).from(5) => shared;
+  }
+}
+
+// The from-offsets are pre-view coordinates; a preceding span_as reshape
+// must refresh the stride frame before the view is applied.
+__co__ void reshape_then_view(f32 [2, 4, 2, 3] a) {
+  parallel p by 32 : block {
+    dma.copy a.span_as([8, 2, 3]).view(16, 3).from(5, 1, 2) => shared;
+  }
+}
+
 // CHECK: make_gmem_ptr<float>((float*)a + 160)
+// CHECK: make_gmem_ptr<float>((float*)a + 5)
+// CHECK: make_gmem_ptr<float>((float*)a + 35)

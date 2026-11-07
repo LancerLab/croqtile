@@ -248,9 +248,9 @@ __co__ void test_view_stride(f32 [64, 32] a) {
               .chunkat(_, _) => shared;
   }
 }
-// view.from offset = p * 16 * 12 = p * 192  (stride 12, not 32)
+// view.from offset = p * 16 * 32 = p * 512  (pre-view stride of `a`)
 // CHECK-LABEL: __global__{{.*}}test_view_stride
-// CHECK: (float*)a + (blockIdx.x * 192)
+// CHECK: (float*)a + (blockIdx.x * 512)
 
 // ---------------------------------------------------------------------------
 // 17. dma.copy.async with span_as + view.from + chunkat

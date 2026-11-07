@@ -1,0 +1,20 @@
+// A view without `.from(...)` has no offsets, and a rank-reducing view's
+// from-coordinates are linearized with the pre-view stride frame.
+//
+// RUN: choreo -es -n -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ void hip_view_no_from(f32 [64] a) {
+  parallel p by 32 : block {
+    dma.copy a.view(64) => shared;
+  }
+}
+
+__co__ void hip_view_rank_reduce(f32 [64, 32] a) {
+  parallel p by 32 : block {
+    dma.copy a.view(64).from(5, 0) => shared;
+  }
+}
+
+// CHECK: hip_view_no_from
+// CHECK: hip_view_rank_reduce
+// CHECK: (float*)((float*)(a) + 160)

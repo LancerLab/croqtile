@@ -444,6 +444,16 @@ protected:
   // immutable global symtab should set this to true.
   bool auto_declare_symbols = false;
 
+  // Declare a with clause's source and matcher names in the live scoped
+  // table of the current with block, so InScopeNameForRef resolves them to
+  // this scope rather than to an enclosing symbol of the same name.
+  void DeclareWithSymbols(const AST::WithIn& w) {
+    if (w.with) SSTab().DeclareSymbolName(w.with->name);
+    if (w.with_matchers)
+      for (const auto& v : w.GetMatchers())
+        SSTab().DeclareSymbolName(cast<AST::Identifier>(v)->name);
+  }
+
   // special to within: map 'with' to its 'with-matchers'
   std::unordered_map<std::string, std::vector<std::string>> within_map;
   // similar for parallel-by
@@ -515,17 +525,8 @@ public:
     } else if (auto wb = dyn_cast<AST::WithBlock>(&n)) {
       SSTab().EnterScope("within_" + std::to_string(wi_count++));
       if (auto_declare_symbols)
-        for (const auto& item : wb->withins->values) {
-          auto w = cast<AST::WithIn>(item);
-          // errs() << "Processing at scope: " << SSTab().ScopeName() << "\n";
-          if (w->with) {
-            // errs() << "Declaring with symbol: " << w->with->name << "\n";
-            SSTab().DeclareSymbolName(w->with->name);
-          }
-          if (w->with_matchers)
-            for (auto v : w->GetMatchers())
-              SSTab().DeclareSymbolName(cast<AST::Identifier>(v)->name);
-        }
+        for (const auto& item : wb->withins->values)
+          DeclareWithSymbols(*cast<AST::WithIn>(item));
     } else if (isa<AST::ForeachBlock>(&n)) {
       SSTab().EnterScope("foreach_" + std::to_string(fe_count++));
     } else if (auto ab = dyn_cast<AST::ApplyBlock>(&n)) {
@@ -548,7 +549,6 @@ public:
           matchers.push_back(scope_name + w->with->name); // only map to itself
         within_map.emplace(scope_name + w->with->name, matchers);
         bv_map.emplace(scope_name + w->with->name, matchers);
-        if (auto_declare_symbols) SSTab().DeclareSymbolName(w->with->name);
       }
       if (w->with_matchers) {
         for (auto v : w->GetMatchers()) {
@@ -556,8 +556,6 @@ public:
           within_map.emplace(
               sname, std::vector<std::string>{sname}); // always map to itself
           bv_map.emplace(sname, std::vector<std::string>{sname});
-          if (auto_declare_symbols)
-            SSTab().DeclareSymbolName(cast<AST::Identifier>(v)->name);
         }
       }
     }

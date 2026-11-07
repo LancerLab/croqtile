@@ -61,6 +61,22 @@ __co__ void shadowed_host_iv(f32 [64] x) {
   }
 }
 
+__co__ void shadowed_param(f32 [64] x) {
+  parallel p by 1 : block {
+    with index = {x} in [2] {
+      foreach index {
+        println(x);
+      }
+    }
+  }
+}
+
+__co__ void shadowed_host_param(f32 [64] x) {
+  with x in [2] {
+    println(x);
+  }
+}
+
 // CHECK-LABEL: __global__{{.*}}explicit_matcher_canonical_body
 // CHECK: for (int __iv_index = 0; __iv_index < 2; ++__iv_index)
 // CHECK: (float*)a + (__iv_index * 32)
@@ -75,3 +91,9 @@ __co__ void shadowed_host_iv(f32 [64] x) {
 // CHECK-LABEL: __global__{{.*}}event_wait_redirect
 // CHECK: ev[__iv_index].wait(((__iv_index & 3) >> 1));
 // CHECK-LABEL: __global__ void __choreo_device_shadowed_host_iv({{.*}}int __iv_i, int __iv_i__2)
+// CHECK-LABEL: __global__{{.*}}shadowed_param
+// CHECK: for (int __iv_index = 0; __iv_index < 2; ++__iv_index)
+// CHECK: printf("{%lld}\n", static_cast<long long>(__iv_index));
+// CHECK-LABEL: void shadowed_host_param(
+// CHECK: int __iv_x = 0;
+// CHECK: printf("{%lld}\n", static_cast<long long>(__iv_x));

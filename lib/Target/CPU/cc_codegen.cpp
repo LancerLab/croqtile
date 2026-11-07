@@ -609,10 +609,12 @@ const ValueItem CCCodeGen::GenOffset(const AST::ptr<AST::ChunkAt>& ca) const {
   if (ca->NoOperation()) return sbe::nu(0);
 
   sbe::ExprSum offset;
+  auto cur_strd = GetSpannedType(GetSymbolType(ca->RefSymbol()))->GetStrides();
 
   for (size_t i = 0; i < ca->OpCount(); ++i) {
     const auto& sop = ca->OpAt(i);
     if (isa<AST::SOP::Reshape>(sop)) {
+      cur_strd = sop->GetBlockStrides();
       continue;
     } else if (isa<AST::SOP::Tiling>(sop) || isa<AST::SOP::TileAt>(sop) ||
                isa<AST::SOP::SubSpan>(sop)) {
@@ -629,11 +631,17 @@ const ValueItem CCCodeGen::GenOffset(const AST::ptr<AST::ChunkAt>& ca) const {
         else
           offset += idx.GetVals()[ith] * strd[ith] * blk.ValueAt(ith);
       }
+      cur_strd = strd;
     } else if (isa<AST::SOP::View>(sop)) {
-      auto off = sop->GetOffsets()->Opts();
-      auto strd = sop->GetBlockStrides();
-      for (size_t ith = 0; ith < off.GetVals().size(); ++ith)
-        offset += off.GetVals()[ith] * strd[ith];
+      // `.view(shape)` without `.from(...)` carries no offset; from
+      // coordinates are pre-view coordinates.
+      if (sop->GetOffsets()) {
+        const auto& offs = sop->GetOffsets()->Opts().GetVals();
+        for (size_t ith = 0; ith < offs.size(); ++ith)
+          if (ith < cur_strd.size())
+            offset += offs[ith] * cur_strd[ith];
+      }
+      cur_strd = sop->GetBlockStrides();
     }
   }
 

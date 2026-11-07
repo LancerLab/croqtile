@@ -50,4 +50,50 @@ __co__ void swizzled_view_row_offset(global bf16[128, 128] q, global bf16[128, 1
   }
 }
 
+__co__ void swizzled_view_span_as_alias(global bf16[128, 128] q, global bf16[128, 128] k) {
+  parallel b by 1 : block {
+    shared bf16[128, 128] q_s;
+    shared bf16[128, 128] k_s;
+    shared event full;
+    parallel p by 2 : group-4 {
+      inthreads.async (p == 0) {
+        q_load = tma.copy.async.swiz<128> q => q_s;
+        k_load = tma.copy.async.swiz<128> k => k_s;
+        trigger full after q_load, k_load;
+      }
+      inthreads.async (p == 1) {
+        wait full;
+        qa = q_s.span_as(128, 128);
+        scores = mma.fill.f32 0.0f;
+        qk = mma.row.row.async scores,
+          qa.view(64, 32).from(0, 32), k_s.view(128, 32).from(0, 0);
+        wait qk;
+      }
+    }
+  }
+}
+
+__co__ void swizzled_view_stride_remap(global bf16[128, 128] q, global bf16[128, 128] k) {
+  parallel b by 1 : block {
+    shared bf16[128, 128] q_s;
+    shared bf16[128, 128] k_s;
+    shared event full;
+    parallel p by 2 : group-4 {
+      inthreads.async (p == 0) {
+        q_load = tma.copy.async.swiz<128> q => q_s;
+        k_load = tma.copy.async.swiz<128> k => k_s;
+        trigger full after q_load, k_load;
+      }
+      inthreads.async (p == 1) {
+        wait full;
+        scores = mma.fill.f32 0.0f;
+        qk = mma.row.row.async scores,
+          q_s.view(64, 32 : 1, 128).from(0, 0), k_s.view(128, 32);
+        wait qk;
+      }
+    }
+  }
+}
+
 // CHECK: error: swizzled WGMMA operand views with a non-zero offset are not supported (the tiled-swizzle physical mapping is not implemented).
+// CHECK: error: swizzled WGMMA operand views that remap strides are not supported (the tiled-swizzle physical mapping is not implemented).

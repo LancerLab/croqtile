@@ -33,9 +33,21 @@ __co__ void dyn_shared_plain_aligned(int n) {
   }
 }
 
+__co__ void dyn_shared_local_align(int n) {
+  parallel by 1 : block {
+    shared u8 [n] dyn;
+    alignas(512) local f32 [8] a;
+    a.at(0) = 1.0f;
+    call kernel(dyn);
+  }
+}
+
 // CHECK: aligned_up_ptr<1024 * 8>(
 // CHECK: *((float*)a + (1)*(256)) = 1.000000f;
 // CHECK-LABEL: __choreo_device_dyn_shared_else_aligned
 // CHECK: aligned_up_ptr<1024 * 8>(
 // CHECK-LABEL: __choreo_device_dyn_shared_plain_aligned
 // CHECK: aligned_up_ptr<1024 * 8>(
+// A local buffer's alignas does not constrain the shared pool.
+// CHECK-LABEL: __choreo_device_dyn_shared_local_align
+// CHECK: aligned_up_ptr<16 * 8>(

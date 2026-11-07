@@ -1,0 +1,21 @@
+// A view without `.from(...)` has no offsets, and a rank-reducing view's
+// from-coordinates are linearized with the pre-view stride frame.
+//
+// REQUIRES: TARGET-CPU
+// RUN: choreo -t cc -es %s -o - | grep -v '^ *//' | FileCheck %s
+
+__co__ void cc_view_no_from(f32 [64] a) {
+  parallel p by 32 : block {
+    dma.copy a.view(64) => shared;
+  }
+}
+
+__co__ void cc_view_rank_reduce(f32 [64, 32] a) {
+  parallel p by 32 : block {
+    dma.copy a.view(64).from(5, 0) => shared;
+  }
+}
+
+// CHECK-LABEL: void cc_view_no_from(
+// CHECK-LABEL: void cc_view_rank_reduce(
+// CHECK: (a.data() + 160)
