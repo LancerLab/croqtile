@@ -5572,7 +5572,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
         if (fp8_sparse_k64) {
           if (v2_mode) {
-            emitFp8PrepackedV2TileLoadSnippet(sym, prepackInfo.device_name,
+            // tile_addr already includes the operand's slot; use the same
+            // slot-adjusted base so the snippet's row offset is intra-slot.
+            emitFp8PrepackedV2TileLoadSnippet(sym, MetaBase(),
                                               ValueSTR(tile_addr), row_stride,
                                               col_stride);
           } else {
