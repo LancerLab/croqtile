@@ -1,0 +1,25 @@
+// Sparse metadata needs two strides (row/column) to build the descriptor;
+// a rank-1 metadata buffer is diagnosed instead of aborting on an
+// out-of-range stride lookup.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+__co__ auto sparse_meta_rank1(u32 [256] meta, f16 [64, 16] a, f16 [8, 32] b) {
+  f32 [64, 8] output{0.0f};
+  parallel by 1 : block {
+    shared u32 [256] meta_s;
+    dma.copy meta => meta_s;
+    a_s = dma.copy a => shared;
+    b_s = dma.copy b => shared;
+    mc = mma.fill.f32 0.0f;
+    parallel p by 1 : group-4 {
+      me = mma.load meta_s;
+      mma.row.row.sp mc, a_s, b_s, me;
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// CHECK: error: sparse metadata must be at least 2-dimensional.

@@ -408,6 +408,9 @@ private:
 
   struct PrepackedU32Info {
     std::string device_name;
+    // Symbol the metadata buffer was resolved from (`<ref>_mdata` or the
+    // reference itself); its type carries the slot stride.
+    std::string resolved_sym;
     bool use_packed_u32 = false;
   };
 

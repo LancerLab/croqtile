@@ -1,0 +1,16 @@
+// TMA descriptors are collected per block-level parallel scope; a TMA copy
+// placed directly in a cluster-level block has no descriptor and must be
+// diagnosed instead of indexing an empty descriptor list.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+__co__ void tma_cluster_scope(global bf16 [64, 64] q) {
+  parallel c by [2] : cluster {
+    shared bf16 [64, 64] q_s;
+    lq = tma.copy.async q => q_s;
+    wait lq;
+  }
+}
+
+// CHECK: error: TMA copy is not supported in this parallel scope.

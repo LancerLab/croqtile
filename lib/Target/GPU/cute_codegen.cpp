@@ -2175,6 +2175,7 @@ CuteCodeGen::resolvePrepackedU32Meta(const std::string& ref_sym,
           info.device_name = ssm.DeviceName(InScopeName(sym));
         }
         if (!info.device_name.empty()) {
+          info.resolved_sym = sym;
           info.use_packed_u32 = true;
           return true;
         }
@@ -2191,6 +2192,7 @@ CuteCodeGen::resolvePrepackedU32Meta(const std::string& ref_sym,
         if (st->ElementType() == BaseType::U32) {
           if (ssm.HasDeviceName(InScopeName(ref_sym))) {
             info.device_name = ssm.DeviceName(InScopeName(ref_sym));
+            info.resolved_sym = ref_sym;
             info.use_packed_u32 = true;
           }
         }
@@ -4740,6 +4742,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       choreo_unreachable("unsupported tma operation: " + n.operation + ".");
 
     const auto& tma_descs = cgi.GetTMADescs()[cur_pb];
+    if (tma_descs.empty()) {
+      Error1(n.LOC(), "TMA copy is not supported in this parallel scope.");
+      return;
+    }
     ParallelLevel tma_sync_level = ParallelLevel::BLOCK;
     int tma_idx = -1;
     if (n.IsTMA() && !isa<PlaceHolderType>(NodeType(n))) {
@@ -5411,6 +5417,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         }
         bool meta_64 = k_val && *k_val > 32 && !fp8_sparse_k64;
         std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
+        if (strides.size() < 2) {
+          Error1(n.LOC(), "sparse metadata must be at least 2-dimensional.");
+          break;
+        }
         std::string row_stride = ValueSTR(strides.at(0));
         std::string col_stride = ValueSTR(strides.at(1));
         bool v2_mode = use_prepack_v2.GetValue();
@@ -5424,7 +5434,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           if (!lca->indices || lca->indices->AllValues().empty())
             return prepackInfo.device_name;
           std::string base = prepackInfo.device_name;
-          AppendArraySlotOffset(base, lca->data->name, lca->indices, false);
+          // The offset's element type/stride come from the symbol the
+          // metadata buffer was actually resolved from (`_mdata` alias).
+          const std::string& off_sym = prepackInfo.resolved_sym.empty()
+                                           ? lca->data->name
+                                           : prepackInfo.resolved_sym;
+          AppendArraySlotOffset(base, off_sym, lca->indices, false);
           base.insert(0, "(");
           base += ")";
           return base;
@@ -5455,9 +5470,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         } else if (v2_mode) {
           if (prepack_single_col) {
             auto tile_off = GenOffset(op.LoadFrom());
-            emitPrepackedV2TileLoadSnippet(sym, prepackInfo.device_name,
-                                           ValueSTR(tile_addr), row_stride,
-                                           ValueSTR(tile_off));
+            emitPrepackedV2TileLoadSnippet(sym, MetaBase(), ValueSTR(tile_addr),
+                                           row_stride, ValueSTR(tile_off));
           } else {
             const std::string base = MetaBase();
             emitPrepackedV2Snippet(sym, base, row_stride, col_stride);
