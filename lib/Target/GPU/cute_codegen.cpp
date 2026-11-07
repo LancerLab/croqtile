@@ -1861,7 +1861,7 @@ CuteCodeGen::TileBaseOffset(const ptr<AST::ChunkAt>& ca) const {
   return ValueSTR(GenOffset(ca));
 }
 
-// given i.sop(...).sop(...)..., generate the offset of the final span in the
+// Given i.sop(...).sop(...)..., generate the offset of the final span in the
 // original span.
 // end_idx: the offset is computed by sop in range [0, end_idx).
 const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
@@ -1901,10 +1901,19 @@ const ValueItem CuteCodeGen::GenOffset(const ptr<AST::ChunkAt>& ca,
       }
       cur_strd = strd;
     } else if (isa<AST::SOP::View>(sop)) {
-      auto off = sop->GetOffsets()->Opts();
-      auto strd = sop->GetBlockStrides();
-      for (size_t ith = 0; ith < off.GetVals().size(); ++ith)
-        offset += off.GetVals()[ith] * strd[ith];
+      // `.view(shape)` without `.from(...)` carries no offset.
+      if (sop->GetOffsets()) {
+        const auto& offs = sop->GetOffsets()->Opts().GetVals();
+        const auto& strd = sop->GetBlockStrides();
+        // A rank-changing view's from-coordinates are expressed in the
+        // pre-view shape; use the pre-view strides for them.
+        const bool rank_changed = offs.size() > strd.size();
+        for (size_t ith = 0; ith < offs.size(); ++ith) {
+          const ValueList& use = rank_changed ? cur_strd : strd;
+          if (ith < use.size())
+            offset += offs[ith] * use[ith];
+        }
+      }
       cur_strd = sop->GetBlockStrides();
     } else
       choreo_unreachable("unsupported spanned operation.");
@@ -5888,6 +5897,39 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             swiz_atom_cols = swiz_bytes / (int)SizeOf(sty->ElementType());
         }
 
+        // A view into a tiled-swizzled operand maps its logical offset to a
+        // non-trivial physical address (e.g. column 64 is element 8192 in the
+        // K-SW128 atom layout), and the WGMMA descriptor's base_offset phase
+        // is not modeled here. Reject a non-zero view offset instead of
+        // silently reading the wrong tile; a zero-offset view is fine.
+        if (ca && swiz_atom_cols > 0) {
+          for (size_t i = 0; i < ca->OpCount(); ++i) {
+            const auto& sop = ca->OpAt(i);
+            if (isa<AST::SOP::View>(sop)) {
+              auto view = cast<AST::SOP::View>(sop);
+              // `.view(shape)` without `.from(...)` carries no offset.
+              if (!view->GetOffsets()) continue;
+              const auto& offs = view->GetOffsets()->Opts().GetVals();
+              bool nonzero = false;
+              for (const auto& o : offs) {
+                auto v = VIInt(o);
+                if (!v || *v != 0) {
+                  nonzero = true;
+                  break;
+                }
+              }
+              if (nonzero) {
+                info.is_direct = true;
+                info.error =
+                    "swizzled WGMMA operand views with a non-zero offset are "
+                    "not supported (the tiled-swizzle physical mapping is not "
+                    "implemented).";
+                return info;
+              }
+            }
+          }
+        }
+
         // For swizzled layouts, recompute base_expr with physical offsets.
         // In a tiled-swizzled smem layout the non-K axis stride is atom_cols
         // (one swizzle period width), not the logical stride.
@@ -5908,6 +5950,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
 
             for (size_t i = 0; i < ca->OpCount(); ++i) {
               const auto& sop = ca->OpAt(i);
+              if (isa<AST::SOP::View>(sop)) {
+                // Non-zero view offsets are rejected above for swizzled
+                // operands; a zero offset contributes nothing.
+                continue;
+              }
               if (isa<AST::SOP::Reshape>(sop)) continue;
               if (!(isa<AST::SOP::Tiling>(sop) || isa<AST::SOP::TileAt>(sop) ||
                     isa<AST::SOP::SubSpan>(sop)))

@@ -1,0 +1,13 @@
+// A rank-changing `.view(shape).from(...)` on a DMA source expresses its
+// from-coordinates in the pre-view shape, so the pre-view strides are used
+// instead of indexing past the post-view block_strides.
+//
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - | grep -v '^ *//' | FileCheck %s
+
+__co__ void rank_reduce_view(f32 [64, 32] a) {
+  parallel p by 32 : block {
+    dma.copy a.view(64).from(5, 0) => shared;
+  }
+}
+
+// CHECK: make_gmem_ptr<float>((float*)a + 160)

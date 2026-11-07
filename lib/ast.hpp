@@ -2475,7 +2475,7 @@ public:
       choreo_unreachable("retrieving an invalid shape.");
     return block_shape.Rank();
   }
-  virtual const ValueList GetBlockStrides() const { return block_strides; }
+  virtual const ValueList& GetBlockStrides() const { return block_strides; }
   virtual void SetBlockStrides(const ValueList& s) { block_strides = s; }
 
   virtual const NodeList TilingFactorNodes() const { return {}; }

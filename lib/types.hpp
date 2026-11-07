@@ -2744,7 +2744,6 @@ struct SpannedArrayType final : public ArrayType,
   // Explicit source-level alignment for each logical spanned-array slot.
   // Zero preserves the historical tightly-packed layout.
   size_t slot_alignment = 0;
-  mutable std::optional<ValueItem> slot_elem_count_cache;
 
   explicit SpannedArrayType(BaseType ft, const ptr<MDSpanType>& s,
                             const ValueList& strd, Storage m,
@@ -2796,10 +2795,7 @@ struct SpannedArrayType final : public ArrayType,
           spty->GetStorage(), arr, slot_alignment);
   }
 
-  void SetSlotAlignment(size_t alignment) {
-    slot_alignment = alignment;
-    slot_elem_count_cache.reset();
-  }
+  void SetSlotAlignment(size_t alignment) { slot_alignment = alignment; }
   size_t SlotAlignment() const { return slot_alignment; }
   bool HasAlignedSlots() const { return slot_alignment != 0; }
   ValueItem PhysicalSlotStrideValue() const {
@@ -2819,14 +2815,10 @@ struct SpannedArrayType final : public ArrayType,
         ->Normalize();
   }
   // Elements one declared slot occupies: the aligned physical stride when
-  // slots are aligned, the packed element count otherwise. Cached because
-  // it is queried for every emitted slot access.
+  // slots are aligned, the packed element count otherwise.
   ValueItem SlotElemCountValue() const {
-    if (!slot_elem_count_cache)
-      slot_elem_count_cache = HasAlignedSlots()
-                                  ? PhysicalSlotStrideElementsValue()
-                                  : spty->GetShape().ElementCountValue();
-    return *slot_elem_count_cache;
+    return HasAlignedSlots() ? PhysicalSlotStrideElementsValue()
+                             : spty->GetShape().ElementCountValue();
   }
 
   size_t Dims() const override { return ArrayType::ArrayRank(); }
