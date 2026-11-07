@@ -4,7 +4,8 @@
 // configuration -- the gap is in what the generated code can express.
 //
 // Feature map (F1..F7 in the note) and stage status:
-//   F4 group barrier   -> DONE under --lock-free; this file pins the default
+//   F4 group barrier   -> DONE for single-warpgroup sites (participant-set
+//                         ids, 8 + group); multi-group sites keep id 15
 //   F6 commit/drain    -> DONE under --lock-free; split in the per-stage tests
 //   F1 metadata operand-> NEXT: gap_baseline_metadata.co + gap_f1_register_metadata.co
 //   F2 decoupled ring  -> needs event-ring semantics; no baseline assertion yet
@@ -64,9 +65,9 @@ __co__ void foo(global f16 [M, K] lhs,
   }
 }
 
-// BARRIER: choreo::named_barrier_sync(128, 15);
+// BARRIER: choreo::named_barrier_sync(128, 9);
 // BARRIER: cde::fence_proxy_async_shared_cta();
-// BARRIER: choreo::named_barrier_sync(128, 15);
+// BARRIER: choreo::named_barrier_sync(128, 9);
 
 // DRAIN: warpgroup_commit_batch();
 // DRAIN-NEXT: warpgroup_wait<0>();

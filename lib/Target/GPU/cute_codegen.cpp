@@ -522,6 +522,28 @@ void CuteCodeGen::EmitGroupX4Sync(std::ostringstream& os,
       thread_count > 0
           ? thread_count
           : (CurrentScopeThreadsCount() > 0 ? CurrentScopeThreadsCount() : 128);
+  // F4.1: a sync whose participants are exactly one warpgroup gets that
+  // group's own named-barrier id (8 + group), so epilogues in different
+  // warpgroups no longer serialize on the shared id 15. Multi-group scopes
+  // keep the CTA-wide id: splitting them per group would deadlock a
+  // 256/384-thread sync across different ids. 15 stays reserved for the
+  // warp-specialization handshakes, and the id pool must fit in 8..14.
+  if (tc == 128) {
+    const int64_t groups =
+        current_inthreads ? current_inthreads->ScopeThreadDim() / 128 : 0;
+    const int64_t wg =
+        current_inthreads ? current_inthreads->ActiveWarpGroup() : -1;
+    const int64_t group_id = wg >= 0 ? 8 + wg : -1;
+    // Only use the per-group id when InitializeNamedEventLowering could
+    // reserve the whole 8..8+G-1 range for group syncs (G <= 7), so the id
+    // can never collide with a named event assigned from the 8..14 pool.
+    if (group_id >= 8 && groups > 0 && 8 + groups - 1 <= 14 &&
+        cgi.GetFunctionTrait(fname)
+                .explicit_named_barrier_ids.count(group_id) == 0) {
+      os << indent << "choreo::named_barrier_sync(128, " << group_id << ");\n";
+      return;
+    }
+  }
   os << indent << "choreo::named_barrier_sync(" << std::to_string(tc)
      << ", 15);\n";
 }
@@ -1966,7 +1988,23 @@ void CuteCodeGen::InitializeNamedEventLowering() {
   // Keep 15 for Choreo's internal warp-specialization handshakes and leave
   // 0-7 available to CUDA/CUTLASS helpers. Events use the remaining IDs and
   // fall back to mbarrier when that small pool is exhausted.
-  for (int id = 14; id >= 8; --id)
+  //
+  // F4.1: per-warpgroup group syncs claim ids 8..8+G-1, so the event pool
+  // starts after them. G comes from any precomputed participation mask (the
+  // per-function masks are sized to the block's threads).
+  int lowest_event_id = 8;
+  if (IsWarpSpecActive()) {
+    size_t block_threads = 0;
+    for (const auto* masks : {&ft.event_participation,
+                              &ft.event_trigger_participation,
+                              &ft.event_wait_participation})
+      for (const auto& [name, mask] : *masks)
+        block_threads = std::max(block_threads, mask.size());
+    int64_t groups = static_cast<int64_t>(block_threads / 128);
+    if (groups > 0 && 8 + groups - 1 <= 14)
+      lowest_event_id = static_cast<int>(8 + groups);
+  }
+  for (int id = 14; id >= lowest_event_id; --id)
     if (ft.explicit_named_barrier_ids.count(id) == 0)
       available_named_barrier_ids_.push_back(id);
 }

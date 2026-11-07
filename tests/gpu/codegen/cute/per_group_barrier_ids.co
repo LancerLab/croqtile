@@ -1,0 +1,79 @@
+// F4.1: a group-wide sync whose participants are exactly one warpgroup uses
+// that warpgroup's own named-barrier id (8 + group) instead of the shared
+// id 15, so epilogues in different warpgroups do not serialize on one
+// barrier. Multi-warpgroup sync sites keep id 15 (splitting a 256/384-thread
+// sync across per-group ids deadlocks).
+//
+// This test pins the id assignment only: the two consumer output_s buffers
+// still alias under memory reuse, so a real kernel needs per-group storage
+// (F4.2) before the epilogue ring can be dropped.
+//
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+#define WARP_M 64
+#define WARP_N 128
+#define TILE_K 64
+#define WARP_K 16
+#define STAGES 2
+
+__co__ void per_group_barrier_ids(global f16 [M, K] lhs,
+                                  global f16 [N, K] rhs,
+                                  global f16 [M, N] output) {
+  parallel {block_m, block_n} by [cdiv(M, 2 * WARP_M), cdiv(N, WARP_N)] : block {
+    shared event full[STAGES], empty[STAGES];
+    shared f16 [2 * WARP_M, TILE_K] lhs_s[STAGES];
+    shared f16 [WARP_N, TILE_K] rhs_s[STAGES];
+
+    parallel p by 3 : group-4, t by 128 : thread {
+      inthreads.async (p == 0) {
+        foreach {iv_k} in [cdiv(K, TILE_K)] {
+          stage = iv_k % STAGES;
+          wait empty.at(iv_k);
+          lhs_load = tma.copy.async.swiz<128> lhs.subspan(2 * WARP_M, TILE_K).at(block_m, iv_k) => lhs_s[stage];
+          rhs_load = tma.copy.async.swiz<128> rhs.subspan(WARP_N, TILE_K).at(block_n, iv_k) => rhs_s[stage];
+          trigger full.at(iv_k) after lhs_load, rhs_load;
+        }
+      }
+
+      inthreads.async (p == 1) {
+        shared f16 [WARP_M, WARP_N] out_s;
+        mc = mma.fill.f16 0.0f;
+        foreach {s} in [STAGES]
+          trigger empty.at(s);
+        foreach {iv_k} in [cdiv(K, TILE_K)] {
+          stage = iv_k % STAGES;
+          wait full.at(iv_k);
+          foreach {iv_wk} in [cdiv(TILE_K, WARP_K)]
+            mma.row.row mc,
+              lhs_s[stage].subspan(WARP_M, TILE_K).at(0, 0).chunkat(_, iv_wk),
+              rhs_s[stage].chunkat(_, iv_wk);
+          trigger empty.at(iv_k);
+        }
+        mma.store mc, out_s;
+        tma.copy out_s => output.subspan(WARP_M, WARP_N).at(2 * block_m, block_n);
+      }
+
+      inthreads.async (p == 2) {
+        shared f16 [WARP_M, WARP_N] out_s;
+        mc = mma.fill.f16 0.0f;
+        foreach {s} in [STAGES]
+          trigger empty.at(s);
+        foreach {iv_k} in [cdiv(K, TILE_K)] {
+          stage = iv_k % STAGES;
+          wait full.at(iv_k);
+          foreach {iv_wk} in [cdiv(TILE_K, WARP_K)]
+            mma.row.row mc,
+              lhs_s[stage].subspan(WARP_M, TILE_K).at(1, 0).chunkat(_, iv_wk),
+              rhs_s[stage].chunkat(_, iv_wk);
+          trigger empty.at(iv_k);
+        }
+        mma.store mc, out_s;
+        tma.copy out_s => output.subspan(WARP_M, WARP_N).at(2 * block_m + 1, block_n);
+      }
+    }
+  }
+}
+
+// Consumer group 1 uses id 9, consumer group 2 uses id 10.
+// CHECK: choreo::named_barrier_sync(128, 9);
+// CHECK: choreo::named_barrier_sync(128, 10);
