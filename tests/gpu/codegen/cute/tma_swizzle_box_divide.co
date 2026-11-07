@@ -1,0 +1,16 @@
+// A swizzled TMA box whose inner extent exceeds the swizzle width is split
+// into swizzle-sized groups. If the extent is not a multiple of the swizzle
+// width the remainder cannot be described by that split, so diagnose it at
+// compile time instead of failing in cuTensorMapEncodeTiled at run time.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+__co__ void tma_swizzle_box_divide(f16 [64, 96] x) {
+  parallel p by 32 : block {
+    load = tma.copy.async.swiz<128> x => shared;
+    wait load;
+  }
+}
+
+// CHECK: error: swizzled TMA copy inner extent (96 elements, 192 bytes) must be a multiple of the swizzle width (128 bytes).

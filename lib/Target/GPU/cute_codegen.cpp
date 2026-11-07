@@ -3668,15 +3668,19 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
           if (auto saty = dyn_cast<SpannedArrayType>(NodeType(*nvd));
               saty && saty->HasAlignedSlots())
             alignment = std::max(alignment, saty->SlotAlignment());
-          return;
-        }
-        if (auto block = dyn_cast<AST::Block>(node)) {
-          self(self, block->GetBody());
+          if (nvd->HasNote("alignment"))
+            alignment = std::max(
+                alignment,
+                static_cast<size_t>(std::stoull(nvd->GetNote("alignment"))));
           return;
         }
         if (auto if_else = dyn_cast<AST::IfElseBlock>(node)) {
           self(self, if_else->GetThenBody());
           self(self, if_else->GetElseBody());
+          return;
+        }
+        if (auto block = dyn_cast<AST::Block>(node)) {
+          self(self, block->GetBody());
           return;
         }
       };
@@ -8633,13 +8637,20 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
       return false;
     };
     std::string iv_name = base;
-    for (size_t suffix = 2; iv_in_use(iv_name); ++suffix)
-      iv_name = base + "__" + std::to_string(suffix);
     // The kernel parameter name is derived from the registered scoped name;
     // keep it equal to the emitted IV name for a suffixed (shadowed) IV.
-    const std::string scoped_param =
-        iv_name == base ? InScopeName(n.with->name)
-                        : InScopeName(n.with->name) + iv_name.substr(base.size());
+    std::string scoped_param = InScopeName(n.with->name);
+    if (iv_in_use(iv_name)) {
+      // Pick a suffix that neither collides with an active IV nor with a
+      // real symbol of that name in the same scope.
+      size_t suffix = 2;
+      do {
+        iv_name = base + "__" + std::to_string(suffix);
+        scoped_param =
+            InScopeName(n.with->name) + "__" + std::to_string(suffix);
+        ++suffix;
+      } while (iv_in_use(iv_name) || SymTab()->Exists(scoped_param));
+    }
     // Both the matcher (`foreach x`) and the source (`foreach a`) canonical
     // names resolve to the with's IV.
     auto record_scope = [&](const std::string& key) {
@@ -10411,6 +10422,15 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
       if (auto inner_val = VIInt(inner_vi)) {
         size_t inner_bytes = (size_t)*inner_val * elem_size;
         if (inner_bytes > (size_t)swiz_bytes) {
+          if (inner_bytes % (size_t)swiz_bytes != 0) {
+            Error1(g_ca->LOC(),
+                   "swizzled TMA copy inner extent (" +
+                       std::to_string(*inner_val) + " elements, " +
+                       std::to_string(inner_bytes) +
+                       " bytes) must be a multiple of the swizzle width (" +
+                       std::to_string(swiz_bytes) + " bytes).");
+            return;
+          }
           size_t swiz_elems = (size_t)swiz_bytes / elem_size;
 
           // Split box: [outer, inner] -> [inner/swiz, outer, swiz]
@@ -10423,7 +10443,11 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
           new_box.push_back(sbe::nu((int64_t)swiz_elems));
           box_shape = Shape(new_box);
 
-          // Split host_shape: [outer, inner] -> [groups, outer, swiz]
+          // Split host_shape: [outer, inner] -> [groups, outer, swiz].
+          // Keep the group count floored: a partial tail group cannot be
+          // represented by this rank-3 swizzled view without reading across
+          // the row boundary, so leave the tail out of the descriptor and let
+          // TMA's OOB behavior handle it.
           auto orig_inner = host_shape.ValueAt(host_shape.Rank() - 1);
           auto num_groups = orig_inner / sbe::nu((int64_t)swiz_elems);
           auto group_stride_val =

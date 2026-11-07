@@ -12,5 +12,30 @@ __co__ void dyn_shared_aligned(int n) {
   }
 }
 
+__co__ void dyn_shared_else_aligned(int n, int c) {
+  parallel by 1 : block {
+    shared u8 [n] dyn;
+    if (c == 0) {
+      call kernel(dyn);
+    } else {
+      alignas(1024) shared f32 [8] a[2];
+      a[1].at(0) = 1.0f;
+    }
+  }
+}
+
+__co__ void dyn_shared_plain_aligned(int n) {
+  parallel by 1 : block {
+    shared u8 [n] dyn;
+    alignas(1024) shared f32 [64] x;
+    x.at(0) = 1.0f;
+    call kernel(dyn);
+  }
+}
+
 // CHECK: aligned_up_ptr<1024 * 8>(
 // CHECK: *((float*)a + (1)*(256)) = 1.000000f;
+// CHECK-LABEL: __choreo_device_dyn_shared_else_aligned
+// CHECK: aligned_up_ptr<1024 * 8>(
+// CHECK-LABEL: __choreo_device_dyn_shared_plain_aligned
+// CHECK: aligned_up_ptr<1024 * 8>(
