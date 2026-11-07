@@ -1,16 +1,26 @@
 // REQUIRES: TARGET-GPU
-// RUN: env CHOREO_SYNC_RECOVERY=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>/dev/null | FileCheck %s
+// RUN: env CHOREO_SYNC_RECOVERY=1 CHOREO_SYNC_RECOVERY_KEEP=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>/dev/null | FileCheck --check-prefix=KEEP %s
+// RUN: env CHOREO_SYNC_RECOVERY=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>&1 | FileCheck --check-prefix=ELIDE %s
 //
-// Sync-recovery completion-wait milestone: tenant y is engine-read (dma copy
-// out of the slot); tenant x then overwrites the same slot. The coloring
-// merges them, so the handover y -> x carries a WAR completion obligation: the
-// receiving tenant may write only once the engine has drained the reads it
-// issued. The drain is per-thread state of the issuing (producer) threads, so
-// the wait is inserted inside the producer tenant, after its last access and
-// before the trigger that hands the slot over.
+// Sync-recovery completion wait: tenant y is engine-read (dma copy out of the
+// slot); tenant x then overwrites the same slot. The coloring merges them, so
+// the handover y -> x carries a WAR completion obligation: the receiving
+// tenant may write only once the engine has drained the reads it issued. The
+// drain is per-thread state of the issuing (producer) threads, so the wait is
+// queued inside the producer tenant, after its last access and before the
+// trigger that hands the slot over.
 //
-// CHECK: cde::cp_async_bulk_wait_group_read<0>();
-// CHECK-NEXT: (void)sig.arrive();
+// The copy here is synchronous (no future), so its reads have retired before
+// the next statement runs: the availability fold discharges the obligation
+// in place and removes the queued wait (ELIDE run). KEEP=1 skips elimination
+// and shows the raw synthesis output, including the emitted primitive.
+
+// KEEP: cde::cp_async_bulk_wait_group_read<0>();
+// KEEP-NEXT: (void)sig.arrive();
+
+// ELIDE-DAG: [sync-recovery] elide AST::CompletionWait (synchronous engine access)
+// ELIDE-NOT: cde::cp_async_bulk_wait_group_read<0>()
+// ELIDE: (void)sig.arrive();
 
 __co__ s32 [16] reuse_wait(s32 [16] src) {
   s32 [16] out;
