@@ -4111,6 +4111,43 @@ struct Fence : public Node, public TypeIDProvider<Fence> {
   __UDT_TYPE_INFO__(Node, Fence)
 };
 
+// Completion wait on an async engine's outstanding copy groups, inserted at a
+// reuse handover frontier. The wait applies to the executing thread's own
+// bulk async-group, so -- like a proxy fence -- it must run on the threads
+// that issued the copy: after the engine's last access to the slot and before
+// the handover signal, never on the receiving tenant.
+struct CompletionWait : public Node, public TypeIDProvider<CompletionWait> {
+  FenceEntity engine;
+  CompletionWaitKind kind;
+  // Copy groups still allowed to be outstanding when the wait returns
+  // (0 = drain everything committed so far).
+  int pending = 0;
+
+  CompletionWait(const location& loc, FenceEntity e,
+                 CompletionWaitKind k = CompletionWaitKind::READ_DRAIN,
+                 int p = 0)
+      : Node(loc), engine(e), kind(k), pending(p) {}
+
+  ptr<Node> CloneImpl() const override {
+    return Make<CompletionWait>(LOC(), engine, kind, pending);
+  }
+
+  FenceEntity GetEngine() const { return engine; }
+  CompletionWaitKind GetKind() const { return kind; }
+  int GetPending() const { return pending; }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
+    os << "\n"
+       << prefix << "`- "
+       << "CompletionWait: " << STR(kind) << "<" << pending << "> ["
+       << STR(engine) << "]";
+  }
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, CompletionWait)
+};
+
 struct RangeExpr : public Node, public TypeIDProvider<RangeExpr> {
   // rv: the range-source variable (a within-declared bounded variable whose
   // bounds define this range). Not directly visible inside the foreach body.

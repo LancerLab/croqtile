@@ -650,6 +650,12 @@ bool HIPCodeGen::Visit(AST::Fence& n) {
   return true;
 }
 
+bool HIPCodeGen::Visit(AST::CompletionWait&) {
+  choreo_unreachable(
+      "completion waits are not lowered for the AMDGPU backend yet.");
+  return false;
+}
+
 bool HIPCodeGen::Visit(AST::Wait& n) {
   TraceEachVisit(n);
 

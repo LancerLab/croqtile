@@ -524,6 +524,25 @@ inline static const std::string STR(FenceEntity e) {
   return "";
 }
 
+/// Which part of an async engine's outstanding work a completion wait drains.
+/// READ_DRAIN waits only until the engine has finished reading its sources
+/// (the destination may still be in flight); it is the WAR discharge that
+/// frees a reused slot for the next tenant. FULL_DRAIN waits for the whole
+/// copy, including the writes (RAW/WAW discharge).
+enum class CompletionWaitKind {
+  READ_DRAIN,
+  FULL_DRAIN,
+};
+
+inline static const std::string STR(CompletionWaitKind k) {
+  switch (k) {
+  case CompletionWaitKind::READ_DRAIN: return "read-drain";
+  case CompletionWaitKind::FULL_DRAIN: return "full-drain";
+  }
+  choreo_unreachable("unsupported completion-wait kind.");
+  return "";
+}
+
 /// The ordering a fence establishes. RELEASE publishes the writer's stores
 /// into a space; ACQUIRE orders (and, on cached spaces, invalidates) the
 /// reader's loads out of a space; ACQ_REL is the bidirectional barrier

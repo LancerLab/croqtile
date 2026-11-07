@@ -109,6 +109,7 @@ struct Visitor {
   virtual bool Visit(AST::Synchronize&) = 0;
   virtual bool Visit(AST::Barrier&) = 0;
   virtual bool Visit(AST::Fence&) = 0;
+  virtual bool Visit(AST::CompletionWait&) = 0;
   virtual bool Visit(AST::Select&) = 0;
   virtual bool Visit(AST::Return&) = 0;
   virtual bool Visit(AST::RangeExpr&) = 0;
@@ -665,6 +666,7 @@ public:
   bool Visit(AST::Synchronize&) override { return true; }
   bool Visit(AST::Barrier&) override { return true; }
   bool Visit(AST::Fence&) override { return true; }
+  bool Visit(AST::CompletionWait&) override { return true; }
   bool Visit(AST::Select&) override { return true; }
   bool Visit(AST::Return&) override { return true; }
   bool Visit(AST::RangeExpr&) override { return true; }
@@ -942,6 +944,10 @@ public:
     TraceEachVisit(n);
     return VisitNode(n);
   }
+  bool Visit(AST::CompletionWait& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
   bool Visit(AST::Select& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
@@ -1034,6 +1040,7 @@ public:
   virtual bool VisitNode(AST::Synchronize&) { return true; }
   virtual bool VisitNode(AST::Barrier&) { return true; }
   virtual bool VisitNode(AST::Fence&) { return true; }
+  virtual bool VisitNode(AST::CompletionWait&) { return true; }
   virtual bool VisitNode(AST::Select&) { return true; }
   virtual bool VisitNode(AST::Return&) { return true; }
   virtual bool VisitNode(AST::RangeExpr&) { return true; }
@@ -1177,6 +1184,7 @@ private:
   bool Visit(AST::Synchronize&) final { return true; }
   bool Visit(AST::Barrier&) final { return true; }
   bool Visit(AST::Fence&) final { return true; }
+  bool Visit(AST::CompletionWait&) final { return true; }
   bool Visit(AST::Select&) final { return true; }
   bool Visit(AST::Return&) final { return true; }
   bool Visit(AST::RangeExpr&) final { return true; }

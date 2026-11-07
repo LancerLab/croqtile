@@ -440,6 +440,12 @@ void Fence::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+void CompletionWait::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  v.Visit(*this);
+  v.AfterVisit(*this);
+}
+
 void RangeExpr::accept(Choreo::Visitor& v) {
   if (lb_mutator) lb_mutator->accept(v);
   if (ub_mutator) ub_mutator->accept(v);
