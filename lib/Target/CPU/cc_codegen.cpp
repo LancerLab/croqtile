@@ -1497,6 +1497,12 @@ bool CCCodeGen::Visit(AST::Fence& n) {
   return true;
 }
 
+bool CCCodeGen::Visit(AST::CompletionWait&) {
+  choreo_unreachable(
+      "completion waits are not lowered for the CPU backend yet.");
+  return false;
+}
+
 bool CCCodeGen::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
 

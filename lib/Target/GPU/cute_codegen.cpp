@@ -7520,6 +7520,29 @@ bool CuteCodeGen::Visit(AST::Fence& n) {
   return true;
 }
 
+bool CuteCodeGen::Visit(AST::CompletionWait& n) {
+  TraceEachVisit(n);
+
+  // Bulk-group drains are the only completion primitive emitted so far. They
+  // refer to the executing thread's own committed copies, which is why the
+  // recovery pass places them on the issuing (producer) threads.
+  if (n.GetEngine() != FenceEntity::TMA && n.GetEngine() != FenceEntity::DMA)
+    choreo_unreachable(
+        "unsupported completion-wait engine: " + STR(n.GetEngine()) + ".");
+  switch (n.GetKind()) {
+  case CompletionWaitKind::READ_DRAIN:
+    ds << d_indent << "cde::cp_async_bulk_wait_group_read<" << n.GetPending()
+       << ">();\n";
+    break;
+  case CompletionWaitKind::FULL_DRAIN:
+    ds << d_indent << "cde::cp_async_bulk_wait_group<" << n.GetPending()
+       << ">();\n";
+    break;
+  }
+
+  return true;
+}
+
 bool CuteCodeGen::Visit(AST::Wait& n) {
   TraceEachVisit(n);
 

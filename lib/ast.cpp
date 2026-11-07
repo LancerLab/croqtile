@@ -415,6 +415,12 @@ void Fence::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+void CompletionWait::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  v.Visit(*this);
+  v.AfterVisit(*this);
+}
+
 void LoopRange::accept(Choreo::Visitor& v) {
   if (lbound) lbound->accept(v);
   if (ubound) ubound->accept(v);

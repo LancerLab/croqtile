@@ -24,29 +24,66 @@ bool SyncRecovery::RunOnProgramImpl(AST::Node& root) {
   if (mr == nullptr) return true;
   root_ = &root;
   RunRecovery();
-  // C6: drive the traversal that inserts the pending fences.
-  if (!pending_fences_.empty()) root.accept(*this);
+  // C6: drive the traversal that splices the pending insertions.
+  if (!pending_inserts_.empty()) root.accept(*this);
   dbgs() << "[sync-recovery] summary: " << total_slots_ << " shared slots, "
          << total_handovers_ << " handovers (" << hb_merged_handovers_
-         << " hb-merged), " << inserted_fences_ << " fences inserted\n";
+         << " hb-merged), " << inserted_fences_ << " fences, "
+         << inserted_waits_ << " completion waits inserted\n";
   return true;
 }
 
 bool SyncRecovery::Visit(AST::MultiNodes& n) {
-  if (pending_fences_.empty()) return true;
+  if (pending_inserts_.empty()) return true;
   for (size_t i = 0; i < n.Count(); ++i) {
-    auto it = pending_fences_.find(n.SubAt(i).get());
-    if (it == pending_fences_.end()) continue;
-    for (FenceEntity e : it->second) {
-      auto fence = AST::Make<AST::Fence>(
-          n.SubAt(i)->LOC(), ParallelLevel::GROUP, Storage::SHARED, e);
-      dbgs() << "[sync-recovery] insert fence [" << STR(e) << "] before stmt\n";
-      n.Insert(fence, i++);
-      ++inserted_fences_;
-    }
-    pending_fences_.erase(it);
+    auto it = pending_inserts_.find(n.SubAt(i).get());
+    if (it == pending_inserts_.end()) continue;
+    std::vector<PendingInsert>& inserts = it->second;
+    // `idx` tracks the anchor as earlier insertions shift it to the right.
+    size_t idx = i;
+    for (const auto& p : inserts)
+      if (!p.after) {
+        if (isa<AST::Fence>(p.node.get()))
+          ++inserted_fences_;
+        else
+          ++inserted_waits_;
+        dbgs() << "[sync-recovery] insert " << p.node->TypeNameString()
+               << " before stmt\n";
+        n.Insert(p.node, idx++);
+      }
+    size_t after_idx = idx + 1;
+    for (const auto& p : inserts)
+      if (p.after) {
+        if (isa<AST::Fence>(p.node.get()))
+          ++inserted_fences_;
+        else
+          ++inserted_waits_;
+        dbgs() << "[sync-recovery] insert " << p.node->TypeNameString()
+               << " after stmt\n";
+        n.Insert(p.node, after_idx++);
+      }
+    i = after_idx - 1;
+    pending_inserts_.erase(it);
   }
   return true;
+}
+
+void SyncRecovery::AddInsert(const AST::Node* anchor,
+                             const ptr<AST::Node>& node, bool after) {
+  auto& list = pending_inserts_[anchor];
+  for (const auto& p : list) {
+    if (p.after != after) continue;
+    if (auto* f = dyn_cast<AST::Fence>(p.node.get())) {
+      if (auto* g = dyn_cast<AST::Fence>(node.get()))
+        if (f->GetEntity() == g->GetEntity()) return;
+    } else if (auto* w = dyn_cast<AST::CompletionWait>(p.node.get())) {
+      if (auto* v = dyn_cast<AST::CompletionWait>(node.get()))
+        if (w->GetEngine() == v->GetEngine() && w->GetKind() == v->GetKind() &&
+            w->GetPending() == v->GetPending())
+          return;
+    }
+  }
+  list.push_back(PendingInsert{node, after});
 }
 
 namespace {
@@ -200,6 +237,33 @@ std::vector<std::string> WitnessSignals(const HBGraph& g, int from, int to) {
   return sigs;
 }
 
+// Producer-side frontier: the statement where the producer's phase hands the
+// slot over. Proxy fences and bulk-group drains are per-thread state, so they
+// must execute on the threads that issued the async work: after the last
+// access, before the handover sync. When the phase closes on a sync statement
+// the insertion goes before it; when it closes on an access, right after it.
+struct FrontierSite {
+  const AST::Node* stmt = nullptr;
+  bool after = false;
+};
+
+FrontierSite
+ProducerFrontier(const std::vector<const LivenessAnalyzer::Stmt*>& po,
+                 const HBGraph& g, int phase) {
+  const auto& ph = g.phases[phase];
+  if (po.empty() || ph.last_stmt_id >= po.size()) return {};
+  size_t sid = ph.last_stmt_id;
+  // The boundary may be a synthetic ScopeEnd (not in the AST); walk back to
+  // the last real statement (typically the handover trigger).
+  while (sid > ph.first_stmt_id && isa<LivenessAnalyzer::ScopeEnd>(po[sid]))
+    --sid;
+  const AST::Node* s = po[sid];
+  if (s == nullptr || isa<LivenessAnalyzer::ScopeEnd>(s)) return {};
+  if (isa<AST::Trigger>(s) || isa<AST::Barrier>(s) || isa<AST::Synchronize>(s))
+    return {s, false};
+  return {s, true};
+}
+
 } // end anonymous namespace
 
 void SyncRecovery::RunRecovery() {
@@ -327,23 +391,34 @@ void SyncRecovery::RunRecovery() {
                      << o.primitive << ")";
           }
           // C6: frontier insertion targets (always-insert; the elimination
-          // pass removes the redundant ones later). A visibility fence is
-          // per-thread: it must execute on the *writing* threads, after
-          // their last write to the slot and before the sync that hands the
-          // slot over --- i.e. inside the producer tenant, before the phase
-          // boundary's last statement (the trigger site).
+          // pass removes the redundant ones later). Both a visibility fence
+          // and a bulk-group drain are per-thread: they must execute on the
+          // threads that produced the slot, after the last access and before
+          // the sync that hands the slot over --- i.e. inside the producer
+          // tenant, at the phase boundary (never on the receiver).
           const auto& po = mr->LA().PreorderStmts();
-          for (const auto& o : obligations)
-            if (o.cls == "visibility") {
-              // The phase boundary may be a synthetic ScopeEnd (not in the
-              // AST); walk back to the last real statement (the trigger).
-              size_t sid = g->phases[a_last].last_stmt_id;
-              while (sid > g->phases[a_last].first_stmt_id &&
-                     isa<LivenessAnalyzer::ScopeEnd>(po[sid]))
-                --sid;
-              if (sid < po.size() && !isa<LivenessAnalyzer::ScopeEnd>(po[sid]))
-                pending_fences_[po[sid]].insert(FenceEntity::TMA);
+          auto site = ProducerFrontier(po, *g, a_last);
+          if (site.stmt != nullptr) {
+            for (const auto& o : obligations) {
+              if (o.cls == "visibility")
+                AddInsert(site.stmt,
+                          AST::Make<AST::Fence>(
+                              site.stmt->LOC(), ParallelLevel::GROUP,
+                              Storage::SHARED, FenceEntity::TMA),
+                          site.after);
+              // WAR with the engine as reader: the receiving tenant may
+              // overwrite the slot only once the engine has drained the
+              // reads it issued. Other completion classes lower to waits
+              // bound to the engine's own event, not to a copy group.
+              if (o.cls == "completion" &&
+                  o.primitive.rfind("read-drain", 0) == 0)
+                AddInsert(site.stmt,
+                          AST::Make<AST::CompletionWait>(
+                              site.stmt->LOC(), FenceEntity::TMA,
+                              CompletionWaitKind::READ_DRAIN, 0),
+                          site.after);
             }
+          }
           dbgs() << "\n";
         }
     }
