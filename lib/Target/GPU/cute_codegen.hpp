@@ -721,10 +721,17 @@ private:
   // Effective slot stride in elements: the physical (alignas-padded) stride
   // for aligned slots, the packed element count otherwise.
   ValueItem SlotStrideElementsValue(const ptr<ArrayType>& array_ty) const;
-  // Offset of a span-array slot in elements, using the effective slot stride.
+  // Offset of a span-array slot in elements, using the effective slot stride
+  // (or `stride_override`, e.g. a fragment's registers-per-slot).
   std::string ArraySlotOffsetExpr(const ptr<ArrayType>& array_ty,
-                                  const AST::NodeList& subs,
-                                  bool is_host) const;
+                                  const AST::NodeList& subs, bool is_host,
+                                  const std::optional<size_t>& stride_override =
+                                      std::nullopt) const;
+  // Slot offset of a slot-indexed DataAccess, or empty when it is not one.
+  std::string DataAccessSlotOffset(const ptr<AST::DataAccess>& da,
+                                   const ptr<Type>& sym_ty, bool is_host,
+                                   const std::optional<size_t>& stride =
+                                       std::nullopt) const;
   // Rewrite `buf_expr` to address a span-array slot: cast the base to the
   // element pointer, then add the slot offset. This is valid for both
   // pointer and regular C++ array declarations.

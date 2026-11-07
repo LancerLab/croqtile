@@ -430,8 +430,8 @@ ValueItem CuteCodeGen::SlotStrideElementsValue(
 }
 
 std::string CuteCodeGen::ArraySlotOffsetExpr(
-    const ptr<ArrayType>& array_ty, const AST::NodeList& subs,
-    bool is_host) const {
+    const ptr<ArrayType>& array_ty, const AST::NodeList& subs, bool is_host,
+    const std::optional<size_t>& stride_override) const {
   if (subs.empty()) return "0";
   const ValueList& dims = array_ty->Dimensions();
   assert(subs.size() <= dims.size());
@@ -447,8 +447,19 @@ std::string CuteCodeGen::ArraySlotOffsetExpr(
   }
   for (size_t i = subs.size(); i < dims.size(); ++i)
     idx = "(" + idx + ")*" + ValueSTR(dims[i]);
-  return "(" + idx + ")*(" + ValueSTR(SlotStrideElementsValue(array_ty)) +
-         ")";
+  const std::string stride =
+      stride_override ? std::to_string(*stride_override)
+                      : ValueSTR(SlotStrideElementsValue(array_ty));
+  return "(" + idx + ")*(" + stride + ")";
+}
+
+std::string CuteCodeGen::DataAccessSlotOffset(
+    const ptr<AST::DataAccess>& da, const ptr<Type>& sym_ty, bool is_host,
+    const std::optional<size_t>& stride) const {
+  if (!da->AccessArrayElement()) return "";
+  auto array_ty = dyn_cast<ArrayType>(sym_ty);
+  if (!array_ty) return "";
+  return ArraySlotOffsetExpr(array_ty, da->GetArrayIndices(), is_host, stride);
 }
 
 void CuteCodeGen::AppendArraySlotOffset(
@@ -2924,13 +2935,24 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
             regs_per_thread = *total;
         }
       }
-      ds << d_indent << bts << " " << sym << "[" << regs_per_thread << "];\n";
+      // A fragment array (`frag ... mc[k]`) holds k slots of regs_per_thread
+      // registers; slot addressing uses that per-slot register stride.
+      // TypeInference already validates array_dims as static and positive.
+      size_t frag_slots = 1;
+      if (auto sat = dyn_cast<SpannedArrayType>(nty)) {
+        auto cnt = VIInt(sat->ElemCount());
+        assert(cnt && *cnt > 0 &&
+               "fragment array needs a static positive slot count.");
+        frag_slots = cnt ? static_cast<size_t>(*cnt) : 1;
+      }
+      const size_t frag_regs = frag_slots * regs_per_thread;
+      ds << d_indent << bts << " " << sym << "[" << frag_regs << "];\n";
       if (n.init_value) {
         std::string init_val =
             ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
                         GetBaseType(*n.init_value->GetType()), false);
         ds << d_indent << "for (int __frag_init = 0; __frag_init < "
-           << regs_per_thread << "; ++__frag_init)\n";
+           << frag_regs << "; ++__frag_init)\n";
         IncrDeviceIndent();
         ds << d_indent << sym << "[__frag_init] = " << init_val << ";\n";
         DecrDeviceIndent();
@@ -11587,9 +11609,18 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     }
   } else if (auto da = dyn_cast<AST::DataAccess>(e)) {
     if (da->AccessElement()) {
-      auto sty = GetSpannedType(GetSymbolType(da->data->name));
+      auto sym_ty = GetSymbolType(da->data->name);
+      auto sty = GetSpannedType(sym_ty);
       assert(sty && "can only access the element of a spanned type.");
       auto scoped = InScopeNameForRef(da->data->name);
+      // A fragment array (`mc[tile]`) stores `regs` registers per slot; fold
+      // the slot offset into the register index. Returns the prefix
+      // `offset + ` (empty when the access is not slot-indexed).
+      auto FragSlotPrefix = [&](size_t regs) -> std::string {
+        const std::string off =
+            DataAccessSlotOffset(da, sym_ty, is_host, regs);
+        return off.empty() ? "" : off + " + ";
+      };
       if (in_register_direct_automap_ && automap_frag_reg_expr_.count(scoped)) {
         oss << automap_frag_reg_expr_.at(scoped);
       } else if (FCtx(fname).HasFragmentLayout(scoped)) {
@@ -11601,6 +11632,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           auto row_expr = OpExprSTR(*idx_it++, "+", true, is_host);
           auto col_expr = OpExprSTR(*idx_it, "+", false, is_host);
           oss << UnScopedName(SSMName(scoped, is_host)) << "["
+              << FragSlotPrefix(fl.regs_per_thread)
               << fl.ForwardIndex(row_expr, col_expr) << "]";
         } else if (FCtx(fname).HasFragmentInfo(scoped) &&
                    !FCtx(fname).FragIsWGMMA(scoped)) {
@@ -11642,16 +11674,19 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           }
           const auto& finfo = FCtx(fname).GetFragmentInfo(scoped);
           auto linear_str = ValueSTR(linear.Get());
+          const std::string slot_off = FragSlotPrefix(finfo.regs_per_thread);
           if (FCtx(fname).HasFragmentLayout(scoped) &&
               FCtx(fname).GetFragmentLayout(scoped).vec_width > 1) {
             auto& fl = FCtx(fname).GetFragmentLayout(scoped);
             auto TW = std::to_string(fl.thread_count * fl.vec_width);
             auto W = std::to_string(fl.vec_width);
-            oss << UnScopedName(SSMName(scoped, is_host)) << "[(" << linear_str
+            oss << UnScopedName(SSMName(scoped, is_host)) << "[" << slot_off
+                << "(" << linear_str
                 << ") / " << TW << " * " << W << " + (" << linear_str << ") % "
                 << W << "]";
           } else {
-            oss << UnScopedName(SSMName(scoped, is_host)) << "[(" << linear_str
+            oss << UnScopedName(SSMName(scoped, is_host)) << "[" << slot_off
+                << "(" << linear_str
                 << ") / (" << finfo.thread_count_expr << ")]";
           }
         } else {
@@ -11735,16 +11770,19 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
         }
         const auto& finfo = FCtx(fname).GetFragmentInfo(scoped);
         auto linear_str = ValueSTR(linear.Get());
+        const std::string slot_off = FragSlotPrefix(finfo.regs_per_thread);
         if (FCtx(fname).HasFragmentLayout(scoped) &&
             FCtx(fname).GetFragmentLayout(scoped).vec_width > 1) {
           auto& fl = FCtx(fname).GetFragmentLayout(scoped);
           auto TW = std::to_string(fl.thread_count * fl.vec_width);
           auto W = std::to_string(fl.vec_width);
-          oss << UnScopedName(SSMName(scoped, is_host)) << "[(" << linear_str
+          oss << UnScopedName(SSMName(scoped, is_host)) << "[" << slot_off
+              << "(" << linear_str
               << ") / " << TW << " * " << W << " + (" << linear_str << ") % "
               << W << "]";
         } else {
-          oss << UnScopedName(SSMName(scoped, is_host)) << "[(" << linear_str
+          oss << UnScopedName(SSMName(scoped, is_host)) << "[" << slot_off
+              << "(" << linear_str
               << ") / (" << finfo.thread_count_expr << ")]";
         }
       } else {
@@ -11753,14 +11791,9 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
         // Apply the span-array slot (`meta_s[stage]`) before the element
         // indices. DataAccess keeps these in array_indices, separate from
         // the in-span indices.
-        if (da->AccessArrayElement()) {
-          if (auto array_ty =
-                  dyn_cast<ArrayType>(GetSymbolType(da->data->name))) {
-            oss << " + "
-                << ArraySlotOffsetExpr(array_ty, da->GetArrayIndices(),
-                                       is_host);
-          }
-        }
+        const std::string slot_off =
+            DataAccessSlotOffset(da, sym_ty, is_host);
+        if (!slot_off.empty()) oss << " + " << slot_off;
         size_t idx = 0;
         auto shape = sty->GetShape();
         auto AppendOffset = [this, &oss, &shape, &idx](const ValueItem& op) {

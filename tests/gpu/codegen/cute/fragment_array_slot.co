@@ -1,0 +1,18 @@
+// A fragment array (`frag f32 [16,16] mc[3]`) stores one slot of
+// registers-per-thread registers per element; element accesses from
+// different slots must address different registers.
+//
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - | grep -v '^ *//' | FileCheck %s
+
+__co__ auto fragment_array_slot() {
+  parallel p by 32 : thread {
+    frag f32 [16, 16] mc[3];
+    mc[0].at(0, 0) = 1.0f;
+    mc[2].at(0, 0) = 2.0f;
+  }
+  return 0;
+}
+
+// CHECK: float mc[24];
+// CHECK: mc[(0)*(8) +
+// CHECK: mc[(2)*(8) +
