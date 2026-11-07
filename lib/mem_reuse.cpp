@@ -701,6 +701,25 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
                         << UnScopedExpr(all_bufs[j].buffer_id)
                         << " cannot share memory (multi-instance safety).\n");
             }
+            // Statement ranges do not model concurrency between warp-
+            // specialised branches: two buffers in different branches can
+            // have disjoint ranges and still be live at the same time. When
+            // the HB graph covers both buffers and cannot order their
+            // accesses (a phase pair unreachable in both directions), the
+            // buffers are concurrent and must not alias (F4.2 per-group
+            // storage).
+            if (!interfere && hb_graph &&
+                hb_graph->HasAccesses(all_bufs[i].buffer_id) &&
+                hb_graph->HasAccesses(all_bufs[j].buffer_id) &&
+                !hb_graph->CanOverlap(all_bufs[i].buffer_id,
+                                      all_bufs[j].buffer_id)) {
+              interfere = true;
+              VST_DEBUG(dbgs()
+                        << "info: HB analysis: buffers "
+                        << UnScopedExpr(all_bufs[i].buffer_id) << " and "
+                        << UnScopedExpr(all_bufs[j].buffer_id)
+                        << " cannot share memory (concurrent branches).\n");
+            }
             ie.interference[i * n + j] = interfere;
             ie.interference[j * n + i] = interfere;
           }
@@ -749,7 +768,15 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
         };
         hb_must_interfere = [hb_graph_ptr](const std::string& a,
                                            const std::string& b) {
-          return hb_graph_ptr->IsUnsafeMultiInstanceOverlap(a, b);
+          if (hb_graph_ptr->IsUnsafeMultiInstanceOverlap(a, b)) return true;
+          // Statement ranges do not model concurrency between warp-
+          // specialised branches: two branch-local buffers can have
+          // disjoint ranges and still be live at the same time. When the
+          // graph covers both and cannot order their accesses, force
+          // interference (F4.2 per-group storage).
+          return hb_graph_ptr->HasAccesses(a) &&
+                 hb_graph_ptr->HasAccesses(b) &&
+                 !hb_graph_ptr->CanOverlap(a, b);
         };
       }
     }

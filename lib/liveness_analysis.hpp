@@ -395,6 +395,9 @@ public:
     void AddEdge(int from, int to);
     void ComputeTransitiveClosure();
     bool Reaches(int from, int to) const;
+    // Whether any phase records an access to `buf`. Pairs outside the graph
+    // fall back to statement-range interference.
+    bool HasAccesses(const std::string& buf) const;
     bool CanOverlap(const std::string& buf_a, const std::string& buf_b) const;
     bool IsUnsafeMultiInstanceOverlap(const std::string& buf_a,
                                       const std::string& buf_b) const;

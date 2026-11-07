@@ -318,6 +318,12 @@ bool LivenessAnalyzer::HBGraph::Reaches(int from, int to) const {
   return reachable[from][to];
 }
 
+bool LivenessAnalyzer::HBGraph::HasAccesses(const std::string& buf) const {
+  for (const auto& p : phases)
+    if (p.buffers_accessed.count(buf)) return true;
+  return false;
+}
+
 bool LivenessAnalyzer::HBGraph::CanOverlap(const std::string& buf_a,
                                            const std::string& buf_b) const {
   if (globally_live_bufs.count(buf_a) || globally_live_bufs.count(buf_b))

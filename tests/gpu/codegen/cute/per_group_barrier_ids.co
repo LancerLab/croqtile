@@ -4,9 +4,9 @@
 // barrier. Multi-warpgroup sync sites keep id 15 (splitting a 256/384-thread
 // sync across per-group ids deadlocks).
 //
-// This test pins the id assignment only: the two consumer output_s buffers
-// still alias under memory reuse, so a real kernel needs per-group storage
-// (F4.2) before the epilogue ring can be dropped.
+// The two consumer output_s buffers are concurrent, so memory reuse must
+// give them distinct storage (F4.2 per-group buffers); the CHECKs pin both
+// the distinct offsets and the per-group barrier ids.
 //
 // RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
 
@@ -74,6 +74,9 @@ __co__ void per_group_barrier_ids(global f16 [M, K] lhs,
   }
 }
 
-// Consumer group 1 uses id 9, consumer group 2 uses id 10.
+// Consumer group 1 uses id 9, consumer group 2 uses id 10; their epilogue
+// buffers sit at distinct shared offsets.
+// CHECK: f16* out_s = (f16*)(anon_{{.*}} + 65536);
 // CHECK: choreo::named_barrier_sync(128, 9);
+// CHECK: f16* out_s = (f16*)(anon_{{.*}} + 81920);
 // CHECK: choreo::named_barrier_sync(128, 10);
