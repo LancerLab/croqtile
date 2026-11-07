@@ -1,0 +1,30 @@
+// F7: a warp-specialised role can be narrower than a warpgroup. The producer
+// selects a single thread of its warpgroup with a thread-level predicate in
+// the inthreads mask; the consumers keep the full 128-thread role. The
+// hardware still dispatches a warp, so the emitted predicate is width 1 and
+// the other lanes leave the branch.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void width1_producer(global f16 [64, 64] a, global f16 [64, 64] out) {
+  parallel by 1 : block {
+    shared event full[1];
+    shared f16 [64, 64] buf;
+    parallel p by 2 : group-4, th by 128 : thread {
+      inthreads.async (p == 0 && th < 1) {
+        load = tma.copy.async a => buf;
+        trigger full[0] after load;
+      }
+      inthreads.async (p == 1) {
+        wait full[0];
+        tma.copy buf => out;
+      }
+    }
+  }
+}
+
+// The producer role is one thread of warpgroup 0; the consumer role keeps
+// warpgroup 1.
+// CHECK: if ((__choreo_vg4id_x == 0 && __choreo_vtid_x < 1)) {
+// CHECK: if ((__choreo_vg4id_x == 1)) {
