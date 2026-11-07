@@ -1,0 +1,24 @@
+// A declared global span array owns one tightly packed slot per array
+// element: the device allocation covers the whole declaration and one flat
+// copy initializes it (global buffers cannot carry alignas).
+//
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - | grep -v '^ *//' | FileCheck %s
+
+__co__ void global_slots(f32 [8] x) {
+  global f32 [8] g[4];
+  parallel p by 1 : block {
+    dma.copy x => g[3];
+  }
+}
+
+__co__ void global_slots_init(f32 [8] x) {
+  global f32 [8] g[4] {1.0f};
+  parallel p by 1 : block {
+    dma.copy x => g[3];
+  }
+}
+
+// CHECK: (float*)g + (3)*(8) + 0
+// CHECK: cudaMalloc(&g__device, 128ULL)
+// CHECK: make_spandata<choreo::f32, 2>({4, 8})
+// CHECK: cudaMemcpy(g__device, g.data(), 128ULL, cudaMemcpyHostToDevice)

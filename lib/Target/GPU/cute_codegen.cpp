@@ -2685,22 +2685,37 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
     auto HandleGlobal = [&]() -> void {
       bts = NameBaseType(sty->ElementType()); // use the device type name
 
+      // A span-array declaration owns one slot per array element; the host
+      // data holds the (tightly packed) slots in declaration order.  Global
+      // buffers cannot carry alignas, so a single contiguous copy suffices.
+      const std::string alloc_bytes =
+          UnScopedExpr(TotalSizeExprOf(*nty, true));
+      auto EmitMakeSpandata = [&]() {
+        ValueList dims = GetArrayDimensions(nty);
+        for (const auto& d : shape.Value()) dims.push_back(d);
+        const Shape host_shape(dims);
+        hs << h_indent << "auto " << sym
+           << " = choreo::make_spandata<choreo::" << STR(sty->e_type) << ", "
+           << host_shape.Rank() << ">({"
+           << ShapeSTR(host_shape, false, ", ", BaseType::U64) << "});\n";
+        if (!n.init_value) return;
+        hs << h_indent << "std::fill(" << sym << ".data(), " << sym
+           << ".data()+" << sym << ".element_count()"
+           << ", "
+           << ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
+                          GetBaseType(*n.init_value->GetType()), true)
+           << ");\n";
+      };
+      auto EmitHostToDeviceCopy = [&](const std::string& sym_data) {
+        hs << h_indent << "choreo::abend_true(cudaMemcpy(" << buf_sym << ", "
+           << sym_data << ", " << alloc_bytes
+           << ", cudaMemcpyHostToDevice));\n";
+      };
+
       if (IsChoreoOutput(InScopeName(sym))) {
         // the sym is choreo output
         std::string sym_data = sym + ".data()";
-        hs << h_indent << "auto " << sym
-           << " = choreo::make_spandata<choreo::" << STR(sty->e_type) << ", "
-           << shape.Rank() << ">({"
-           << ShapeSTR(shape, false, ", ", BaseType::U64) << "});\n";
-        if (n.init_value) {
-          // support initialization of output
-          hs << h_indent << "std::fill(" << sym_data << ", " << sym_data << "+"
-             << sym << ".element_count()"
-             << ", "
-             << ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
-                            GetBaseType(*n.init_value->GetType()), true)
-             << ");\n";
-        }
+        EmitMakeSpandata();
         if (sa) {
           // is span_as
           hs << h_indent << bts << " * " << buf_sym << " = " << sa->id->name;
@@ -2719,12 +2734,8 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         } else {
           hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
           hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
-             << UnScopedSizeExpr(*sty) << "));\n";
-          if (n.init_value) {
-            hs << h_indent << "choreo::abend_true(cudaMemcpy(" << buf_sym
-               << ", " << sym_data << ", " << UnScopedSizeExpr(*sty)
-               << ", cudaMemcpyHostToDevice));\n";
-          }
+             << alloc_bytes << "));\n";
+          if (n.init_value) EmitHostToDeviceCopy(sym_data);
         }
         global_buffers.insert(buf_sym);
         return;
@@ -2755,24 +2766,13 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         } else {
           hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
           hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
-             << UnScopedSizeExpr(*sty) << "));\n";
+             << alloc_bytes << "));\n";
 
           if (!n.init_value) return;
 
           std::string sym_data = sym + ".data()";
-          hs << h_indent << "auto " << sym
-             << " = choreo::make_spandata<choreo::" << STR(sty->e_type) << ", "
-             << shape.Rank() << ">({"
-             << ShapeSTR(shape, false, ", ", BaseType::U64) << "});\n";
-          hs << h_indent << "std::fill(" << sym_data << ", " << sym_data << "+"
-             << sym << ".element_count()"
-             << ", "
-             << ExprCastSTR(n.init_value, std::nullopt, GetBaseType(*sty),
-                            GetBaseType(*n.init_value->GetType()), true)
-             << ");\n";
-          hs << h_indent << "choreo::abend_true(cudaMemcpy(" << buf_sym << ", "
-             << sym_data << ", " << UnScopedSizeExpr(*sty)
-             << ", cudaMemcpyHostToDevice));\n";
+          EmitMakeSpandata();
+          EmitHostToDeviceCopy(sym_data);
         }
       }
     };
