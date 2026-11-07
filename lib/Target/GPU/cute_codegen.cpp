@@ -516,28 +516,52 @@ CuteCodeGen::GetDMABufferExpr(const std::string& sym,
 
 void CuteCodeGen::EmitGroupX4Sync(std::ostringstream& os,
                                   const std::string& indent,
-                                  int thread_count) const {
+                                  int thread_count) {
   if (lock_free.GetValue()) return;
   int tc =
       thread_count > 0
           ? thread_count
           : (CurrentScopeThreadsCount() > 0 ? CurrentScopeThreadsCount() : 128);
   // F4.1: a sync whose participants are exactly one warpgroup gets that
-  // group's own named-barrier id (8 + group), so epilogues in different
-  // warpgroups no longer serialize on the shared id 15. Multi-group scopes
-  // keep the CTA-wide id: splitting them per group would deadlock a
-  // 256/384-thread sync across different ids. 15 stays reserved for the
-  // warp-specialization handshakes, and the id pool must fit in 8..14.
+  // group's own named-barrier id, so epilogues in different warpgroups no
+  // longer serialize on the shared id 15. The id is claimed from the named
+  // event pool on first use (a second site in the same group reuses it);
+  // when the pool no longer has it - an event took it, a dynamic barrier id
+  // disabled the pool, or the block has more than 7 warpgroups - the sync
+  // falls back to 15. Multi-group scopes always keep 15: splitting a
+  // 256/384-thread sync across per-group ids deadlocks.
   if (tc == 128 && current_inthreads) {
     const int64_t wg = current_inthreads->ActiveWarpGroup();
-    const int64_t group_id = 8 + wg;
-    // Only use the id when InitializeNamedEventLowering reserved it for
-    // group syncs, so it cannot collide with a named event on the 8..14 pool.
-    if (wg >= 0 && group_id < lowest_event_barrier_id_ &&
-        cgi.GetFunctionTrait(fname)
-                .explicit_named_barrier_ids.count(group_id) == 0) {
-      os << indent << "choreo::named_barrier_sync(128, " << group_id << ");\n";
-      return;
+    if (wg >= 0) {
+      auto it = group_barrier_ids_.find(wg);
+      if (it == group_barrier_ids_.end()) {
+        int id = -1;
+        const int candidate = static_cast<int>(8 + wg);
+        if (candidate <= 14) {
+          // The pool is only a candidate list: events index into it without
+          // consuming entries, so also check the ids already assigned to a
+          // named event. Claiming from the pool (erasing) keeps every later
+          // event off this id.
+          bool taken = std::any_of(
+              named_event_lowerings_.begin(), named_event_lowerings_.end(),
+              [&](const auto& entry) {
+                return entry.second.barrier_id == candidate;
+              });
+          auto slot = std::find(available_named_barrier_ids_.begin(),
+                                available_named_barrier_ids_.end(),
+                                candidate);
+          if (!taken && slot != available_named_barrier_ids_.end()) {
+            id = candidate;
+            available_named_barrier_ids_.erase(slot);
+          }
+        }
+        it = group_barrier_ids_.emplace(wg, id).first;
+      }
+      if (it->second >= 0) {
+        os << indent << "choreo::named_barrier_sync(128, " << it->second
+           << ");\n";
+        return;
+      }
     }
   }
   os << indent << "choreo::named_barrier_sync(" << std::to_string(tc)
@@ -1980,32 +2004,13 @@ const ValueList CuteCodeGen::GenStrides(const ptr<AST::ChunkAt>& ca,
 
 void CuteCodeGen::InitializeNamedEventLowering() {
   auto& ft = cgi.GetFunctionTrait(fname);
-  // F4.1: per-warpgroup group syncs claim ids 8..8+G-1, so the event pool
-  // starts after them. G is the block's warpgroup count from the launch
-  // config (thread dims x group dims), the same value the sync sites use.
-  // Set unconditionally before the early return so it never leaks across
-  // functions; a dynamic barrier id or an unknown launch config reserves
-  // nothing and keeps the old shared-id behaviour.
-  lowest_event_barrier_id_ = 8;
-  if (IsWarpSpecActive()) {
-    int64_t block_threads = 0;
-    for (const auto& lc : cgi.GetFunctionLaunches(fname)) {
-      auto thr = VIInt(
-          lc.thread_count.x * lc.thread_count.y * lc.thread_count.z);
-      auto groups = VIInt(lc.group_count.x * lc.group4_count.x *
-                          lc.group_count.y * lc.group_count.z);
-      if (thr && groups && *thr > 0 && *groups > 0)
-        block_threads = std::max(block_threads, *thr * *groups);
-    }
-    int64_t groups = block_threads / 128;
-    if (groups > 0 && groups <= 7)
-      lowest_event_barrier_id_ = static_cast<int>(8 + groups);
-  }
   if (ft.has_dynamic_named_barrier_id) return;
   // Keep 15 for Choreo's internal warp-specialization handshakes and leave
   // 0-7 available to CUDA/CUTLASS helpers. Events use the remaining IDs and
-  // fall back to mbarrier when that small pool is exhausted.
-  for (int id = 14; id >= lowest_event_barrier_id_; --id)
+  // fall back to mbarrier when that small pool is exhausted. Per-warpgroup
+  // group syncs claim their id from the same pool on first use (F4.1), so a
+  // function with no sync sites loses no event capacity.
+  for (int id = 14; id >= 8; --id)
     if (ft.explicit_named_barrier_ids.count(id) == 0)
       available_named_barrier_ids_.push_back(id);
 }

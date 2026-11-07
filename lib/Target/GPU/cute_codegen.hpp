@@ -300,10 +300,11 @@ private:
   };
   std::map<std::string, NamedEventLowering> named_event_lowerings_;
   std::deque<int> available_named_barrier_ids_;
-  // F4.1: lowest id the named-event pool may use; ids [8, lowest) are reserved
-  // for per-warpgroup group syncs (see EmitGroupX4Sync). 8 means no
-  // reservation. Set per function by InitializeNamedEventLowering.
-  int lowest_event_barrier_id_ = 8;
+  // F4.1: named-barrier id per warpgroup for group-wave syncs. Allocated on
+  // first use from available_named_barrier_ids_ (so a function with no sync
+  // sites reserves nothing); -1 means the id was already taken and the sync
+  // falls back to the shared id 15. Reset per function.
+  std::map<int64_t, int> group_barrier_ids_;
   std::set<std::string> cluster_trigger_events_;
   std::set<std::string> ready_event_names_;
   std::set<std::string> waited_events_;
@@ -532,6 +533,7 @@ private:
     anonymous_scalar_exprs_.clear();
     named_event_lowerings_.clear();
     available_named_barrier_ids_.clear();
+    group_barrier_ids_.clear();
     hoisted_scale_decl_scopes.clear();
     active_hoisted_scale_decls.clear();
     hoisted_scale_accum_scopes.clear();
@@ -749,7 +751,7 @@ private:
                    const ptr<AST::MultiValues> subscription,
                    const ptr<Type>& sym_ty) const;
   void EmitGroupX4Sync(std::ostringstream& os, const std::string& indent,
-                       int thread_count = 0) const;
+                       int thread_count = 0);
   std::optional<HoistedScaleAccumInfo> AnalyzeHoistableScaledWGMMAAccum(
       const ptr<AST::Node>& n, const std::vector<std::string>& loop_refs) const;
   bool CollectHoistableScaledWGMMAAccum(
