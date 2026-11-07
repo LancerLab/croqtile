@@ -989,6 +989,11 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.push(pb->GetLevel());
     cooperative_stack_.push(pb->IsCooperative());
+    // Bind the parallel indices in the live scoped table so an enclosing
+    // `with` source of the same name does not shadow them.
+    for (auto v : pb->AllSubPVs())
+      SSTab().DeclareSymbolName(cast<AST::Identifier>(v)->name);
+    SSTab().DeclareSymbolName(pb->BPV()->name);
     // only on device-side
     bool is_deferred_block = !pb->IsOuter() &&
                              pb->GetLevel() == ParallelLevel::BLOCK &&
@@ -1639,7 +1644,7 @@ const ValueList CuteCodeGen::GenIndices(const ptr<AST::ChunkAt>& ca,
       assert(ca->TilingOperationCount() == 1);
     }
 
-    for (size_t i = 0; i < coords.size(); ++i) {
+    for (size_t i = 0; i < coords.size() && i < indices.size(); ++i) {
       // combine 'a' and 'c' between expressions like 'chunkat(a, b).chunk(c,
       // d)'
       indices[i] = indices[i] + coords[i] * shape.ValueAt(i);
@@ -2703,10 +2708,14 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       // A span-array declaration owns one slot per array element; the host
       // data holds the (tightly packed) slots in declaration order.  Global
       // buffers cannot carry alignas, so a single contiguous copy suffices.
+      // A one-slot declaration is indistinguishable from its span.
+      auto sat = dyn_cast<SpannedArrayType>(nty);
+      const bool one_slot = sat && sbe::ceq(sat->ElemCount(), sbe::nu(1));
       const std::string alloc_bytes =
           UnScopedExpr(TotalSizeExprOf(*nty, true));
       auto EmitMakeSpandata = [&]() {
-        ValueList dims = GetArrayDimensions(nty);
+        ValueList dims;
+        if (!one_slot) dims = GetArrayDimensions(nty);
         for (const auto& d : shape.Value()) dims.push_back(d);
         const Shape host_shape(dims);
         hs << h_indent << "auto " << sym
@@ -2973,7 +2982,9 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         // follows the declaration (physical for pooled/aligned slots).
         const std::string slot_count = ValueSTR(sat->ElemCount());
         const std::string slot_stride = SlotElemExpr();
-        ds << d_indent << "const " << bts << " __init = "
+        // Unique per declaration: sibling local arrays share the scope.
+        const std::string init_name = "__init_" + sym;
+        ds << d_indent << "const " << bts << " " << init_name << " = "
            << ExprSTR(n.init_value) << ";\n";
         ds << d_indent << "for (int __slot = 0; __slot < " << slot_count
            << "; ++__slot) {\n";
@@ -2982,7 +2993,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
            << ")) + __slot * (" << slot_stride << ");\n";
         ds << d_indent << "for (int i = 0; i < " << ValueSTR(ec)
            << "; ++i)\n";
-        ds << d_indent << "  __p[i] = __init;\n";
+        ds << d_indent << "  __p[i] = " << init_name << ";\n";
         DecrDeviceIndent();
         ds << d_indent << "}\n";
       } else if (ec == sbe::nu(1)) {
@@ -4610,10 +4621,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
          << " ? (unsigned)" << dyn_n_str << " - " << rn << " : " << tile_n_str
          << ";\n";
 
-      auto f_sub = emit_dyn_sub_tensor(f_buf_name, f_sto, elem_type, f_base_off,
-                                       f_row_stride, rm, rn);
-      auto t_sub = emit_dyn_sub_tensor(t_buf_name, t_sto, elem_type, t_base_off,
-                                       t_row_stride, rm, rn);
+      auto f_sub = emit_dyn_sub_tensor(f_buf.second, f_sto, elem_type,
+                                       f_base_off, f_row_stride, rm, rn);
+      auto t_sub = emit_dyn_sub_tensor(t_buf.second, t_sto, elem_type,
+                                       t_base_off, t_row_stride, rm, rn);
 
       // Full tile -> fast path (vectorized, Pred=false).
       ds << d_indent << "if (" << pred_n << " == " << tile_n_str << ") {\n";
@@ -4864,6 +4875,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         Error1(n.LOC(),
                "TMA copy supports at most 3 tile dimensions (got " +
                    std::to_string(effective_tma_rank) + ").");
+      }
+      if (rev_indices.size() < effective_tma_rank) {
+        Error1(n.LOC(), "TMA descriptor rank does not match the tile rank.");
+        rev_indices.resize(effective_tma_rank, sbe::nu(0));
       }
 
       bool is_multicast_tma = n.IsMulticast() && n.IsTMA();
@@ -9991,9 +10006,11 @@ bool CuteCodeGen::Visit(AST::Return& n) {
   } else if (auto sty = dyn_cast<SpannedType>(vty)) {
     if (auto id = AST::GetIdentifier(*n.value)) {
       auto sym = id->name;
-      // A declared span-array buffer has a different host shape than the
-      // single-span return type, so it cannot be returned as-is.
-      if (dyn_cast<SpannedArrayType>(GetSymbolType(sym))) {
+      // A declared span-array buffer with more than one slot has a different
+      // host shape than the single-span return type; a one-slot declaration
+      // is indistinguishable from its span and round-trips.
+      if (auto sat = dyn_cast<SpannedArrayType>(GetSymbolType(sym));
+          sat && !sbe::ceq(sat->ElemCount(), sbe::nu(1))) {
         Error1(n.LOC(),
                "returning a span-array buffer is not supported; return a "
                "single-span value instead.");

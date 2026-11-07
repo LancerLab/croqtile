@@ -77,6 +77,14 @@ __co__ void shadowed_host_param(f32 [64] x) {
   }
 }
 
+__co__ void parallel_shadow(f32 [4] p) {
+  with i in [2] {
+    parallel i by 4 : thread {
+      p.at(i) = 0.0f;
+    }
+  }
+}
+
 // CHECK-LABEL: __global__{{.*}}explicit_matcher_canonical_body
 // CHECK: for (int __iv_index = 0; __iv_index < 2; ++__iv_index)
 // CHECK: (float*)a + (__iv_index * 32)
@@ -97,3 +105,6 @@ __co__ void shadowed_host_param(f32 [64] x) {
 // CHECK-LABEL: void shadowed_host_param(
 // CHECK: int __iv_x = 0;
 // CHECK: printf("{%lld}\n", static_cast<long long>(__iv_x));
+// CHECK-LABEL: __global__{{.*}}parallel_shadow
+// CHECK: __choreo_vtid_x
+// CHECK-NOT: + __iv_i)

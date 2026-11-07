@@ -18,7 +18,30 @@ __co__ void global_slots_init(f32 [8] x) {
   }
 }
 
+__co__ auto global_slot_return(f32 [8] x) {
+  global f32 [8] g[1];
+  parallel p by 1 : block {
+    dma.copy x => g[0];
+  }
+  return g;
+}
+
+__co__ void global_dyn_slots(int n, f32 [4, n] x) {
+  global f32 [4, n] g[2] {1.0f};
+  parallel p by 1 : block {
+    dma.copy x => g[1];
+  }
+}
+
 // CHECK: (float*)g + (3)*(8) + 0
 // CHECK: cudaMalloc(&g__device, 128ULL)
 // CHECK: make_spandata<choreo::f32, 2>({4, 8})
 // CHECK: cudaMemcpy(g__device, g.data(), 128ULL, cudaMemcpyHostToDevice)
+// A one-slot declaration is indistinguishable from its span and can be
+// returned with the single-span shape.
+// CHECK: make_spandata<choreo::f32, 1>({8})
+// CHECK: return g;
+// Dynamic declarations keep the runtime size arithmetic 64-bit (the slot
+// byte expression carries ULL literals from the shape).
+// CHECK: cudaMalloc(&g__device, (((n * 4ULL)) * 4) * (2))
+// CHECK: cudaMemcpy(g__device, g.data(), (((n * 4ULL)) * 4) * (2), cudaMemcpyHostToDevice)

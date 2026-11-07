@@ -16,9 +16,10 @@ __co__ void init_span_arrays(f32 [8] x) {
   }
 }
 
-// DEFAULT: const float __init = 1.000000f;
+// DEFAULT: const float __init_s = 1.000000f;
 // DEFAULT: float* __p = ((float*)(s)) + __slot * (8);
-// DEFAULT: __p[i] = __init;
+// DEFAULT: __p[i] = __init_s;
+// DEFAULT: const float __init_t = 1.000000f;
 // DEFAULT: float* __p = ((float*)(t)) + __slot * (64);
 // NOMEM: __shared__ float s[2][8];
 // NOMEM: float* __p = ((float*)(s)) + __slot * (8);

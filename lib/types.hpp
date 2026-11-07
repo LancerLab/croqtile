@@ -2988,6 +2988,12 @@ inline std::string TotalSizeExprOf(const Type& ty, bool ULL_suffix = false) {
   if (auto bytes = VIInt(total))
     return std::to_string(static_cast<size_t>(*bytes)) +
            (ULL_suffix ? "ULL" : "");
+  // Keep the runtime multiplication 64-bit: the slot byte expression carries
+  // ULL on its literals, so promoting it before multiplying by the slot
+  // count avoids signed-int overflow for large dynamic declarations.
+  if (ULL_suffix && !aty->HasAlignedSlots())
+    return "(" + aty->spty->ByteSizeExpression(true) + ") * (" +
+           aty->ElemCount()->ToString() + ")";
   return "(" + total->ToString() + ")";
 }
 

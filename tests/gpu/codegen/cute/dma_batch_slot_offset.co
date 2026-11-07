@@ -10,4 +10,18 @@ __co__ void dma_batch_slot(global f16 [2, 64, 128] x) {
   }
 }
 
+// The dynamic-box path builds its sub-tensors from the same base; keep the
+// slot offset there too.
+__co__ void dma_dyn_box_slot(global f32 [64, 32] inA, global f32 [64, 32] inB,
+                             global f32 [64, 32] out) {
+  parallel p by 32 : block {
+    shared f32 [64, 32] s[2];
+    dma.copy inA => s[0];
+    dma.copy inB => s[1];
+    dma.copy s[0] => out;
+  }
+}
+
 // CHECK: make_smem_ptr<f16>((f16*)(f16*)a + (1)*(8192) + __batch_i0 * 4096)
+// CHECK: make_smem_ptr<float>((float*)(float*)s + (0)*(2048) + 0)
+// CHECK: make_smem_ptr<float>((float*)(float*)s + (1)*(2048) + 0)

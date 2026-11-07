@@ -1,0 +1,16 @@
+// A root-param subview can produce fewer compact coordinates than the tile
+// rank; the issue path must not read a missing coordinate (std::out_of_range)
+// and instead diagnose the descriptor/tile rank mismatch.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+__co__ void tma_rank_mismatch(global f32 [8, 16, 32] x) {
+  parallel b by 1 : block {
+    sv = x.view(8, 16, 32).from(1, 2, 3);
+    load = tma.copy.async sv => shared;
+    wait load;
+  }
+}
+
+// CHECK: error: TMA descriptor rank does not match the tile rank.

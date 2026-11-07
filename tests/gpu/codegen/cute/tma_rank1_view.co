@@ -19,4 +19,13 @@ __co__ void tma_rank1_split(global f32 [128, 128] x) {
   }
 }
 
+// A chained view whose intermediate rank exceeds the final rank must not
+// read the index vector out of bounds before the rank diagnostic.
+__co__ void tma_chained_view(global f32 [64] x) {
+  parallel b by 1 : block {
+    load = tma.copy.async x.view(8, 8).view(64) => shared;
+    wait load;
+  }
+}
+
 // CHECK: error: TMA copy requires a tile with at least 2 dimensions.
