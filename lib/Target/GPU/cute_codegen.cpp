@@ -5551,6 +5551,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           const std::string& off_sym = prepackInfo.resolved_sym.empty()
                                            ? lca->data->name
                                            : prepackInfo.resolved_sym;
+          // Only a metadata buffer that is itself a span array can take the
+          // operand's slot indices. A plain broadcast span must stay at its
+          // base: AppendArraySlotOffset's subscript fallback would turn a
+          // data element into the metadata pointer.
+          if (!dyn_cast<ArrayType>(GetSymbolType(off_sym)))
+            return prepackInfo.device_name;
           AppendArraySlotOffset(base, off_sym, lca->indices, false);
           base.insert(0, "(");
           base += ")";
@@ -7457,9 +7463,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             auto mdata_base = [&](const std::string& name) {
               std::string base = name;
               // The metadata buffer may be a span array indexed like the A
-              // operand; fold the operand's slot into its base.
-              if (auto lca = op.LoadFrom(); lca && lca->indices &&
-                  !lca->indices->AllValues().empty()) {
+              // operand; fold the operand's slot into its base. A plain
+              // broadcast metadata buffer must stay at its base (its
+              // AppendArraySlotOffset fallback would subscript a data word).
+              if (auto lca = op.LoadFrom();
+                  lca && lca->indices && !lca->indices->AllValues().empty() &&
+                  dyn_cast<ArrayType>(GetSymbolType(mdata_sym_name))) {
                 AppendArraySlotOffset(base, mdata_sym_name, lca->indices,
                                       false);
                 base = "(" + base + ")";

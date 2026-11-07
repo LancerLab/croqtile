@@ -67,3 +67,28 @@ __co__ auto prepack_mdata_slot(u32 [64, 4] meta, f16 [64, 16] lhs_packed,
 // CHECK: uint32_t __sp_u32_val = ((unsigned int*)lhs_s_mdata + (1)*(256))[__sp_packed_row * (16) + __sp_k_idx * (1)];
 // V2: me = ((const uint32_t*)(((unsigned int*)meta_s + (1)*(256))))[((__sp_packed_row >> 4) * (4) + __sp_k_idx) * 16 + (__sp_packed_row & 15)];
 // V2: me = ((const uint32_t*)(((unsigned int*)meta_s + (1)*(64))) + ((__sp_row >> 4) << 4) + (__sp_row & 15))[(0 & 0) << 4];
+
+// A plain (non-array) metadata buffer is broadcast across A slots: the base
+// must not take the A operand's slot index.
+__co__ auto prepack_broadcast_mdata(u32 [64, 4] meta, f16 [64, 16] lhs_packed,
+                                    f16 [8, 32] rhs) {
+  f32 [64, 8] output{0.0f};
+  parallel by 1 : block {
+    shared f16 [64, 16] lhs_s[2];
+    shared u32 [64, 4] lhs_s_mdata;
+    dma.copy lhs_packed => lhs_s[1];
+    dma.copy meta => lhs_s_mdata;
+    rhs_s = dma.copy rhs => shared;
+    mc = mma.fill.f32 0.0f;
+    parallel p by 1 : group-4 {
+      me = mma.load lhs_s[1];
+      mma.row.row.sp mc, lhs_s, rhs_s, me;
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// Broadcast metadata stays at the buffer base (no `[1]` slot subscript).
+// CHECK: uint32_t __sp_u32_val = lhs_s_mdata[__sp_packed_row * (16) + __sp_k_idx * (1)];
+// V2: me = ((const uint32_t*)(lhs_s_mdata))[((__sp_packed_row >> 4) * (16) + __sp_k_idx) * 16 + (__sp_packed_row & 15)];
