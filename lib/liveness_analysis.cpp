@@ -2229,16 +2229,12 @@ bool LivenessAnalyzer::Visit(AST::Fence& n) {
 
 bool LivenessAnalyzer::Visit(AST::Trigger& n) {
   TraceEachVisit(n);
-  for (const auto& e : n.GetEvents()) {
-    AddUse(&n, GetEventName(*e));
-
-    if (cur_hb_state && cur_wg_id >= 0 && cur_hb_phase) {
-      std::string event_base = InScopeName(GetEventName(*e));
-      cur_hb_phase->signal_out = event_base;
-      FinalizeHBPhase();
-      StartNewHBPhase("");
-    }
-  }
+  // Record a trigger-after's dependencies before switching phases: the
+  // dependencies complete before the event fires, so their buffer uses
+  // belong to the triggering phase.  Recording them after the phase switch
+  // left a dead-end phase holding the DMA destination/operand accesses,
+  // which made the HB graph unable to prove that a later reuse of those
+  // buffers (e.g. the epilogue arena) is ordered after the trigger.
   if (n.HasDependencies()) {
     const bool native_completion = n.HasNote("native_completion_event");
     for (const auto& dependency : n.GetDependencies()) {
@@ -2261,6 +2257,16 @@ bool LivenessAnalyzer::Visit(AST::Trigger& n) {
         AddUse(current_stmt, src);
         AddUse(current_stmt, dst);
       }
+    }
+  }
+  for (const auto& e : n.GetEvents()) {
+    AddUse(&n, GetEventName(*e));
+
+    if (cur_hb_state && cur_wg_id >= 0 && cur_hb_phase) {
+      std::string event_base = InScopeName(GetEventName(*e));
+      cur_hb_phase->signal_out = event_base;
+      FinalizeHBPhase();
+      StartNewHBPhase("");
     }
   }
   return true;

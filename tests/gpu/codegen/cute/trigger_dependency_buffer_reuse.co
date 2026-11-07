@@ -1,0 +1,35 @@
+// A shared buffer declared after the pipeline's last wait may reuse the
+// (now dead) operand storage: the trigger-after dependency's buffer use is
+// ordered before the event fires, so mem reuse's HB analysis can overlap
+// the epilogue buffer with the TMA destination. This is the F5 enabler for
+// concurrent epilogues and for fitting a metadata ring beside the operand
+// arena.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void trigger_dependency_buffer_reuse(global f16 [64, 64] a,
+                                            global f16 [64, 64] out) {
+  parallel by 1 : block {
+    shared event full[1];
+    shared f16 [64, 64] operand;
+    shared f16 [64, 64] reuse_s;
+    parallel g by 2 : group-4 {
+      inthreads.async (g == 0) {
+        load = tma.copy.async a => operand;
+        trigger full[0] after load;
+      }
+      inthreads.async (g == 1) {
+        wait full[0];
+        // The dependency use of `operand` belongs to the triggering phase;
+        // this later write may therefore share its storage.
+        reuse_s.at(0, 0) = 1.0f;
+        tma.copy reuse_s => out;
+      }
+    }
+  }
+}
+
+// Both buffers land at offset 0 of the shared arena.
+// CHECK: f16* operand = (f16*)(anon_{{.*}} + 0);
+// CHECK: f16* reuse_s = (f16*)(anon_{{.*}} + 0);
