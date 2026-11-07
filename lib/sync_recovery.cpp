@@ -18,10 +18,19 @@
 
 using namespace Choreo;
 
+namespace {
+// Elimination helpers (defined with the analysis utilities below).
+const char* CoveringOp(const AST::Node* s, const AST::MultiNodes& n, size_t j,
+                       const AST::Node& ins, const std::string& buffer);
+bool SelfDischarging(const AST::Node* s, const AST::Node& ins,
+                     const std::string& buffer);
+} // namespace
+
 bool SyncRecovery::RunOnProgramImpl(AST::Node& root) {
   // TODO: proper CCtx flag; env var keeps the scaffold unintrusive.
   if (!std::getenv("CHOREO_SYNC_RECOVERY")) return true;
   if (mr == nullptr) return true;
+  keep_insertions_ = std::getenv("CHOREO_SYNC_RECOVERY_KEEP") != nullptr;
   root_ = &root;
   RunRecovery();
   // C6: drive the traversal that splices the pending insertions.
@@ -29,7 +38,8 @@ bool SyncRecovery::RunOnProgramImpl(AST::Node& root) {
   dbgs() << "[sync-recovery] summary: " << total_slots_ << " shared slots, "
          << total_handovers_ << " handovers (" << hb_merged_handovers_
          << " hb-merged), " << inserted_fences_ << " fences, "
-         << inserted_waits_ << " completion waits inserted\n";
+         << inserted_waits_ << " completion waits inserted, " << elided_fences_
+         << " fences, " << elided_waits_ << " completion waits elided\n";
   return true;
 }
 
@@ -39,6 +49,9 @@ bool SyncRecovery::Visit(AST::MultiNodes& n) {
     auto it = pending_inserts_.find(n.SubAt(i).get());
     if (it == pending_inserts_.end()) continue;
     std::vector<PendingInsert>& inserts = it->second;
+    // Elimination first: the containing list is what makes domination
+    // decidable, so coverage is judged here rather than at synthesis time.
+    Eliminate(inserts, n, i);
     // `idx` tracks the anchor as earlier insertions shift it to the right.
     size_t idx = i;
     for (const auto& p : inserts)
@@ -69,7 +82,8 @@ bool SyncRecovery::Visit(AST::MultiNodes& n) {
 }
 
 void SyncRecovery::AddInsert(const AST::Node* anchor,
-                             const ptr<AST::Node>& node, bool after) {
+                             const ptr<AST::Node>& node, bool after,
+                             int not_before, const std::string& buffer) {
   auto& list = pending_inserts_[anchor];
   for (const auto& p : list) {
     if (p.after != after) continue;
@@ -83,7 +97,45 @@ void SyncRecovery::AddInsert(const AST::Node* anchor,
           return;
     }
   }
-  list.push_back(PendingInsert{node, after});
+  list.push_back(PendingInsert{node, after, not_before, buffer});
+}
+
+void SyncRecovery::Eliminate(std::vector<PendingInsert>& inserts,
+                             const AST::MultiNodes& n, size_t anchor_idx) {
+  if (keep_insertions_ || inserts.empty()) return;
+  std::vector<PendingInsert> keep;
+  keep.reserve(inserts.size());
+  for (const auto& ins : inserts) {
+    const char* reason = nullptr;
+    // Statements up to the anchor execute before it whenever it does, so a
+    // covering op in that range is available on every path to the insertion
+    // site (the site-level slice of the availability fold; cross-block
+    // availability is not folded yet, so the pass only under-removes).
+    long last = ins.after ? (long)anchor_idx : (long)anchor_idx - 1;
+    for (long j = 0; j <= last && reason == nullptr; ++j) {
+      const AST::Node* s = n.SubAt((size_t)j).get();
+      auto pit = preorder_index_.find(s);
+      if (pit == preorder_index_.end()) continue; // our own insertion
+      int sidx = pit->second;
+      if (ins.not_before >= 0 && sidx <= ins.not_before) {
+        if (sidx == ins.not_before && SelfDischarging(s, *ins.node, ins.buffer))
+          reason = "synchronous engine access";
+        continue;
+      }
+      reason = CoveringOp(s, n, (size_t)j, *ins.node, ins.buffer);
+    }
+    if (reason == nullptr) {
+      keep.push_back(ins);
+      continue;
+    }
+    if (isa<AST::Fence>(ins.node.get()))
+      ++elided_fences_;
+    else
+      ++elided_waits_;
+    dbgs() << "[sync-recovery] elide " << ins.node->TypeNameString() << " ("
+           << reason << ")\n";
+  }
+  inserts.swap(keep);
 }
 
 namespace {
@@ -264,11 +316,111 @@ ProducerFrontier(const std::vector<const LivenessAnalyzer::Stmt*>& po,
   return {s, true};
 }
 
+// --- elimination: attribution and availability ---------------------------
+
+// Does `n`'s subtree refer to `buffer`? Names are compared unscoped so that a
+// phase's scoped buffer id matches the identifiers in the access statement.
+bool MentionsBuffer(const AST::Node* n, const std::string& buffer) {
+  if (n == nullptr || buffer.empty()) return false;
+  // Composite nodes whose operands ReferredSymbols does not walk.
+  if (auto* d = dyn_cast<AST::DMA>(n))
+    return MentionsBuffer(d->from.get(), buffer) ||
+           MentionsBuffer(d->to.get(), buffer);
+  if (auto* a = dyn_cast<AST::Assignment>(n))
+    return MentionsBuffer(a->da.get(), buffer) ||
+           MentionsBuffer(a->value.get(), buffer);
+  const std::string buf = UnScopedExpr(buffer);
+  for (const auto& sym : ReferredSymbols(const_cast<AST::Node*>(n), nullptr))
+    if (UnScopedExpr(sym) == buf) return true;
+  return false;
+}
+
+bool DmaReadsSlot(const AST::DMA* dma, const std::string& buffer) {
+  return dma->from != nullptr && MentionsBuffer(dma->from.get(), buffer);
+}
+
+// Preorder index of the last statement in the phase that touches the slot;
+// `engine_only` restricts it to engine statements (the drain's frontier).
+int LastSlotAccessIndex(const std::vector<const LivenessAnalyzer::Stmt*>& po,
+                        const HBGraph& g, int phase, const std::string& buffer,
+                        bool engine_only) {
+  const auto& ph = g.phases[phase];
+  int last = -1;
+  for (size_t i = ph.first_stmt_id; i <= ph.last_stmt_id && i < po.size();
+       ++i) {
+    const AST::Node* s = po[i];
+    if (s == nullptr || isa<LivenessAnalyzer::ScopeEnd>(s)) continue;
+    if (engine_only && !isa<AST::DMA>(s)) continue;
+    if (!MentionsBuffer(s, buffer)) continue;
+    last = (int)i;
+  }
+  return last;
+}
+
+// A synchronous engine access has no outstanding work once it retires, so it
+// discharges its own completion obligation (a blocking copy has finished
+// reading before the next statement runs).
+bool SelfDischarging(const AST::Node* s, const AST::Node& ins,
+                     const std::string& buffer) {
+  if (!isa<AST::CompletionWait>(&ins) || buffer.empty()) return false;
+  auto* d = dyn_cast<AST::DMA>(s);
+  return d != nullptr && !d->IsAsync() && DmaReadsSlot(d, buffer);
+}
+
+// Covering order (Table 1 instantiation, must direction): an operation
+// available at the insertion site that discharges everything the insertion
+// would. Returns a short attribution string, or nullptr when it does not
+// cover.
+const char* CoveringOp(const AST::Node* s, const AST::MultiNodes& n, size_t j,
+                       const AST::Node& ins, const std::string& buffer) {
+  if (auto* w = dyn_cast<AST::CompletionWait>(&ins)) {
+    if (auto* cw = dyn_cast<AST::CompletionWait>(s)) {
+      if (cw->GetEngine() != FenceEntity::TMA &&
+          cw->GetEngine() != FenceEntity::DMA)
+        return nullptr;
+      if (cw->GetKind() == CompletionWaitKind::FULL_DRAIN)
+        return "available complete drain";
+      if (w->GetKind() == CompletionWaitKind::READ_DRAIN)
+        return "available read drain";
+      return nullptr;
+    }
+    if (auto* wt = dyn_cast<AST::Wait>(s)) {
+      // A wait on a future covers the drain only if that future belongs to an
+      // async copy that read this slot (the wait retires the reads).
+      for (const auto& t : wt->GetTargets()) {
+        auto id = AST::GetIdentifier(*t);
+        if (!id) continue;
+        const std::string fname = UnScopedExpr(id->name);
+        for (size_t k = 0; k < j; ++k) {
+          auto* d = dyn_cast<AST::DMA>(n.SubAt(k).get());
+          if (d == nullptr || !d->IsAsync()) continue;
+          if (UnScopedExpr(d->future) != fname) continue;
+          if (DmaReadsSlot(d, buffer))
+            return "source wait on the draining copy";
+        }
+      }
+      return nullptr;
+    }
+    return nullptr;
+  }
+  if (isa<AST::Fence>(&ins)) {
+    if (auto* f = dyn_cast<AST::Fence>(s)) {
+      const FenceEntity e = f->GetEntity();
+      if (e == FenceEntity::TMA || e == FenceEntity::DMA ||
+          e == FenceEntity::ALL)
+        return "available proxy fence";
+    }
+  }
+  return nullptr;
+}
+
 } // end anonymous namespace
 
 void SyncRecovery::RunRecovery() {
   const auto& df_ctxs = mr->RecoveryDFCtxs();
   const auto& hb_graphs = mr->LA().HBGraphs();
+  const auto& po = mr->LA().PreorderStmts();
+  for (size_t i = 0; i < po.size(); ++i) preorder_index_[po[i]] = (int)i;
 
   for (const auto& [df_name, ctx] : df_ctxs) {
     // --- C1: tenant reconstruction from post-coloring offsets ---
@@ -396,16 +548,19 @@ void SyncRecovery::RunRecovery() {
           // threads that produced the slot, after the last access and before
           // the sync that hands the slot over --- i.e. inside the producer
           // tenant, at the phase boundary (never on the receiver).
-          const auto& po = mr->LA().PreorderStmts();
           auto site = ProducerFrontier(po, *g, a_last);
           if (site.stmt != nullptr) {
+            const int last_access =
+                LastSlotAccessIndex(po, *g, a_last, slot[i].buffer_id, false);
+            const int last_engine =
+                LastSlotAccessIndex(po, *g, a_last, slot[i].buffer_id, true);
             for (const auto& o : obligations) {
               if (o.cls == "visibility")
                 AddInsert(site.stmt,
                           AST::Make<AST::Fence>(
                               site.stmt->LOC(), ParallelLevel::GROUP,
                               Storage::SHARED, FenceEntity::TMA),
-                          site.after);
+                          site.after, last_access);
               // WAR with the engine as reader: the receiving tenant may
               // overwrite the slot only once the engine has drained the
               // reads it issued. Other completion classes lower to waits
@@ -416,7 +571,7 @@ void SyncRecovery::RunRecovery() {
                           AST::Make<AST::CompletionWait>(
                               site.stmt->LOC(), FenceEntity::TMA,
                               CompletionWaitKind::READ_DRAIN, 0),
-                          site.after);
+                          site.after, last_engine, slot[i].buffer_id);
             }
           }
           dbgs() << "\n";
