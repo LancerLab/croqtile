@@ -1,0 +1,14 @@
+// A rank-1 shared tile whose swizzle split expands the coordinate list must
+// not emit a bulk-tensor call whose arity differs from the helper rank.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+__co__ void tma_store_rank_mismatch(global f32 [256] out) {
+  parallel b by 1 : block {
+    shared f32 [256] s;
+    tma.copy.swiz<128> s => out;
+  }
+}
+
+// CHECK: error: TMA store coordinates do not match the instruction rank.

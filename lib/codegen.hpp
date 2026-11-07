@@ -295,6 +295,9 @@ private:
   AST::InThreadsBlock* in_thr_block =
       nullptr; // if the TMA is within an inthreads, record it here
   bool event_managed = false;
+  // Rank of the tensor map actually encoded on the host (root-param/view
+  // flattening and the swizzle split are emission decisions).
+  size_t map_rank = GetInvalidRank();
 
 public:
   TMADesc(const ptr<AST::ChunkAt>& f, const ptr<AST::ChunkAt>& t,
@@ -349,6 +352,8 @@ public:
 
   void SetEventManaged(bool em) { event_managed = em; }
   bool IsEventManaged() const { return event_managed; }
+  size_t GetMapRank() const { return map_rank; }
+  void SetMapRank(size_t rank) { map_rank = rank; }
 
   // Root parameter resolution for TMA on computed subviews.
   // When the TMA source is not a direct function parameter (e.g.,

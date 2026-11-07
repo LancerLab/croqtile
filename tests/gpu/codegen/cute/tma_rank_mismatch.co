@@ -13,4 +13,15 @@ __co__ void tma_rank_mismatch(global f32 [8, 16, 32] x) {
   }
 }
 
+// A view that raises the tile rank selects a higher-rank instruction while
+// the host flattens the descriptor; diagnose the instruction/map mismatch.
+__co__ void tma_view_raises_rank(global f32 [2, 128, 128] x) {
+  parallel b by 1 : block {
+    shared f32 [2, 128, 128] s;
+    load = tma.copy.async x.view(2, 128, 128).from(0, 0, 0) => s;
+    wait load;
+  }
+}
+
 // CHECK: error: TMA descriptor rank does not match the tile rank.
+// CHECK: error: TMA instruction rank (3) does not match the tensor-map rank (2).

@@ -4860,11 +4860,12 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         Error1(n.LOC(), "TMA copy requires a tile with at least 2 dimensions.");
         rev_indices.resize(2, sbe::nu(0));
       }
-      bool tma_has_inner_split = false;
+      size_t effective_tma_rank = t_shape.Rank();
       if (tma_idx >= 0) {
-        auto split_it = tma_inner_splits_.find(tma_descs[tma_idx].GetName());
+        const std::string& desc_name = tma_descs[tma_idx].GetName();
+        auto split_it = tma_inner_splits_.find(desc_name);
         if (split_it != tma_inner_splits_.end()) {
-          tma_has_inner_split = true;
+          effective_tma_rank += 1;
           auto se = sbe::nu((int64_t)split_it->second.swiz_elems);
           auto orig_inner = rev_indices.front();
           auto orig_outer = rev_indices.back();
@@ -4873,9 +4874,15 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           rev_indices.push_back(orig_outer);
           rev_indices.push_back(orig_inner / se);
         }
+        size_t map_rank = tma_descs[tma_idx].GetMapRank();
+        if (IsValidRank(map_rank) && map_rank != effective_tma_rank) {
+          Error1(n.LOC(),
+                 "TMA instruction rank (" +
+                     std::to_string(effective_tma_rank) +
+                     ") does not match the tensor-map rank (" +
+                     std::to_string(map_rank) + ").");
+        }
       }
-      size_t effective_tma_rank =
-          tma_has_inner_split ? t_shape.Rank() + 1 : t_shape.Rank();
       if (effective_tma_rank > 3) {
         Error1(n.LOC(),
                "TMA copy supports at most 3 tile dimensions (got " +
@@ -4887,6 +4894,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       }
 
       bool is_multicast_tma = n.IsMulticast() && n.IsTMA();
+      if (is_multicast_tma && effective_tma_rank != 2) {
+        Error1(n.LOC(), "multicast TMA requires a 2-D tile.");
+      }
       bool emit_tma_single_guard =
           !ScopeAlreadySingleThreadForLevel(tma_sync_level);
       // A non-warpspec TMA copy must be issued by a single thread.  That is
@@ -5196,6 +5206,21 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           out.push_back(base.front() / split_se);
           return out;
         };
+        if (tma_idx >= 0) {
+          size_t map_rank = tma_descs[tma_idx].GetMapRank();
+          if (IsValidRank(map_rank) && map_rank != s2g_rank) {
+            Error1(n.LOC(),
+                   "TMA store instruction rank (" + std::to_string(s2g_rank) +
+                       ") does not match the tensor-map rank (" +
+                       std::to_string(map_rank) + ").");
+          }
+        }
+        ValueList s2g_indices = make_s2g_indices(s2g_indices_orig);
+        if (s2g_indices.size() != s2g_rank) {
+          Error1(n.LOC(),
+                 "TMA store coordinates do not match the instruction rank.");
+          s2g_indices.resize(s2g_rank, sbe::nu(0));
+        }
 
         bool multi_consumer_s2g = IsWarpSpecActive() && InSpecWarp() &&
                                   current_inthreads &&
@@ -5217,7 +5242,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           bool has_per_consumer_boxes =
               box_elems > 0 && box_elems * num_consumers <= source_elems;
 
-          auto final_idx_base = make_s2g_indices(s2g_indices_orig);
+          const ValueList& final_idx_base = s2g_indices;
 
           auto strReplaceAll = [](std::string s, const std::string& from,
                                   const std::string& to) {
@@ -5256,7 +5281,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                << ValueSTR(final_idx_base) << ", " << f_buf_expr << ");\n";
           }
         } else {
-          auto final_idx = make_s2g_indices(s2g_indices_orig);
+          const ValueList& final_idx = s2g_indices;
           ds << d_indent << "  cde::cp_async_bulk_tensor_" << s2g_rank
              << "d_shared_to_global(&" << *tname << "_tensor_map, "
              << ValueSTR(final_idx) << ", " << f_buf_expr << ");\n";
@@ -10433,7 +10458,7 @@ static const char* CuTensorMapL2PromotionExpr(int l2_promote_bytes) {
 }
 
 void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
-  for (auto desc : cgi.GetTMADesc(pb)) {
+  for (TMADesc& desc : cgi.GetTMADescs()[pb]) {
     ptr<AST::ChunkAt> g_ca = nullptr;
     ptr<AST::ChunkAt> s_ca = nullptr;
     std::string g_sym, s_sym;
@@ -10639,6 +10664,7 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
       }
     }
 
+    desc.SetMapRank(host_rank);
     hs << h_indent << "uint64_t " << desc.GetName() << "_shape[] = {"
        << ValueSTR(Reverse(host_shape.Value())) << "};\n";
     hs << h_indent << "uint64_t " << desc.GetName() << "_strides[] = {"
