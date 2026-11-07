@@ -1,0 +1,28 @@
+// A prepacked-u32 metadata buffer declared as a span array is loaded from
+// the requested slot: the metadata snippets index from the slot-adjusted
+// base, not slot 0 (both the u32 and the v2 encodings).
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a --use-prepack %s -o - | grep -v '^ *//' | FileCheck %s
+// RUN: choreo -es -t cute -arch=sm_90a --use-prepack-v2 %s -o - | grep -v '^ *//' | FileCheck %s --check-prefix=V2
+
+__co__ auto prepack_meta_slot(u32 [64, 4] meta, f16 [64, 16] lhs_packed,
+                              f16 [8, 32] rhs) {
+  f32 [64, 8] output{0.0f};
+  parallel by 1 : block {
+    shared u32 [64, 4] meta_s[2];
+    dma.copy meta => meta_s[1];
+    lhs_s = dma.copy lhs_packed => shared;
+    rhs_s = dma.copy rhs => shared;
+    mc = mma.fill.f32 0.0f;
+    parallel p by 1 : group-4 {
+      me = mma.load meta_s[1];
+      mma.row.row.sp mc, lhs_s, rhs_s, me;
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// CHECK: uint32_t __sp_u32_val = ((unsigned int*)meta_s + (1)*(256))[__sp_packed_row * (4) + __sp_k_idx * (1)];
+// V2: me = ((const uint32_t*)(((unsigned int*)meta_s + (1)*(256))))[((__sp_packed_row >> 4) * (4) + __sp_k_idx) * 16 + (__sp_packed_row & 15)];

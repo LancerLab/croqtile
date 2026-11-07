@@ -2296,7 +2296,6 @@ void CuteCodeGen::emitPrepackedV2TileLoadSnippet(
 
 void CuteCodeGen::emitPrepackedV2Snippet(const std::string& metaVar,
                                          const std::string& baseName,
-                                         const std::string& /*deviceArray*/,
                                          const std::string& rowStride,
                                          const std::string& /*colStride*/) {
   ds << d_indent << "  int __sp_lane = __sp_tid & 31;\n";
@@ -5397,9 +5396,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(sym));
       bool policy_is_sparse = mma_policy.find("SPARSE::") != std::string::npos;
       if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_E) {
-        auto tile_addr = TileAddr(op.LoadFrom(), false);
-        auto strides = GenStrides(op.LoadFrom());
-        auto load_from_sty = dyn_cast<SpannedType>(op.LoadFrom()->GetType());
+        auto lca = op.LoadFrom();
+        auto tile_addr = TileAddr(lca, false);
+        auto strides = GenStrides(lca);
+        auto load_from_sty = dyn_cast<SpannedType>(lca->GetType());
         auto k_val = VIInt(ssmi.shape.at(2));
         bool policy_is_fp8 = mma_policy.find("E4M3") != std::string::npos ||
                              mma_policy.find("E5M2") != std::string::npos;
@@ -5414,9 +5414,21 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         std::string row_stride = ValueSTR(strides.at(0));
         std::string col_stride = ValueSTR(strides.at(1));
         bool v2_mode = use_prepack_v2.GetValue();
-        std::string ref_sym = op.LoadFrom()->RefSymbol();
+        std::string ref_sym = lca->RefSymbol();
         auto prepackInfo =
             resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue() || v2_mode);
+        // The prepacked metadata may live in a span-array slot; the snippets
+        // index from the buffer base, so fold the slot offset in. Built on
+        // demand: the tile/single-column snippets take their own address.
+        auto MetaBase = [&]() -> std::string {
+          if (!lca->indices || lca->indices->AllValues().empty())
+            return prepackInfo.device_name;
+          std::string base = prepackInfo.device_name;
+          AppendArraySlotOffset(base, lca->data->name, lca->indices, false);
+          base.insert(0, "(");
+          base += ")";
+          return base;
+        };
 
         if (!prepackInfo.use_packed_u32) {
           ds << d_indent << "auto " << sym
@@ -5447,17 +5459,15 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                                            ValueSTR(tile_addr), row_stride,
                                            ValueSTR(tile_off));
           } else {
-            emitPrepackedV2Snippet(sym, prepackInfo.device_name,
-                                   prepackInfo.device_name, row_stride,
-                                   col_stride);
+            const std::string base = MetaBase();
+            emitPrepackedV2Snippet(sym, base, row_stride, col_stride);
           }
         } else {
           if (prepack_single_col)
             emitPrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr),
                                             row_stride);
           else
-            emitPrepackedU32Snippet(sym, prepackInfo.device_name, row_stride,
-                                    col_stride);
+            emitPrepackedU32Snippet(sym, MetaBase(), row_stride, col_stride);
         }
         ds << d_indent << "}\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
@@ -5652,8 +5662,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             ds << d_indent << "{\n";
             ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
             if (v2_mode_exec)
-              emitPrepackedV2Snippet(meta_var, prepackInfo.device_name,
-                                     prepackInfo.device_name, "128", "1");
+              emitPrepackedV2Snippet(meta_var, prepackInfo.device_name, "128",
+                                     "1");
             else
               emitPrepackedU32Snippet(meta_var, prepackInfo.device_name, "128",
                                       "1");
