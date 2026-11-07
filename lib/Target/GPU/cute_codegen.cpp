@@ -996,6 +996,10 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
     if (pb->IsOuter() || is_deferred_block) {
       if (!is_deferred_block) parallel_idx += 1;
       cur_pb = pb;
+      // TMA descriptors are collected per parallel block; restart the
+      // counters so the index into this block's list stays in range.
+      tma_count = 0;
+      tma_future_count = 0;
       emitted_device_names_.clear();
       if (cgi.GetFunctionTrait(fname).multiple_parallelby)
         device_fn = "__choreo_device_" + fname + std::to_string(parallel_idx);
@@ -1606,21 +1610,23 @@ const ValueList CuteCodeGen::GenIndices(const ptr<AST::ChunkAt>& ca,
       // View.from contributes the logical origin directly to the TMA
       // coordinates. Unlike chunk/subspan indices, these offsets are already in
       // the original tensor's coordinate space and must not be scaled by the
-      // view block shape.
+      // view block shape. Each offset belongs to its own dimension.
       if (auto offsets = op->GetOffsets()) {
+        size_t from_dim = 0;
         for (auto p : offsets->AllValues()) {
           if (const auto& o = dyn_cast<AST::Expr>(p)->Opts(); o.HasVals()) {
             const auto& vals = o.GetVals();
             for (auto& val : vals) {
-              if (sbe::ceq(val, sbe::sym("::__choreo_no_tiling__")))
-                coords.push_back(sbe::nu(0));
-              else
-                indices[coords.size()] = indices[coords.size()] + val;
+              if (!sbe::ceq(val, sbe::sym("::__choreo_no_tiling__")) &&
+                  from_dim < indices.size())
+                indices[from_dim] = indices[from_dim] + val;
+              ++from_dim;
             }
           } else {
-            indices[coords.size()] =
-                indices[coords.size()] +
-                sbe::sym(OpExprSTR(p, "*", true, IsHost()));
+            if (from_dim < indices.size())
+              indices[from_dim] = indices[from_dim] +
+                                  sbe::sym(OpExprSTR(p, "*", true, IsHost()));
+            ++from_dim;
           }
         }
       } else {
@@ -1653,6 +1659,7 @@ CuteCodeGen::GenCompactRootTMAIndices(const TMADesc& desc,
   if (!desc.HasRootParam()) return std::nullopt;
 
   const auto& def_ca = desc.GetRootDefCA();
+  if (!def_ca) return std::nullopt;
   const auto& root_shape = desc.GetRootParamShape();
   const size_t root_rank = root_shape.Rank();
   size_t end_idx = def_ca->OpCount();
@@ -4883,6 +4890,12 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
            << ptx_bar_expr << ", " << tma_tx_bytes_expr << ");\n";
       }
 
+      // The 2-D TMA issue below reads two coordinates; a rank-1 tile cannot
+      // be described by it. Diagnose and keep the emission state consistent.
+      if (rev_indices.size() < 2) {
+        Error1(n.LOC(), "TMA copy requires a tile with at least 2 dimensions.");
+        rev_indices.resize(2, sbe::nu(0));
+      }
       auto coord0_expr = ValueSTR(rev_indices.at(0));
       auto coord1_expr = ValueSTR(rev_indices.at(1));
       std::string cache_hint_template;
@@ -9947,6 +9960,14 @@ bool CuteCodeGen::Visit(AST::Return& n) {
   } else if (auto sty = dyn_cast<SpannedType>(vty)) {
     if (auto id = AST::GetIdentifier(*n.value)) {
       auto sym = id->name;
+      // A declared span-array buffer has a different host shape than the
+      // single-span return type, so it cannot be returned as-is.
+      if (dyn_cast<SpannedArrayType>(GetSymbolType(sym))) {
+        Error1(n.LOC(),
+               "returning a span-array buffer is not supported; return a "
+               "single-span value instead.");
+        return false;
+      }
       if (IsChoreoInput(InScopeName(sym))) {
         // return the global storage, must map back
         hs << h_indent << "choreo::abend_true(cudaMemcpy(" << sym << ".data(), "

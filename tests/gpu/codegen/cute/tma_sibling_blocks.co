@@ -1,0 +1,22 @@
+// TMA descriptors are collected per parallel block; a second sibling block
+// reuses the descriptor list from index 0 instead of continuing the first
+// block's counter (which indexed past the second block's list).
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v '^ *//' | FileCheck %s
+
+__co__ void tma_sibling_blocks(global bf16[128, 128] q, global bf16[128, 128] r) {
+  parallel b by 1 : block {
+    shared bf16[128, 128] q_s;
+    load = tma.copy.async q => q_s;
+    wait load;
+  }
+  parallel b by 1 : block {
+    shared bf16[128, 128] r_s;
+    load2 = tma.copy.async r => r_s;
+    wait load2;
+  }
+}
+
+// CHECK: __choreo_device_tma_sibling_blocks0(
+// CHECK: __choreo_device_tma_sibling_blocks1(

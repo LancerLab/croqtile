@@ -1,0 +1,15 @@
+// A .view(...).from(...) on a TMA source contributes each coordinate to its
+// own tensor dimension; CUDA coordinate order is reversed (col, row).
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v '^ *//' | FileCheck %s
+
+__co__ void tma_view_from_coords(f32 [64, 32] x) {
+  parallel b by 1 : block {
+    shared f32 [64, 32] s;
+    load = tma.copy.async x.view(64, 32).from(5, 6) => s;
+    wait load;
+  }
+}
+
+// CHECK: tma_load_2d_shared_cta_global_mbarrier({{.*}}, 6, 5);

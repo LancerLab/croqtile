@@ -1,0 +1,14 @@
+// A declared span-array buffer cannot be returned: its host shape (all slots)
+// differs from the single-span return type.
+//
+// RUN: not choreo -es -t cute -arch=sm_86 %s 2>&1 | FileCheck %s
+
+__co__ auto return_span_array(f32 [8] x) {
+  global f32 [8] g[2];
+  parallel p by 1 : block {
+    dma.copy x => g[1];
+  }
+  return g;
+}
+
+// CHECK: error: returning a span-array buffer is not supported; return a single-span value instead.
