@@ -1,0 +1,13 @@
+// A batched DMA into a span-array slot must keep the slot base offset; the
+// per-batch sub-tensor adds the batch offset on top of the slot pointer.
+//
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - | grep -v '^ *//' | FileCheck %s
+
+__co__ void dma_batch_slot(global f16 [2, 64, 128] x) {
+  parallel p by 64 : thread {
+    shared f16 [2, 64, 64] a[2];
+    dma.copy x.view(2, 64, 64 : 8192, 128, 1) => a[1];
+  }
+}
+
+// CHECK: make_smem_ptr<f16>((f16*)(f16*)a + (1)*(8192) + __batch_i0 * 4096)

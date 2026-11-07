@@ -4441,7 +4441,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       auto f_data_shape = dma_plan->IsTiledDMA() ? dma_plan->GetBoxOfFrom()
                                                  : dma_plan->from_ca_shape;
       const auto t_pad_mds =
-          GenTensorDecl(RemoveSuffix(t_buf_name, ".data()"), t_buf_name,
+          GenTensorDecl(RemoveSuffix(t_buf_name, ".data()"), t_buf.second,
                         t_sty->GetStorage(), t_sty->ElementType(), f_data_shape,
                         false, pad_offset, ValueSTR(t_stride, false, true), {},
                         use_wgmma_layout_t, swizzle_mode);
@@ -4489,11 +4489,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         batch_t_off = t_off;
       } else {
         const auto f_sub = GenTensorDecl(
-            RemoveSuffix(f_buf_name, ".data()"), f_buf_name,
+            RemoveSuffix(f_buf_name, ".data()"), f_buf.second,
             f_sty->GetStorage(), f_sty->ElementType(), dma_plan->GetBoxOfFrom(),
             false, f_off, ValueSTR(f_stride, false, true), {}, false);
         const auto t_sub = GenTensorDecl(
-            RemoveSuffix(t_buf_name, ".data()"), t_buf_name,
+            RemoveSuffix(t_buf_name, ".data()"), t_buf.second,
             t_sty->GetStorage(), t_sty->ElementType(), dma_plan->GetBoxOfTo(),
             false, t_off, ValueSTR(t_stride, false, true), {},
             use_wgmma_layout_t, swizzle_mode);
@@ -4818,6 +4818,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       // so TMA fills all rows of group 0 before group 1 (atom-major
       // layout matching WGMMA B128 expectations).
       // Coordinate order: [inner%swiz, outer, inner/swiz]
+      // The issue path below reads at least two coordinates; a rank-1 tile
+      // cannot be described by it (and the split would inflate rev_indices,
+      // hiding the rank problem).
+      if (t_shape.Rank() < 2) {
+        Error1(n.LOC(), "TMA copy requires a tile with at least 2 dimensions.");
+        rev_indices.resize(2, sbe::nu(0));
+      }
       bool tma_has_inner_split = false;
       if (tma_idx >= 0) {
         auto split_it = tma_inner_splits_.find(tma_descs[tma_idx].GetName());
@@ -4834,6 +4841,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       }
       size_t effective_tma_rank =
           tma_has_inner_split ? t_shape.Rank() + 1 : t_shape.Rank();
+      if (effective_tma_rank > 3) {
+        Error1(n.LOC(),
+               "TMA copy supports at most 3 tile dimensions (got " +
+                   std::to_string(effective_tma_rank) + ").");
+      }
 
       bool is_multicast_tma = n.IsMulticast() && n.IsTMA();
       bool emit_tma_single_guard =

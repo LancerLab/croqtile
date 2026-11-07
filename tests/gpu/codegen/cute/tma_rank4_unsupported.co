@@ -1,0 +1,15 @@
+// The TMA issuer handles up to 3 tile dimensions; a rank-4 (or rank-3
+// swizzle-split) copy is diagnosed instead of issuing a 2-D instruction
+// against a higher-rank tensor map.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+__co__ void tma_rank4(global bf16 [2, 128, 128] x) {
+  parallel p by 32 : block {
+    load = tma.copy.async.swiz<128> x => shared;
+    wait load;
+  }
+}
+
+// CHECK: error: TMA copy supports at most 3 tile dimensions (got 4).

@@ -1,6 +1,6 @@
-// The 2-D TMA issue path reads two coordinates, so a rank-1 tile (a
-// rank-reducing view) is diagnosed instead of aborting on an out-of-range
-// coordinate lookup.
+// The 2-D TMA issue path reads at least two coordinates, so a rank-1 tile is
+// diagnosed -- both for a plain tile and when the host-side swizzle split
+// would otherwise inflate the coordinate list.
 //
 // REQUIRES: TARGET-SM_90A
 // RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
@@ -8,6 +8,13 @@
 __co__ void tma_rank1_view(f32 [64, 32] x) {
   parallel b by 1 : block {
     load = tma.copy.async x.view(64).from(5, 0) => shared;
+    wait load;
+  }
+}
+
+__co__ void tma_rank1_split(global f32 [128, 128] x) {
+  parallel b by 1 : block {
+    load = tma.copy.async.swiz<128> x.view(128) => shared;
     wait load;
   }
 }
