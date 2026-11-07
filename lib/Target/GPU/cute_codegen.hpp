@@ -300,6 +300,10 @@ private:
   };
   std::map<std::string, NamedEventLowering> named_event_lowerings_;
   std::deque<int> available_named_barrier_ids_;
+  // F4.1: lowest id the named-event pool may use; ids [8, lowest) are reserved
+  // for per-warpgroup group syncs (see EmitGroupX4Sync). 8 means no
+  // reservation. Set per function by InitializeNamedEventLowering.
+  int lowest_event_barrier_id_ = 8;
   std::set<std::string> cluster_trigger_events_;
   std::set<std::string> ready_event_names_;
   std::set<std::string> waited_events_;
