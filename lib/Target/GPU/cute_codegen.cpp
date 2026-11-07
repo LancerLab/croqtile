@@ -435,6 +435,8 @@ std::string CuteCodeGen::ArraySlotOffsetExpr(
   if (subs.empty()) return "0";
   const ValueList& dims = array_ty->Dimensions();
   assert(subs.size() <= dims.size());
+  // Over-subscription is diagnosed elsewhere; keep release builds in bounds.
+  if (subs.size() > dims.size()) return "0";
   std::string idx;
   for (size_t i = 0; i < subs.size(); ++i) {
     if (idx.empty())
@@ -2454,10 +2456,17 @@ bool CuteCodeGen::Visit(AST::FunctionDecl& n) {
       hs << h_indent << "__choreo_check_cuda_environment__();\n";
 
   // name the symbolic dimensions for better readability
-  for (auto item : symbolic_dimensions) {
-    hs << h_indent << "auto &" << UnScopedName(item.first) << " = "
-       << item.second.hsd_expr << ";\n";
-    ssm.MapHostSymbol(item.first, UnScopedName(item.first));
+  {
+    std::unordered_set<std::string> host_params;
+    for (const auto& item : GetChoreoFuncIns(cgi))
+      host_params.insert(UnScopedName(item.name));
+    for (auto item : symbolic_dimensions) {
+      // A symbolic dimension that is itself a parameter needs no binding.
+      if (host_params.count(UnScopedName(item.first))) continue;
+      hs << h_indent << "auto &" << UnScopedName(item.first) << " = "
+         << item.second.hsd_expr << ";\n";
+      ssm.MapHostSymbol(item.first, UnScopedName(item.first));
+    }
   }
 
   // emit the runtime checks
@@ -3841,6 +3850,7 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     std::vector<std::string> kernel_arg_refs;
     {
       std::unordered_set<std::string> seen_iv_params;
+      std::unordered_set<std::string> seen_params;
       for (auto& item : GetDeviceFuncIns(updating_cgi)) {
         auto sname = item.name;
         if (isa<SpannedType>(item.type)) sname += "__device";
@@ -3850,13 +3860,19 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
         if (item.need_iv_prefix &&
             !seen_iv_params.insert("__iv_" + UnScopedName(item.name)).second)
           continue;
-        if (ssm.HasHostName(sname))
+        if (ssm.HasHostName(sname)) {
           kernel_arg_refs.push_back(ssm.HostName(sname));
-        else
+          seen_params.insert(UnScopedName(ssm.HostName(sname)));
+        } else {
           kernel_arg_refs.push_back(UnScopedName(ssm.DeviceName(sname)));
+          seen_params.insert(UnScopedName(ssm.DeviceName(sname)));
+        }
       }
-      for (auto item : symbolic_dimensions)
+      for (auto item : symbolic_dimensions) {
+        // A symbolic dimension that is itself a parameter needs no extra arg.
+        if (seen_params.count(UnScopedName(item.first))) continue;
         kernel_arg_refs.push_back(UnScopedName(item.first));
+      }
       if (const auto& mri = FCtx(fname).GetDynMemReuseInfo(SSTab().ScopeName()))
         for (const auto& [sto, ie] : mri->infos)
           for (size_t idx = 0; idx < ie.offset_args.size(); ++idx)
@@ -7365,16 +7381,29 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           std::string ref_sym = op.LoadFrom()->RefSymbol();
           if (!ref_sym.empty()) {
             auto mdata_sym_name = ref_sym + "_mdata";
+            auto mdata_base = [&](const std::string& name) {
+              std::string base = name;
+              // The metadata buffer may be a span array indexed like the A
+              // operand; fold the operand's slot into its base.
+              if (auto lca = op.LoadFrom(); lca && lca->indices &&
+                  !lca->indices->AllValues().empty()) {
+                AppendArraySlotOffset(base, mdata_sym_name, lca->indices,
+                                      false);
+                base = "(" + base + ")";
+              }
+              return base;
+            };
             if (SSTab().IsDeclared(mdata_sym_name)) {
               auto mdata_key = InScopeName(mdata_sym_name) + ".data";
               if (ssm.HasDeviceName(mdata_key)) {
                 ds << d_indent << "uint8_t* " << sym
-                   << "_mdata_ptr = (uint8_t*)" << ssm.DeviceName(mdata_key)
-                   << ";\n";
+                   << "_mdata_ptr = (uint8_t*)"
+                   << mdata_base(ssm.DeviceName(mdata_key)) << ";\n";
               } else if (ssm.HasDeviceName(InScopeName(mdata_sym_name))) {
                 ds << d_indent << "uint8_t* " << sym
                    << "_mdata_ptr = (uint8_t*)"
-                   << ssm.DeviceName(InScopeName(mdata_sym_name)) << ";\n";
+                   << mdata_base(ssm.DeviceName(InScopeName(mdata_sym_name)))
+                   << ";\n";
               }
             } else if (isa<FutureType>(GetSymbolType(ref_sym))) {
               ds << d_indent << "uint8_t* " << sym << "_mdata_ptr = (uint8_t*)"
@@ -10888,6 +10917,7 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
 
   size_t index = 0;
   std::unordered_set<std::string> seen_iv_params;
+  std::unordered_set<std::string> seen_params;
   for (auto& item : GetDeviceFuncIns(updating_cgi)) {
     if (!PrefixedWith(scoped_symtab.ScopeName(), GetScope(item.name))) continue;
     auto dname = (item.need_iv_prefix ? "__iv_" : "") + UnScopedName(item.name);
@@ -10896,10 +10926,13 @@ void CuteCodeGen::EmitDeviceFuncDecl(std::ostringstream& oss,
     if (item.need_iv_prefix && !seen_iv_params.insert(dname).second) continue;
     if (index++ > 0) oss << ", ";
     oss << DeviceParamTypeStringify(item.type) << " " << dname;
+    seen_params.insert(dname);
     ssm.MapDeviceSymbolIfNotExist(item.name, dname);
   }
 
   for (auto item : symbolic_dimensions) {
+    // A symbolic dimension that is itself a parameter needs no extra param.
+    if (seen_params.count(UnScopedName(item.first))) continue;
     oss << ((index++ > 0) ? ", unsigned " : "unsigned ");
     oss << UnScopedName(item.first);
     ssm.MapDeviceSymbolIfNotExist(item.first, UnScopedName(item.first));

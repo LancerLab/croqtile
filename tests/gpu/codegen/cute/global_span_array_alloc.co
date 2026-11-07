@@ -41,7 +41,12 @@ __co__ void global_dyn_slots(int n, f32 [4, n] x) {
 // returned with the single-span shape.
 // CHECK: make_spandata<choreo::f32, 1>({8})
 // CHECK: return g;
+// A symbolic dimension that is also a parameter is not re-emitted as an
+// extra kernel parameter (duplicate names do not compile).
+// CHECK: __global__ void __choreo_device_global_dyn_slots(int n, float * x, float * g)
+// CHECK-NOT: unsigned n
 // Dynamic declarations keep the runtime size arithmetic 64-bit (the slot
 // byte expression carries ULL literals from the shape).
 // CHECK: cudaMalloc(&g__device, (((n * 4ULL)) * 4) * (2))
 // CHECK: cudaMemcpy(g__device, g.data(), (((n * 4ULL)) * 4) * (2), cudaMemcpyHostToDevice)
+// CHECK: __choreo_device_global_dyn_slots{{.*}}>>>(n, x__device, g__device)
