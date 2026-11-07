@@ -1,0 +1,26 @@
+// A span-array declaration initializes every slot (not just slot 0) at the
+// declaration's slot stride, which follows the emitted layout: packed for a
+// regular C++ array, physical (alignas-padded) for aligned slots. The
+// initial value is evaluated once and each slot is filled through a hoisted
+// base pointer.
+//
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - | grep -v '^ *//' | FileCheck %s --check-prefix=DEFAULT
+// RUN: choreo -es -t cute -arch=sm_86 --mem-reuse=false %s -o - | grep -v '^ *//' | FileCheck %s --check-prefix=NOMEM
+
+__co__ void init_span_arrays(f32 [8] x) {
+  parallel p by 1 : block {
+    shared f32 [8] s[2] {1.0f};
+    alignas(256) shared f32 [8] t[2] {1.0f};
+    dma.copy x => s[1];
+    dma.copy x => t[1];
+  }
+}
+
+// DEFAULT: const float __init = 1.000000f;
+// DEFAULT: float* __p = ((float*)(s)) + __slot * (8);
+// DEFAULT: __p[i] = __init;
+// DEFAULT: float* __p = ((float*)(t)) + __slot * (64);
+// NOMEM: __shared__ float s[2][8];
+// NOMEM: float* __p = ((float*)(s)) + __slot * (8);
+// NOMEM: __shared__ alignas(256) float t[2][64];
+// NOMEM: float* __p = ((float*)(t)) + __slot * (64);

@@ -2689,6 +2689,14 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
 
     bool spmem = false; // allocatable scratchpad memory: share, local
 
+    // One slot occupies this many elements; the same value sizes the
+    // declaration, addresses its slots and drives initialization.
+    auto SlotElemExpr = [&]() -> std::string {
+      if (auto sat = dyn_cast<SpannedArrayType>(nty))
+        return ValueSTR(SlotStrideElementsValue(sat));
+      return ElemCountExprOf(*sty);
+    };
+
     auto HandleGlobal = [&]() -> void {
       bts = NameBaseType(sty->ElementType()); // use the device type name
 
@@ -2793,14 +2801,6 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       std::string alignment_specifier;
       if (n.HasNote("alignment"))
         alignment_specifier = "alignas(" + n.GetNote("alignment") + ") ";
-
-      // One slot occupies this many elements; the same value sizes the
-      // declaration and addresses its slots.
-      auto SlotElemExpr = [&]() -> std::string {
-        if (auto sat = dyn_cast<SpannedArrayType>(nty))
-          return ValueSTR(SlotStrideElementsValue(sat));
-        return ElemCountExprOf(*sty);
-      };
 
       if (!CCtx().MemReuse()) {
         if (n.HasNote("ref"))
@@ -2968,9 +2968,28 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         IncrDeviceIndent();
       }
       auto ec = sty->GetShape().ElementCountValue();
-      if (ec == sbe::nu(1))
-        ds << d_indent << sym << " = " << ExprSTR(n.init_value) << ";\n";
-      else {
+      if (auto sat = dyn_cast<SpannedArrayType>(nty)) {
+        // Every slot of the declaration is initialized; the slot stride
+        // follows the declaration (physical for pooled/aligned slots).
+        const std::string slot_count = ValueSTR(sat->ElemCount());
+        const std::string slot_stride = SlotElemExpr();
+        ds << d_indent << "const " << bts << " __init = "
+           << ExprSTR(n.init_value) << ";\n";
+        ds << d_indent << "for (int __slot = 0; __slot < " << slot_count
+           << "; ++__slot) {\n";
+        IncrDeviceIndent();
+        ds << d_indent << bts << "* __p = ((" << bts << "*)(" << sym
+           << ")) + __slot * (" << slot_stride << ");\n";
+        ds << d_indent << "for (int i = 0; i < " << ValueSTR(ec)
+           << "; ++i)\n";
+        ds << d_indent << "  __p[i] = __init;\n";
+        DecrDeviceIndent();
+        ds << d_indent << "}\n";
+      } else if (ec == sbe::nu(1)) {
+        // Single-element span: index the declaration (an array or pointer)
+        // instead of assigning to it, which is ill-typed for a C array.
+        ds << d_indent << sym << "[0] = " << ExprSTR(n.init_value) << ";\n";
+      } else {
         ds << d_indent << "for (int i = 0; i < " << ValueSTR(ec) << "; ++i) ";
         ds << sym << "[i] = " << ExprSTR(n.init_value) << ";\n";
       }
