@@ -130,3 +130,28 @@ __co__ void tma_view_rank2_stride(global f32 [64, 64] x) {
 }
 
 // CHECK: error: TMA view layout does not match the flattened tensor map
+
+// A shadowed parameter takes the non-global TMA branch; an explicit-stride
+// view that ignores the source row stride must be diagnosed there too.
+__co__ void tma_view_shadow_stride(f32 [64, 64] x) {
+  parallel b by 1 : block {
+    load = tma.copy.async x.view(32, 32: 2, 1) => shared;
+    wait load;
+  }
+}
+
+// CHECK: error: TMA view layout does not match the flattened tensor map
+
+// A returned function-local global takes the Choreo-output branch; an
+// explicit-stride view on the store destination must be validated too.
+__co__ auto tma_view_store_local_stride(f32 [64, 64] x) {
+  global f32 [64, 64] out;
+  parallel b by 1 : block {
+    shared f32 [32, 32] s;
+    dma.copy x => out;
+    tma.copy s => out.view(32, 32: 2, 1);
+  }
+  return out;
+}
+
+// CHECK: error: TMA view layout does not match the flattened tensor map

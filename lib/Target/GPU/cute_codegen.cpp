@@ -10822,6 +10822,8 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
         base_expr = SSMName((g_unscoped + "__device"), true);
       else
         base_expr = SSMName(InScopeName(g_unscoped) + "__device", true);
+      if (has_view && host_rank >= 2)
+        CheckViewStrides(g_shape.ValueAt(g_shape.Rank() - 1));
       std::vector<ValueItem> byte_strides;
       for (size_t i = 0; i < host_stride.Rank(); ++i)
         byte_strides.push_back(host_stride.ValueAt(i) *
