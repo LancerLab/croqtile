@@ -17,5 +17,13 @@ __co__ void dma_copy_size_mismatch_product(int M) {
   dma.copy src => dst;
 }
 
+// Different structural bases can still have a single-monomial difference.
+__co__ void dma_copy_size_mismatch_monomial(int M) {
+  global f32 [M] src[3];
+  global f32 [M] dst[2];
+  dma.copy src => dst;
+}
+
 // CHECK: error: DMA statement has a size mismatch between 'from' and 'to': {{.*}}M != {{.*}}M + 1
 // CHECK: error: DMA statement has a size mismatch between 'from' and 'to': {{.*}}dma_copy_size_mismatch_product::M * 3) != {{.*}}dma_copy_size_mismatch_product::M + 1) * 3)
+// CHECK: error: DMA statement has a size mismatch between 'from' and 'to': {{.*}}dma_copy_size_mismatch_monomial::M * 3) != {{.*}}dma_copy_size_mismatch_monomial::M * 2)

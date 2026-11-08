@@ -1710,6 +1710,58 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
       return {norm, 0};
     };
 
+    struct Monomial {
+      std::vector<std::string> factors;
+      bool operator<(const Monomial& other) const {
+        return factors < other.factors;
+      }
+    };
+    using MonomialSum = std::map<Monomial, int64_t>;
+    std::function<std::optional<MonomialSum>(const ValueItem&)>
+        to_monomial_sum = [&](const ValueItem& total)
+        -> std::optional<MonomialSum> {
+      auto norm = total->Normalize();
+      if (auto value = dyn_cast<sbe::NumericValue>(norm)) {
+        MonomialSum sum;
+        if (value->Value() != 0) sum[Monomial{}] = value->Value();
+        return sum;
+      }
+      if (auto symbol = dyn_cast<sbe::SymbolicValue>(norm))
+        return MonomialSum{{Monomial{{symbol->Value()}}, 1}};
+      auto op = dyn_cast<sbe::BinaryOperation>(norm);
+      if (!op) return std::nullopt;
+      auto opcode = op->GetOpCode();
+      if (opcode != OpCode::ADD && opcode != OpCode::SUBTRACT &&
+          opcode != OpCode::MULTIPLY)
+        return std::nullopt;
+      auto lhs = to_monomial_sum(op->GetLeft());
+      auto rhs = to_monomial_sum(op->GetRight());
+      if (!lhs || !rhs) return std::nullopt;
+      if (opcode == OpCode::MULTIPLY) {
+        if (lhs->empty() || rhs->empty()) return MonomialSum{};
+        if (lhs->size() != 1 || rhs->size() != 1) return std::nullopt;
+        auto [lmono, lcoeff] = *lhs->begin();
+        auto [rmono, rcoeff] = *rhs->begin();
+        auto factors = lmono.factors;
+        factors.insert(factors.end(), rmono.factors.begin(),
+                       rmono.factors.end());
+        std::sort(factors.begin(), factors.end());
+        return MonomialSum{{Monomial{factors}, lcoeff * rcoeff}};
+      }
+      auto sum = *lhs;
+      int64_t sign = opcode == OpCode::SUBTRACT ? -1 : 1;
+      for (const auto& [mono, coeff] : *rhs) {
+        auto it = sum.find(mono);
+        int64_t value = (it == sum.end() ? 0 : it->second) + sign * coeff;
+        if (value == 0) {
+          if (it != sum.end()) sum.erase(it);
+        } else {
+          sum[mono] = value;
+        }
+      }
+      return sum;
+    };
+
     auto src_total = total_elems(n.from, fty);
     auto dst_total = total_elems(n.to, tty);
     if (src_total && dst_total) {
@@ -1724,6 +1776,13 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
         auto dst_offset = additive_base_offset(dst_canon);
         mismatch = *src_offset.first == *dst_offset.first &&
                    src_offset.second != dst_offset.second;
+      }
+      if (!equal.has_value() && !mismatch) {
+        // A difference that is a single monomial cannot be zero for positive
+        // extents. A difference with several monomials stays undecidable.
+        auto diff = to_monomial_sum(
+            sbe::bop(OpCode::SUBTRACT, src_canon, dst_canon)->Normalize());
+        mismatch = diff && diff->size() == 1;
       }
       if (mismatch) {
         AgentFacts facts;
