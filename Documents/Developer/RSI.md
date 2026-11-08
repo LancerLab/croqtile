@@ -137,7 +137,7 @@ The same loop is implemented as a Piano workflow in the `piano` repository:
 `loop rounds[ propose → implement → verify ]` with a serial round, up to 100
 rounds by default (lower it for a short trial). Each round proposes one lit-verifiable change, implements it in the
 shared checkout, then builds and runs the lit suites there; a failing round is
-restored exactly to its pre-round files. The gemm_sp end-to-end kernel
+restored exactly to its pre-round files. If a campaign is interrupted, resume the same run instead of starting a new one: `piano -p --json --resume <run-id> "continue"` (headless continue) reloads the run's recorded workflow and continues its latest job from the accepted cursor. The gemm_sp end-to-end kernel
 (`tests/gpu/end2end/gemm_sp.co`, not the whole e2e directory) runs in the
 round only when a GPU is idle (utilization 0, low memory; polled every 30 s
 with a bound), pinned with `CUDA_VISIBLE_DEVICES`, and never while another
