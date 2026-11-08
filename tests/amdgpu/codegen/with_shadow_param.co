@@ -1,0 +1,34 @@
+// A `with` source or matcher that shadows a function parameter must resolve to
+// the with's canonical iteration variable, not to the parameter.
+//
+// RUN: choreo -es -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ void with_shadow_param(f32 [64] x) {
+  parallel p by 1 : block {
+    with index = {x} in [2] {
+      foreach index {
+        println(x);
+      }
+    }
+  }
+}
+
+__co__ void with_shadow_source(f32 [64] index) {
+  parallel p by 1 : block {
+    with index = {x} in [2] {
+      foreach index {
+        println(index);
+      }
+    }
+  }
+}
+
+// CHECK-LABEL: __global__ void __choreo_device_with_shadow_param
+// CHECK: for (int __iv_index = 0; __iv_index < 2; ++__iv_index)
+// CHECK-NOT: printf(x)
+// CHECK: printf(__iv_index)
+
+// CHECK-LABEL: __global__ void __choreo_device_with_shadow_source
+// CHECK: for (int __iv_index = 0; __iv_index < 2; ++__iv_index)
+// CHECK-NOT: printf(index)
+// CHECK: printf(__iv_index)

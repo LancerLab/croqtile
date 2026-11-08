@@ -279,11 +279,21 @@ bool HIPCodeGen::Visit(AST::WithIn& n) {
   if (n.with)
     ssm.MapDeviceSymbol(InScopeName(n.with->name), "__iv_" + n.with->name);
 
+  // Resolve the source and matcher names to this with scope in the live
+  // scoped table; otherwise InScopeNameForRef falls back to an enclosing
+  // symbol of the same name (e.g. a kernel parameter).
+  DeclareWithSymbols(n);
+
   // A single-matcher `with` source (e.g. the desugared `foreach j in [N]`)
   // is scalar: keep the source mapped to its canonical `__iv_<source>` IV and
   // skip the synthetic matcher initializer; the foreach emits the loop
-  // directly over `__iv_<source>`.
-  if (has_scalar_matcher) return true;
+  // directly over `__iv_<source>`. The matcher must resolve to the same IV.
+  if (has_scalar_matcher) {
+    auto m = cast<AST::Identifier>(n.GetMatchers()[0]);
+    ssm.RemapDeviceSymbol(InScopeName(m->name), "__iv_" + n.with->name);
+    ssm.RemapHostSymbol(InScopeName(m->name), "__iv_" + n.with->name);
+    return true;
+  }
 
   for (auto& v : n.GetMatchers()) {
     auto id = cast<AST::Identifier>(v);
