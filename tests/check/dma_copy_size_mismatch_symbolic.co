@@ -1,0 +1,12 @@
+// A symbolic total is rejected when the size check can prove the two sides
+// unequal; independent extents remain undecidable and are accepted.
+//
+// RUN: not choreo -es -t cc %s 2>&1 | FileCheck %s
+
+__co__ void dma_copy_size_mismatch_symbolic(int M) {
+  global f32 [M] src;
+  global f32 [M + 1] dst;
+  dma.copy src => dst;
+}
+
+// CHECK: error: DMA statement has a size mismatch between 'from' and 'to': {{.*}}M != {{.*}}M + 1
