@@ -134,16 +134,18 @@ F. 输出（简洁中文）
 
 The same loop is implemented as a Piano workflow in the `piano` repository:
 `recipes/workflows/croqtile-dev-loop.yml` (and its `-dsh` twin) runs
-`loop rounds[ propose → implement → verify ]` with a serial round, 2 rounds by
-default. Each round proposes one lit-verifiable change, implements it in the
+`loop rounds[ propose → implement → verify ]` with a serial round, up to 100
+rounds by default (lower it for a short trial). Each round proposes one lit-verifiable change, implements it in the
 shared checkout, then builds and runs the lit suites there; a failing round is
-restored exactly to its pre-round files. The end-to-end suite runs in the
+restored exactly to its pre-round files. The gemm_sp end-to-end kernel
+(`tests/gpu/end2end/gemm_sp.co`, not the whole e2e directory) runs in the
 round only when a GPU is idle (utilization 0, low memory; polled every 30 s
 with a bound), pinned with `CUDA_VISIBLE_DEVICES`, and never while another
 suite or benchmark runs. The verify stage then commits the round with a
-descriptive English message before the engine's loop auto-commit, which finds
-nothing left and logs a no-op — every round is a durable, self-describing
-commit. There is no tournament: the engine's review-score referee is not a
+descriptive English message and pushes the branch before the engine's loop
+auto-commit, which finds nothing left and logs a no-op — every round is a
+durable, self-describing, pushed commit (a failed push keeps the local commit
+and is reported, never force-pushed). There is no tournament: the engine's review-score referee is not a
 measurement comparable across rounds. Scope is compiler changes whose
 evidence is a build plus lit tests; kernel tuning stays in the
 `gpu-croqtile-tuning` workflows.
