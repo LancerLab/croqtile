@@ -1,0 +1,50 @@
+// REQUIRES: TARGET-GPU
+// RUN: env CHOREO_SYNC_RECOVERY=1 CHOREO_SYNC_RECOVERY_KEEP=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>/dev/null | FileCheck --check-prefix=KEEP %s
+// RUN: env CHOREO_SYNC_RECOVERY=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>&1 | FileCheck --check-prefix=ELIDE %s
+//
+// Cross-block availability: the source wait on the draining copy sits in the
+// enclosing statement list, one block above the handover trigger. It executes
+// whenever the nested trigger does, so the availability fold reaches it and
+// removes the queued drain (ELIDE run). KEEP=1 shows raw synthesis: the drain
+// is placed inside the conditional, immediately before the trigger.
+
+// KEEP: f.wait();
+// KEEP: cde::cp_async_bulk_wait_group_read<0>();
+// KEEP-NEXT: (void)sig.arrive();
+
+// ELIDE-DAG: [sync-recovery] elide AST::CompletionWait (source wait on the draining copy)
+// ELIDE: f.wait();
+// ELIDE-NOT: cde::cp_async_bulk_wait_group_read<0>()
+// ELIDE: (void)sig.arrive();
+
+__co__ s32 [1, 16] reuse_xblock(s32 [1, 16] src) {
+  s32 [1, 16] out;
+
+  parallel p by 1 : block {
+    parallel q by 2 : group-4 {
+      shared event sig;
+
+      inthreads.async (q == 1) {
+        shared s32 [1, 16] y;
+        f = tma.copy.async y => out;
+        wait f;
+        if (src.at(0, 0) > 0) {
+          trigger sig;
+        }
+      }
+
+      inthreads.async (q == 0) {
+        wait sig;
+        shared s32 [1, 16] x;
+        x.at(0, 0) = src.at(0, 0);
+        out.at(0, 1) = x.at(0, 0);
+      }
+
+      sync.barrier : block;
+    }
+  }
+
+  return out;
+}
+
+int main() { return 0; }

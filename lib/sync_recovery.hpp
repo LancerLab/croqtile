@@ -3,6 +3,7 @@
 
 #include <map>
 #include <set>
+#include <vector>
 
 #include "visitor.hpp"
 
@@ -41,6 +42,11 @@ private:
   std::map<const AST::Node*, std::vector<PendingInsert>> pending_inserts_;
   // Preorder index of every statement, from the liveness analyzer.
   std::map<const AST::Node*, int> preorder_index_;
+  // Node ancestry during the splice traversal. At Visit(MultiNodes) time the
+  // top of the stack is the list being spliced and the entries below it are
+  // its ancestors, which makes the ancestor-list prefixes available as
+  // must-dominating cover sites above the enclosing statement.
+  std::vector<AST::Node*> visit_stack_;
   size_t inserted_fences_ = 0;
   size_t inserted_waits_ = 0;
   size_t elided_fences_ = 0;
@@ -74,10 +80,25 @@ private:
   void Eliminate(std::vector<PendingInsert>& inserts, const AST::MultiNodes& n,
                  size_t anchor_idx);
 
-  // RunOnProgramImpl skips the traversal entirely; these exist only to
-  // satisfy the abstract base.
-  bool BeforeVisitImpl(AST::Node&) override { return true; }
-  bool AfterVisitImpl(AST::Node&) override { return true; }
+  // Maintain the ancestry stack used by the elimination fold. A few accept()
+  // implementations emit BeforeVisit without AfterVisit (Expr and its
+  // subclasses, AttributeExpr, DeviceFunctionDecl); keeping those off the
+  // stack preserves its balance.
+  static bool TracksAncestry(AST::Node& n) {
+    return !isa<AST::Expr>(&n) && !isa<AST::AttributeExpr>(&n) &&
+           !isa<AST::DeviceFunctionDecl>(&n);
+  }
+  bool BeforeVisitImpl(AST::Node& n) override {
+    if (TracksAncestry(n)) visit_stack_.push_back(&n);
+    return true;
+  }
+  bool AfterVisitImpl(AST::Node& n) override {
+    if (!TracksAncestry(n)) return true;
+    assert(!visit_stack_.empty() && visit_stack_.back() == &n &&
+           "unbalanced ancestry stack");
+    visit_stack_.pop_back();
+    return true;
+  }
 };
 
 } // end namespace Choreo
