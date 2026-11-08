@@ -361,6 +361,13 @@ std::pair<ValueItem, ValueItem> GetMmaLoadExpectedDims(const MMAInfo& ssmi) {
   return {mma_m, mma_k};
 }
 
+bool IsSingleColumnMetadata(const SpannedType& sty) {
+  if (sty.Dims() < 2) return false;
+  if (auto meta_cols = VIInt(sty.GetShape().ValueAt(1)))
+    return *meta_cols == 1;
+  return false;
+}
+
 MmaLoadShapeWarningKind
 GetMmaLoadShapeWarningKind(const MMAInfo& ssmi,
                            const ptr<SpannedType>& parent_ty) {
@@ -5622,21 +5629,15 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         // the metadata layout parameters (strides, single-column form) come
         // from the buffer the metadata was actually resolved from.
         bool prepack_single_col = false;
-        auto single_col = [](const SpannedType& sty) {
-          if (sty.Dims() < 2) return false;
-          if (auto meta_cols = VIInt(sty.GetShape().ValueAt(1)))
-            return *meta_cols == 1;
-          return false;
-        };
         if (!prepackInfo.resolved_sym.empty() &&
             prepackInfo.resolved_sym != ref_sym) {
           if (auto meta_sty = dyn_cast<SpannedType>(
                   GetSymbolType(prepackInfo.resolved_sym))) {
             strides = meta_sty->GetStrides();
-            prepack_single_col = single_col(*meta_sty);
+            prepack_single_col = IsSingleColumnMetadata(*meta_sty);
           }
         } else if (load_from_sty) {
-          prepack_single_col = single_col(*load_from_sty);
+          prepack_single_col = IsSingleColumnMetadata(*load_from_sty);
         }
         if (strides.size() < 2) {
           Error1(n.LOC(), "sparse metadata must be at least 2-dimensional.");
@@ -5935,6 +5936,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             // resolved metadata type is available.
             std::string row_stride = "128";
             std::string col_stride = "1";
+            bool prepack_single_col = false;
             if (!prepackInfo.resolved_sym.empty()) {
               if (auto meta_sty = dyn_cast<SpannedType>(
                       GetSymbolType(prepackInfo.resolved_sym))) {
@@ -5943,20 +5945,30 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                   row_stride = ValueSTR(strides.at(0));
                   col_stride = ValueSTR(strides.at(1));
                 }
+                prepack_single_col = IsSingleColumnMetadata(*meta_sty);
               }
             }
             ds << d_indent << meta_ty << " " << meta_var << " = 0;\n";
             ds << d_indent << "{\n";
             ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
-            std::string k_idx_expr, warp_idx_expr;
-            if (PrepackedMetadataIndexExprs(n.LOC(), k_idx_expr,
-                                            warp_idx_expr)) {
+            if (prepack_single_col) {
               if (v2_mode_exec)
-                emitPrepackedV2Snippet(meta_var, meta_device, row_stride,
-                                       col_stride, k_idx_expr, warp_idx_expr);
+                emitPrepackedV2TileLoadSnippet(meta_var, meta_device,
+                                               meta_device, row_stride, "0");
               else
-                emitPrepackedU32Snippet(meta_var, meta_device, row_stride,
-                                        col_stride, k_idx_expr, warp_idx_expr);
+                emitPrepackedU32TileLoadSnippet(meta_var, meta_device,
+                                                row_stride);
+            } else {
+              std::string k_idx_expr, warp_idx_expr;
+              if (PrepackedMetadataIndexExprs(n.LOC(), k_idx_expr,
+                                              warp_idx_expr)) {
+                if (v2_mode_exec)
+                  emitPrepackedV2Snippet(meta_var, meta_device, row_stride,
+                                         col_stride, k_idx_expr, warp_idx_expr);
+                else
+                  emitPrepackedU32Snippet(meta_var, meta_device, row_stride,
+                                          col_stride, k_idx_expr, warp_idx_expr);
+              }
             }
             ds << d_indent << "}\n";
           }
