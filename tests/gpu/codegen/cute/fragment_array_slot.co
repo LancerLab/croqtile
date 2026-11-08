@@ -34,3 +34,20 @@ __co__ auto fragment_array_call() {
 
 // CHECK-LABEL: __choreo_device_fragment_array_call
 // CHECK: consume_fragment({{.*}}mc + (2)*(8));
+
+// A whole-array copy must transfer every slot, not just the first one.
+__co__ auto fragment_array_copy() {
+  parallel p by 32 : thread {
+    frag f32 [16, 16] a[2] {1.0f};
+    frag f32 [16, 16] b[2] {0.0f};
+    copy(b, a);
+  }
+  return 0;
+}
+
+// CHECK-LABEL: __choreo_device_fragment_array_copy
+// CHECK: { // frag.copy
+// CHECK-NEXT: #pragma unroll
+// CHECK-NEXT: for (int __r = 0; __r < 16; ++__r)
+// CHECK-NEXT: b[__r] = a[__r];
+// CHECK: } // frag.copy

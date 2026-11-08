@@ -9968,8 +9968,15 @@ bool CuteCodeGen::Visit(AST::FragTransfer& n) {
   } else {
     // Plain transfer (no lambda)
     if (n.op == AST::FragTransferKind::COPY) {
+      // A fragment array holds one slot of regs_per_thread registers per
+      // element; a whole-array copy must cover every slot.
+      size_t copy_regs = regs;
+      if (auto sat = dyn_cast<SpannedArrayType>(GetSymbolType(frag_name))) {
+        if (auto cnt = VIInt(sat->ElemCount()))
+          copy_regs *= static_cast<size_t>(*cnt);
+      }
       IndStream() << "#pragma unroll\n";
-      IndStream() << "for (int __r = 0; __r < " << regs << "; ++__r)\n";
+      IndStream() << "for (int __r = 0; __r < " << copy_regs << "; ++__r)\n";
       IncrIndent();
       IndStream() << dst_sym << "[__r] = " << src_sym << "[__r];\n";
       DecrIndent();
