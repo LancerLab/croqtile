@@ -3098,7 +3098,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         ds << d_indent << "  __p[__e] = " << init_name << ";\n";
         DecrDeviceIndent();
         ds << d_indent << "}\n";
-      } else if (ec == sbe::nu(1)) {
+      } else if (sbe::ceq(ec, sbe::nu(1))) {
         // Single-element span: index the declaration (an array or pointer)
         // instead of assigning to it, which is ill-typed for a C array.
         ds << d_indent << sym << "[0] = " << InitValueSTR() << ";\n";

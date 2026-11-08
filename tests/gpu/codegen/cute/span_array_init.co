@@ -48,3 +48,23 @@ __co__ void init_fp8_scalar_span(f8_e4m3 [8] x) {
 }
 
 // DEFAULT: for (int __e = 0; __e < 8; ++__e) s[__e] = choreo::utils::from_f32<f8_e4m3>(1.000000f);
+
+// A single-element span is assigned directly (indexed) instead of taking the
+// fill loop.
+__co__ void init_one_element(global f32 [1] x) {
+  parallel p by 1 : block {
+    shared f32 [1] s {1.0f};
+    dma.copy x => s;
+  }
+}
+
+__co__ void init_one_fp8(global f8_e4m3 [1] x) {
+  parallel p by 1 : block {
+    shared f8_e4m3 [1] s {1.0f};
+    dma.copy x => s;
+  }
+}
+
+// CHECK-NOT: for (int __e = 0; __e < 1; ++__e)
+// DEFAULT: s[0] = 1.000000f;
+// DEFAULT: s[0] = choreo::utils::from_f32<f8_e4m3>(1.000000f);
