@@ -1633,6 +1633,16 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
 
   if (auto sty = dyn_cast<SpannedType>(nty)) {
     auto sto = sty->GetStorage();
+    auto total_size = UnScopedExpr(TotalSizeExprOf(*nty, true));
+    // TotalSizeExprOf is byte-oriented; declarations size in elements.
+    auto total_elem_count = [&]() -> std::string {
+      if (auto sat = dyn_cast<SpannedArrayType>(nty)) {
+        auto total = (sat->PhysicalSlotStrideElementsValue() * sat->ElemCount())
+                         ->Normalize();
+        return UnScopedExpr(ValueSTR(total));
+      }
+      return UnScopedExpr(ValueSTR(sty->GetShape().ElementCountValue()));
+    };
 
     if (IsHost() && sto == Storage::GLOBAL) {
       auto bts = HIPNameBaseType(sty->ElementType());
@@ -1649,11 +1659,11 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
            << ShapeSTR(shape, false, ", ", BaseType::U64) << "});\n";
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
         hs << h_indent << "choreo::abend_true(hipMalloc(&" << buf_sym << ", "
-           << UnScopedSizeExpr(*sty) << "));\n";
+           << total_size << "));\n";
       } else {
         hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
         hs << h_indent << "choreo::abend_true(hipMalloc(&" << buf_sym << ", "
-           << UnScopedSizeExpr(*sty) << "));\n";
+           << total_size << "));\n";
       }
       ssm.MapHostSymbol(sname + "__device", buf_sym);
       ssm.MapHostSymbol(sname, buf_sym);
@@ -1675,8 +1685,7 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
           ds << "alignas(" << n.GetNote("alignment") << ") ";
         ds << "__shared__ ";
         ds << HIPNameBaseType(sty->ElementType()) << " " << sym << "["
-           << UnScopedSizeExpr(*sty) << " / sizeof("
-           << HIPNameBaseType(sty->ElementType()) << ")];\n";
+           << total_elem_count() << "];\n";
         ssm.MapDeviceSymbolIfNotExist(sname, sym);
         return true;
       }
@@ -1685,8 +1694,7 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
         if (n.HasNote("alignment"))
           ds << "alignas(" << n.GetNote("alignment") << ") ";
         ds << HIPNameBaseType(sty->ElementType()) << " " << sym << "["
-           << UnScopedSizeExpr(*sty) << " / sizeof("
-           << HIPNameBaseType(sty->ElementType()) << ")];\n";
+           << total_elem_count() << "];\n";
         ssm.MapDeviceSymbolIfNotExist(sname, sym);
         return true;
       }

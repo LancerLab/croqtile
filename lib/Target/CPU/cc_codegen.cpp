@@ -1763,7 +1763,16 @@ bool CCCodeGen::Visit(AST::NamedVariableDecl& n) {
   if (auto sty = dyn_cast<SpannedType>(nty)) {
     ssm.MapHostSymbol(sname, sym);
     auto elem_ty = CCBaseTypeName(sty->ElementType());
-    auto size = UnScopedExpr(SizeExprOf(*sty, true));
+    auto size = UnScopedExpr(TotalSizeExprOf(*nty, true));
+    // TotalSizeExprOf is byte-oriented; declarations size in elements.
+    auto total_elem_count = [&]() -> std::string {
+      if (auto sat = dyn_cast<SpannedArrayType>(nty)) {
+        auto total = (sat->PhysicalSlotStrideElementsValue() * sat->ElemCount())
+                         ->Normalize();
+        return UnScopedExpr(ValueSTR(total));
+      }
+      return UnScopedExpr(ValueSTR(sty->GetShape().ElementCountValue()));
+    };
     if (sty->GetStorage() == Storage::LOCAL ||
         sty->GetStorage() == Storage::SHARED) {
       size_t alignment = 64;
@@ -1772,8 +1781,7 @@ bool CCCodeGen::Visit(AST::NamedVariableDecl& n) {
             std::max(alignment,
                      static_cast<size_t>(std::stoull(n.GetNote("alignment"))));
       os << indent << "alignas(" << alignment << ") " << elem_ty << " " << sym
-         << "[" << UnScopedExpr(ValueSTR(sty->GetShape().ElementCountValue()))
-         << "];\n";
+         << "[" << total_elem_count() << "];\n";
     } else {
       os << indent << elem_ty << "* " << sym << " = static_cast<" << elem_ty
          << "*>(std::aligned_alloc(64, " << size << "));\n";

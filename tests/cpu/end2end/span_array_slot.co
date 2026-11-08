@@ -1,0 +1,31 @@
+// REQUIRES: TARGET-CPU
+// RUN: choreo -gs %target %s | bash -s -- --execute | FileCheck --match-full-lines %s
+
+// A global span-array slot must address distinct, fully allocated storage.
+// Both slots are written and then both are read back, so a slot offset that
+// still aliases slot 0 or a one-slot allocation that lets slot 1 run past the
+// buffer both fail the assertions.
+__co__ auto span_array_slot() {
+  global s32 [1024] tiles[2][2];
+  s32 [2048] output{0};
+  parallel by 1 : block {
+    parallel p by 1024 : thread {
+      tiles[0][0].at(p) = p;
+      tiles[1][0].at(p) = p + 10000;
+      output.at(p) = tiles[0][0].at(p);
+      output.at(1024 + p) = tiles[1][0].at(p) - 10000;
+    }
+  }
+  return output;
+}
+
+int main() {
+  auto res = span_array_slot();
+  for (int i = 0; i < 1024; ++i) {
+    choreo::choreo_assert(res[i] == i, "slot0 mismatch");
+    choreo::choreo_assert(res[1024 + i] == i, "slot1 mismatch");
+  }
+  std::cout << "Test span_array_slot Passed" << std::endl;
+}
+
+// CHECK: Test span_array_slot Passed

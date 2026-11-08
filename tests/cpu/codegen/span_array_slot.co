@@ -13,6 +13,19 @@ __co__ auto span_array_slot() {
   return output;
 }
 
+__co__ auto span_array_slot_global() {
+  global f32 [4] tiles[2][2];
+  f32 [4] output{0.0f};
+  parallel by 1 : block {
+    tiles[1][0].at(0) = 2.0f;
+    output.at(0) = tiles[1][0].at(0);
+  }
+  return output;
+}
+
 // CHECK-LABEL: span_array_slot
+// CHECK: float tiles[16];
 // CHECK: *((float*)tiles + ((1)*2+0)*(4)) = 1.000000f;
 // CHECK: *((float*)output) = *((float*)tiles + ((1)*2+0)*(4));
+// CHECK-LABEL: span_array_slot_global
+// CHECK: aligned_alloc(64, 64ULL)
