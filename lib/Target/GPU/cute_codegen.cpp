@@ -10738,6 +10738,17 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
                              gmem_ty->ElementSizeValue()});
         host_rank = 2;
       } else {
+        // A rank-2 source with a view still takes its box from the viewed
+        // tile; the box's innermost extent must stay within the map's inner
+        // extent, or the copy zero-fills / the driver rejects the box.
+        if (has_view && t_shape.Rank() >= 2) {
+          ValueItem map_inner = g_shape.ValueAt(g_shape.Rank() - 1);
+          if (sbe::cgt(t_shape.ValueAt(t_shape.Rank() - 1), map_inner)) {
+            Error1(g_ca->LOC(),
+                   "TMA view box is wider than the tensor map's innermost "
+                   "extent.");
+          }
+        }
         std::vector<ValueItem> byte_strides;
         for (size_t i = 0; i < host_stride.Rank(); ++i)
           byte_strides.push_back(host_stride.ValueAt(i) *

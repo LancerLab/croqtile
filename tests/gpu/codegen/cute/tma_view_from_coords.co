@@ -49,3 +49,16 @@ __co__ void tma_view_root_subview(global f32 [2, 64, 4, 128] input) {
 
 // CHECK-LABEL: __choreo_device_tma_view_root_subview
 // CHECK: tma_load
+
+// A rank-2 global source with a layout-preserving view stays valid (this is
+// the branch that also diagnoses over-wide boxes; the non-global parameter
+// form above takes a different path).
+__co__ void tma_view_rank2_global(global f32 [64, 32] x) {
+  parallel b by 1 : block {
+    load = tma.copy.async x.view(64, 32) => shared;
+    wait load;
+  }
+}
+
+// CHECK-LABEL: __choreo_device_tma_view_rank2_global
+// CHECK: tma_load_2d_shared_cta_global_mbarrier

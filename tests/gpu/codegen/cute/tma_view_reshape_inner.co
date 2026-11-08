@@ -27,3 +27,14 @@ __co__ void tma_view_overwide_stride(global f32 [64, 32, 16] x) {
 }
 
 // CHECK: error: TMA view layout does not match the flattened tensor map
+
+// A rank-2 source with an over-wide view box is diagnosed too: the box's
+// innermost extent must stay within the map's inner extent.
+__co__ void tma_view_rank2_wide(global f32 [64, 32] x) {
+  parallel b by 1 : block {
+    load = tma.copy.async x.view(32, 64) => shared;
+    wait load;
+  }
+}
+
+// CHECK: error: TMA view box is wider than the tensor map's innermost extent.
