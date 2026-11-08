@@ -6585,6 +6585,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       try_hoist_direct_desc(direct_b);
 
       bool metadata_is_register = false;
+      bool metadata_is_non_u32_scalar = false;
       if (policy_is_sparse) {
         auto metadata = op.ExecOperand(3);
         auto metadata_sym = metadata ? metadata->GetSymbol() : nullptr;
@@ -6599,14 +6600,22 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         if (metadata_sym) {
           auto mty = GetSymbolType(metadata_name);
           metadata_is_register = IsU32RegisterMetadata(mty, metadata_scoped);
+          if (auto scty = dyn_cast<ScalarType>(mty))
+            metadata_is_non_u32_scalar = scty->GetBaseType() != BaseType::U32;
         }
         if (metadata_name.empty() ||
             (!metadata_is_register &&
              !explicit_mma_loads_.count(metadata_name) &&
              !explicit_mma_loads_.count(metadata_scoped))) {
-          Error1(n.LOC(),
-                 "sparse WGMMA metadata must be loaded into a register with "
-                 "mma.load before use");
+          if (metadata_is_non_u32_scalar)
+            Error1(n.LOC(),
+                   "sparse WGMMA metadata register must be a 32-bit unsigned "
+                   "integer (u32); SM90 sparse atoms consume a uint32_t "
+                   "metadata value");
+          else
+            Error1(n.LOC(),
+                   "sparse WGMMA metadata must be loaded into a register with "
+                   "mma.load before use");
           return false;
         }
       }
