@@ -119,3 +119,14 @@ __co__ void tma_view_swiz_inner_wide(global f16 [64, 128] x) {
 }
 
 // CHECK: error: TMA view box is wider than the tensor map's innermost extent.
+
+// A rank-2 global source with an explicit-stride view that ignores the
+// source's row stride would lower to a dense box and load the wrong elements.
+__co__ void tma_view_rank2_stride(global f32 [64, 64] x) {
+  parallel b by 1 : block {
+    load = tma.copy.async x.view(32, 32: 2, 1) => shared;
+    wait load;
+  }
+}
+
+// CHECK: error: TMA view layout does not match the flattened tensor map

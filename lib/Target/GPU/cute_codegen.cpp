@@ -10750,6 +10750,23 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
         std::any_of(g_ca->AllOperations().begin(), g_ca->AllOperations().end(),
                     [](const auto& sop) { return isa<AST::SOP::View>(sop); });
 
+    // A view-derived box must describe the same layout as the tensor map:
+    // contiguous innermost dimension and a row stride equal to the map's
+    // innermost extent. The box extents are validated against the logical
+    // map below.
+    auto CheckViewStrides = [&](const ValueItem& inner_dim) {
+      if (!has_view || t_shape.Rank() < 2 || g_ca->OpCount() == 0) return;
+      const ValueList& t_strides = g_ca->LastOp()->GetBlockStrides();
+      if (t_strides.size() == t_shape.Rank() &&
+          (sbe::cne(t_strides.back(), sbe::nu(1)) ||
+           sbe::cne(t_strides[t_strides.size() - 2], inner_dim))) {
+        Error1(g_ca->LOC(),
+               "TMA view layout does not match the flattened tensor map "
+               "(contiguous innermost dimension, row stride equal to the "
+               "source's innermost extent).");
+      }
+    };
+
     if (desc.HasRootParam()) {
       // TMA source is a computed subview (e.g., Q_head derived from Q).
       // Flatten the root parameter's N-D shape to 2D [outer, inner]
@@ -10781,18 +10798,7 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
         // dimension. The view-derived strides must be contiguous (stride 1)
         // with a row stride equal to the map's inner extent; an
         // explicit-stride view that keeps the flattened layout is valid.
-        // The box extents are validated against the logical map below.
-        if (t_shape.Rank() >= 2 && g_ca->OpCount() > 0) {
-          const ValueList& t_strides = g_ca->LastOp()->GetBlockStrides();
-          if (t_strides.size() == t_shape.Rank() &&
-              (sbe::cne(t_strides.back(), sbe::nu(1)) ||
-               sbe::cne(t_strides[t_strides.size() - 2], inner_dim))) {
-            Error1(g_ca->LOC(),
-                   "TMA view layout does not match the flattened tensor map "
-                   "(contiguous innermost dimension, row stride equal to the "
-                   "source's innermost extent).");
-          }
-        }
+        CheckViewStrides(inner_dim);
         ValueItem outer_dim = sbe::nu(1);
         for (size_t i = 0; i + 1 < g_shape.Rank(); ++i)
           outer_dim = outer_dim * g_shape.ValueAt(i);
@@ -10802,7 +10808,9 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
         host_rank = 2;
       } else {
         // A rank-2 source with a view still takes its box from the viewed
-        // tile; the box is validated against the logical map below.
+        // tile; validate the view's strides against the logical map below.
+        if (has_view && host_rank >= 2)
+          CheckViewStrides(g_shape.ValueAt(g_shape.Rank() - 1));
         std::vector<ValueItem> byte_strides;
         for (size_t i = 0; i < host_stride.Rank(); ++i)
           byte_strides.push_back(host_stride.ValueAt(i) *
