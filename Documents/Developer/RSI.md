@@ -130,6 +130,17 @@ F. 输出（简洁中文）
 顺延到下一次 tick（lock 会保留给下一 tick resume）。
 ```
 
+## Piano implementation
+
+The same loop is implemented as a Piano workflow in the `piano` repository:
+`recipes/workflows/croqtile-dev-loop.yml` (and its `-dsh` twin) runs
+`propose → race{implement → review} → verify` with a two-lane tournament. The
+review score is the tournament referee, so one invocation runs one round (the
+engine only carries a winner that strictly improves the same metric identity);
+rerun the workflow for the next round. It covers compiler changes whose
+evidence is a build plus lit tests; kernel tuning stays in the
+`gpu-croqtile-tuning` workflows.
+
 ## Notes
 
 - **focus 是 prompt 的语义，不是新的 decision。** 加 `--focus` 不新增 docs 主题、
