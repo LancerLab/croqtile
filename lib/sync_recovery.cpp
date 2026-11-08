@@ -85,16 +85,24 @@ void SyncRecovery::AddInsert(const AST::Node* anchor,
                              const ptr<AST::Node>& node, bool after,
                              int not_before, const std::string& buffer) {
   auto& list = pending_inserts_[anchor];
-  for (const auto& p : list) {
+  for (auto& p : list) {
     if (p.after != after) continue;
     if (auto* f = dyn_cast<AST::Fence>(p.node.get())) {
       if (auto* g = dyn_cast<AST::Fence>(node.get()))
-        if (f->GetEntity() == g->GetEntity()) return;
+        if (f->GetEntity() == g->GetEntity()) {
+          // Merge the preconditions: elimination must fold against the last
+          // access of every obligation the collapsed op discharges.
+          p.not_before = std::max(p.not_before, not_before);
+          return;
+        }
     } else if (auto* w = dyn_cast<AST::CompletionWait>(p.node.get())) {
       if (auto* v = dyn_cast<AST::CompletionWait>(node.get()))
-        if (w->GetEngine() == v->GetEngine() && w->GetKind() == v->GetKind() &&
-            w->GetPending() == v->GetPending())
+        if (w->GetEngine() == v->GetEngine() && w->GetKind() == v->GetKind()) {
+          // A smaller pending count drains more: keep the stronger node.
+          if (v->GetPending() < w->GetPending()) p.node = node;
+          p.not_before = std::max(p.not_before, not_before);
           return;
+        }
     }
   }
   list.push_back(PendingInsert{node, after, not_before, buffer});
