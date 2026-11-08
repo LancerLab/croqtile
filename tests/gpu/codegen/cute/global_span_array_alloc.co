@@ -45,8 +45,29 @@ __co__ void global_dyn_slots(int n, f32 [4, n] x) {
 // extra kernel parameter (duplicate names do not compile).
 // CHECK: __global__ void __choreo_device_global_dyn_slots(int n, float * x, float * g)
 // CHECK-NOT: unsigned n
-// Dynamic declarations keep the runtime size arithmetic 64-bit (the slot
-// byte expression carries ULL literals from the shape).
-// CHECK: cudaMalloc(&g__device, (((n * 4ULL)) * 4) * (2))
-// CHECK: cudaMemcpy(g__device, g.data(), (((n * 4ULL)) * 4) * (2), cudaMemcpyHostToDevice)
+// Dynamic declarations build the runtime size as an explicit 64-bit
+// product: every factor is cast before multiplying.
+// CHECK: cudaMalloc(&g__device, (uint64_t)(4) * (uint64_t)(n) * 4 * (uint64_t)(2))
+// CHECK: cudaMemcpy(g__device, g.data(), (uint64_t)(4) * (uint64_t)(n) * 4 * (uint64_t)(2), cudaMemcpyHostToDevice)
 // CHECK: __choreo_device_global_dyn_slots{{.*}}>>>(n, x__device, g__device)
+
+// A fully symbolic shape has no literal to carry the ULL suffix; every
+// factor is cast before multiplying so the size stays 64-bit.
+__co__ void global_symbolic_slots(int m, int n, f32 [m, n] x) {
+  global f32 [m, n] g[2] {1.0f};
+  parallel p by 1 : block {
+    dma.copy x => g[1];
+  }
+}
+
+// CHECK: cudaMalloc(&g__device, (uint64_t)(m) * (uint64_t)(n) * 4 * (uint64_t)(2))
+
+// A plain global span (no slot dimension) takes the same 64-bit sizing path.
+__co__ void global_plain_dyn(int m, int n, f32 [m, n] x) {
+  global f32 [m, n] g;
+  parallel p by 1 : block {
+    dma.copy x => g;
+  }
+}
+
+// CHECK: cudaMalloc(&g__device, (uint64_t)(m) * (uint64_t)(n) * 4)

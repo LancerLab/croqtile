@@ -2981,19 +2981,46 @@ inline std::string ElemCountExprOf(const Type& ty) {
 // alignment padding. SizeExprOf reports a single slot, so it under-covers a
 // declaration, a host allocation, or an initialization whose byte size is
 // derived from it. Kept symbolic for runtime-shaped slot counts/strides.
+// 64-bit runtime byte size of a spanned shape: cast every factor before
+// multiplying. ByteSizeExpression's ULL suffix only promotes literals, so a
+// fully symbolic shape (e.g. [m, n]) would still overflow 32-bit int.
+inline std::string RuntimeByteSizeExpr64(const SpannedType& spty) {
+  std::string expr;
+  auto mul = [&expr](const std::string& factor) {
+    if (!expr.empty()) expr += " * ";
+    expr += factor;
+  };
+  auto& shape = spty.GetShape();
+  for (size_t i = 0; i < shape.Rank(); ++i)
+    mul("(uint64_t)(" + shape.ValueAt(i)->ToString() + ")");
+  mul(std::to_string(SizeOf(spty.ElementType())));
+  return expr;
+}
+
 inline std::string TotalSizeExprOf(const Type& ty, bool ULL_suffix = false) {
   auto aty = dyn_cast<SpannedArrayType>(&ty);
-  if (!aty) return SizeExprOf(ty, ULL_suffix);
+  if (!aty) {
+    // A plain spanned global with a runtime shape has no slot dimension but
+    // the same 64-bit sizing requirement.
+    if (ULL_suffix) {
+      if (auto spty = dyn_cast<SpannedType>(&ty))
+        if (spty->RuntimeShaped()) return RuntimeByteSizeExpr64(*spty);
+    }
+    return SizeExprOf(ty, ULL_suffix);
+  }
   auto total = (aty->PhysicalSlotStrideValue() * aty->ElemCount())->Normalize();
   if (auto bytes = VIInt(total))
     return std::to_string(static_cast<size_t>(*bytes)) +
            (ULL_suffix ? "ULL" : "");
-  // Keep the runtime multiplication 64-bit: the slot byte expression carries
-  // ULL on its literals, so promoting it before multiplying by the slot
-  // count avoids signed-int overflow for large dynamic declarations.
-  if (ULL_suffix && !aty->HasAlignedSlots())
-    return "(" + aty->spty->ByteSizeExpression(true) + ") * (" +
-           aty->ElemCount()->ToString() + ")";
+  if (ULL_suffix) {
+    // Aligned slots use the physical (padded) byte stride; otherwise the
+    // packed shape bytes. Both are multiplied by the slot count in 64-bit.
+    const std::string slot_bytes =
+        aty->HasAlignedSlots()
+            ? "(uint64_t)(" + aty->PhysicalSlotStrideValue()->ToString() + ")"
+            : RuntimeByteSizeExpr64(*aty->spty);
+    return slot_bytes + " * (uint64_t)(" + aty->ElemCount()->ToString() + ")";
+  }
   return "(" + total->ToString() + ")";
 }
 
