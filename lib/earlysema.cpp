@@ -3754,16 +3754,10 @@ bool EarlySemantics::Visit(AST::Return& n) {
       }
     }
 
-    auto vty = NodeType(*n.value);
-    if (!(isa<SpannedType>(vty) || isa<ScalarType>(vty))) {
-      Error1(n.LOC(),
-             "returning value with type '" + PSTR(vty) + "' is not supported.");
-      return false;
-    }
-
-    // The return scaffold only represents whole symbols. Reject an indexed
-    // slot of a span array before memory reuse and liveness analysis, both of
-    // which assume return operands are symbols or future data references.
+    // The return scaffold only represents whole symbols. Diagnose an
+    // indexed return before NodeType(): a plain-span element access can
+    // otherwise trip a shape assertion while the slot-array and liveness
+    // passes assume return operands are symbols or future data references.
     if (auto e = dyn_cast<AST::Expr>(n.value.get()); e && e->op == Op::ElemOf) {
       auto base = AST::GetArrayBaseSymbol(*e);
       auto base_ty = GetSymbolType(base->name);
@@ -3775,6 +3769,19 @@ bool EarlySemantics::Visit(AST::Return& n) {
                "return a single-span value instead.");
         return false;
       }
+      if (isa<SpannedType>(base_ty)) {
+        Error1(n.LOC(),
+               "returning an indexed element of a span is not supported; "
+               "return the whole span instead.");
+        return false;
+      }
+    }
+
+    auto vty = NodeType(*n.value);
+    if (!(isa<SpannedType>(vty) || isa<ScalarType>(vty))) {
+      Error1(n.LOC(),
+             "returning value with type '" + PSTR(vty) + "' is not supported.");
+      return false;
     }
 
     if (CCtx().HasFeature(ChoreoFeature::NSVR)) {
