@@ -18,7 +18,7 @@ __co__ void init_span_arrays(f32 [8] x) {
 
 // DEFAULT: const float __init_s = 1.000000f;
 // DEFAULT: float* __p = ((float*)(s)) + __slot * (8);
-// DEFAULT: __p[i] = __init_s;
+// DEFAULT: __p[__e] = __init_s;
 // DEFAULT: const float __init_t = 1.000000f;
 // DEFAULT: float* __p = ((float*)(t)) + __slot * (64);
 // NOMEM: __shared__ float s[2][8];
@@ -47,4 +47,4 @@ __co__ void init_fp8_scalar_span(f8_e4m3 [8] x) {
   }
 }
 
-// DEFAULT: for (int i = 0; i < 8; ++i) s[i] = choreo::utils::from_f32<f8_e4m3>(1.000000f);
+// DEFAULT: for (int __e = 0; __e < 8; ++__e) s[__e] = choreo::utils::from_f32<f8_e4m3>(1.000000f);

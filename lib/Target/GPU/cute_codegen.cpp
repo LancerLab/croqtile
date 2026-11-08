@@ -3091,9 +3091,11 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         IncrDeviceIndent();
         ds << d_indent << bts << "* __p = ((" << bts << "*)(" << sym
            << ")) + __slot * (" << slot_stride << ");\n";
-        ds << d_indent << "for (int i = 0; i < " << ValueSTR(ec)
-           << "; ++i)\n";
-        ds << d_indent << "  __p[i] = " << init_name << ";\n";
+        // Unique loop variable: the element count expression may name a
+        // symbolic dimension `i`, which a plain `int i` loop would shadow.
+        ds << d_indent << "for (int __e = 0; __e < " << ValueSTR(ec)
+           << "; ++__e)\n";
+        ds << d_indent << "  __p[__e] = " << init_name << ";\n";
         DecrDeviceIndent();
         ds << d_indent << "}\n";
       } else if (ec == sbe::nu(1)) {
@@ -3101,8 +3103,9 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         // instead of assigning to it, which is ill-typed for a C array.
         ds << d_indent << sym << "[0] = " << InitValueSTR() << ";\n";
       } else {
-        ds << d_indent << "for (int i = 0; i < " << ValueSTR(ec) << "; ++i) ";
-        ds << sym << "[i] = " << InitValueSTR() << ";\n";
+        ds << d_indent << "for (int __e = 0; __e < " << ValueSTR(ec)
+           << "; ++__e) ";
+        ds << sym << "[__e] = " << InitValueSTR() << ";\n";
       }
       if (sto == Storage::SHARED) {
         DecrDeviceIndent();

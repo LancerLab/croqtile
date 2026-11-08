@@ -1,0 +1,14 @@
+// The span-array initializer loop variable is unique: a symbolic dimension
+// named `i` must not be shadowed by the fill loop. (Dynamic shared buffers
+// require memory reuse, so this case cannot share the --mem-reuse=false file.)
+//
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - | grep -v '^ *//' | FileCheck %s
+
+__co__ void init_symbolic_span(global f32 [8] x, s32 i) {
+  parallel p by 1 : block {
+    shared f32 [i] s[2] {1.0f};
+    dma.copy x => s[1];
+  }
+}
+
+// CHECK: for (int __e = 0; __e < i; ++__e)
