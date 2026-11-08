@@ -1,0 +1,53 @@
+// REQUIRES: TARGET-GPU
+// RUN: env CHOREO_SYNC_RECOVERY=1 CHOREO_SYNC_RECOVERY_KEEP=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>/dev/null | FileCheck --check-prefix=KEEP %s
+// RUN: env CHOREO_SYNC_RECOVERY=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>&1 | FileCheck --check-prefix=ELIDE %s
+//
+// Engine-write direction (WAW): tenant a is engine-written (async load into the
+// slot) and then read; tenant b reuses the slot as another async load
+// destination. The WAW[EW->EW] obligation is a full bulk-group drain on the
+// producing threads, before the trigger. The source already waits on the
+// future of the copy that wrote the slot, which retires the write in place, so
+// the elimination pass removes the queued drain (ELIDE run). KEEP=1 shows the
+// raw synthesis, and with it the full-group lowering (the read-drain class
+// covers the other lowering path).
+
+// KEEP: f.wait();
+// KEEP: cuda::ptx::cp_async_bulk_wait_group(cuda::ptx::n32_t<0>{});
+// KEEP-NEXT: sig1.arrive
+
+// ELIDE-DAG: [sync-recovery] elide AST::CompletionWait (source wait on the draining copy)
+// ELIDE: f.wait();
+// ELIDE-NOT: cuda::ptx::cp_async_bulk_wait_group
+// ELIDE: sig1.arrive
+
+__co__ s32 [1, 16] reuse_waw(s32 [1, 16] src) {
+  s32 [1, 16] out;
+
+  parallel p by 1 : block {
+    parallel q by 2 : group-4 {
+      shared event sig1;
+
+      inthreads.async (q == 1) {
+        shared s32 [1, 16] a;
+        f = tma.copy.async src => a;
+        wait f;
+        out.at(0, 0) = a.at(0, 0);
+        trigger sig1;
+      }
+
+      inthreads.async (q == 0) {
+        wait sig1;
+        shared s32 [1, 16] b;
+        g = tma.copy.async src => b;
+        wait g;
+        out.at(0, 1) = b.at(0, 0);
+      }
+
+      sync.barrier : block;
+    }
+  }
+
+  return out;
+}
+
+int main() { return 0; }

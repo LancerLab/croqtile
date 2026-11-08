@@ -374,6 +374,10 @@ bool DmaReadsSlot(const AST::DMA* dma, const std::string& buffer) {
   return dma->from != nullptr && MentionsBuffer(dma->from.get(), buffer);
 }
 
+bool DmaWritesSlot(const AST::DMA* dma, const std::string& buffer) {
+  return dma->to != nullptr && MentionsBuffer(dma->to.get(), buffer);
+}
+
 // Preorder index of the last statement in the phase that touches the slot;
 // `engine_only` restricts it to engine statements (the drain's frontier).
 int LastSlotAccessIndex(const std::vector<const LivenessAnalyzer::Stmt*>& po,
@@ -393,11 +397,14 @@ int LastSlotAccessIndex(const std::vector<const LivenessAnalyzer::Stmt*>& po,
 }
 
 // A synchronous engine access has no outstanding work once it retires, so it
-// discharges its own completion obligation (a blocking copy has finished
-// reading before the next statement runs).
+// discharges its own read-drain obligation (a blocking copy has finished
+// reading before the next statement runs). Full drains are not discharged
+// this way: a thread-executed copy does not retire a group's writes.
 bool SelfDischarging(const AST::Node* s, const AST::Node& ins,
                      const std::string& buffer) {
-  if (!isa<AST::CompletionWait>(&ins) || buffer.empty()) return false;
+  auto* cw = dyn_cast<AST::CompletionWait>(&ins);
+  if (cw == nullptr || buffer.empty()) return false;
+  if (cw->GetKind() != CompletionWaitKind::READ_DRAIN) return false;
   auto* d = dyn_cast<AST::DMA>(s);
   return d != nullptr && !d->IsAsync() && DmaReadsSlot(d, buffer);
 }
@@ -413,15 +420,21 @@ const char* CoveringOp(const AST::Node* s, const AST::MultiNodes& n, size_t j,
       if (cw->GetEngine() != FenceEntity::TMA &&
           cw->GetEngine() != FenceEntity::DMA)
         return nullptr;
-      if (cw->GetKind() == CompletionWaitKind::FULL_DRAIN)
+      // A stronger (smaller) pending count covers a weaker one. A full drain
+      // retires both writes and reads; a read drain retires only reads.
+      if (cw->GetKind() == CompletionWaitKind::FULL_DRAIN &&
+          cw->GetPending() <= w->GetPending())
         return "available complete drain";
-      if (w->GetKind() == CompletionWaitKind::READ_DRAIN)
+      if (cw->GetKind() == CompletionWaitKind::READ_DRAIN &&
+          w->GetKind() == CompletionWaitKind::READ_DRAIN &&
+          cw->GetPending() <= w->GetPending())
         return "available read drain";
       return nullptr;
     }
     if (auto* wt = dyn_cast<AST::Wait>(s)) {
       // A wait on a future covers the drain only if that future belongs to an
-      // async copy that read this slot (the wait retires the reads).
+      // async copy that touched this slot in the covered direction (the wait
+      // retires that copy's outstanding work).
       for (const auto& t : wt->GetTargets()) {
         auto id = AST::GetIdentifier(*t);
         if (!id) continue;
@@ -430,7 +443,11 @@ const char* CoveringOp(const AST::Node* s, const AST::MultiNodes& n, size_t j,
           auto* d = dyn_cast<AST::DMA>(n.SubAt(k).get());
           if (d == nullptr || !d->IsAsync()) continue;
           if (UnScopedExpr(d->future) != fname) continue;
-          if (DmaReadsSlot(d, buffer))
+          if (w->GetKind() == CompletionWaitKind::READ_DRAIN &&
+              DmaReadsSlot(d, buffer))
+            return "source wait on the draining copy";
+          if (w->GetKind() == CompletionWaitKind::FULL_DRAIN &&
+              DmaWritesSlot(d, buffer))
             return "source wait on the draining copy";
         }
       }
@@ -596,16 +613,23 @@ void SyncRecovery::RunRecovery() {
                               site.stmt->LOC(), ParallelLevel::GROUP,
                               Storage::SHARED, FenceEntity::TMA),
                           site.after, last_access);
-              // WAR with the engine as reader: the receiving tenant may
-              // overwrite the slot only once the engine has drained the
-              // reads it issued. Other completion classes lower to waits
-              // bound to the engine's own event, not to a copy group.
-              if (o.cls == "completion" &&
-                  o.primitive.rfind("read-drain", 0) == 0)
+              if (o.cls != "completion") continue;
+              // Group-bound completion classes drain on the producing
+              // threads: a WAR read-drain when the engine read the slot, a
+              // full drain when the engine wrote it and the next tenant
+              // reuses it. `engine-wait` classes are bound to the engine's
+              // own event on the receiver and stay dump-only.
+              if (o.primitive.rfind("read-drain", 0) == 0)
                 AddInsert(site.stmt,
                           AST::Make<AST::CompletionWait>(
                               site.stmt->LOC(), FenceEntity::TMA,
                               CompletionWaitKind::READ_DRAIN, 0),
+                          site.after, last_engine, slot[i].buffer_id);
+              else if (o.primitive.rfind("P9:wait_group", 0) == 0)
+                AddInsert(site.stmt,
+                          AST::Make<AST::CompletionWait>(
+                              site.stmt->LOC(), FenceEntity::TMA,
+                              CompletionWaitKind::FULL_DRAIN, 0),
                           site.after, last_engine, slot[i].buffer_id);
             }
           }
