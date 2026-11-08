@@ -378,19 +378,29 @@ bool DmaWritesSlot(const AST::DMA* dma, const std::string& buffer) {
   return dma->to != nullptr && MentionsBuffer(dma->to.get(), buffer);
 }
 
-// Preorder index of the last statement in the phase that touches the slot;
-// `engine_only` restricts it to engine statements (the drain's frontier).
+// Direction filter for drain preconditions: a read drain folds against the
+// last engine read, a full drain against the last engine write.
+enum class AccessDir { Any, Read, Write };
+
+// Preorder index of the last statement in the phase that touches the slot in
+// the requested direction. Read/Write restrict to engine (DMA) statements.
 int LastSlotAccessIndex(const std::vector<const LivenessAnalyzer::Stmt*>& po,
                         const HBGraph& g, int phase, const std::string& buffer,
-                        bool engine_only) {
+                        AccessDir dir) {
   const auto& ph = g.phases[phase];
   int last = -1;
   for (size_t i = ph.first_stmt_id; i <= ph.last_stmt_id && i < po.size();
        ++i) {
     const AST::Node* s = po[i];
     if (s == nullptr || isa<LivenessAnalyzer::ScopeEnd>(s)) continue;
-    if (engine_only && !isa<AST::DMA>(s)) continue;
-    if (!MentionsBuffer(s, buffer)) continue;
+    if (dir == AccessDir::Any) {
+      if (!MentionsBuffer(s, buffer)) continue;
+    } else {
+      auto* d = dyn_cast<AST::DMA>(s);
+      if (d == nullptr) continue;
+      if (dir == AccessDir::Read && !DmaReadsSlot(d, buffer)) continue;
+      if (dir == AccessDir::Write && !DmaWritesSlot(d, buffer)) continue;
+    }
     last = (int)i;
   }
   return last;
@@ -602,10 +612,12 @@ void SyncRecovery::RunRecovery() {
           // tenant, at the phase boundary (never on the receiver).
           auto site = ProducerFrontier(po, *g, a_last);
           if (site.stmt != nullptr) {
-            const int last_access =
-                LastSlotAccessIndex(po, *g, a_last, slot[i].buffer_id, false);
-            const int last_engine =
-                LastSlotAccessIndex(po, *g, a_last, slot[i].buffer_id, true);
+            const int last_access = LastSlotAccessIndex(
+                po, *g, a_last, slot[i].buffer_id, AccessDir::Any);
+            const int last_engine_read = LastSlotAccessIndex(
+                po, *g, a_last, slot[i].buffer_id, AccessDir::Read);
+            const int last_engine_write = LastSlotAccessIndex(
+                po, *g, a_last, slot[i].buffer_id, AccessDir::Write);
             for (const auto& o : obligations) {
               if (o.cls == "visibility")
                 AddInsert(site.stmt,
@@ -624,13 +636,13 @@ void SyncRecovery::RunRecovery() {
                           AST::Make<AST::CompletionWait>(
                               site.stmt->LOC(), FenceEntity::TMA,
                               CompletionWaitKind::READ_DRAIN, 0),
-                          site.after, last_engine, slot[i].buffer_id);
+                          site.after, last_engine_read, slot[i].buffer_id);
               else if (o.primitive.rfind("P9:wait_group", 0) == 0)
                 AddInsert(site.stmt,
                           AST::Make<AST::CompletionWait>(
                               site.stmt->LOC(), FenceEntity::TMA,
                               CompletionWaitKind::FULL_DRAIN, 0),
-                          site.after, last_engine, slot[i].buffer_id);
+                          site.after, last_engine_write, slot[i].buffer_id);
             }
           }
           dbgs() << "\n";
