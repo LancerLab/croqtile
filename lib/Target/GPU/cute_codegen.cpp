@@ -10677,6 +10677,21 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     Shape host_stride = g_stride;
     size_t host_rank = g_shape.Rank();
 
+    // A view box wider than the map's innermost extent is incoherent
+    // (driver reject or silent zero-fill). This covers the branches whose
+    // map inner extent is the source's innermost dimension; the root-subview
+    // branch derives its inner extent from g_stride[0] and is not covered.
+    const bool has_view =
+        !desc.HasRootParam() &&
+        std::any_of(g_ca->AllOperations().begin(), g_ca->AllOperations().end(),
+                    [](const auto& sop) { return isa<AST::SOP::View>(sop); });
+    auto CheckViewBox = [&]() {
+      if (!has_view || t_shape.Rank() < 2) return;
+      if (sbe::cgt(t_shape.LeadingValue(), g_shape.LeadingValue()))
+        Error1(g_ca->LOC(),
+               "TMA view box is wider than the tensor map's innermost extent.");
+    };
+
     if (desc.HasRootParam()) {
       // TMA source is a computed subview (e.g., Q_head derived from Q).
       // Flatten the root parameter's N-D shape to 2D [outer, inner]
@@ -10702,14 +10717,6 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
       base_expr = root_name + ".data()";
     } else if (found_param && is_global_arg) {
       base_expr = g_unscoped + ".data()";
-      // Check if a .view() operation flattens to a lower rank
-      bool has_view = false;
-      for (auto& sop : g_ca->AllOperations()) {
-        if (isa<AST::SOP::View>(sop)) {
-          has_view = true;
-          break;
-        }
-      }
       if (has_view && host_rank > 2) {
         ValueItem inner_dim = g_shape.ValueAt(g_shape.Rank() - 1);
         // The flattened map's inner extent is the source's innermost
@@ -10739,31 +10746,20 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
         host_rank = 2;
       } else {
         // A rank-2 source with a view still takes its box from the viewed
-        // tile; the box's innermost extent must stay within the map's inner
-        // extent, or the copy zero-fills / the driver rejects the box.
-        if (has_view && t_shape.Rank() >= 2) {
-          ValueItem map_inner = g_shape.ValueAt(g_shape.Rank() - 1);
-          if (sbe::cgt(t_shape.ValueAt(t_shape.Rank() - 1), map_inner)) {
-            Error1(g_ca->LOC(),
-                   "TMA view box is wider than the tensor map's innermost "
-                   "extent.");
-          }
-        }
+        // tile; the box must stay coherent with the map (see CheckViewBox).
+        CheckViewBox();
         std::vector<ValueItem> byte_strides;
         for (size_t i = 0; i < host_stride.Rank(); ++i)
           byte_strides.push_back(host_stride.ValueAt(i) *
                                  gmem_ty->ElementSizeValue());
         host_stride = Shape(byte_strides);
       }
-    } else if (found_param) {
-      base_expr = SSMName((g_unscoped + "__device"), true);
-      std::vector<ValueItem> byte_strides;
-      for (size_t i = 0; i < host_stride.Rank(); ++i)
-        byte_strides.push_back(host_stride.ValueAt(i) *
-                               gmem_ty->ElementSizeValue());
-      host_stride = Shape(byte_strides);
-    } else if (IsChoreoOutput(g_sym)) {
-      base_expr = SSMName(InScopeName(g_unscoped) + "__device", true);
+    } else if (found_param || IsChoreoOutput(g_sym)) {
+      if (found_param)
+        base_expr = SSMName((g_unscoped + "__device"), true);
+      else
+        base_expr = SSMName(InScopeName(g_unscoped) + "__device", true);
+      CheckViewBox();
       std::vector<ValueItem> byte_strides;
       for (size_t i = 0; i < host_stride.Rank(); ++i)
         byte_strides.push_back(host_stride.ValueAt(i) *

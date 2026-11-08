@@ -3,6 +3,7 @@
 //
 // REQUIRES: TARGET-SM_90A
 // RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v '^ *//' | FileCheck %s
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - 2>&1 | grep -v '^ *//' | FileCheck %s --check-prefix=NOERR --implicit-check-not=error:
 
 __co__ void tma_view_from_coords(f32 [64, 32] x) {
   parallel b by 1 : block {
@@ -62,3 +63,19 @@ __co__ void tma_view_rank2_global(global f32 [64, 32] x) {
 
 // CHECK-LABEL: __choreo_device_tma_view_rank2_global
 // CHECK: tma_load_2d_shared_cta_global_mbarrier
+
+// A layout-preserving view on a shadowed device parameter stays valid.
+__co__ void tma_view_shadow_ok(f32 [64, 32] x) {
+  parallel b by 1 : block {
+    load = tma.copy.async x.view(64, 32) => shared;
+    wait load;
+  }
+}
+
+// CHECK-LABEL: __choreo_device_tma_view_shadow_ok
+// CHECK: tma_load_2d_shared_cta_global_mbarrier
+
+// The merged-stderr run asserts the whole file compiles with no diagnostic.
+// (stderr is not merged into the CHECK run: a CHECK-LABEL would bind to the
+// kernel name inside an info diagnostic and truncate the checked region.)
+// NOERR: tma_load_2d_shared_cta_global_mbarrier

@@ -38,3 +38,38 @@ __co__ void tma_view_rank2_wide(global f32 [64, 32] x) {
 }
 
 // CHECK: error: TMA view box is wider than the tensor map's innermost extent.
+
+// The same over-wide view is diagnosed when the source is a shadowed device
+// parameter (host-allocated parameter) ...
+__co__ void tma_view_shadow_wide(f32 [64, 32] x) {
+  parallel b by 1 : block {
+    load = tma.copy.async x.view(32, 64) => shared;
+    wait load;
+  }
+}
+
+// ... and on the store side of a shadowed parameter.
+__co__ auto tma_view_store_wide(f32 [64, 32] out) {
+  parallel b by 1 : block {
+    shared f32 [32, 64] s;
+    tma.copy s => out.view(32, 64);
+  }
+  return out;
+}
+
+// CHECK: error: TMA view box is wider than the tensor map's innermost extent.
+
+// A returned function-local global (not a parameter) takes the Choreo-output
+// branch; its over-wide view is diagnosed there too.
+__co__ auto tma_view_store_local_wide(f32 [64, 32] x) {
+  global f32 [64, 32] out;
+  parallel b by 1 : block {
+    shared f32 [32, 64] s;
+    dma.copy x => out;
+    tma.copy s => out.view(32, 64);
+  }
+  return out;
+}
+
+// CHECK: error: TMA view box is wider than the tensor map's innermost extent.
+// CHECK: error: TMA view box is wider than the tensor map's innermost extent.
