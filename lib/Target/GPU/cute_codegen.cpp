@@ -11834,7 +11834,23 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
         return off.empty() ? "" : off + " + ";
       };
       if (in_register_direct_automap_ && automap_frag_reg_expr_.count(scoped)) {
-        oss << automap_frag_reg_expr_.at(scoped);
+        // The automap override is a plain `sym[reg]` expression, so a
+        // fragment-array element access must still fold its slot offset into
+        // the subscript (e.g. `mc[(2)*(8) + __r]`).
+        const auto& reg_expr = automap_frag_reg_expr_.at(scoped);
+        const std::string slot_off =
+            FCtx(fname).HasFragmentLayout(scoped)
+                ? FragSlotPrefix(
+                      FCtx(fname).GetFragmentLayout(scoped).regs_per_thread)
+                : std::string();
+        if (slot_off.empty()) {
+          oss << reg_expr;
+        } else {
+          auto bracket = reg_expr.find('[');
+          assert(bracket != std::string::npos && "expected an indexed register");
+          oss << reg_expr.substr(0, bracket + 1) << slot_off
+              << reg_expr.substr(bracket + 1);
+        }
       } else if (FCtx(fname).HasFragmentLayout(scoped)) {
         const auto& fl = FCtx(fname).GetFragmentLayout(scoped);
         if ((fl.kind == LayoutKind::WGMMA_ACC ||

@@ -17,6 +17,23 @@ __co__ auto fragment_array_slot() {
 // CHECK: mc[(0)*(8) +
 // CHECK: mc[(2)*(8) +
 
+// Register-direct automap used by `apply` must fold the span-array slot
+// offset into the mapped register, so `mc[2].at(i,j)` does not alias slot 0.
+__co__ auto fragment_array_apply_slot() {
+  parallel p by 32 : thread {
+    frag f32 [16, 16] acc;
+    frag f32 [16, 16] mc[3] {0.0f};
+    apply {i, j} in acc.span {
+      acc.at(i, j) = mc[2].at(i, j);
+    }
+  }
+  return 0;
+}
+
+// CHECK-LABEL: __choreo_device_fragment_array_apply_slot
+// CHECK: { // apply acc
+// CHECK: acc[__r] = mc[(2)*(8) + __r];
+
 __device__ __forceinline__ void consume_fragment(float* values) {
   values[0] = values[0] + 1.0f;
 }
