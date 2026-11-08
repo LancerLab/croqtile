@@ -134,14 +134,14 @@ F. 输出（简洁中文）
 
 The same loop is implemented as a Piano workflow in the `piano` repository:
 `recipes/workflows/croqtile-dev-loop.yml` (and its `-dsh` twin) runs
-`loop rounds[ loop round[ propose → race{implement → review} ] → verify ]`
-with a two-lane tournament, 3 rounds by default. The tournament is wrapped in
-a one-iteration inner loop on purpose: the engine only carries a winner that
-strictly improves the same metric across repetitions of the tournament's own
-loop, and the review score is a per-round verdict rather than a comparable
-measurement — the inner loop gives each outer round a fresh tournament
-instance (its incumbent key includes the outer iteration), so every round's
-winner lands. It covers compiler changes whose evidence is a build plus lit
+`loop rounds[ propose → implement → verify ]` with a serial round, 2 rounds by
+default. Each round proposes one lit-verifiable change, implements it in the
+shared checkout, then builds and runs the lit suites there; a failing round is
+restored exactly to its pre-round files. The loop auto-commits each
+iteration's workspace changes at its exit (`[Feature](no-ticket): rounds R<n>`
+by default), so every round is a durable, recoverable point. There is no
+tournament: the engine's review-score referee is not a measurement comparable
+across rounds. Scope is compiler changes whose evidence is a build plus lit
 tests; kernel tuning stays in the `gpu-croqtile-tuning` workflows.
 
 ## Notes
