@@ -421,10 +421,38 @@ private:
 
   PrepackedU32Info resolvePrepackedU32Meta(const std::string& ref_sym,
                                            bool forceFlag);
+  // The prepacked dense formats index the packed layout by the canonical
+  // loop variables `iv_k` (K tile) and `iv_warp` (warp chunk), emitted as
+  // `__iv_iv_k`/`__iv_iv_warp`. Match them by name so any nesting order
+  // works; a kernel with no loops is a single tile (0, 0). Returns false and
+  // diagnoses when the kernel has loops but not the canonical pair.
+  bool PrepackedMetadataIndexExprs(const location& loc, std::string& kExpr,
+                                   std::string& warpExpr) const {
+    kExpr = "0";
+    warpExpr = "0";
+    if (foreach_iv_stack_.empty()) return true;
+    bool k_found = false;
+    bool w_found = false;
+    for (const auto& iv : foreach_iv_stack_) {
+      if (iv == "__iv_iv_k") {
+        kExpr = iv;
+        k_found = true;
+      } else if (iv == "__iv_iv_warp") {
+        warpExpr = iv;
+        w_found = true;
+      }
+    }
+    if (k_found && w_found) return true;
+    Error1(loc, "prepacked metadata indexing requires the canonical loop "
+                "variables 'iv_k' (K tile) and 'iv_warp' (warp chunk)");
+    return false;
+  }
   void emitPrepackedU32Snippet(const std::string& metaVar,
                                const std::string& deviceArray,
                                const std::string& rowStride,
-                               const std::string& colStride);
+                               const std::string& colStride,
+                               const std::string& kIdxExpr,
+                               const std::string& warpIdxExpr);
   void emitPrepackedU32TileLoadSnippet(const std::string& metaVar,
                                        const std::string& tileAddr,
                                        const std::string& rowStride);
@@ -440,7 +468,9 @@ private:
   void emitPrepackedV2Snippet(const std::string& metaVar,
                               const std::string& baseName,
                               const std::string& rowStride,
-                              const std::string& colStride);
+                              const std::string& colStride,
+                              const std::string& kIdxExpr,
+                              const std::string& warpIdxExpr);
   void emitFp8PrepackedV2TileLoadSnippet(const std::string& metaVar,
                                          const std::string& baseName,
                                          const std::string& tileAddr,

@@ -89,6 +89,12 @@ __co__ auto prepack_broadcast_mdata(u32 [64, 4] meta, f16 [64, 16] lhs_packed,
   return output;
 }
 
+// The prepacked snippets take the K-tile and warp-chunk indices from the
+// enclosing foreach IVs; a kernel without those loops uses 0 instead of
+// referencing undefined `__iv_iv_k`/`__iv_iv_warp` identifiers.
+// CHECK: int __sp_k_idx = (0) * 2 + (0);
+// V2: int __sp_k_idx = (0) * 2 + (0);
+
 // Broadcast metadata stays at the buffer base (no `[1]` slot subscript).
 // CHECK: uint32_t __sp_u32_val = lhs_s_mdata[__sp_packed_row * (16) + __sp_k_idx * (1)];
 // V2: me = ((const uint32_t*)(lhs_s_mdata))[((__sp_packed_row >> 4) * (16) + __sp_k_idx) * 16 + (__sp_packed_row & 15)];

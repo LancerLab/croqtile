@@ -2268,7 +2268,9 @@ CuteCodeGen::resolvePrepackedU32Meta(const std::string& ref_sym,
 void CuteCodeGen::emitPrepackedU32Snippet(const std::string& metaVar,
                                           const std::string& deviceArray,
                                           const std::string& rowStride,
-                                          const std::string& colStride) {
+                                          const std::string& colStride,
+                                          const std::string& kIdxExpr,
+                                          const std::string& warpIdxExpr) {
   ds << d_indent << "  int __sp_lane = __sp_tid & 31;\n";
   ds << d_indent << "  bool __sp_active = ((__sp_lane & 3) < 2);\n";
   ds << d_indent
@@ -2276,7 +2278,8 @@ void CuteCodeGen::emitPrepackedU32Snippet(const std::string& metaVar,
   ds << d_indent
      << "  int __sp_packed_row = blockIdx.x * 64 + ((__sp_tid >> 5) * 16) + "
         "(((__sp_tid >> 2) & 7) << 1) + (__sp_tid & 1);\n";
-  ds << d_indent << "  int __sp_k_idx = __iv_iv_k * 2 + __iv_iv_warp;\n";
+  ds << d_indent << "  int __sp_k_idx = (" << kIdxExpr << ") * 2 + ("
+     << warpIdxExpr << ");\n";
   ds << d_indent << "  if (__sp_active) {\n";
   ds << d_indent << "    uint32_t __sp_u32_val = " << deviceArray
      << "[__sp_packed_row * (" << rowStride << ") + __sp_k_idx * (" << colStride
@@ -2361,13 +2364,16 @@ void CuteCodeGen::emitPrepackedV2TileLoadSnippet(
 void CuteCodeGen::emitPrepackedV2Snippet(const std::string& metaVar,
                                          const std::string& baseName,
                                          const std::string& rowStride,
-                                         const std::string& /*colStride*/) {
+                                         const std::string& /*colStride*/,
+                                         const std::string& kIdxExpr,
+                                         const std::string& warpIdxExpr) {
   ds << d_indent << "  int __sp_lane = __sp_tid & 31;\n";
   ds << d_indent << "  bool __sp_active = ((__sp_lane & 3) < 2);\n";
   ds << d_indent
      << "  int __sp_packed_row = blockIdx.x * 64 + ((__sp_tid >> 5) * 16)"
         " + (((__sp_tid >> 2) & 7) << 1) + (__sp_tid & 1);\n";
-  ds << d_indent << "  int __sp_k_idx = __iv_iv_k * 2 + __iv_iv_warp;\n";
+  ds << d_indent << "  int __sp_k_idx = (" << kIdxExpr << ") * 2 + ("
+     << warpIdxExpr << ");\n";
   ds << d_indent << "  if (__sp_active) {\n";
   ds << d_indent << "    " << metaVar << " = ((const uint32_t*)(" << baseName
      << "))[((__sp_packed_row >> 4) * (" << rowStride
@@ -5594,14 +5600,23 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                                            row_stride, ValueSTR(tile_off));
           } else {
             const std::string base = MetaBase();
-            emitPrepackedV2Snippet(sym, base, row_stride, col_stride);
+            std::string k_idx_expr, warp_idx_expr;
+            if (PrepackedMetadataIndexExprs(n.LOC(), k_idx_expr,
+                                            warp_idx_expr))
+              emitPrepackedV2Snippet(sym, base, row_stride, col_stride,
+                                     k_idx_expr, warp_idx_expr);
           }
         } else {
           if (prepack_single_col)
             emitPrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr),
                                             row_stride);
-          else
-            emitPrepackedU32Snippet(sym, MetaBase(), row_stride, col_stride);
+          else {
+            std::string k_idx_expr, warp_idx_expr;
+            if (PrepackedMetadataIndexExprs(n.LOC(), k_idx_expr,
+                                            warp_idx_expr))
+              emitPrepackedU32Snippet(sym, MetaBase(), row_stride, col_stride,
+                                      k_idx_expr, warp_idx_expr);
+          }
         }
         ds << d_indent << "}\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
@@ -5795,12 +5810,16 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             ds << d_indent << meta_ty << " " << meta_var << " = 0;\n";
             ds << d_indent << "{\n";
             ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
-            if (v2_mode_exec)
-              emitPrepackedV2Snippet(meta_var, prepackInfo.device_name, "128",
-                                     "1");
-            else
-              emitPrepackedU32Snippet(meta_var, prepackInfo.device_name, "128",
-                                      "1");
+            std::string k_idx_expr, warp_idx_expr;
+            if (PrepackedMetadataIndexExprs(n.LOC(), k_idx_expr,
+                                            warp_idx_expr)) {
+              if (v2_mode_exec)
+                emitPrepackedV2Snippet(meta_var, prepackInfo.device_name, "128",
+                                       "1", k_idx_expr, warp_idx_expr);
+              else
+                emitPrepackedU32Snippet(meta_var, prepackInfo.device_name, "128",
+                                        "1", k_idx_expr, warp_idx_expr);
+            }
             ds << d_indent << "}\n";
           }
         }
