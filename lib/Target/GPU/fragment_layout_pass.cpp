@@ -170,8 +170,16 @@ bool FragmentLayoutPass::Visit(AST::FragReduce& n) {
 
 bool FragmentLayoutPass::Visit(AST::FragTransfer& n) {
   if (n.op != AST::FragTransferKind::COPY) return true;
-  auto dst_scoped = InScopeName(n.DstName());
-  auto src_scoped = InScopeName(n.SrcName());
+
+  // Non-variable operands (for example a span-array slot) are diagnosed by
+  // the code generator; resolve without asserting so this pass does not crash
+  // before that diagnostic runs.
+  auto dst_id = AST::GetIdentifier(*n.dst);
+  auto src_id = AST::GetIdentifier(*n.src);
+  if (!dst_id || !src_id) return true;
+
+  auto dst_scoped = InScopeName(dst_id->name);
+  auto src_scoped = InScopeName(src_id->name);
   copy_edges_.emplace_back(dst_scoped, src_scoped);
   return true;
 }

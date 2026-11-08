@@ -9867,8 +9867,19 @@ bool CuteCodeGen::Visit(AST::FragTransfer& n) {
   if (IsHost()) return true;
   if (has_pending_wgmma_finalize) EmitWGMMAFinalize(ds, d_indent, true);
 
-  auto dst_name = n.DstName();
-  auto src_name = n.SrcName();
+  // Fragment transfers address whole fragment variables. Resolve the
+  // operands without asserting so a span-array slot is diagnosed instead of
+  // crashing in DstName()/SrcName().
+  auto dst_id = AST::GetIdentifier(*n.dst);
+  auto src_id = AST::GetIdentifier(*n.src);
+  if (!dst_id || !src_id) {
+    Error1(n.LOC(), "frag transfer operands must be fragment variables; "
+                    "span-array slots and element expressions are not "
+                    "supported.");
+    return true;
+  }
+  const std::string& dst_name = dst_id->name;
+  const std::string& src_name = src_id->name;
   auto dst_scoped = InScopeNameForRef(dst_name);
   auto src_scoped = InScopeNameForRef(src_name);
 
