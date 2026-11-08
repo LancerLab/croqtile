@@ -24,6 +24,11 @@ __co__ auto ctmma_meta_slot(f16 [16, 16] lhs, u8 [16, 4] lhs_meta,
   return output;
 }
 
+// The metadata buffer stays live until the mma.load, so mem-reuse must not
+// place b_s at the metadata's address (both were at +1024 before the
+// liveness fix, and b_s's copy then clobbered the metadata).
+// CHECK: a_s_mdata = (unsigned char*)(anon_{{.*}} + 1536);
+// CHECK: b_s__buf__ = (f16*)(anon_{{.*}} + 1024);
 // CHECK: uint8_t* ma_mdata_ptr = (uint8_t*)((unsigned char*)a_s_mdata + (1)*(64));
 
 // A plain (non-array) metadata buffer is broadcast across A slots: it must

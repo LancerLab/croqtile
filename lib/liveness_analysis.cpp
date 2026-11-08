@@ -2060,6 +2060,14 @@ bool LivenessAnalyzer::Visit(AST::MMA& n) {
       tracker_.AddNoStorageAlias(AST::FragName(op->LoadTo()),
                                  op->LoadFrom()->RefSymbol());
     AddUse(current_stmt, GetAllSymbolicOperands(op->LoadFrom().get()));
+    // Sparse metadata for this operand is referenced through the
+    // `<ref>_mdata` convention (the codegen reads it at this load); keep
+    // that buffer live so mem-reuse cannot alias it with another buffer.
+    if (auto lca = op->LoadFrom()) {
+      const std::string ref_sym = lca->RefSymbol();
+      if (!ref_sym.empty() && SSTab().IsDeclared(ref_sym + "_mdata"))
+        AddUse(current_stmt, ref_sym + "_mdata");
+    }
   } break;
   default: break;
   }
