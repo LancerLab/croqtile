@@ -15,6 +15,20 @@ __co__ void tma_view_from_coords(f32 [64, 32] x) {
 
 // CHECK: tma_load_2d_shared_cta_global_mbarrier({{.*}}, 6, 5);
 
+// A rank-reducing .from(...) keeps the pre-view coordinates: fold them
+// through the pre-view stride frame, then split by the flattened map's inner
+// extent.  For global f32 [2, 64, 32], the origin (1, 5, 7) is element 2215,
+// i.e. map coordinates (outer 69, inner 7), emitted (inner, outer).
+__co__ void tma_view_from_rank_reduce(global f32 [2, 64, 32] x) {
+  parallel b by 1 : block {
+    load = tma.copy.async x.view(64, 32).from(1, 5, 7) => shared;
+    wait load;
+  }
+}
+
+// CHECK-LABEL: __choreo_device_tma_view_from_rank_reduce
+// CHECK: tma_load_2d_shared_cta_global_mbarrier({{.*}}, 7, 69);
+
 // An explicit-stride view that keeps the flattened layout stays valid: the
 // innermost stride is 1 and the row stride equals the source's inner extent.
 // (The box stays within both map extents and the 256-element box limit.)

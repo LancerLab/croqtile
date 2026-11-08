@@ -1640,6 +1640,14 @@ const ValueList CuteCodeGen::GenIndices(const ptr<AST::ChunkAt>& ca,
   // Generate the initial indices
   indices = ValxN(sbe::nu(0), ca->GetBlockShape().DimCount());
 
+  // Stride frame before the current spanned operation. `.from(...)`
+  // coordinates are expressed in the pre-view frame; every operation
+  // refreshes the frame exactly as in GenOffset().
+  auto cur_strd =
+      GetSpannedType(GetSymbolType(ca->RefSymbol()))->GetStrides();
+  for (size_t i = 0; i < sop_base; ++i)
+    cur_strd = sops[i]->GetBlockStrides();
+
   // handle each chunkat inside a seqeunce like 'chunkat(a, b).chunkat(c)...'
   for (size_t sop_idx = sop_base; sop_idx < sops.size(); ++sop_idx) {
     // span_as reshape operation would not affect index generation
@@ -1675,22 +1683,38 @@ const ValueList CuteCodeGen::GenIndices(const ptr<AST::ChunkAt>& ca,
       // the original tensor's coordinate space and must not be scaled by the
       // view block shape. Each offset belongs to its own dimension.
       if (auto offsets = op->GetOffsets()) {
-        size_t from_dim = 0;
+        ValueList origin;
         for (auto p : offsets->AllValues()) {
           if (const auto& o = dyn_cast<AST::Expr>(p)->Opts(); o.HasVals()) {
-            const auto& vals = o.GetVals();
-            for (auto& val : vals) {
-              if (!sbe::ceq(val, sbe::sym("::__choreo_no_tiling__")) &&
-                  from_dim < indices.size())
-                indices[from_dim] = indices[from_dim] + val;
-              ++from_dim;
-            }
+            for (auto& val : o.GetVals())
+              origin.push_back(
+                  sbe::ceq(val, sbe::sym("::__choreo_no_tiling__"))
+                      ? sbe::nu(0)
+                      : val);
           } else {
-            if (from_dim < indices.size())
-              indices[from_dim] = indices[from_dim] +
-                                  sbe::sym(OpExprSTR(p, "*", true, IsHost()));
-            ++from_dim;
+            origin.push_back(sbe::sym(OpExprSTR(p, "*", true, IsHost())));
           }
+        }
+
+        // A rank-reducing .from(...) keeps the pre-view coordinates. The
+        // flattened tensor map has two dimensions, so fold the whole origin
+        // through the pre-view stride frame and split it at the map's inner
+        // extent instead of dropping the coordinates past the post-view rank.
+        if (origin.size() > indices.size() && indices.size() == 2) {
+          ValueItem linear = sbe::nu(0);
+          for (size_t i = 0; i < origin.size() && i < cur_strd.size(); ++i)
+            linear = linear + origin[i] * cur_strd[i];
+
+          auto map_shape =
+              GetSpannedType(GetSymbolType(ca->RefSymbol()))->GetShape();
+          if (auto li = ca->IndexOfLastSpanAs())
+            map_shape = ca->OpAt(*li)->GetBlockShape();
+          auto inner = map_shape.ValueAt(map_shape.Rank() - 1);
+          indices[0] = indices[0] + linear / inner;
+          indices[1] = indices[1] + linear % inner;
+        } else {
+          for (size_t i = 0; i < origin.size() && i < indices.size(); ++i)
+            indices[i] = indices[i] + origin[i];
         }
       } else {
         coords = ValxN(sbe::nu(0), shape.DimCount());
@@ -1707,6 +1731,8 @@ const ValueList CuteCodeGen::GenIndices(const ptr<AST::ChunkAt>& ca,
       // d)'
       indices[i] = indices[i] + coords[i] * shape.ValueAt(i);
     }
+
+    cur_strd = op->GetBlockStrides();
   }
 
   VST_DEBUG(dbgs() << "Indices for chunkat (" << PSTR(ca)
