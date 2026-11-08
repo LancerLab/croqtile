@@ -35,4 +35,4 @@ For a **hands-on tutorial**, see the [Croqtile Tutorial](https://codes1gn.github
 
 ### Process
 
-12. [RSI — Development Incident Retrospective](RSI.md) -- incidents and the rules adopted to prevent them (e.g. never run concurrent lit suites)
+12. [RSI — 10-minute Dev Loop Prompt](RSI.md) -- the development loop's process, round lock, verification rules, and the 2026-11-08 GPU-incident lessons
