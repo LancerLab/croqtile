@@ -22,9 +22,38 @@ __co__ auto span_array_slot_global() {
   return output;
 }
 
+__co__ auto span_array_copy() {
+  global s32 [4] src[3];
+  s32 [12] output{0};
+  parallel by 1 : block {
+    shared s32 [4] tmp[3];
+    dma.copy src => tmp;
+    output.at(0) = tmp[2].at(3);
+  }
+  return output;
+}
+
+// An indexed slot is a single span, so the copy must stay one span wide.
+__co__ auto span_array_slot_copy() {
+  global s32 [4] src[3];
+  s32 [4] output{0};
+  parallel by 1 : block {
+    shared s32 [4] tmp[3];
+    dma.copy src[1] => tmp[1];
+    output.at(0) = tmp[1].at(3);
+  }
+  return output;
+}
+
 // CHECK-LABEL: __choreo_device_span_array_slot
 // CHECK: __shared__ float tiles[16];
 // CHECK: *((float*)tiles + ((1)*2+0)*(4) + 0) = 1.000000f;
 // CHECK: *((float*)output + 0) = *((float*)tiles + ((1)*2+0)*(4) + 0);
 // CHECK-LABEL: __choreo_device_span_array_slot_global
 // CHECK: hipMalloc(&tiles__device, 64ULL)
+// CHECK-LABEL: __choreo_device_span_array_copy
+// CHECK: __shared__ int tmp[12];
+// CHECK: __i < 48ULL / sizeof(int)
+// CHECK-LABEL: __choreo_device_span_array_slot_copy
+// CHECK: __shared__ int tmp[12];
+// CHECK: __i < 16ULL / sizeof(int)

@@ -279,7 +279,7 @@ private:
 
   void EmitDMACopy(const HIPDMALoweringDecision& dec,
                    const std::string& from_expr, const std::string& to_expr,
-                   const ptr<SpannedType>& to_sty);
+                   const std::string& to_size_expr);
   void EmitDMAPad(AST::DMA& n, const HIPDMALoweringDecision& dec,
                   const std::string& from_expr, const std::string& to_expr,
                   const ptr<SpannedType>& from_sty,

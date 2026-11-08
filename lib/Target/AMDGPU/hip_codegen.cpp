@@ -1288,7 +1288,8 @@ bool HIPCodeGen::Visit(AST::DMA& n) {
     auto to_sty = GetSpannedType(NodeType(*n.GetTo()));
     if (to_sty) {
       hs << h_indent << "(void)hipMemcpy(" << to_expr << ", " << from_expr
-         << ", " << UnScopedSizeExpr(*to_sty) << ", hipMemcpyDefault);\n";
+         << ", " << UnScopedExpr(TotalSizeExprFor(*n.GetTo(), *to_sty))
+         << ", hipMemcpyDefault);\n";
     }
     return true;
   }
@@ -1304,7 +1305,8 @@ bool HIPCodeGen::Visit(AST::DMA& n) {
   } else if (dec->IsTranspose()) {
     EmitDMATranspose(n, *dec, from_expr, to_expr, from_sty, to_sty);
   } else {
-    EmitDMACopy(*dec, from_expr, to_expr, to_sty);
+    EmitDMACopy(*dec, from_expr, to_expr,
+                UnScopedExpr(TotalSizeExprFor(*n.GetTo(), *to_sty)));
   }
 
   if (!is_async) ds << d_indent << "__syncthreads();\n";
@@ -1315,10 +1317,9 @@ bool HIPCodeGen::Visit(AST::DMA& n) {
 void HIPCodeGen::EmitDMACopy(const HIPDMALoweringDecision& dec,
                              const std::string& from_expr,
                              const std::string& to_expr,
-                             const ptr<SpannedType>& to_sty) {
+                             const std::string& to_size_expr) {
   auto bt_name = HIPNameBaseType(dec.elem_type);
-  auto size_expr = UnScopedSizeExpr(*to_sty);
-  ds << d_indent << "for (size_t __i = threadIdx.x; __i < " << size_expr
+  ds << d_indent << "for (size_t __i = threadIdx.x; __i < " << to_size_expr
      << " / sizeof(" << bt_name << "); __i += blockDim.x) {\n";
   ds << d_indent << "  ((" << bt_name << "*)" << to_expr << ")[__i] = "
      << "((" << bt_name << "*)" << from_expr << ")[__i];\n";

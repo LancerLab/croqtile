@@ -1195,7 +1195,7 @@ bool CCCodeGen::Visit(AST::DMA& n) {
   auto to_ca = cast<AST::ChunkAt>(n.to);
   auto from_sty = cast<SpannedType>(from_ca->GetType());
 
-  auto size_expr = UnScopedExpr(SizeExprOf(*from_sty, true));
+  auto size_expr = UnScopedExpr(TotalSizeExprFor(*from_ca, *from_sty));
 
   std::string from_expr = ExprSTR(n.from);
   std::string to_expr = ExprSTR(n.to);

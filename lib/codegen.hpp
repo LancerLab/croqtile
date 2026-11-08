@@ -790,6 +790,29 @@ protected:
   CodeGenInfo& cgi;
 
 protected:
+  // Whole-declaration byte size for a symbol. ChunkAt's inferred type and
+  // return-value types can drop the slot dimensions, so recover the declared
+  // SpannedArrayType from the symbol table and fall back to the chunk size.
+  std::string TotalSizeExprForSymbol(const std::string& sym,
+                                     const Type& chunk_ty) const {
+    auto ty = GetSymbolType(sym);
+    if (auto fty = dyn_cast<FutureType>(ty)) ty = fty->GetSpannedType();
+    if (auto sat = dyn_cast<SpannedArrayType>(ty))
+      return TotalSizeExprOf(*sat, true);
+    return TotalSizeExprOf(chunk_ty, true);
+  }
+
+  // Whole-declaration byte size for a DMA/copy operand. Full references use
+  // the declared symbol size; indexed slots and subviews keep the chunk size.
+  std::string TotalSizeExprFor(const AST::Node& node,
+                               const Type& chunk_ty) const {
+    if (auto ca = dyn_cast<AST::ChunkAt>(&node);
+        ca && ca->NoOperation() &&
+            (!ca->indices || ca->indices->None()))
+      return TotalSizeExprForSymbol(ca->RefSymbol(), chunk_ty);
+    return TotalSizeExprOf(chunk_ty, true);
+  }
+
   Storage FutureStorage(const std::string& n) const {
     assert(PrefixedWith(n, "::") && "requires a scoped name.");
     if (cgi.GetFunctionSharedFutures(fname).count(n))

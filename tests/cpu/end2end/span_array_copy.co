@@ -1,0 +1,37 @@
+// REQUIRES: TARGET-CPU
+// RUN: choreo -gs %target %s | bash -s -- --execute | FileCheck --match-full-lines %s
+
+// A bulk copy of a multi-slot span array must transfer every slot, not just
+// the first span. The source values are written slot by slot, copied through
+// a shared span array, and then all 12 elements are checked.
+__co__ auto span_array_copy() {
+  global s32 [4] src[3];
+  s32 [12] output{0};
+  parallel by 1 : block {
+    parallel p by 4 : thread {
+      src[0].at(p) = p;
+      src[1].at(p) = 100 + p;
+      src[2].at(p) = 200 + p;
+    }
+    shared s32 [4] tmp[3];
+    dma.copy src => tmp;
+    parallel p by 4 : thread {
+      output.at(p) = tmp[0].at(p);
+      output.at(4 + p) = tmp[1].at(p);
+      output.at(8 + p) = tmp[2].at(p);
+    }
+  }
+  return output;
+}
+
+int main() {
+  auto res = span_array_copy();
+  for (int p = 0; p < 4; ++p) {
+    choreo::choreo_assert(res[p] == p, "slot0 mismatch");
+    choreo::choreo_assert(res[4 + p] == 100 + p, "slot1 mismatch");
+    choreo::choreo_assert(res[8 + p] == 200 + p, "slot2 mismatch");
+  }
+  std::cout << "Test span_array_copy Passed" << std::endl;
+}
+
+// CHECK: Test span_array_copy Passed
