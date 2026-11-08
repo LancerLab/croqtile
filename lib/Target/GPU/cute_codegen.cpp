@@ -5623,8 +5623,15 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           // operand's slot indices. A plain broadcast span must stay at its
           // base: AppendArraySlotOffset's subscript fallback would turn a
           // data element into the metadata pointer.
-          if (!dyn_cast<ArrayType>(GetSymbolType(off_sym)))
+          auto off_ty = dyn_cast<ArrayType>(GetSymbolType(off_sym));
+          if (!off_ty)
             return prepackInfo.device_name;
+          // A one-slot metadata array is a broadcast like a plain buffer:
+          // folding the operand's slot index would address past its only slot.
+          if (off_ty->ArrayRank() == 1) {
+            if (auto cnt = VIInt(off_ty->Dimension(0)))
+              if (*cnt == 1) return prepackInfo.device_name;
+          }
           AppendArraySlotOffset(base, off_sym, lca->indices, false);
           base.insert(0, "(");
           base += ")";
