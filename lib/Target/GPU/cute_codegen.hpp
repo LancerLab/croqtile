@@ -417,6 +417,9 @@ private:
     // reference itself); its type carries the slot stride.
     std::string resolved_sym;
     bool use_packed_u32 = false;
+    // True when the mma.load operand itself is the metadata buffer (no
+    // `<ref>_mdata` alias): its operand address is in the metadata frame.
+    bool operand_is_metadata = false;
   };
 
   PrepackedU32Info resolvePrepackedU32Meta(const std::string& ref_sym,

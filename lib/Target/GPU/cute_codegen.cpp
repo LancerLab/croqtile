@@ -2246,7 +2246,11 @@ CuteCodeGen::resolvePrepackedU32Meta(const std::string& ref_sym,
     return false;
   };
 
-  if (!tryResolve(ref_sym + "_mdata")) { tryResolve(ref_sym); }
+  if (tryResolve(ref_sym + "_mdata")) {
+    info.operand_is_metadata = false;
+  } else if (tryResolve(ref_sym)) {
+    info.operand_is_metadata = true;
+  }
 
   if (!info.use_packed_u32 && forceFlag) {
     if (SSTab().IsDeclared(ref_sym)) {
@@ -2256,6 +2260,7 @@ CuteCodeGen::resolvePrepackedU32Meta(const std::string& ref_sym,
             info.device_name = ssm.DeviceName(InScopeName(ref_sym));
             info.resolved_sym = ref_sym;
             info.use_packed_u32 = true;
+            info.operand_is_metadata = true;
           }
         }
       }
@@ -5615,9 +5620,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         // chunk-adjusted metadata address (chunkat lives in the
         // metadata-element frame).
         const std::string meta_base = MetaBase();
+        const bool operand_is_metadata = prepackInfo.operand_is_metadata;
         const std::string meta_tile =
-            prepackInfo.resolved_sym == ref_sym ? ValueSTR(tile_addr)
-                                                : meta_base;
+            operand_is_metadata ? ValueSTR(tile_addr) : meta_base;
 
         ds << d_indent << meta_ty << " " << sym << " = 0;\n";
         ds << d_indent << "{\n";
@@ -5632,9 +5637,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           }
         } else if (v2_mode) {
           if (prepack_single_col) {
-            auto tile_off = GenOffset(op.LoadFrom());
-            emitPrepackedV2TileLoadSnippet(sym, meta_base, ValueSTR(tile_addr),
-                                           row_stride, ValueSTR(tile_off));
+            emitPrepackedV2TileLoadSnippet(
+                sym, meta_base, meta_tile, row_stride,
+                operand_is_metadata ? ValueSTR(GenOffset(lca)) : "0");
           } else {
             std::string k_idx_expr, warp_idx_expr;
             if (PrepackedMetadataIndexExprs(n.LOC(), k_idx_expr,
@@ -5644,8 +5649,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           }
         } else {
           if (prepack_single_col)
-            emitPrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr),
-                                            row_stride);
+            emitPrepackedU32TileLoadSnippet(sym, meta_tile, row_stride);
           else {
             std::string k_idx_expr, warp_idx_expr;
             if (PrepackedMetadataIndexExprs(n.LOC(), k_idx_expr,
