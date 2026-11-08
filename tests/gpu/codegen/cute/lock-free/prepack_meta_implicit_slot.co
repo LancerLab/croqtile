@@ -1,7 +1,8 @@
 // A prepacked sparse A operand in a span-array slot also selects the stage of
 // its implicit metadata: when the E operand is omitted, the generated
-// metadata load folds the A operand's slot into the metadata buffer base
-// instead of reading slot 0.
+// metadata load folds the A operand's slot into the metadata buffer base and
+// indexes the packed metadata with the buffer's declared row/column strides,
+// not the old hardcoded 128/1.
 //
 // REQUIRES: TARGET-SM_90A
 // RUN: choreo -es -t cute -arch=sm_90a --use-prepack %s -o - | grep -v '^ *//' | FileCheck %s
@@ -25,7 +26,32 @@ __co__ auto prepack_implicit_slot(u32 [64, 4] meta, f16 [64, 16] lhs_packed,
   return output;
 }
 
-// CHECK: uint32_t __sp_u32_val = ((unsigned int*)lhs_s_mdata + (1)*(256))[__sp_packed_row * (128) + __sp_k_idx * (1)];
+__co__ auto prepack_implicit_slot_wide(u32 [32, 8] meta,
+                                       f16 [64, 16] lhs_packed,
+                                       f16 [8, 32] rhs) {
+  f32 [64, 8] output{0.0f};
+  parallel by 1 : block {
+    shared f16 [64, 16] lhs_s[2];
+    shared u32 [32, 8] lhs_s_mdata[2];
+    dma.copy lhs_packed => lhs_s[1];
+    dma.copy meta => lhs_s_mdata[1];
+    rhs_s = dma.copy rhs => shared;
+    mc = mma.fill.f32 0.0f;
+    parallel p by 1 : group-4 {
+      mma.row.row.sp mc, lhs_s[1], rhs_s;
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// CHECK-LABEL: __global__{{.*}}prepack_implicit_slot
+// CHECK: uint32_t __sp_u32_val = ((unsigned int*)lhs_s_mdata + (1)*(256))[__sp_packed_row * (4) + __sp_k_idx * (1)];
 // CHECK: GMMA_64x8x32_F32F16F16_SS{{.*}}lhs_s_meta
-// V2: lhs_s_meta = ((const uint32_t*)(((unsigned int*)lhs_s_mdata + (1)*(256))))[((__sp_packed_row >> 4) * (128) + __sp_k_idx) * 16 + (__sp_packed_row & 15)];
+// V2: lhs_s_meta = ((const uint32_t*)(((unsigned int*)lhs_s_mdata + (1)*(256))))[((__sp_packed_row >> 4) * (4) + __sp_k_idx) * 16 + (__sp_packed_row & 15)];
+// V2: GMMA_64x8x32_F32F16F16_SS{{.*}}lhs_s_meta
+// CHECK-LABEL: __global__{{.*}}prepack_implicit_slot_wide
+// CHECK: uint32_t __sp_u32_val = ((unsigned int*)lhs_s_mdata + (1)*(256))[__sp_packed_row * (8) + __sp_k_idx * (1)];
+// CHECK: GMMA_64x8x32_F32F16F16_SS{{.*}}lhs_s_meta
+// V2: lhs_s_meta = ((const uint32_t*)(((unsigned int*)lhs_s_mdata + (1)*(256))))[((__sp_packed_row >> 4) * (8) + __sp_k_idx) * 16 + (__sp_packed_row & 15)];
 // V2: GMMA_64x8x32_F32F16F16_SS{{.*}}lhs_s_meta

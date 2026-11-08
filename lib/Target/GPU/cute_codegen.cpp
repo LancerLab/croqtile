@@ -5929,6 +5929,22 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             bool fp8_sparse_k64 = policy_is_fp8 && k_val && *k_val == 64;
             bool meta_64 = k_val && *k_val > 32 && !fp8_sparse_k64;
             std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
+            // The implicit metadata buffer may be a `<ref>_mdata` alias or the
+            // A buffer itself; either way its declaration supplies the packed
+            // row/column strides. Keep the old 128/1 layout only when no
+            // resolved metadata type is available.
+            std::string row_stride = "128";
+            std::string col_stride = "1";
+            if (!prepackInfo.resolved_sym.empty()) {
+              if (auto meta_sty = dyn_cast<SpannedType>(
+                      GetSymbolType(prepackInfo.resolved_sym))) {
+                auto strides = meta_sty->GetStrides();
+                if (strides.size() >= 2) {
+                  row_stride = ValueSTR(strides.at(0));
+                  col_stride = ValueSTR(strides.at(1));
+                }
+              }
+            }
             ds << d_indent << meta_ty << " " << meta_var << " = 0;\n";
             ds << d_indent << "{\n";
             ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
@@ -5936,11 +5952,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             if (PrepackedMetadataIndexExprs(n.LOC(), k_idx_expr,
                                             warp_idx_expr)) {
               if (v2_mode_exec)
-                emitPrepackedV2Snippet(meta_var, meta_device, "128", "1",
-                                       k_idx_expr, warp_idx_expr);
+                emitPrepackedV2Snippet(meta_var, meta_device, row_stride,
+                                       col_stride, k_idx_expr, warp_idx_expr);
               else
-                emitPrepackedU32Snippet(meta_var, meta_device, "128", "1",
-                                        k_idx_expr, warp_idx_expr);
+                emitPrepackedU32Snippet(meta_var, meta_device, row_stride,
+                                        col_stride, k_idx_expr, warp_idx_expr);
             }
             ds << d_indent << "}\n";
           }
