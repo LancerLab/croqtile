@@ -12543,5 +12543,21 @@ std::string CuteCodeGen::EmitUniformFragmentAccess(const ptr<AST::ChunkAt>& ca,
   const auto& finfo = FCtx(fname).GetFragmentInfo(scoped);
   auto sym = UnScopedName(SSMName(scoped, is_host));
   auto linear = ValueSTR(GenOffset(ca));
-  return sym + "[(" + linear + ") / (" + finfo.thread_count_expr + ")]";
+
+  // A fragment array (`mc[tile]`) stores `regs_per_thread` registers per
+  // slot; fold the slot offset into the register index, matching the
+  // DataAccess path. Without it every slot would read slot 0's registers.
+  std::string slot_off;
+  if (ca->indices) {
+    const auto& subs = ca->indices->AllValues();
+    if (!subs.empty()) {
+      if (auto array_ty = dyn_cast<ArrayType>(GetSymbolType(ca->data->name)))
+        slot_off = ArraySlotOffsetExpr(array_ty, subs, is_host,
+                                       finfo.regs_per_thread);
+    }
+  }
+
+  std::string reg_idx = "(" + linear + ") / (" + finfo.thread_count_expr + ")";
+  if (!slot_off.empty()) reg_idx = slot_off + " + " + reg_idx;
+  return sym + "[" + reg_idx + "]";
 }

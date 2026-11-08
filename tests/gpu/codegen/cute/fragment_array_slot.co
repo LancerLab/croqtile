@@ -68,3 +68,18 @@ __co__ auto fragment_array_copy() {
 // CHECK-NEXT: for (int __r = 0; __r < 16; ++__r)
 // CHECK-NEXT: b[__r] = a[__r];
 // CHECK: } // frag.copy
+
+// A fragment-array ChunkAt must fold the slot offset into its register index,
+// just like `at` and whole-array accesses.
+__co__ auto fragment_array_chunkat_slot() {
+  parallel p by 32 : thread {
+    frag f32 [16, 16] mc[3] {0.0f};
+    with {i, j} in [1, 1] {
+      call consume_fragment(mc[2].chunkat(i, j));
+    }
+  }
+  return 0;
+}
+
+// CHECK-LABEL: __choreo_device_fragment_array_chunkat_slot
+// CHECK: consume_fragment({{.*}}mc[(2)*(8) + {{.*}});
