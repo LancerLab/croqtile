@@ -83,3 +83,20 @@ __co__ auto fragment_array_chunkat_slot() {
 
 // CHECK-LABEL: __choreo_device_fragment_array_chunkat_slot
 // CHECK: consume_fragment({{.*}}mc[(2)*(8) + {{.*}});
+
+// A fragment-array span_as alias is a pointer into the fragment registers. Its
+// slot offset must use the fragment layout's registers-per-thread, not the
+// span's element count.
+__co__ auto fragment_array_span_as_alias() {
+  parallel p by 32 : thread {
+    frag f32 [16, 16] mc[3] {0.0f};
+    q1 = mc[2].span_as(16, 16);
+    call consume_fragment(q1);
+  }
+  return 0;
+}
+
+// CHECK-LABEL: __choreo_device_fragment_array_span_as_alias
+// CHECK: auto* q1 = static_cast<float*>((float*)mc + (2)*(8));
+// CHECK-NOT: mc + (2)*(256)
+// CHECK: consume_fragment((float*)q1);

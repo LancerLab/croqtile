@@ -2763,8 +2763,12 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         if (sa->subscriptions && sa->subscriptions->Count() > 0) {
           assert(dyn_cast<SpannedArrayType>(tty) &&
                  "span_as with subscriptions requires array type.");
+          std::optional<size_t> slot_stride;
+          const std::string scoped = InScopeName(sa->id->name);
+          if (FCtx(fname).HasFragmentInfo(scoped))
+            slot_stride = FCtx(fname).GetFragmentInfo(scoped).regs_per_thread;
           AppendArraySlotOffset(base_expr, sa->id->name, sa->subscriptions,
-                                IsHost());
+                                IsHost(), slot_stride);
         }
         ds << d_indent << "auto* " << raw_sym << " = ";
         ds << "static_cast<"

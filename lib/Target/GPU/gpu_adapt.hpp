@@ -758,11 +758,24 @@ public:
                             "` to be dynamically shaped (by " +
                             STR(sty->GetShape()) + ").");
       break;
-    case Storage::REG:
-      if (!n.HasNote("fragment_decl"))
+    case Storage::REG: {
+      // A span_as alias of a fragment-array slot is a pointer view into the
+      // fragment registers, not a fragment declaration. Allow exactly that
+      // shape; arbitrary REG declarations still need fragment_decl.
+      bool fragment_span_as_alias = false;
+      if (auto e = dyn_cast<AST::Expr>(n.init_expr)) {
+        if (auto sa = dyn_cast<AST::SpanAs>(e->GetReference())) {
+          auto aty = dyn_cast<SpannedArrayType>(GetSymbolType(sa->id->name));
+          fragment_span_as_alias =
+              aty && aty->spty->GetStorage() == Storage::REG &&
+              sa->subscriptions && sa->subscriptions->Count() > 0;
+        }
+      }
+      if (!n.HasNote("fragment_decl") && !fragment_span_as_alias)
         Error1(n.LOC(), "can not declare variable '" + n.name_str + "` as " +
                             STR(st) + " inside choreo function.");
       break;
+    }
     default:
       Error1(n.LOC(), "can not declare variable '" + n.name_str + "` as " +
                           STR(st) + " inside choreo function.");
