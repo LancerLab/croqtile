@@ -237,9 +237,25 @@ public:
                             STR(sty->GetShape()) + ").");
       break;
     case Storage::REG:
-      if (!n.HasNote("fragment_decl"))
-        Error1(n.LOC(), "can not declare variable '" + n.name_str + "` as " +
-                            STR(st) + " inside choreo function.");
+      if (!n.HasNote("fragment_decl")) {
+        // Fragment span_as slot aliases need the fragment layout's register
+        // stride, which HIP codegen does not model. Point at the construct
+        // instead of reporting a generic REG declaration.
+        bool fragment_span_as_alias = false;
+        if (auto e = dyn_cast<AST::Expr>(n.init_expr)) {
+          if (auto sa = dyn_cast<AST::SpanAs>(e->GetReference())) {
+            fragment_span_as_alias =
+                dyn_cast<SpannedArrayType>(GetSymbolType(sa->id->name)) &&
+                sa->subscriptions && sa->subscriptions->Count() > 0;
+          }
+        }
+        if (fragment_span_as_alias)
+          Error1(n.LOC(), "AMDGPU does not support fragment span_as slot "
+                              "aliases; use the cute GPU target.");
+        else
+          Error1(n.LOC(), "can not declare variable '" + n.name_str + "` as " +
+                              STR(st) + " inside choreo function.");
+      }
       break;
     default:
       Error1(n.LOC(), "can not declare variable '" + n.name_str + "` as " +

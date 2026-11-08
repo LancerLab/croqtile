@@ -1,0 +1,17 @@
+// AMDGPU has no fragment-layout register stride, so a span_as alias of a
+// fragment-array slot must be rejected with a target-specific diagnostic
+// rather than the generic REG-declaration error.
+//
+// RUN: not choreo -es -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ auto fragment_span_as_alias_unsupported() {
+  parallel p by 32 : thread {
+    frag f32 [16, 16] mc[3] {0.0f};
+    q1 = mc[2].span_as(16, 16);
+    q1.at(0, 0) = 1.0f;
+  }
+  return 0;
+}
+
+// CHECK-NOT: can not declare variable
+// CHECK: error:{{.*}}AMDGPU does not support fragment span_as slot aliases
