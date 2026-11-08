@@ -1,0 +1,54 @@
+// REQUIRES: TARGET-GPU
+// RUN: env CHOREO_SYNC_RECOVERY=1 CHOREO_SYNC_RECOVERY_KEEP=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>/dev/null | FileCheck --check-prefix=KEEP %s
+// RUN: env CHOREO_SYNC_RECOVERY=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>&1 | FileCheck --check-prefix=ELIDE %s
+//
+// Both drain kinds at one handover: the producer engine-writes the slot
+// (async load) and also engine-reads it (async store). The derive step then
+// emits a read drain (WAR, the store's read) and a full drain (WAW, the load's
+// write) at the same frontier. Each is covered by the source wait on its own
+// copy, so both elide; the direction-specific precondition is what lets the
+// full drain fold against the earlier load wait despite the later store.
+
+// KEEP: g.wait();
+// KEEP-NEXT: cde::cp_async_bulk_wait_group_read<0>();
+// KEEP-NEXT: cuda::ptx::cp_async_bulk_wait_group(cuda::ptx::n32_t<0>{});
+// KEEP-NEXT: sig.arrive
+
+// ELIDE-COUNT-2: [sync-recovery] elide AST::CompletionWait (source wait on the draining copy)
+// ELIDE: g.wait();
+// ELIDE-NOT: cde::cp_async_bulk_wait_group_read<0>()
+// ELIDE-NOT: cuda::ptx::cp_async_bulk_wait_group
+// ELIDE: sig.arrive
+
+__co__ s32 [1, 16] reuse_drains(s32 [1, 16] src) {
+  s32 [1, 16] out;
+
+  parallel p by 1 : block {
+    parallel q by 2 : group-4 {
+      shared event sig;
+
+      inthreads.async (q == 1) {
+        shared s32 [1, 16] a;
+        f = tma.copy.async src => a;
+        wait f;
+        g = tma.copy.async a => out;
+        wait g;
+        trigger sig;
+      }
+
+      inthreads.async (q == 0) {
+        wait sig;
+        shared s32 [1, 16] b;
+        h = tma.copy.async src => b;
+        wait h;
+        out.at(0, 1) = b.at(0, 0);
+      }
+
+      sync.barrier : block;
+    }
+  }
+
+  return out;
+}
+
+int main() { return 0; }
