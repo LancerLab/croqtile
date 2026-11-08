@@ -1,0 +1,25 @@
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto pad_multi_slot() {
+  f32 [2, 4] src[3];
+  parallel p by 1 : block {
+    dma.pad<{1, 2}, {1, 2}, {0, 0}, 0.0f> src => local;
+  }
+}
+
+__co__ auto transp_multi_slot() {
+  s32 [2, 16] src[3];
+  s32 [16, 2] dst[3];
+  dma.transp<1, 0> src => dst;
+}
+
+// A multi-slot destination is rejected too.
+__co__ auto transp_multi_slot_dst() {
+  s32 [2, 16] src;
+  s32 [16, 2] dst[3];
+  dma.transp<1, 0> src => dst;
+}
+
+// CHECK: error: pad/transpose of a multi-slot span array is not supported; apply the DMA to one slot at a time.
+// CHECK: error: pad/transpose of a multi-slot span array is not supported; apply the DMA to one slot at a time.
+// CHECK: error: pad/transpose of a multi-slot span array is not supported; apply the DMA to one slot at a time.
