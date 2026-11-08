@@ -1,0 +1,26 @@
+// A span-array slot access that omits a slot subscript leaves an unfinished
+// slot type; it must be diagnosed instead of silently addressing the first
+// element of the unfinished slot.
+//
+// RUN: not choreo -es %s 2>&1 | FileCheck %s
+
+__co__ void span_array_partial_slot() {
+  parallel by 1 {
+    shared f32[2, 8] b[2][3];
+    b[1].at(0, 0) = 1.0f;
+  }
+}
+
+// CHECK: error: span-array slot access must select a complete slot before '.at(...)'
+
+// A complete slot subscript must keep compiling; it must not be confused with
+// the partial-slot case above.
+__co__ void span_array_complete_slot() {
+  parallel by 1 {
+    shared f32[2, 8] b[2][3];
+    b[1][0].at(0, 0) = 1.0f;
+  }
+}
+
+// CHECK-NOT: error: span-array slot access must select a complete slot
+

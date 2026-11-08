@@ -1502,6 +1502,7 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
 
   auto dty = GetSymbolType(n.GetDataName());
   ptr<Type> accessed_ty = dty;
+  bool partial_slot = false;
   if (n.AccessArrayElement()) {
     auto aty = dyn_cast<SpannedArrayType>(dty);
     if (!aty) {
@@ -1510,11 +1511,15 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
                           ".");
       return false;
     }
+    // SubScriptType keeps returning a SpannedArrayType for both complete and
+    // partial slot subscripts; compare the subscript count with the declared
+    // slot-array rank to detect an unfinished slot.
+    partial_slot = n.GetArrayIndices().size() < aty->ArrayRank();
     accessed_ty = aty->SubScriptType(n.GetArrayIndices().size());
   }
   auto sty = dyn_cast<SpannedType>(accessed_ty);
 
-  if (!sty) {
+  if (!sty || partial_slot) {
     if (n.AccessArrayElement())
       Error1(n.LOC(), "span-array slot access must select a complete slot "
                       "before '.at(...)'.");
