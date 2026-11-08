@@ -370,6 +370,9 @@ private:
   std::unordered_map<std::string, ptr<AST::ChunkAt>> live_chunk_aliases;
   std::unordered_set<std::string> explicit_mma_loads_;
   std::unordered_set<std::string> shared_scalar_syms_;
+  // Scalar declarations without an initializer, keyed by scoped name. Used to
+  // reject a sparse WGMMA metadata register that is consumed while unset.
+  std::unordered_set<std::string> uninitialized_scalars_;
   std::unordered_map<std::string, std::string> single_matcher_iv_;
   // Canonical IV remaps installed by a WithBlock's `with` clauses, saved so
   // they cannot leak into a later block that reuses the same matcher name.
@@ -573,6 +576,7 @@ private:
     live_chunk_aliases.clear();
     explicit_mma_loads_.clear();
     shared_scalar_syms_.clear();
+    uninitialized_scalars_.clear();
     single_matcher_iv_.clear();
     single_matcher_iv_scopes_.clear();
     shared_buf_swiz_.clear();

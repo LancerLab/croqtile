@@ -3195,7 +3195,11 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       Stream() << CudaDeviceMemory(st) << " ";
     }
     Stream() << NameBaseType(GetBaseType(*nty)) << " " << sym;
-    if (n.init_expr) Stream() << " = " << ExprSTR(n.init_expr, false);
+    if (n.init_expr) {
+      Stream() << " = " << ExprSTR(n.init_expr, false);
+    } else {
+      uninitialized_scalars_.insert(sname);
+    }
     Stream() << ";\n";
 
     // mutables have references
@@ -3456,6 +3460,8 @@ bool CuteCodeGen::Visit(AST::NamedTypeDecl& n) {
 
 bool CuteCodeGen::Visit(AST::Assignment& n) {
   TraceEachVisit(n);
+  if (!n.AssignToDataElement())
+    uninitialized_scalars_.erase(InScopeName(n.GetName()));
   if (vec4_automap_skip_) return true;
   if (apply_row_hoisted_stmts_.count(&n)) return true;
 
@@ -6613,6 +6619,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           metadata_is_register = IsU32RegisterMetadata(mty, metadata_scoped);
           if (auto scty = dyn_cast<ScalarType>(mty))
             metadata_is_non_u32_scalar = scty->GetBaseType() != BaseType::U32;
+        }
+        if (metadata_is_register &&
+            uninitialized_scalars_.count(metadata_scoped) &&
+            !explicit_mma_loads_.count(metadata_scoped)) {
+          Error1(n.LOC(),
+                 "sparse WGMMA metadata register must be initialized before "
+                 "use");
+          return false;
         }
         if (metadata_name.empty() ||
             (!metadata_is_register &&
