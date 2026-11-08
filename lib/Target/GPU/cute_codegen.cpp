@@ -7535,8 +7535,10 @@ bool CuteCodeGen::Visit(AST::CompletionWait& n) {
        << ">();\n";
     break;
   case CompletionWaitKind::FULL_DRAIN:
-    ds << d_indent << "cde::cp_async_bulk_wait_group<" << n.GetPending()
-       << ">();\n";
+    // libcu++ only exposes the read variant in cuda::device::experimental;
+    // the full-group drain lives in the PTX wrapper namespace.
+    ds << d_indent << "cuda::ptx::cp_async_bulk_wait_group(cuda::ptx::n32_t<"
+       << n.GetPending() << ">{});\n";
     break;
   }
 
