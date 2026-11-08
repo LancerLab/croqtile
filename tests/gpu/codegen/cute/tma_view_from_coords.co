@@ -13,3 +13,39 @@ __co__ void tma_view_from_coords(f32 [64, 32] x) {
 }
 
 // CHECK: tma_load_2d_shared_cta_global_mbarrier({{.*}}, 6, 5);
+
+// An explicit-stride view that keeps the flattened layout stays valid: the
+// innermost stride is 1 and the row stride equals the source's inner extent.
+__co__ void tma_view_stride_ok(global f32 [64, 32, 16] x) {
+  parallel b by 1 : block {
+    load = tma.copy.async x.view(2048, 8: 16, 1) => shared;
+    wait load;
+  }
+}
+
+// CHECK-LABEL: __choreo_device_tma_view_stride_ok
+// CHECK: tma_load_2d_shared_cta_global_mbarrier
+
+// An intermediate view replaced by a later subspan is not diagnosed.
+__co__ void tma_view_dead(global f32 [64, 32, 16] x) {
+  parallel b by 1 : block {
+    load = tma.copy.async x.view(64, 32: 16, 1).subspan(64, 16) => shared;
+    wait load;
+  }
+}
+
+// CHECK-LABEL: __choreo_device_tma_view_dead
+// CHECK: tma_load_2d_shared_cta_global_mbarrier
+
+// A root-subview TMA source (its own map path) with a layout-preserving
+// view must not be diagnosed by the flattened-map check.
+__co__ void tma_view_root_subview(global f32 [2, 64, 4, 128] input) {
+  parallel bm by 1 : block {
+    in_head = input.subspan(1, 64, 1, 128).at(0, 0, 0, 0).sqz();
+    load = tma.copy.async in_head.view(64, 128) => shared;
+    wait load;
+  }
+}
+
+// CHECK-LABEL: __choreo_device_tma_view_root_subview
+// CHECK: tma_load

@@ -1,0 +1,29 @@
+// A view that re-shapes the source's innermost dimension makes the flattened
+// 2-D tensor map (inner = the source's innermost dimension) and the
+// view-derived box describe different regions. The box's row stride must
+// equal the map's inner extent and its innermost stride must be 1; diagnose
+// it instead of encoding an incoherent map (driver reject or silent
+// zero-fill).
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+__co__ void tma_view_reshape_inner(global f32 [64, 32, 16] x) {
+  parallel b by 1 : block {
+    load = tma.copy.async x.view(64, 32) => shared;
+    wait load;
+  }
+}
+
+// CHECK: error: TMA view layout does not match the flattened tensor map
+
+// An explicit-stride view can keep a coherent row stride yet request a wider
+// innermost extent than the map provides; the box must stay within the map.
+__co__ void tma_view_overwide_stride(global f32 [64, 32, 16] x) {
+  parallel b by 1 : block {
+    load = tma.copy.async x.view(1024, 32: 16, 1) => shared;
+    wait load;
+  }
+}
+
+// CHECK: error: TMA view layout does not match the flattened tensor map

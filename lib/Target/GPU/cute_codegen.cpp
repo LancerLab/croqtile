@@ -10712,6 +10712,24 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
       }
       if (has_view && host_rank > 2) {
         ValueItem inner_dim = g_shape.ValueAt(g_shape.Rank() - 1);
+        // The flattened map's inner extent is the source's innermost
+        // dimension. The view-derived box must be coherent with it:
+        // contiguous innermost (stride 1), row stride equal to the map's
+        // inner extent, and an inner extent no wider than the map. Compare
+        // strides as well as extents: an explicit-stride view that keeps the
+        // flattened layout is valid.
+        if (t_shape.Rank() >= 2 && g_ca->OpCount() > 0) {
+          const ValueList& t_strides = g_ca->LastOp()->GetBlockStrides();
+          if (t_strides.size() == t_shape.Rank() &&
+              (sbe::cne(t_strides.back(), sbe::nu(1)) ||
+               sbe::cne(t_strides[t_strides.size() - 2], inner_dim) ||
+               sbe::cgt(t_shape.ValueAt(t_shape.Rank() - 1), inner_dim))) {
+            Error1(g_ca->LOC(),
+                   "TMA view layout does not match the flattened tensor map "
+                   "(contiguous innermost dimension, row stride equal to the "
+                   "source's innermost extent, inner extent within it).");
+          }
+        }
         ValueItem outer_dim = sbe::nu(1);
         for (size_t i = 0; i + 1 < g_shape.Rank(); ++i)
           outer_dim = outer_dim * g_shape.ValueAt(i);
