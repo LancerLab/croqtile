@@ -2082,8 +2082,14 @@ bool LivenessAnalyzer::Visit(AST::FragReduce& n) {
   // would let a later allocation reuse the source's storage while the
   // reduction still reads it.
   stmt_linfo[current_stmt].buffer_related = true;
-  AddUse(current_stmt, n.SrcName());
-  if (!n.IsAllReduce()) AddUse(current_stmt, n.DstName());
+  // Non-variable reduction operands (for example a span-array slot) are
+  // diagnosed during code generation; resolve without asserting so liveness
+  // does not crash first.
+  auto src_id = AST::GetIdentifier(*n.src);
+  auto dst_id = AST::GetIdentifier(*n.dst);
+  if (!src_id || (!n.IsAllReduce() && !dst_id)) return true;
+  AddUse(current_stmt, src_id->name);
+  if (!n.IsAllReduce()) AddUse(current_stmt, dst_id->name);
   return true;
 }
 

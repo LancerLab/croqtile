@@ -150,8 +150,15 @@ bool FragmentLayoutPass::Visit(AST::FragReduce& n) {
   // legality is checked after layout inference by the target code generator.
   if (n.IsAllReduce()) return true;
 
-  auto dst_scoped = InScopeName(n.DstName());
-  auto src_scoped = InScopeName(n.SrcName());
+  // Non-variable operands (for example a span-array slot) are diagnosed by
+  // the code generator; resolve without asserting so this pass does not crash
+  // before that diagnostic runs.
+  auto dst_id = AST::GetIdentifier(*n.dst);
+  auto src_id = AST::GetIdentifier(*n.src);
+  if (!dst_id || !src_id) return true;
+
+  auto dst_scoped = InScopeName(dst_id->name);
+  auto src_scoped = InScopeName(src_id->name);
 
   if (usages_.count(dst_scoped)) {
     usages_[dst_scoped].is_reduce_target = true;

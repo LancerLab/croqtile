@@ -10046,8 +10046,22 @@ bool CuteCodeGen::Visit(AST::FragReduce& n) {
 
   // ---- Prepare: resolve symbols, compute all parameters ----
 
-  auto src_scoped = InScopeNameForRef(n.SrcName());
-  auto dst_scoped = InScopeNameForRef(n.DstName());
+  // Fragment reductions address whole fragment variables. Resolve the
+  // operands without asserting so a span-array slot is diagnosed instead of
+  // crashing in SrcName()/DstName().
+  auto src_id = AST::GetIdentifier(*n.src);
+  auto dst_id = AST::GetIdentifier(*n.dst);
+  if (!src_id || !dst_id) {
+    Error1(n.LOC(), "frag reduction operands must be fragment variables; "
+                    "span-array slots and element expressions are not "
+                    "supported.");
+    return true;
+  }
+  const std::string& src_name = src_id->name;
+  const std::string& dst_name = dst_id->name;
+
+  auto src_scoped = InScopeNameForRef(src_name);
+  auto dst_scoped = InScopeNameForRef(dst_name);
 
   if (n.IsAllReduce()) {
     if (!FCtx(fname).HasFragmentLayout(src_scoped)) {
@@ -10070,9 +10084,9 @@ bool CuteCodeGen::Visit(AST::FragReduce& n) {
     }
 
     auto value_sym = UnScopedName(SSMName(src_scoped, false));
-    std::string ws_name = "__all_reduce_ws_" + n.SrcName();
+    std::string ws_name = "__all_reduce_ws_" + src_name;
 
-    IndStream() << "{ // " << n.OpName() << " " << n.SrcName() << "\n";
+    IndStream() << "{ // " << n.OpName() << " " << src_name << "\n";
     IncrIndent();
     if (width > 32) {
       IndStream() << "__shared__ float " << ws_name << "[" << fl.thread_count
@@ -10133,12 +10147,12 @@ bool CuteCodeGen::Visit(AST::FragReduce& n) {
   std::string first_idx_expr =
       src_fl.ReduceLocalIndex("__row", "0", rp.local_cols);
   std::string ws_name =
-      rp.NeedsWorkspace() ? ("__reduce_ws_" + n.DstName()) : "";
+      rp.NeedsWorkspace() ? ("__reduce_ws_" + dst_name) : "";
 
   // ---- Emit: write CUDA code from prepared parameters ----
 
-  IndStream() << "{ // " << n.OpName() << " " << n.SrcName() << " -> "
-              << n.DstName() << "\n";
+  IndStream() << "{ // " << n.OpName() << " " << src_name << " -> "
+              << dst_name << "\n";
   IncrIndent();
 
   if (rp.NeedsWorkspace()) {

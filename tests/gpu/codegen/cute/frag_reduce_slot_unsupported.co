@@ -1,0 +1,27 @@
+// A fragment reduction addresses whole fragment variables. A span-array slot
+// is an element expression, so it must be diagnosed instead of crashing while
+// resolving the operand name.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s
+
+__co__ void frag_reduce_slot_unsupported() {
+  parallel b by 1 : block {
+    frag f32[64] row_sum[2] {0.0f};
+    all_reduce_sum(row_sum[1]);
+  }
+}
+
+// CHECK: error: frag reduction operands must be fragment variables; span-array slots and element expressions are not supported.
+
+// The two-operand reductions take the same operand path and must not crash in
+// layout inference before the diagnostic runs.
+__co__ void frag_reduce_slot_row_unsupported() {
+  parallel b by 1 : block {
+    frag f32[64, 128] scores[2] {1.0f};
+    frag f32[64] out;
+    reduce_sum(out, scores[1], 1);
+  }
+}
+
+// CHECK: error: frag reduction operands must be fragment variables; span-array slots and element expressions are not supported.
