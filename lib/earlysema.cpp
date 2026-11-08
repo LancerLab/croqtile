@@ -3770,9 +3770,12 @@ bool EarlySemantics::Visit(AST::Return& n) {
         return false;
       }
       if (isa<SpannedType>(base_ty)) {
-        Error1(n.LOC(),
-               "returning an indexed element of a span is not supported; "
-               "return the whole span instead.");
+        auto span_rank = cast<SpannedType>(base_ty)->GetShape().Rank();
+        auto is_subspan = AST::GetSubScriptLevel(*e) < span_rank;
+        Error1(n.LOC(), std::string("returning an indexed ") +
+                            (is_subspan ? "row" : "element") +
+                            " of a span is not supported; return the whole "
+                            "span instead.");
         return false;
       }
     }
