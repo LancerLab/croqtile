@@ -111,26 +111,53 @@ void SyncRecovery::AddInsert(const AST::Node* anchor,
 void SyncRecovery::Eliminate(std::vector<PendingInsert>& inserts,
                              const AST::MultiNodes& n, size_t anchor_idx) {
   if (keep_insertions_ || inserts.empty()) return;
+  assert(!visit_stack_.empty() && visit_stack_.back() == &n &&
+         "elimination must run at the list currently being visited");
   std::vector<PendingInsert> keep;
   keep.reserve(inserts.size());
   for (const auto& ins : inserts) {
     const char* reason = nullptr;
-    // Statements up to the anchor execute before it whenever it does, so a
-    // covering op in that range is available on every path to the insertion
-    // site (the site-level slice of the availability fold; cross-block
-    // availability is not folded yet, so the pass only under-removes).
-    long last = ins.after ? (long)anchor_idx : (long)anchor_idx - 1;
-    for (long j = 0; j <= last && reason == nullptr; ++j) {
-      const AST::Node* s = n.SubAt((size_t)j).get();
+    // A statement covers the insertion iff it executes on every path that
+    // reaches the insertion site and follows the producer's last access. Both
+    // the enclosing-list prefix and the prefixes of its ancestor lists have
+    // that property (must direction).
+    auto probe = [&](const AST::Node* s, const AST::MultiNodes& lst,
+                     size_t j) -> const char* {
       auto pit = preorder_index_.find(s);
-      if (pit == preorder_index_.end()) continue; // our own insertion
+      if (pit == preorder_index_.end()) return nullptr; // our own insertion
       int sidx = pit->second;
       if (ins.not_before >= 0 && sidx <= ins.not_before) {
         if (sidx == ins.not_before && SelfDischarging(s, *ins.node, ins.buffer))
-          reason = "synchronous engine access";
-        continue;
+          return "synchronous engine access";
+        return nullptr;
       }
-      reason = CoveringOp(s, n, (size_t)j, *ins.node, ins.buffer);
+      return CoveringOp(s, lst, j, *ins.node, ins.buffer);
+    };
+
+    // Site-level slice: the prefix of the enclosing statement list.
+    long last = ins.after ? (long)anchor_idx : (long)anchor_idx - 1;
+    for (long j = 0; j <= last && reason == nullptr; ++j)
+      reason = probe(n.SubAt((size_t)j).get(), n, (size_t)j);
+
+    // Cross-block slice: every list on the ancestry stack contributes the
+    // siblings before the child that contains the anchor. Those execute
+    // whenever the anchor does, including per iteration when a loop header is
+    // crossed, so they are must-available cover sites as well.
+    for (size_t k = 0; k + 1 < visit_stack_.size() && reason == nullptr; ++k) {
+      auto* up = dyn_cast<AST::MultiNodes>(visit_stack_[k]);
+      if (up == nullptr) continue;
+      const AST::Node* child = visit_stack_[k + 1];
+      size_t stop = up->Count();
+      bool found = false;
+      for (size_t j = 0; j < up->Count(); ++j)
+        if (up->SubAt(j).get() == child) {
+          stop = j;
+          found = true;
+          break;
+        }
+      if (!found) continue; // child not tracked; stay conservative
+      for (size_t j = 0; j < stop && reason == nullptr; ++j)
+        reason = probe(up->SubAt(j).get(), *up, j);
     }
     if (reason == nullptr) {
       keep.push_back(ins);
