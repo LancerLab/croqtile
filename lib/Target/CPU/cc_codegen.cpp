@@ -969,6 +969,8 @@ bool CCCodeGen::Visit(AST::WithIn& n) {
   if (has_scalar_matcher) {
     auto m = cast<AST::Identifier>(n.GetMatchers()[0]);
     ssm.RemapHostSymbol(InScopeName(m->name), "__iv_" + n.with->name);
+    os << indent << "[[maybe_unused]] int __iv_" << n.with->name
+       << " = 0;\n";
     return true;
   }
 

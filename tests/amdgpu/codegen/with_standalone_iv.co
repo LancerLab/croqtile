@@ -1,0 +1,15 @@
+// A standalone scalar `with` must declare its canonical iteration variable,
+// otherwise the emitted body reads an undeclared `__iv_<source>`.
+//
+// RUN: choreo -es -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ void with_standalone_iv() {
+  with i in [2] {
+    println(i);
+  }
+}
+
+// CHECK-LABEL: void with_standalone_iv(
+// CHECK: int __iv_i = 0;
+// CHECK-NOT: printf(i)
+// CHECK: printf(__iv_i)

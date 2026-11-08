@@ -290,8 +290,17 @@ bool HIPCodeGen::Visit(AST::WithIn& n) {
   // directly over `__iv_<source>`. The matcher must resolve to the same IV.
   if (has_scalar_matcher) {
     auto m = cast<AST::Identifier>(n.GetMatchers()[0]);
+    // The source is already mapped on the device; the host map is needed for a
+    // standalone host-level with whose body reads the source name.
+    ssm.RemapHostSymbol(InScopeName(n.with->name), "__iv_" + n.with->name);
     ssm.RemapDeviceSymbol(InScopeName(m->name), "__iv_" + n.with->name);
     ssm.RemapHostSymbol(InScopeName(m->name), "__iv_" + n.with->name);
+    if (IsHost())
+      hs << h_indent << "[[maybe_unused]] int __iv_" << n.with->name
+         << " = 0;\n";
+    else
+      ds << d_indent << "[[maybe_unused]] int __iv_" << n.with->name
+         << " = 0;\n";
     return true;
   }
 
