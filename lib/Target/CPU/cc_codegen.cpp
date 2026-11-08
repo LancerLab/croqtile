@@ -683,6 +683,7 @@ bool CCCodeGen::BeforeVisitImpl(AST::Node& n) {
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     levels.push(pb->GetLevel());
   } else if (isa<AST::WithBlock>(&n)) {
+    EnterSingleMatcherIVScope();
     IndStream() << "{\n";
     IncrIndent();
   } else if (isa<AST::ForeachBlock>(&n)) {
@@ -742,6 +743,7 @@ bool CCCodeGen::AfterVisitImpl(AST::Node& n) {
       IndStream() << "});\n";
     }
   } else if (isa<AST::WithBlock>(&n)) {
+    LeaveSingleMatcherIVScope();
     DecrIndent();
     IndStream() << "}\n";
   } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
@@ -968,9 +970,22 @@ bool CCCodeGen::Visit(AST::WithIn& n) {
   // directly over `__iv_<source>`. The matcher must resolve to the same IV.
   if (has_scalar_matcher) {
     auto m = cast<AST::Identifier>(n.GetMatchers()[0]);
-    ssm.RemapHostSymbol(InScopeName(m->name), "__iv_" + n.with->name);
-    os << indent << "[[maybe_unused]] int __iv_" << n.with->name
-       << " = 0;\n";
+    const std::string base = "__iv_" + n.with->name;
+    std::string iv_name = base;
+    if (SingleMatcherIVInUse(iv_name)) {
+      size_t suffix = 2;
+      do {
+        iv_name = base + "__" + std::to_string(suffix);
+        ++suffix;
+      } while (SingleMatcherIVInUse(iv_name));
+    }
+    RecordSingleMatcherIV("__iv_" + m->name);
+    RecordSingleMatcherIV(base);
+    single_matcher_iv_["__iv_" + m->name] = iv_name;
+    single_matcher_iv_[base] = iv_name;
+    ssm.RemapHostSymbol(InScopeName(m->name), iv_name);
+    ssm.RemapHostSymbol(InScopeName(n.with->name), iv_name);
+    os << indent << "[[maybe_unused]] int " << iv_name << " = 0;\n";
     return true;
   }
 
@@ -1011,6 +1026,11 @@ bool CCCodeGen::Visit(AST::ForeachBlock& n) {
                         "variable after normalization.");
       auto iv_bty = cast<BoundedType>(rng->GetIV()->GetType());
       auto iv_name = UnScopedName(iv_scoped);
+      if (auto iv_it = single_matcher_iv_.find(iv_name);
+          iv_it != single_matcher_iv_.end())
+        // Redirect the foreach's canonical IV to the with source's declared
+        // iteration variable so nested same-source withs stay distinct.
+        iv_name = iv_it->second;
       ssm.RemapHostSymbol(iv_scoped, iv_name);
       auto lb = UnScopedExpr(ValueSTR(iv_bty->GetLowerBound()));
       auto ub = UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()));

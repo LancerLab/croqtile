@@ -1,0 +1,30 @@
+// A nested `with` that reuses the outer source name must get a distinct
+// canonical IV so the inner declaration does not shadow the outer source.
+//
+// REQUIRES: TARGET-CPU
+// RUN: choreo -t cc -es %s | FileCheck %s
+
+__co__ void with_nested_source() {
+  parallel p by 1 : block {
+    with a = {x} in [2] {
+      foreach x {
+        with a = {y} in [3] {
+          println(x + y);
+        }
+      }
+    }
+    with a = {z} in [4] {
+      foreach z {
+        println(z);
+      }
+    }
+  }
+}
+
+// CHECK-LABEL: void with_nested_source(
+// CHECK: for (int __iv_a = 0; __iv_a < 2; ++__iv_a)
+// CHECK: int __iv_a__2 = 0;
+// CHECK: std::cout << (__iv_a + __iv_a__2)
+// CHECK: for (int __iv_a = 0; __iv_a < 4; ++__iv_a)
+// CHECK: std::cout << __iv_a
+// CHECK-NOT: int __iv_a__2

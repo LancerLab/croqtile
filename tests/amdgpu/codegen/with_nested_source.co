@@ -1,0 +1,29 @@
+// A nested `with` that reuses the outer source name must get a distinct
+// canonical IV so the inner declaration does not shadow the outer source.
+//
+// RUN: choreo -es -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ void with_nested_source() {
+  parallel p by 1 : block {
+    with a = {x} in [2] {
+      foreach x {
+        with a = {y} in [3] {
+          println(x + y);
+        }
+      }
+    }
+    with a = {z} in [4] {
+      foreach z {
+        println(z);
+      }
+    }
+  }
+}
+
+// CHECK-LABEL: __global__ void __choreo_device_with_nested_source
+// CHECK: for (int __iv_a = 0; __iv_a < 2; ++__iv_a)
+// CHECK: int __iv_a__2 = 0;
+// CHECK: printf((__iv_a + __iv_a__2))
+// CHECK: for (int __iv_a = 0; __iv_a < 4; ++__iv_a)
+// CHECK: printf(__iv_a)
+// CHECK-NOT: int __iv_a__2

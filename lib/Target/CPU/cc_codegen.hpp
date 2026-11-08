@@ -2,8 +2,12 @@
 #define __CHOREO_CODEGEN_CC_HPP__
 
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <stack>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "assess.hpp"
 #include "ast.hpp"
@@ -138,6 +142,44 @@ protected:
   std::vector<std::string> pending_device_futures;
   std::vector<std::string> global_allocs;
 
+  // Canonical IV names chosen for single-matcher `with` clauses, and the
+  // per-WithBlock frames used to restore them when the block exits.
+  std::unordered_map<std::string, std::string> single_matcher_iv_;
+  std::vector<std::vector<std::pair<std::string, std::optional<std::string>>>>
+      single_matcher_iv_scopes_;
+
+  void RecordSingleMatcherIV(const std::string& key) {
+    if (single_matcher_iv_scopes_.empty()) return;
+    auto& saved = single_matcher_iv_scopes_.back();
+    for (const auto& [saved_key, old] : saved)
+      if (saved_key == key) return;
+    auto it = single_matcher_iv_.find(key);
+    saved.emplace_back(key, it == single_matcher_iv_.end()
+                                ? std::nullopt
+                                : std::optional<std::string>(it->second));
+  }
+
+  bool SingleMatcherIVInUse(const std::string& name) const {
+    for (const auto& [key, value] : single_matcher_iv_)
+      if (value == name) return true;
+    return false;
+  }
+
+  void EnterSingleMatcherIVScope() {
+    single_matcher_iv_scopes_.emplace_back();
+  }
+
+  void LeaveSingleMatcherIVScope() {
+    if (single_matcher_iv_scopes_.empty()) return;
+    for (const auto& [key, old] : single_matcher_iv_scopes_.back()) {
+      if (old)
+        single_matcher_iv_[key] = *old;
+      else
+        single_matcher_iv_.erase(key);
+    }
+    single_matcher_iv_scopes_.pop_back();
+  }
+
   virtual void ResetFunctionStates() {
     fty = nullptr;
     void_return = false;
@@ -147,6 +189,8 @@ protected:
     device_future_counter = 0;
     pending_device_futures.clear();
     global_allocs.clear();
+    single_matcher_iv_.clear();
+    single_matcher_iv_scopes_.clear();
   }
 };
 
