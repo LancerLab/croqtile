@@ -17,9 +17,10 @@ __co__ void tma_view_from_coords(f32 [64, 32] x) {
 
 // An explicit-stride view that keeps the flattened layout stays valid: the
 // innermost stride is 1 and the row stride equals the source's inner extent.
+// (The box stays within both map extents and the 256-element box limit.)
 __co__ void tma_view_stride_ok(global f32 [64, 32, 16] x) {
   parallel b by 1 : block {
-    load = tma.copy.async x.view(2048, 8: 16, 1) => shared;
+    load = tma.copy.async x.view(128, 8: 16, 1) => shared;
     wait load;
   }
 }
@@ -90,4 +91,54 @@ __co__ void tma_view_named_ok(global f32 [64, 32] x) {
 }
 
 // CHECK-LABEL: __choreo_device_tma_view_named_ok
+// CHECK: tma_load_2d_shared_cta_global_mbarrier
+
+// A rank-2 tile no wider than the map in either extent stays valid.
+__co__ void tma_view_outer_ok(global f32 [64, 32] x) {
+  parallel b by 1 : block {
+    load = tma.copy.async x.view(32, 32) => shared;
+    wait load;
+  }
+}
+
+// CHECK-LABEL: __choreo_device_tma_view_outer_ok
+// CHECK: tma_load_2d_shared_cta_global_mbarrier
+
+// A wide inner tile under TMA swizzle is split into legal box dims rather
+// than diagnosed by the 256-element box limit.
+__co__ void tma_view_swiz_split_ok(global f16 [64, 1024] x) {
+  parallel b by 1 : block {
+    shared f16 [64, 1024] s;
+    load = tma.copy.async.swiz<128> x => s;
+    wait load;
+  }
+}
+
+// CHECK-LABEL: __choreo_device_tma_view_swiz_split_ok
+// CHECK: tma_load_3d_shared_cta_global_mbarrier
+
+// A box of exactly the 256-element driver limit stays valid.
+__co__ void tma_view_box_256_ok(global f32 [256, 32] x) {
+  parallel b by 1 : block {
+    shared f32 [256, 32] s;
+    load = tma.copy.async x.view(256, 32) => s;
+    wait load;
+  }
+}
+
+// CHECK-LABEL: __choreo_device_tma_view_box_256_ok
+// CHECK: tma_load_2d_shared_cta_global_mbarrier
+
+// A box that exceeds the map along a non-innermost dimension is the ordinary
+// TMA out-of-bounds-fill pattern (padded boundary tile): it stays valid and
+// the driver zero-fills the excess rows.
+__co__ void tma_view_padded_rows_ok(global f16 [32, 128] x) {
+  parallel b by 1 : block {
+    shared f16 [64, 128] s;
+    load = tma.copy.async x.view(64, 128) => s;
+    wait load;
+  }
+}
+
+// CHECK-LABEL: __choreo_device_tma_view_padded_rows_ok
 // CHECK: tma_load_2d_shared_cta_global_mbarrier

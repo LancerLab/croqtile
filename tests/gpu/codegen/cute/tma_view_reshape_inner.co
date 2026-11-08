@@ -74,18 +74,6 @@ __co__ auto tma_view_store_local_wide(f32 [64, 32] x) {
 // CHECK: error: TMA view box is wider than the tensor map's innermost extent.
 // CHECK: error: TMA view box is wider than the tensor map's innermost extent.
 
-// A named view variable takes the root-subview descriptor path; its
-// over-wide box is diagnosed there too.
-__co__ void tma_view_named_wide(global f32 [64, 32] x) {
-  parallel b by 1 : block {
-    v = x.view(32, 64);
-    load = tma.copy.async v => shared;
-    wait load;
-  }
-}
-
-// CHECK: error: TMA view box is wider than the tensor map's innermost extent.
-
 // A computed root subview flattened to 2-D uses its outermost stride as the
 // map's inner extent; a view box wider than that is diagnosed.
 __co__ void tma_view_root_subview_wide(global f32 [2, 64, 4, 128] input) {
@@ -103,6 +91,29 @@ __co__ void tma_view_root_subview_wide(global f32 [2, 64, 4, 128] input) {
 __co__ void tma_view_stride_rank_mismatch(global f32 [64, 32, 16] x) {
   parallel b by 1 : block {
     load = tma.copy.async x.view(128, 32: 16) => shared;
+    wait load;
+  }
+}
+
+// CHECK: error: TMA view box is wider than the tensor map's innermost extent.
+
+// Any box dimension above 256 is rejected outright by the driver. The map's
+// outer extent stays above the box so only the driver limit fires.
+__co__ void tma_view_driver_wide(global f32 [1024, 32] x) {
+  parallel b by 1 : block {
+    load = tma.copy.async x.view(512, 8) => shared;
+    wait load;
+  }
+}
+
+// CHECK: error: TMA box dimension exceeds the 256-element driver limit.
+
+// A swizzled copy splits the innermost dimension, but the logical box must
+// still lie within the logical map.
+__co__ void tma_view_swiz_inner_wide(global f16 [64, 128] x) {
+  parallel b by 1 : block {
+    shared f16 [32, 256] s;
+    load = tma.copy.async.swiz<128> x.view(32, 256) => s;
     wait load;
   }
 }

@@ -10692,20 +10692,10 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     Shape host_stride = g_stride;
     size_t host_rank = g_shape.Rank();
 
-    // A box wider than the map's innermost extent is incoherent (driver
-    // reject or silent zero-fill), whether the box comes from an inline view
-    // or a named view variable. Diagnosed per branch against the map's own
-    // inner extent: the source's innermost dimension, or g_stride[0] for a
-    // root-subview descriptor flattened from its root.
+    // A View operation in this source chunk marks the box as view-derived.
     const bool has_view =
         std::any_of(g_ca->AllOperations().begin(), g_ca->AllOperations().end(),
                     [](const auto& sop) { return isa<AST::SOP::View>(sop); });
-    auto CheckViewBox = [&](ValueItem map_inner) {
-      if (t_shape.Rank() < 2) return;
-      if (sbe::cgt(t_shape.LeadingValue(), map_inner))
-        Error1(g_ca->LOC(),
-               "TMA view box is wider than the tensor map's innermost extent.");
-    };
 
     if (desc.HasRootParam()) {
       // TMA source is a computed subview (e.g., Q_head derived from Q).
@@ -10720,8 +10710,6 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
       const auto& root_shape = desc.GetRootParamShape();
 
       ValueItem inner_dim = g_stride[0];
-      // The flattened map's inner extent is the subview's outermost stride.
-      CheckViewBox(inner_dim);
       ValueItem total_elems = sbe::nu(1);
       for (size_t i = 0; i < root_shape.Rank(); ++i)
         total_elems = total_elems * root_shape.ValueAt(i);
@@ -10737,11 +10725,10 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
       if (has_view && host_rank > 2) {
         ValueItem inner_dim = g_shape.ValueAt(g_shape.Rank() - 1);
         // The flattened map's inner extent is the source's innermost
-        // dimension. The view-derived box must be coherent with it:
-        // contiguous innermost (stride 1), row stride equal to the map's
-        // inner extent, and an inner extent no wider than the map. Compare
-        // strides as well as extents: an explicit-stride view that keeps the
-        // flattened layout is valid.
+        // dimension. The view-derived strides must be contiguous (stride 1)
+        // with a row stride equal to the map's inner extent; an
+        // explicit-stride view that keeps the flattened layout is valid.
+        // The box extents are validated against the logical map below.
         if (t_shape.Rank() >= 2 && g_ca->OpCount() > 0) {
           const ValueList& t_strides = g_ca->LastOp()->GetBlockStrides();
           if (t_strides.size() == t_shape.Rank() &&
@@ -10751,12 +10738,6 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
                    "TMA view layout does not match the flattened tensor map "
                    "(contiguous innermost dimension, row stride equal to the "
                    "source's innermost extent).");
-          } else if (sbe::cgt(t_shape.LeadingValue(), inner_dim)) {
-            // Kept independent of the stride-rank precondition: a view whose
-            // stride list rank differs still must not request a wider box.
-            Error1(g_ca->LOC(),
-                   "TMA view box is wider than the tensor map's innermost "
-                   "extent.");
           }
         }
         ValueItem outer_dim = sbe::nu(1);
@@ -10768,8 +10749,7 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
         host_rank = 2;
       } else {
         // A rank-2 source with a view still takes its box from the viewed
-        // tile; the box must stay coherent with the map (see CheckViewBox).
-        CheckViewBox(g_shape.LeadingValue());
+        // tile; the box is validated against the logical map below.
         std::vector<ValueItem> byte_strides;
         for (size_t i = 0; i < host_stride.Rank(); ++i)
           byte_strides.push_back(host_stride.ValueAt(i) *
@@ -10781,7 +10761,6 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
         base_expr = SSMName((g_unscoped + "__device"), true);
       else
         base_expr = SSMName(InScopeName(g_unscoped) + "__device", true);
-      CheckViewBox(g_shape.LeadingValue());
       std::vector<ValueItem> byte_strides;
       for (size_t i = 0; i < host_stride.Rank(); ++i)
         byte_strides.push_back(host_stride.ValueAt(i) *
@@ -10796,6 +10775,18 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
           "TMA descriptors require a host-accessible base pointer. At " +
           oss.str());
     }
+
+    // A view-derived box must lie within the logical map along the
+    // innermost dimension: the view claims to reshape the source's
+    // contiguous row, and a wider box silently zero-fills instead. Boxes
+    // that merely exceed the map along other dimensions are the ordinary
+    // TMA out-of-bounds-fill pattern (padded boundary tiles) and stay legal.
+    // The swizzle split rewrites both shapes, so this uses the pre-split
+    // t_shape/host_shape.
+    if (has_view && t_shape.Rank() >= 2 && host_shape.Rank() >= 1 &&
+        sbe::cgt(t_shape.LeadingValue(), host_shape.LeadingValue()))
+      Error1(g_ca->LOC(),
+             "TMA view box is wider than the tensor map's innermost extent.");
 
     // When TMA swizzle is enabled and the box inner dimension (in bytes)
     // exceeds the swizzle width, CUDA requires boxDim[0]*elemSize <=
@@ -10872,6 +10863,16 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
         }
       }
     }
+
+    // The encoded box must fit the driver's per-dimension limit. This uses
+    // the (possibly split) encoded box: the swizzle split above keeps the
+    // innermost dimension legal at swiz_elems.
+    for (size_t i = 0; i < box_shape.Rank(); ++i)
+      if (sbe::cgt(box_shape.ValueAt(i), sbe::nu(256))) {
+        Error1(g_ca->LOC(),
+               "TMA box dimension exceeds the 256-element driver limit.");
+        break;
+      }
 
     desc.SetMapRank(host_rank);
     hs << h_indent << "uint64_t " << desc.GetName() << "_shape[] = {"
