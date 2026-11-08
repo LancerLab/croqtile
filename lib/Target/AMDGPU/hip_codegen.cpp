@@ -307,14 +307,25 @@ bool HIPCodeGen::Visit(AST::WithIn& n) {
     single_matcher_iv_[base] = iv_name;
     // The source is already mapped on the device; the host map is needed for a
     // standalone host-level with whose body reads the source name.
+    std::string scoped_iv = InScopeName(n.with->name);
+    if (iv_name != base) scoped_iv += iv_name.substr(base.size());
     ssm.RemapHostSymbol(InScopeName(n.with->name), iv_name);
     ssm.RemapDeviceSymbol(InScopeName(n.with->name), iv_name);
     ssm.RemapDeviceSymbol(InScopeName(m->name), iv_name);
     ssm.RemapHostSymbol(InScopeName(m->name), iv_name);
-    if (IsHost())
+    if (iv_name != base) {
+      ssm.RemapHostSymbol(scoped_iv, iv_name);
+      ssm.RemapDeviceSymbol(scoped_iv, iv_name);
+    }
+    if (IsHost()) {
       hs << h_indent << "[[maybe_unused]] int " << iv_name << " = 0;\n";
-    else
+      // A host-level with IV used by a nested device block is passed to the
+      // kernel as an int parameter; register it as a device input.
+      cgi.AddSymbolDetail(
+          fname, {scoped_iv, m->GetType(), true, -1, ParamAttr::NONE, "", true});
+    } else {
       ds << d_indent << "[[maybe_unused]] int " << iv_name << " = 0;\n";
+    }
     return true;
   }
 
@@ -1022,34 +1033,46 @@ bool HIPCodeGen::Visit(AST::ParallelBy& n) {
     }
     ds << ") ";
   }
+  // Host-scope IVs are only kernel arguments while their with block encloses
+  // this parallel block; out-of-scope host IVs must not appear in the launch.
+  auto is_live_device_input = [&](const SymbolDetail& item) {
+    return !item.need_iv_prefix ||
+           PrefixedWith(scoped_symtab.ScopeName(), GetScope(item.name));
+  };
+  auto device_arg_name = [&](const SymbolDetail& item) {
+    return (item.need_iv_prefix ? "__iv_" : "") + UnScopedName(item.name);
+  };
+
   ds << "void " << device_fn << "(";
   bool first = true;
+  std::unordered_set<std::string> seen_iv_params;
   for (auto& item : cgi.GetDeviceAllIns(fname)) {
+    if (!is_live_device_input(item)) continue;
+    const std::string dname = device_arg_name(item);
+    if (item.need_iv_prefix && !seen_iv_params.insert(dname).second) continue;
     if (!first) ds << ", ";
     if (auto sty = dyn_cast<SpannedType>(item.type)) {
-      ds << HIPNameBaseType(sty->ElementType()) << "* "
-         << UnScopedName(item.name);
-      ssm.MapDeviceSymbolIfNotExist(item.name, UnScopedName(item.name));
+      ds << HIPNameBaseType(sty->ElementType()) << "* " << dname;
+      ssm.MapDeviceSymbolIfNotExist(item.name, dname);
     } else if (auto scalar = dyn_cast<ScalarType>(item.type)) {
-      ds << HIPNameBaseType(scalar->GetBaseType()) << " "
-         << UnScopedName(item.name);
-      ssm.MapDeviceSymbolIfNotExist(item.name, UnScopedName(item.name));
+      ds << HIPNameBaseType(scalar->GetBaseType()) << " " << dname;
+      ssm.MapDeviceSymbolIfNotExist(item.name, dname);
     } else if (CanYieldAnInteger(item.type)) {
-      ds << "int " << UnScopedName(item.name);
-      ssm.MapDeviceSymbolIfNotExist(item.name, UnScopedName(item.name));
+      ds << "int " << dname;
+      ssm.MapDeviceSymbolIfNotExist(item.name, dname);
     } else if (isa<EventArrayType>(item.type)) {
-      ds << "bool * " << UnScopedName(item.name);
-      ssm.MapDeviceSymbolIfNotExist(item.name, UnScopedName(item.name));
+      ds << "bool * " << dname;
+      ssm.MapDeviceSymbolIfNotExist(item.name, dname);
     } else if (auto et = dyn_cast<EventType>(item.type)) {
       if (et->GetStorage() == Storage::GLOBAL) {
-        ds << "bool * " << UnScopedName(item.name);
+        ds << "bool * " << dname;
       } else {
-        ds << "bool " << UnScopedName(item.name);
+        ds << "bool " << dname;
       }
-      ssm.MapDeviceSymbolIfNotExist(item.name, UnScopedName(item.name));
+      ssm.MapDeviceSymbolIfNotExist(item.name, dname);
     } else {
-      ds << HostTypeStringify(*item.type) << " " << UnScopedName(item.name);
-      ssm.MapDeviceSymbolIfNotExist(item.name, UnScopedName(item.name));
+      ds << HostTypeStringify(*item.type) << " " << dname;
+      ssm.MapDeviceSymbolIfNotExist(item.name, dname);
     }
     first = false;
   }
@@ -1066,7 +1089,12 @@ bool HIPCodeGen::Visit(AST::ParallelBy& n) {
     // Emit hipLaunchCooperativeKernel with args array.
     hs << h_indent << "void* __" << fname << "_coop_args[] = {";
     first = true;
+    std::unordered_set<std::string> seen_coop_ivs;
     for (auto& item : cgi.GetDeviceAllIns(fname)) {
+      if (!is_live_device_input(item)) continue;
+      if (item.need_iv_prefix &&
+          !seen_coop_ivs.insert(device_arg_name(item)).second)
+        continue;
       if (!first) hs << ", ";
       if (dyn_cast<SpannedType>(item.type)) {
         hs << "(void*)&" << ssm.HostName(item.name + "__device");
@@ -1086,7 +1114,12 @@ bool HIPCodeGen::Visit(AST::ParallelBy& n) {
        << "<<<__grid, __block>>>";
     hs << "(";
     first = true;
+    std::unordered_set<std::string> seen_launch_ivs;
     for (auto& item : cgi.GetDeviceAllIns(fname)) {
+      if (!is_live_device_input(item)) continue;
+      if (item.need_iv_prefix &&
+          !seen_launch_ivs.insert(device_arg_name(item)).second)
+        continue;
       if (!first) hs << ", ";
       if (dyn_cast<SpannedType>(item.type)) {
         hs << ssm.HostName(item.name + "__device");

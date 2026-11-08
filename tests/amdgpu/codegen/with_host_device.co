@@ -1,0 +1,35 @@
+// A host-level `with` IV used inside a device block must be forwarded to the
+// kernel as an int parameter and passed at the launch site.
+//
+// RUN: choreo -es -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ void host_with_device(f32 [64] x) {
+  with i in [2] {
+    parallel p by 1 : block {
+      println(i);
+    }
+  }
+}
+
+__co__ void host_with_then_device(f32 [64] x) {
+  with i in [2] {
+    println(i);
+  }
+  parallel p by 1 : block {
+    println(1);
+  }
+}
+
+// CHECK-LABEL: __global__ void __choreo_device_host_with_device(float* x, int __iv_i)
+// CHECK: printf(__iv_i)
+// CHECK-LABEL: void host_with_device(
+// CHECK: {{\[\[}}maybe_unused]] int __iv_i = 0;
+// CHECK: __choreo_device_host_with_device<<<{{.*}}>>>(x__device, __iv_i);
+
+// An IV whose with block does not enclose the parallel must not leak into the
+// later kernel signature or launch.
+// CHECK-LABEL: __global__ void __choreo_device_host_with_then_device(float* x)
+// CHECK: printf(1)
+// CHECK-NOT: __iv_i
+// CHECK-LABEL: void host_with_then_device(
+// CHECK: __choreo_device_host_with_then_device<<<{{.*}}>>>(x__device);
