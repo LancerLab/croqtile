@@ -506,7 +506,13 @@ bool TypeInference::Visit(AST::DataAccess& n) {
              "expect '" + n.GetDataName() + "' an array-of-spanned type.");
       return false;
     }
-    accessed_ty = aty->SubScriptType(n.GetArrayIndices().size());
+    const size_t slot_count = n.GetArrayIndices().size();
+    if (slot_count > aty->ArrayRank()) {
+      Error1(n.LOC(), "span-array slot access has too many subscripts for the "
+                      "declared slot rank.");
+      return false;
+    }
+    accessed_ty = aty->SubScriptType(slot_count);
   }
 
   if (n.AccessElement()) {

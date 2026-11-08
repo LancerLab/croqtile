@@ -1,0 +1,15 @@
+// A span-array slot access with more subscripts than the declared slot rank
+// must be diagnosed at the access instead of aborting in ArrayType::SubScript.
+//
+// RUN: not choreo -es %s 2>&1 | FileCheck %s
+
+__co__ void span_array_oversubscribed_slot() {
+  parallel by 1 {
+    shared f32[8] tiles[2][2];
+    t0 = tiles[1];
+    t0[0][0].at(0) = 1.0f;
+  }
+}
+
+// CHECK-NOT: invalid subscription
+// CHECK: error: span-array slot access has too many subscripts for the declared slot rank.

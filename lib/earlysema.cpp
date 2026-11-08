@@ -1514,8 +1514,14 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
     // SubScriptType keeps returning a SpannedArrayType for both complete and
     // partial slot subscripts; compare the subscript count with the declared
     // slot-array rank to detect an unfinished slot.
-    partial_slot = n.GetArrayIndices().size() < aty->ArrayRank();
-    accessed_ty = aty->SubScriptType(n.GetArrayIndices().size());
+    const size_t slot_count = n.GetArrayIndices().size();
+    if (slot_count > aty->ArrayRank()) {
+      Error1(n.LOC(), "span-array slot access has too many subscripts for the "
+                      "declared slot rank.");
+      return false;
+    }
+    partial_slot = slot_count < aty->ArrayRank();
+    accessed_ty = aty->SubScriptType(slot_count);
   }
   auto sty = dyn_cast<SpannedType>(accessed_ty);
 
