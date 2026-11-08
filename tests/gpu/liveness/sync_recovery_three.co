@@ -1,0 +1,61 @@
+// REQUIRES: TARGET-GPU
+// RUN: env CHOREO_SYNC_RECOVERY=1 CHOREO_SYNC_RECOVERY_KEEP=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>/dev/null | FileCheck --check-prefix=KEEP %s
+// RUN: env CHOREO_SYNC_RECOVERY=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>&1 | FileCheck --check-prefix=ELIDE %s
+//
+// Three tenants on one slot, chained by two signals. The middle tenant is
+// engine-written and engine-read, so the a -> b handover carries a WAW
+// obligation that lowers to a full drain, while b -> c is engine-writer to
+// generic and stays event-bound. The source waits on both futures, so the
+// queued full drain is elided in place.
+
+// KEEP: f.wait();
+// KEEP: cuda::ptx::cp_async_bulk_wait_group(cuda::ptx::n32_t<0>{});
+// KEEP-NEXT: sig1.arrive
+
+// ELIDE-DAG: handover a -> b
+// ELIDE-DAG: handover b -> c
+// ELIDE-DAG: elide AST::CompletionWait (source wait on the draining copy)
+// ELIDE: f.wait();
+// ELIDE-NOT: cuda::ptx::cp_async_bulk_wait_group
+// ELIDE: sig1.arrive
+
+__co__ s32 [1, 16] reuse_three(s32 [1, 16] src) {
+  s32 [1, 16] out;
+
+  parallel p by 1 : block {
+    parallel q by 3 : group-4 {
+      shared event sig1;
+      shared event sig2;
+
+      inthreads.async (q == 2) {
+        shared s32 [1, 16] a;
+        f = tma.copy.async src => a;
+        wait f;
+        out.at(0, 0) = a.at(0, 0);
+        trigger sig1;
+      }
+
+      inthreads.async (q == 1) {
+        wait sig1;
+        shared s32 [1, 16] b;
+        g = tma.copy.async src => b;
+        wait g;
+        out.at(0, 1) = b.at(0, 0);
+        trigger sig2;
+      }
+
+      inthreads.async (q == 0) {
+        wait sig2;
+        shared s32 [1, 16] c;
+        c.at(0, 0) = src.at(0, 0);
+        out.at(0, 2) = c.at(0, 0);
+      }
+
+      sync.barrier : block;
+    }
+  }
+
+  return out;
+}
+
+int main() { return 0; }
