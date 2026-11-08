@@ -294,12 +294,18 @@ bool HIPCodeGen::Visit(AST::WithIn& n) {
     auto m = cast<AST::Identifier>(n.GetMatchers()[0]);
     const std::string base = "__iv_" + n.with->name;
     std::string iv_name = base;
+    std::string scoped_iv = InScopeName(n.with->name);
     if (SingleMatcherIVInUse(iv_name)) {
       size_t suffix = 2;
+      std::string candidate;
       do {
-        iv_name = base + "__" + std::to_string(suffix);
+        const std::string suffix_str = std::to_string(suffix);
+        iv_name = base + "__" + suffix_str;
+        candidate = n.with->name + "__" + suffix_str;
+        scoped_iv = InScopeName(n.with->name) + "__" + suffix_str;
         ++suffix;
-      } while (SingleMatcherIVInUse(iv_name));
+      } while (SingleMatcherIVInUse(iv_name) ||
+               SymTab()->Exists(scoped_iv) || SSTab().IsDeclared(candidate));
     }
     RecordSingleMatcherIV("__iv_" + m->name);
     RecordSingleMatcherIV(base);
@@ -307,8 +313,6 @@ bool HIPCodeGen::Visit(AST::WithIn& n) {
     single_matcher_iv_[base] = iv_name;
     // The source is already mapped on the device; the host map is needed for a
     // standalone host-level with whose body reads the source name.
-    std::string scoped_iv = InScopeName(n.with->name);
-    if (iv_name != base) scoped_iv += iv_name.substr(base.size());
     ssm.RemapHostSymbol(InScopeName(n.with->name), iv_name);
     ssm.RemapDeviceSymbol(InScopeName(n.with->name), iv_name);
     ssm.RemapDeviceSymbol(InScopeName(m->name), iv_name);

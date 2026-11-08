@@ -1,0 +1,28 @@
+// A user symbol named like a suffixed with IV must not be reused for the
+// nested with IV; the next free suffix is chosen instead.
+//
+// RUN: choreo -es -t hip -arch=gfx1030 %s 2>&1 | FileCheck %s
+
+__co__ void with_scoped_collision() {
+  f32 a__2 = 7;
+  println(a__2);
+  parallel p by 1 : block {
+    with a = {x} in [2] {
+      foreach x {
+        with a = {y} in [3] {
+          println(x + y);
+        }
+      }
+    }
+  }
+}
+
+// CHECK-LABEL: __global__ void __choreo_device_with_scoped_collision
+// CHECK: for (int __iv_a = 0; __iv_a < 2; ++__iv_a)
+// CHECK: int __iv_a__3 = 0;
+// CHECK: printf((__iv_a + __iv_a__3))
+// CHECK-NOT: int __iv_a__2
+// CHECK-LABEL: void with_scoped_collision(
+// CHECK: float a__2 = static_cast<float>(7);
+// CHECK: printf(a__2);
+// CHECK: __choreo_device_with_scoped_collision<<<{{.*}}>>>();

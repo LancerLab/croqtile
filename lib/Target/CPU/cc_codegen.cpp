@@ -974,10 +974,17 @@ bool CCCodeGen::Visit(AST::WithIn& n) {
     std::string iv_name = base;
     if (SingleMatcherIVInUse(iv_name)) {
       size_t suffix = 2;
+      std::string scoped_candidate;
+      std::string candidate;
       do {
-        iv_name = base + "__" + std::to_string(suffix);
+        const std::string suffix_str = std::to_string(suffix);
+        iv_name = base + "__" + suffix_str;
+        candidate = n.with->name + "__" + suffix_str;
+        scoped_candidate = InScopeName(n.with->name) + "__" + suffix_str;
         ++suffix;
-      } while (SingleMatcherIVInUse(iv_name));
+      } while (SingleMatcherIVInUse(iv_name) ||
+               SymTab()->Exists(scoped_candidate) ||
+               SSTab().IsDeclared(candidate));
     }
     RecordSingleMatcherIV("__iv_" + m->name);
     RecordSingleMatcherIV(base);
