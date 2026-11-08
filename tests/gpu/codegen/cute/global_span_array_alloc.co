@@ -60,6 +60,7 @@ __co__ void global_symbolic_slots(int m, int n, f32 [m, n] x) {
   }
 }
 
+// CHECK: cudaMalloc(&x__device, (uint64_t)(m) * (uint64_t)(n) * 4)
 // CHECK: cudaMalloc(&g__device, (uint64_t)(m) * (uint64_t)(n) * 4 * (uint64_t)(2))
 
 // A plain global span (no slot dimension) takes the same 64-bit sizing path.
