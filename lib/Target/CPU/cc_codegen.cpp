@@ -179,6 +179,27 @@ const std::string CCCodeGen::ExprSTR(AST::ptr<AST::Node> e) const {
       assert(sty && "can only access the element of a spanned type.");
       oss << "*((" << CCBaseTypeName(sty->ElementType()) << "*)"
           << ExprSTR(da->data);
+      if (da->AccessArrayElement()) {
+        const auto& array_subs = da->GetArrayIndices();
+        if (auto array_ty =
+                dyn_cast<SpannedArrayType>(GetSymbolType(da->data->name))) {
+          const auto& dims = array_ty->Dimensions();
+          if (!array_subs.empty() && array_subs.size() <= dims.size()) {
+            std::string slot_idx;
+            for (size_t i = 0; i < array_subs.size(); ++i) {
+              if (slot_idx.empty())
+                slot_idx = ExprSTR(array_subs[i]);
+              else
+                slot_idx = "(" + slot_idx + ")*" + ValueSTR(dims[i]) + "+" +
+                           ExprSTR(array_subs[i]);
+            }
+            for (size_t i = array_subs.size(); i < dims.size(); ++i)
+              slot_idx = "(" + slot_idx + ")*" + ValueSTR(dims[i]);
+            oss << " + (" << slot_idx << ")*("
+                << ValueSTR(array_ty->PhysicalSlotStrideElementsValue()) << ")";
+          }
+        }
+      }
       size_t idx = 0;
       auto shape = sty->GetShape();
       for (auto item : da->GetIndices()) {

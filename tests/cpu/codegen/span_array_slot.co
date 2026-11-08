@@ -1,0 +1,18 @@
+// REQUIRES: TARGET-CPU
+// RUN: choreo -es -t cc %s -o - | FileCheck %s
+
+// A span-array slot access must fold the slot indices into the base address
+// before applying the element offset.
+__co__ auto span_array_slot() {
+  f32 [4] output{0.0f};
+  parallel by 1 : block {
+    shared f32 [4] tiles[2][2];
+    tiles[1][0].at(0) = 1.0f;
+    output.at(0) = tiles[1][0].at(0);
+  }
+  return output;
+}
+
+// CHECK-LABEL: span_array_slot
+// CHECK: *((float*)tiles + ((1)*2+0)*(4)) = 1.000000f;
+// CHECK: *((float*)output) = *((float*)tiles + ((1)*2+0)*(4));
