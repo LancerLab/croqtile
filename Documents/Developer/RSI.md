@@ -137,12 +137,16 @@ The same loop is implemented as a Piano workflow in the `piano` repository:
 `loop rounds[ propose → implement → verify ]` with a serial round, 2 rounds by
 default. Each round proposes one lit-verifiable change, implements it in the
 shared checkout, then builds and runs the lit suites there; a failing round is
-restored exactly to its pre-round files. The loop auto-commits each
-iteration's workspace changes at its exit (`[Feature](no-ticket): rounds R<n>`
-by default), so every round is a durable, recoverable point. There is no
-tournament: the engine's review-score referee is not a measurement comparable
-across rounds. Scope is compiler changes whose evidence is a build plus lit
-tests; kernel tuning stays in the `gpu-croqtile-tuning` workflows.
+restored exactly to its pre-round files. The end-to-end suite runs in the
+round only when a GPU is idle (utilization 0, low memory; polled every 30 s
+with a bound), pinned with `CUDA_VISIBLE_DEVICES`, and never while another
+suite or benchmark runs. The verify stage then commits the round with a
+descriptive English message before the engine's loop auto-commit, which finds
+nothing left and logs a no-op — every round is a durable, self-describing
+commit. There is no tournament: the engine's review-score referee is not a
+measurement comparable across rounds. Scope is compiler changes whose
+evidence is a build plus lit tests; kernel tuning stays in the
+`gpu-croqtile-tuning` workflows.
 
 ## Notes
 
