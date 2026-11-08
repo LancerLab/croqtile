@@ -1778,11 +1778,20 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
                    src_offset.second != dst_offset.second;
       }
       if (!equal.has_value() && !mismatch) {
-        // A difference that is a single monomial cannot be zero for positive
-        // extents. A difference with several monomials stays undecidable.
+        // A non-empty difference whose monomial coefficients all share one
+        // sign cannot be zero for positive extents. This covers the
+        // single-monomial case; mixed-sign differences stay undecidable.
         auto diff = to_monomial_sum(
             sbe::bop(OpCode::SUBTRACT, src_canon, dst_canon)->Normalize());
-        mismatch = diff && diff->size() == 1;
+        if (diff && !diff->empty()) {
+          bool all_positive = true;
+          bool all_negative = true;
+          for (const auto& term : *diff) {
+            all_positive = all_positive && term.second > 0;
+            all_negative = all_negative && term.second < 0;
+          }
+          mismatch = all_positive || all_negative;
+        }
       }
       if (mismatch) {
         AgentFacts facts;
