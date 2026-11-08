@@ -1600,6 +1600,65 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     }
   }
 
+  // A whole span-array copy must transfer every declared slot. The shape
+  // checks above only compare the base span shape, so a 3-slot source and a
+  // 2-slot destination look equivalent while codegen copies all source slots.
+  // Compare the static total element counts once both sides are fully typed.
+  if (n.operation == ".copy") {
+    auto static_total_elems =
+        [&](const ptr<AST::Node>& operand,
+            const ptr<Type>& chunk_ty) -> std::optional<int64_t> {
+      const Type* size_ty = chunk_ty.get();
+      if (auto ca = dyn_cast<AST::ChunkAt>(operand);
+          ca && ca->NoOperation() &&
+          (!ca->indices || ca->indices->None())) {
+        auto sym_ty = GetSymbolType(ca->RefSymbol());
+        if (auto fty = dyn_cast<FutureType>(sym_ty))
+          sym_ty = fty->GetSpannedType();
+        if (isa<SpannedArrayType>(sym_ty)) size_ty = sym_ty.get();
+      }
+      if (auto aty = dyn_cast<SpannedArrayType>(size_ty)) {
+        if (!aty->spty->GetShape().IsValid()) return std::nullopt;
+        auto total =
+            (aty->PhysicalSlotStrideElementsValue() * aty->ElemCount())
+                ->Normalize();
+        return VIInt(total);
+      }
+      auto sty = dyn_cast<SpannedType>(size_ty);
+      if (!sty || !sty->GetShape().IsValid()) return std::nullopt;
+      return VIInt(sty->GetShape().ElementCountValue());
+    };
+
+    auto src_total = static_total_elems(n.from, fty);
+    auto dst_total = static_total_elems(n.to, tty);
+    if (src_total && dst_total && *src_total != *dst_total) {
+      AgentFacts facts;
+      facts.category = "dma-size";
+      facts.constraint = "DMA source/destination total element count";
+      facts.predicate = "from.total_elems == to.total_elems";
+      facts.observed.push_back("from.total_elems = " +
+                               std::to_string(*src_total));
+      facts.observed.push_back("to.total_elems = " +
+                               std::to_string(*dst_total));
+      facts.valid = "from.total_elems == to.total_elems";
+      facts.repair_do =
+          "Make the DMA source and destination cover the same total number "
+          "of elements.";
+      facts.repair_why =
+          "A DMA copy transfers one element count between its source and "
+          "destination.";
+      facts.repair_alt =
+          "Resize or re-view one side so both cover the same element count.";
+      facts.confidence = "certain";
+      ErrorWithFacts(n.LOC(),
+                     "DMA statement has a size mismatch between 'from' and "
+                     "'to': " +
+                         std::to_string(*src_total) + " != " +
+                         std::to_string(*dst_total) + " elements.",
+                     facts);
+    }
+  }
+
   for (const auto& ca_node : {n.from, n.to}) {
     const auto& ca = cast<AST::ChunkAt>(ca_node);
     auto sty = GetSpannedType(GetSymbolType(ca->RefSymbol()));

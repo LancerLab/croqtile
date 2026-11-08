@@ -1,0 +1,13 @@
+// A whole span-array copy must transfer every declared slot. The rank and
+// element-type checks see matching base spans here, but the source has 3
+// slots and the destination only 2, so codegen would overrun the destination.
+//
+// RUN: not choreo -es -t cc %s 2>&1 | FileCheck %s
+
+__co__ void dma_copy_size_mismatch() {
+  global f32 [4] src[3];
+  global f32 [4] dst[2];
+  dma.copy src => dst;
+}
+
+// CHECK: error: DMA statement has a size mismatch between 'from' and 'to': 12 != 8 elements.

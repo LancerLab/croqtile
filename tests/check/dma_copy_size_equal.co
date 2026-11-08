@@ -1,0 +1,12 @@
+// Equal total slot counts are still accepted and copy the whole declaration.
+//
+// RUN: choreo -es -t cc %s -o - | FileCheck %s
+
+__co__ void dma_copy_size_equal() {
+  global f32 [4] src[3];
+  global f32 [4] dst[3];
+  dma.copy src => dst;
+}
+
+// CHECK-LABEL: dma_copy_size_equal
+// CHECK: std::memcpy((void*)(dst), (const void*)(src), 48ULL);
