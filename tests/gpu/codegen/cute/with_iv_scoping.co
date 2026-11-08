@@ -85,6 +85,32 @@ __co__ void parallel_shadow(f32 [4] p) {
   }
 }
 
+// A local declared in a range-source foreach body shadows the canonical loop
+// IV for subsequent value references, while its own initializer still resolves
+// to the source.
+__co__ void foreach_source_local_shadow() {
+  parallel p by 1 : block {
+    foreach index in [2] {
+      s32 index = 5;
+      println(index);
+    }
+  }
+}
+
+// A shadow in the then branch must not leak into the else branch.
+__co__ void foreach_shadow_else_scope() {
+  parallel p by 1 : block {
+    foreach index in [2] {
+      if (index == 0) {
+        s32 index = 5;
+        println(index);
+      } else {
+        println(index);
+      }
+    }
+  }
+}
+
 // CHECK-LABEL: __global__{{.*}}explicit_matcher_canonical_body
 // CHECK: for (int __iv_index = 0; __iv_index < 2; ++__iv_index)
 // CHECK: (float*)a + (__iv_index * 32)
@@ -108,3 +134,12 @@ __co__ void parallel_shadow(f32 [4] p) {
 // CHECK-LABEL: __global__{{.*}}parallel_shadow
 // CHECK: __choreo_vtid_x
 // CHECK-NOT: + __iv_i)
+// CHECK-LABEL: __global__{{.*}}foreach_source_local_shadow
+// CHECK: for (int __iv_index = 0; __iv_index < 2; ++__iv_index)
+// CHECK: int index = 5;
+// CHECK: printf("%lld\n", static_cast<int64_t>(index));
+// CHECK-LABEL: __global__{{.*}}foreach_shadow_else_scope
+// CHECK: int index = 5;
+// CHECK: printf("%lld\n", static_cast<int64_t>(index));
+// CHECK: } else {
+// CHECK: printf("%lld\n", static_cast<long long>(__iv_index));

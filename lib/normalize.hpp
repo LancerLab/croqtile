@@ -64,6 +64,23 @@ private:
   // block so identically named sources in sibling scopes (or other functions)
   // do not mask one another.
   std::vector<std::unordered_set<std::string>> multi_dim_scope_stack;
+  // Local declarations that shadow an active range-source name, one set per
+  // active block scope. A declaration is recorded only after its initializer
+  // has been visited, so the initializer still resolves to the range source.
+  std::vector<std::unordered_set<std::string>> shadow_scopes;
+
+  // Nodes that introduce a lexical scope for local shadow tracking.
+  static bool IntroducesShadowScope(const AST::Node& n) {
+    return isa<AST::ForeachBlock>(&n) || isa<AST::WithBlock>(&n) ||
+           isa<AST::ParallelBy>(&n) || isa<AST::IfElseBlock>(&n) ||
+           isa<AST::WhileBlock>(&n) || isa<AST::InThreadsBlock>(&n);
+  }
+
+  bool IsShadowed(const std::string& name) const {
+    for (auto it = shadow_scopes.rbegin(); it != shadow_scopes.rend(); ++it)
+      if (it->count(name)) return true;
+    return false;
+  }
 
   // Return the bound operand of a bound-access expression, or nullptr when the
   // expression is not a bound access. The bound operand keeps the range-source
@@ -76,6 +93,7 @@ public:
   ForeachCanon() : NormBase("foreach-canon") {}
 
   bool BeforeVisitImpl(AST::Node& n) override {
+    if (IntroducesShadowScope(n)) shadow_scopes.emplace_back();
     if (isa<AST::WithBlock>(&n)) multi_dim_scope_stack.emplace_back();
 
     // Protect range-source identifiers before their range subtree is visited.
@@ -103,6 +121,7 @@ public:
     if (ctx.empty()) return true;
 
     if (auto sym = e->GetSymbol()) {
+      if (IsShadowed(sym->name)) return true;
       for (auto it = ctx.rbegin(); it != ctx.rend(); ++it) {
         if (sym->name == it->first) {
           sym->name = it->second;
@@ -119,7 +138,7 @@ public:
   // Identifier::accept only dispatches Visit, so handle the rewrite here.
   bool Visit(AST::Identifier& n) override {
     if (bound_operands.count(&n) || range_sources.count(&n)) return true;
-    if (ctx.empty()) return true;
+    if (ctx.empty() || IsShadowed(n.name)) return true;
     for (auto it = ctx.rbegin(); it != ctx.rend(); ++it) {
       if (n.name == it->first) {
         n.name = it->second;
@@ -138,7 +157,30 @@ public:
     return true;
   }
 
+  // Record a local declaration after its initializer has been visited. Only
+  // names that collide with an active range source can shadow its rewrite.
+  bool Visit(AST::NamedVariableDecl& n) override {
+    if (shadow_scopes.empty() || ctx.empty()) return true;
+    for (const auto& c : ctx)
+      if (n.name_str == c.first) {
+        shadow_scopes.back().insert(n.name_str);
+        break;
+      }
+    return true;
+  }
+
+  // The then and else branches are separate lexical scopes: a local declared
+  // in one branch must not shadow the source in the other.
+  bool InMidVisitImpl(AST::Node& n) override {
+    if (!isa<AST::IfElseBlock>(&n)) return true;
+    if (!shadow_scopes.empty()) shadow_scopes.pop_back();
+    shadow_scopes.emplace_back();
+    return true;
+  }
+
   bool AfterVisitImpl(AST::Node& n) override {
+    if (IntroducesShadowScope(n) && !shadow_scopes.empty())
+      shadow_scopes.pop_back();
     if (auto e = dyn_cast<AST::Expr>(&n)) {
       if (auto bound = BoundOperand(*e)) bound_operands.erase(bound.get());
     } else if (isa<AST::ForeachBlock>(&n) && !pops.empty()) {
