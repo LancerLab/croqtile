@@ -1,0 +1,29 @@
+// A load of a metadata register named `me` in one group must not exempt a
+// different, same-named shared metadata scalar in a sibling group. The
+// explicit-load exemption is scoped to the symbol actually consumed.
+//
+// RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+__co__ auto sparse_metadata_shadowed_loaded_scope(
+    u32 [64, 1] meta, f16 [64, 16] lhs_packed, f16 [8, 32] rhs) {
+  f32 [64, 8] output{0.0f};
+  parallel by 1 : block {
+    shared u32 [64, 1] meta_s[2];
+    dma.copy meta => meta_s[1];
+    lhs_s = dma.copy lhs_packed => shared;
+    rhs_s = dma.copy rhs => shared;
+    mc = mma.fill.f32 0.0f;
+    parallel by 1 : group-4 {
+      me = mma.load meta_s[1];
+      mma.row.row.sp mc, lhs_s, rhs_s, me;
+    }
+    parallel by 1 : group-4 {
+      shared u32 me;
+      mma.row.row.sp mc, lhs_s, rhs_s, me;
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// CHECK: error: sparse WGMMA metadata must be loaded into a register with mma.load before use

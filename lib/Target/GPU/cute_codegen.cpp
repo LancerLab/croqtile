@@ -6630,7 +6630,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         }
         if (metadata_name.empty() ||
             (!metadata_is_register &&
-             !explicit_mma_loads_.count(metadata_name) &&
              !explicit_mma_loads_.count(metadata_scoped))) {
           if (metadata_is_non_u32_scalar)
             Error1(n.LOC(),
