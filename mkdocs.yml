@@ -70,6 +70,7 @@ nav:
     - Tileflow Optimization Patterns: tileflow-opt.md
     - Async DMA Patterns: async-dma-patterns.md
     - Elementwise Add Sample: elementwise-add-sample.md
+    - Performance Gap Study (CUDA vs CroqTile): performance-gap-cuda-vs-croqtile-spmm.md
   - "Target-Specific":
     - Calling Conventions: target/calls.md
     - Environment Setup: target/env_setting_up.md

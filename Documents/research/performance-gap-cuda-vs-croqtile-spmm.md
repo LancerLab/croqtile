@@ -1,0 +1,370 @@
+# Case study: a 44% gap between a hand-written CUDA SM90 kernel and the same design in Choreo
+
+This note records why a hand-written Hopper CUDA kernel reaches **1845 TFLOPS**
+on a 2:4 structured-sparse e4m3 GEMM at 16384x16384x16384 while the
+Choreo/CroqTile kernel with the *same macro configuration* reaches **1279
+TFLOPS**. It lists, for each mechanism behind the gap, the CUDA implementation,
+the exact Choreo source location that blocks or lacks it, and the acceptance
+criterion for a fix. It is written for whoever picks up the feature work.
+
+The analysis is static (source, round records, generated `.cu`); no new GPU
+measurement was taken for it. Numbers quoted as percentages are either from the
+tuning campaign's records or from the CUDA arm's own A/B rounds and are labelled
+as such.
+
+## 1. The two kernels
+
+Both kernels solve `C[M,N] = A[M,K] @ B[N,K]^T` with A 2:4-sparse e4m3 (dense
+storage, compressed once), B dense e4m3, C fp16. Both were produced by tuning
+loops (100-round budget, same model, same harness); the CUDA one is hand-written
+CUDA, the CroqTile one is Choreo source lowered by `choreo` and compiled by
+`nvcc`.
+
+Artifacts (private reference repository, `piano-sparse-gemm-tuning`):
+
+- CUDA best: `cuda/state/current-best.cu`, iteration 67, 1845.08 TFLOPS.
+  Promoted from `cuda/candidates/iter-067.cu`.
+- CroqTile best: `croqtile/state/current-best.co`, iteration 76, 1279.28 TFLOPS.
+  Promoted from `croqtile/candidates/iter-076-attempt2.co`. The generated CUDA is
+  produced by `python3 verify.py --compile`; in the campaign workspace it is
+  `build/iter-076-attempt2-evidence/__choreo_cute_iter-076-attempt2.cu` (the
+  artifact repository excludes `build/`).
+
+Line references below are to those files as of the campaign.
+
+### 1.1 The macro configuration is already identical
+
+| dimension | CUDA best | CroqTile best |
+| --- | --- | --- |
+| Output block per CTA | 256x256 | 256x256 (4 tiles of 64x256) |
+| Warpgroups per CTA | 4 x 64x256 | 4 x 64x256 |
+| Pipeline | 2 operand stages, K step 256 | 2 operand stages, K step 256 |
+| A operand | pre-packed, 128 B swizzle | pre-packed, 128 B swizzle |
+| B operand | 128 B swizzle, 64 KiB/stage | 128 B swizzle, two 128-wide halves |
+| MMA instruction | `wgmma ... m64n256k64.f16.e4m3.e4m3` | same shape and dtype |
+| Accumulator | fp16 | fp16 |
+| Grid traversal | 16x8 block rasterisation | `group_m` 48 |
+| Threads per CTA | 544 (512 consumers + 1 producer) | 640 (512 consumers + 128 producer group) |
+| Dynamic shared memory | 224 KiB + barriers | 230400 B |
+| Threads/CTA residency | 1 CTA/SM | 1 CTA/SM |
+
+Both campaigns also made the same two big moves: fp16 accumulation instead of
+fp32 (CUDA: iter-024, +18%; CroqTile: from the seed) and 128 B swizzle on both
+operands. So the gap is *not* a missed configuration; it is in what the
+generated code can express.
+
+### 1.2 Where the CroqTile kernel's time goes
+
+The CroqTile campaign's profiles (ten consecutive passes, recorded in
+`croqtile/rounds/iter-076.json` and its promotion reasons) report roughly two
+thirds of SM time in MMA with a residual third lost to **fill wait at 1 CTA/SM**,
+DRAM non-binding at about a quarter of peak. That residual is exactly what the
+three mechanisms below target.
+
+## 2. Gap 1 — sparse metadata must travel through TMA, not consumer LDG
+
+### 2.1 What the CUDA kernel does
+
+The metadata operand is shipped on its own TMA ring and consumed from
+registers, so no metadata access sits on the consumer's critical path:
+
+- `cuda/state/current-best.cu:85` `kMetaStages = 4` — its own four-deep ring,
+  separate from the two operand stages.
+- `cuda/state/current-best.cu:88` `kMetaPrefetch = 2` — armed two stages ahead.
+- `cuda/state/current-best.cu:606` `kProducerThread = 512`, `:648` — a single
+  producer thread issues both rings.
+- `cuda/state/current-best.cu:642` `mbarrier_init(&sMetaFull[s], 1)` — the ring
+  has a full side only; its empty side is implied by the operand release.
+- `cuda/state/current-best.cu:719-761` — the consumer waits on the **next**
+  stage's metadata frame and fills `f0..f3` while the current stage's `e0..e3`
+  run, i.e. a register double buffer (four extra registers, no shared memory).
+- `cuda/state/current-best.cu:783` `wgmma_acc_fence(acc)` is the only ordering
+  statement; `:770` documents the deliberate absence of a per-stage drain.
+
+Measured value of this mechanism, from the CUDA arm's own experiment: when it
+temporarily replaced the TMA metadata ring with generic per-thread loads inside
+the consumer (the "generic-proxy metadata transport" round), the same kernel
+read 1576-1578 TFLOPS against a ~1830 base in the same window — **about -14%**.
+
+### 2.2 What the CroqTile kernel does instead
+
+The current best reads metadata **directly from global memory inside each
+consumer warpgroup**, every K stage:
+
+- `croqtile/state/current-best.co:128,189,250,312` — four copies of an inline
+  `__cpp__` block, one per consumer region, each computing a lane-to-word map
+  and issuing two `ld.global` (`me_pair0`/`me_pair1`) per thread per stage.
+- `croqtile/state/current-best.co:81` — a `shared u32 [SPMM_WARP_M, 4] meta_s`
+  declaration that is dead: its contents are never written (no TMA copy targets
+  it) and the `me = mma.load meta_s ...` at `:139` etc. is immediately
+  overwritten by `me = (uint32_t)(me_pair0 >> ...)` at `:143`.
+- The dead declaration cannot be removed: round 68 replaced the operand with
+  `me = 0` and Choreo **SIGSEGV'd**, at `lib/codegen_prepare.hpp:816-821`
+  (`GetSpannedType(GetSymbolType(e_sym))->ElementType()` null-dereferences
+  because a plain scalar symbol has no spanned type). Attempts with
+  `u32 me = 0;`, `me = mma.fill.u32 0;`, `frag.u32 me {0};` all fail to lower
+  (`-11`, exit 8, exit 4 respectively; see `croqtile/rounds/iter-068.json`).
+
+The seed in the Piano repository
+(`evals/workspaces/croqtile-sparse-gemm-e4m3-16384/seed.co:77-93`) *did* stage
+metadata through TMA with its own `shared event meta_full[SPMM_STAGES]`, but at
+the same depth as the operands and gated by the operand ring's `empty[stage]`.
+The tuning loop moved away from it (rounds 13/20/22 and the "direct-meta"
+family) because in that form it was slower than direct LDG. The CUDA kernel's
+*decoupled, deeper, register-prefetched* ring is the form that pays, and it is
+not expressible today.
+
+### 2.3 Feature work
+
+**F1. Allow a sparse-metadata operand that is a plain register value.**
+Today the E operand must be `mma.load <spanned shared buffer>`. Support (a) an
+`u32`/`u64` register operand, or (b) an explicit "consume from shared into
+registers" form that does not carry the spanned-type requirement.
+- Code: `lib/codegen_prepare.hpp:816-821` (type capture), sparse E operand
+  emission at `lib/Target/GPU/cute_codegen.cpp:5289-5330`
+  (`MMAOperation::Load`, `policy_is_sparse && ssmi.frag == FRAG_E`), and
+  `lib/Target/GPU/cute_codegen.cpp:7175` (the second FRAG_E site).
+- Acceptance: a `.co` with `u32 me = ...;` as the sparse operand lowers, the
+  generated code contains no `LDS` for the metadata operand, and the round
+  verifies bit-exact.
+
+**F2. Allow an event ring whose depth is independent of the operand stages.**
+The seed's `tma.copy.async<meta_full[stage]>` proves separate event arrays are
+syntactically fine; what is missing is (a) an empty side that does not borrow
+the operand ring's release, and (b) a consumer-side register prefetch one frame
+ahead. Both are currently the author's problem: `wait meta_full[s]` inside the
+consumer region forces the consumer to read shared, and any read of shared
+metadata needs the F1 operand form.
+- Code: `lib/Target/GPU/cute_codegen.cpp:7744-7750` and `:7899` (event wait →
+  `named_barrier_sync`), `:8471-8490` (event arrive/sync lowering).
+- Acceptance: a ring of depth 4 with a 2-stage lookahead compiles, the
+  generated SASS shows no per-stage `LDG` in the consumer for metadata, and the
+  result is bit-exact.
+
+**F3. (related, smaller) Do not force one tensor-map box to the swizzle size.**
+Round 69 tried to merge the two 128-wide RHS copies into one 256-wide copy;
+Choreo emitted `box_shape = {256, 256}` with `CU_TENSOR_MAP_SWIZZLE_128B` and
+`cuTensorMapEncodeTiled` refused (`CUDA_ERROR_INVALID_VALUE`), because the box's
+inner dimension must not exceed the swizzle size.
+- Code: box/shape derivation just above
+  `lib/Target/GPU/cute_codegen.cpp:10428` (the `cuTensorMapEncodeTiled` emitter);
+  the `tma_inner_splits_` path at `:10390-10410` shows where a split is already
+  modelled.
+- Acceptance: either automatic split of an over-wide box into swizzle-sized
+  copies, or a load-time diagnostic instead of a runtime driver failure.
+
+## 3. Gap 2 — the epilogue cannot run concurrently in the four consumer groups
+
+### 3.1 What the CUDA kernel does
+
+After the K loop all four warpgroups reuse the (now dead) operand arena as a
+transpose buffer and store concurrently:
+
+- `cuda/state/current-best.cu:827` `bar.sync 1, 512` — one named barrier over
+  exactly the 512 consumer threads.
+- `:829-846` — register→shared transpose with a padded stride (`kCStride` 132)
+  chosen for bank behaviour, then a fully coalesced `uint4` store per row
+  (`:850-860`).
+- No epilogue ring, no serialisation between warpgroups, no extra shared
+  budget.
+
+### 3.2 What the CroqTile kernel does instead
+
+- `croqtile/state/current-best.co:78` declares `epi0..epi3` and each consumer
+  region waits on its predecessor's event before `mma.store mc, output_s` and
+  `tma.copy ... => output` (`:165-168`, `:226-229`, ...). The four epilogues are
+  **serialised**.
+- The ring exists because Choreo aliases the four per-region
+  `shared f16 [SPMM_WARP_M, SPMM_WARP_N] output_s` declarations onto one pool
+  and hard-codes `bar.sync 15, 128` twice per consumer region (generated file:
+  eight occurrences at `__choreo_cute_iter-076-attempt2.cu:422,428,543,549,664,
+  670,...`).
+- Removing the ring (round 67) deadlocks: `compute-sanitizer --tool synccheck`
+  reports 16288 errors, `Barrier error detected. Divergent thread(s) in block.`
+  at `__choreo_device_spmm+0x7640`, then `CUDA failure: 719`. The barrier is
+  emitted by Choreo, not written by the kernel, so the kernel cannot remove it.
+
+The emitter:
+
+- `lib/Target/GPU/cute_codegen.cpp:478-486` `CuteCodeGen::EmitGroupX4Sync` —
+  `choreo::named_barrier_sync(<threads>, 15)`, barrier id hard-coded to 15 and
+  the participant count taken from `CurrentScopeThreadsCount()` (fallback 128).
+- Call sites: `:4649`, `:5017`, `:6879`, `:7727`, `:7899` — emitted after event
+  waits and around shared-buffer transitions whenever
+  `NeedWarpSpecGroupX4SyncForCurrentScope()` (`lib/Target/GPU/cute_codegen.hpp:
+  858-860`, i.e. warp-spec active at `GROUPx4` level).
+- Runtime: `runtime/choreo_cute.h:106` `named_barrier_sync`.
+
+### 3.3 Feature work
+
+**F4. Make the group barrier configurable, and allow an epilogue that does not
+need it.** Options, in increasing scope:
+1. derive barrier id/participant count from the enclosing scope instead of the
+   constants above (small);
+2. let a shared buffer be declared *per group* so the four `output_s` do not
+   alias, removing the reason for the barrier (medium; costs 3 x 32 KiB shared
+   unless F5 lands);
+3. allow a `barrier` attribute on the epilogue region to opt out, with the
+   compiler proving no aliasing (large).
+- Code: `lib/Target/GPU/cute_codegen.cpp:478-486`; call sites listed above;
+  shared-pool aliasing model in `lib/target.hpp:555-563` and the budget check in
+  `lib/memcheck.hpp:56,530`.
+- Acceptance: a kernel with four concurrent epilogues compiles, passes
+  `compute-sanitizer --tool synccheck` with 0 errors, and is not slower than the
+  serialised ring in the same window.
+
+**F5. (enabler) Scoped reuse of the operand arena.** The CUDA kernel's epilogue
+buffer is free because it reuses the dead stage buffers. Choreo allocates
+statically; there is no way to say "this shared buffer may alias the stage
+buffers after the last wait".
+- Code: shared allocation/budget: `lib/memcheck.hpp:56,530,639`,
+  `lib/target.hpp:555-563`.
+- Acceptance: a `.co` can declare an epilogue buffer in a scope whose lifetime
+  starts after the pipeline's last wait, and the shared-memory report shows the
+  reduced footprint.
+
+## 4. Gap 3 — drain-free MMA scheduling and a single-thread producer
+
+### 4.1 What the CUDA kernel does
+
+- Per stage the consumer issues four sparse `m64n256k64` atoms, each followed by
+  its own commit/wait (`cuda/state/current-best.cu:771-810`); there is
+  deliberately **no stage-boundary drain** (`:770` comment), and one
+  `wgmma_acc_fence` per stage (`:783`).
+- The producer is one thread (`:606`), so the other 31 threads of its warp exit
+  and do not occupy scheduler slots.
+
+### 4.2 What the CroqTile kernel does instead
+
+- `croqtile/state/current-best.co:162` (and `:223`, `:284`, `:345`) — one
+  `mma.commit` per K stage, lowered by
+  `lib/Target/GPU/cute_codegen.cpp:5178-5182` into
+  `EmitWGMMAFinalize` (`:489-500`), which unconditionally emits
+  `warpgroup_commit_batch()` followed by `warpgroup_wait<0>()`. The kernel
+  author cannot ask for a commit without the wait, nor for a per-atom wait.
+- The producer is a full 128-thread group (`parallel p1 by 5 : group-4`, line
+  82), because role widths come from the parallel/group model
+  (`lib/normalize.hpp:1618-1650` role tables, `lib/pipeline.cpp:317` active-thread
+  accounting); there is no one-thread role.
+- Round 66 tried a single empty event per stage and rounds 61-63 tried to
+  restructure the handshake; all measured neutral or negative *within the
+  generated structure*, which is why the axis was closed by the tuner rather
+  than by a missing idea.
+
+### 4.3 Feature work
+
+**F6. Separate `commit` from `wait`, and allow a per-atom wait.** Expose
+`mma.commit` as commit-only (today it is commit+wait<0>) and an explicit
+`mma.wait<depth>`; the current lowering is `EmitWGMMAFinalize(..., force_wait)`
+at `lib/Target/GPU/cute_codegen.cpp:489-500`, with the commit dispatch at
+`:5178`. Acceptance: a kernel emits `warpgroup_commit_batch()` per stage and
+`warpgroup_wait<0>()` only at the final drain, verified bit-exact.
+
+**F7. Allow a role narrower than a warpgroup.** The CUDA winner needs one
+producer thread. Choreo's role model only offers warpgroup granularity
+(`GROUPx4`); the relevant machinery is `lib/pipeline.cpp:317`,
+`lib/visitor.hpp:460,535` (`inthreads` scopes) and the role tables in
+`lib/normalize.hpp:1618-1650`. Acceptance: a `.co` can declare an
+`inthreads`-style producer of width 1 while the four consumers stay warpgroups,
+and the generated code uses one thread.
+
+## 5. What the campaign already ruled out
+
+So a reviewer does not re-open closed axes, these were measured during the
+CroqTile campaign (round records under `croqtile/rounds/`):
+
+| axis | result |
+| --- | --- |
+| staging depth (TILE_K 128, 4 stages) | -8.5% (iter-075); shared budget also blocks deeper |
+| group_m / rasterisation | optimum at 48 (+0.38% over 32, iter-076); 8 -> -8.4% (iter-064) |
+| epilogue ring removal | deadlock, choreo-emitted `bar.sync 15,128` (iter-067) |
+| removing the metadata operand | Choreo SIGSEGV (iter-068) |
+| merged RHS copies | `cuTensorMapEncodeTiled` refuses 256-wide box with 128 B swizzle (iter-069) |
+| metadata LDG prefetch/lane map | -4% / null in this DSL (iters 062-063) |
+| fill-copy L2 promotion, handshake granularity, descriptor budget | neutral or negative (iters 054-061, 070-074) |
+
+## 6. Caveats on the comparison
+
+- **Verification strength differs.** The CUDA case samples 1024 random output
+  sites plus an fp16-overflow check; the CroqTile seed verifies a fixed 128x256
+  corner of the output. Both use the same tolerance (`abs 0.5 + rel 1.5%`), but
+  a CroqTile PASS is weaker evidence. This is a property of the two eval cases,
+  not of Choreo.
+- **Accumulation precision is the same** (fp16) on both sides, so the gap is not
+  a precision trade.
+- The 14% metadata figure comes from the CUDA arm's own A/B; it is the best
+  available estimate of the mechanism's value, not a measurement of a CroqTile
+  variant.
+
+## 7. Suggested order of work
+
+1. F1 (register metadata operand) — smallest change, unblocks F2 and removes the
+   dead `meta_s` hack.
+2. F4.1 + F6 (barrier configurability, commit/wait split) — mechanical, each
+   independently testable.
+3. F2 (decoupled metadata ring) — the biggest single win, needs F1.
+4. F4.2/F5 (non-aliased epilogue or scoped arena reuse) and F7 (narrow producer)
+   — larger, each with a shared-memory budget question.
+5. F3 (tensor-map box splitting) — quality-of-life; today it fails as a driver
+   error at run time.
+
+## 8. Implementation status after F1–F7 (2026-11-08)
+
+All seven feature gaps are now expressible, and the campaign's CroqTile
+kernel was re-run on this branch with a rebuilt compiler. Measured on the
+same H800, same shape (16384^3), same harness:
+
+| variant | TFLOPS |
+| --- | --- |
+| campaign CroqTile best (iter-99, built with `croqtile.bak`) | 1314.78 |
+| ported to this branch unchanged (group_m=48) | 1311.3 |
+| + host-side thread-major metadata prepack | 1420.4 |
+| + group_m=32 rasterisation | 1435.6 |
+| + single-thread producer (`th < 1` role) | 1444.99 peak (~1440 median) |
+| CUDA winner | 1845.08 |
+
+The gap is now about **22%** (28.8% at the campaign's 1314.78; the 1279.28
+number quoted in section 1 is an earlier iteration-76 read, not the campaign
+best).
+
+### What landed
+
+- F1 register metadata; F2 independent-depth event ring; F3 swizzle/TMA
+  diagnostics; F4.1 per-warpgroup named-barrier ids (participant-set based,
+  `8 + group`; multi-group sites keep 15); F4.2 concurrent-branch storage
+  (memory reuse forces interference when the HB graph cannot order two
+  branch buffers); F5 scoped arena reuse (a trigger-after dependency's
+  buffer uses are attributed to the triggering phase, so an epilogue buffer
+  declared after the pipeline's last wait overlaps the dead operand arena;
+  shared heap 230400 -> 197632 B); F6 commit/wait split (`--lock-free`);
+  F7 width-1 producer role.
+- Test suite: 707 tests, 0 failures (cute codegen 156/156).
+
+### What did not help (measured negative)
+
+- TMA metadata rings: 2-stage tied to the operand fill 1343.8; 4-stage
+  decoupled with its own events and register double buffer 1331.3. Both are
+  below the same structure without a ring (1362.35) and far below the
+  prepacked-LDG kernel. The CUDA arm's 14% metadata figure does not
+  transfer; the host-side thread-major prepack (one coalesced 16 B load per
+  thread per tile) is the best metadata transport here.
+- Concurrent epilogue without the epilogue ring (F4.2 storage): 1293 vs
+  1362 for the serialised ring; the ring's pacing is beneficial.
+- Direct global epilogue (-14.6%), L2 metadata prefetch (-1.2%), 2D 16x8
+  rasterisation (-2.4%), L2 partition/window/hitRatio variations,
+  async-store epilogue, promote hints: all neutral or negative.
+- The one-tile (F5 arena-reuse) structure costs 3.7% versus the four-tile
+  persistent structure, so arena reuse and concurrent epilogues do not pay
+  for themselves on this kernel.
+
+### Where the remaining ~22% is
+
+An ncu profile of the best kernel (96 registers, 0 spills, 102-register cap
+at blockDim 640) shows: L1/TEX pipe 94% busy, 48% of warp stalls on L1TEX
+scoreboards and 38% on barriers, DRAM only 29%, occupancy 31% (1 block/SM,
+limited by both registers and shared memory). The CUDA winner launches 544
+threads (120 regs/thread) with hand-written SASS scheduling; matching it
+would need the physical thread model to express mixed-width roles
+(4x128 consumers + one 32-thread producer, blockDim 544), which the current
+group-4 x group x thread product cannot represent, plus scheduling work
+below the DSL.
