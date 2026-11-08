@@ -1,0 +1,11 @@
+// A multi-slot span array cannot be represented by the single-span return
+// scaffold; it must be rejected instead of silently dropping slots.
+//
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto ret_multi_slot_array() {
+  f32 [4] tiles[3];
+  return tiles;
+}
+
+// CHECK: error: returning a multi-slot span array is not supported

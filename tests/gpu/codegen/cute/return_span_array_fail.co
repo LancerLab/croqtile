@@ -11,4 +11,4 @@ __co__ auto return_span_array(f32 [8] x) {
   return g;
 }
 
-// CHECK: error: returning a span-array buffer is not supported; return a single-span value instead.
+// CHECK: error: returning a multi-slot span array is not supported

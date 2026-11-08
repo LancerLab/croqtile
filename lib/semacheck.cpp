@@ -2557,6 +2557,30 @@ bool SemaChecker::VisitNode(AST::Return& n) {
              "returning value with type '" + PSTR(vty) + "' is not supported.");
       return false;
     }
+
+    // The return operand's type can be a rank-only SpannedType. Recover the
+    // declared type for a full symbol reference; indexed slots and subviews
+    // keep the single-span return behavior.
+    const Type* declared_ty = nullptr;
+    if (auto ca = dyn_cast<AST::ChunkAt>(n.value.get());
+        ca && ca->NoOperation() && (!ca->indices || ca->indices->None())) {
+      declared_ty = GetSymbolType(ca->RefSymbol()).get();
+    } else if (auto name = AST::GetName(*n.value)) {
+      declared_ty = GetSymbolType(*name).get();
+    }
+    if (declared_ty) {
+      if (auto fty = dyn_cast<FutureType>(declared_ty))
+        declared_ty = fty->GetSpannedType().get();
+      if (auto aty = dyn_cast<SpannedArrayType>(declared_ty)) {
+        auto slot_count = VIInt(aty->ElemCount());
+        if (slot_count && *slot_count > 1) {
+          Error1(n.LOC(),
+                 "returning a multi-slot span array is not supported; return "
+                 "a single-span value instead.");
+          return false;
+        }
+      }
+    }
   }
 
   return true;
