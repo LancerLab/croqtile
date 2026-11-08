@@ -774,11 +774,13 @@ private:
   // Rewrite `buf_expr` to address a span-array slot: cast the base to the
   // element pointer, then add the slot offset. This is valid for both
   // pointer and regular C++ array declarations.
-  void AppendArraySlotOffset(std::string& buf_expr, const std::string& sym,
-                             const ptr<AST::MultiValues>& indices,
-                             bool is_host) const;
-  void AppendArraySlotOffset(std::string& buf_expr, const std::string& sym,
-                             const AST::NodeList& subs, bool is_host) const;
+  void AppendArraySlotOffset(
+      std::string& buf_expr, const std::string& sym,
+      const ptr<AST::MultiValues>& indices, bool is_host,
+      const std::optional<size_t>& stride = std::nullopt) const;
+  void AppendArraySlotOffset(
+      std::string& buf_expr, const std::string& sym, const AST::NodeList& subs,
+      bool is_host, const std::optional<size_t>& stride = std::nullopt) const;
   std::pair<std::string, std::string>
   GetDMABufferExpr(const std::string& sym,
                    const ptr<AST::MultiValues> subscription,

@@ -464,15 +464,15 @@ std::string CuteCodeGen::DataAccessSlotOffset(
 
 void CuteCodeGen::AppendArraySlotOffset(
     std::string& buf_expr, const std::string& sym,
-    const ptr<AST::MultiValues>& indices, bool is_host) const {
+    const ptr<AST::MultiValues>& indices, bool is_host,
+    const std::optional<size_t>& stride) const {
   if (indices)
-    AppendArraySlotOffset(buf_expr, sym, indices->AllValues(), is_host);
+    AppendArraySlotOffset(buf_expr, sym, indices->AllValues(), is_host, stride);
 }
 
-void CuteCodeGen::AppendArraySlotOffset(std::string& buf_expr,
-                                       const std::string& sym,
-                                       const AST::NodeList& subs,
-                                       bool is_host) const {
+void CuteCodeGen::AppendArraySlotOffset(
+    std::string& buf_expr, const std::string& sym, const AST::NodeList& subs,
+    bool is_host, const std::optional<size_t>& stride) const {
   if (subs.empty()) return;
   auto sym_ty = GetSymbolType(sym);
   auto array_ty = dyn_cast<ArrayType>(sym_ty);
@@ -488,7 +488,7 @@ void CuteCodeGen::AppendArraySlotOffset(std::string& buf_expr,
   buf_expr.insert(0, std::string("(") + NameBaseType(sty->ElementType()) +
                          "*)");
   buf_expr += " + ";
-  buf_expr += ArraySlotOffsetExpr(array_ty, subs, is_host);
+  buf_expr += ArraySlotOffsetExpr(array_ty, subs, is_host, stride);
 }
 
 std::pair<std::string, std::string>
@@ -12157,7 +12157,20 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           std::reverse(subscripts.begin(), subscripts.end());
           std::string base =
               ssm.DeviceName(InScopeNameForRef(base_id->name));
-          AppendArraySlotOffset(base, base_id->name, subscripts, is_host);
+          // A fragment array holds regs_per_thread registers per slot, not
+          // the span's element count: address slots with the declared
+          // register stride (the declaration allocates slots*regs floats).
+          // Resolve the reference in declaration order (as the DataAccess
+          // path does) and prefer the precomputed layout, like the
+          // declaration and DataAccess do.
+          const std::string scoped = InScopeNameForRef(base_id->name);
+          std::optional<size_t> frag_stride;
+          if (FCtx(fname).HasFragmentLayout(scoped))
+            frag_stride = FCtx(fname).GetFragmentLayout(scoped).regs_per_thread;
+          else if (FCtx(fname).HasFragmentInfo(scoped))
+            frag_stride = FCtx(fname).GetFragmentInfo(scoped).regs_per_thread;
+          AppendArraySlotOffset(base, base_id->name, subscripts, is_host,
+                                frag_stride);
           oss << base;
         } else {
           oss << OpExprSTR(expr->GetL(), "[]", true, is_host) << "["

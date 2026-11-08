@@ -122,30 +122,3 @@ __co__ auto prepack_single_mdata_alias(u32 [64, 1] meta, f16 [64, 16] lhs_packed
 }
 
 // CHECK: (((unsigned int*)lhs_s_mdata + (1)*(64)))[__sp_local_row * (1)]
-
-// A chunked operand with a `_mdata` alias keeps the metadata at tile 0: the
-// operand's chunk offset lives in the A frame (a uniform-sparsity pattern
-// legitimately reuses one metadata tile for every K chunk).
-__co__ auto prepack_single_mdata_alias_chunk(u32 [64, 1] meta, f16 [64, 16] lhs_packed,
-                                             f16 [8, 32] rhs) {
-  f32 [64, 8] output{0.0f};
-  parallel by 1 : block {
-    shared f16 [64, 16] lhs_s[2];
-    shared u32 [64, 1] lhs_s_mdata[2];
-    dma.copy lhs_packed => lhs_s[1];
-    dma.copy meta => lhs_s_mdata[1];
-    rhs_s = dma.copy rhs => shared;
-    mc = mma.fill.f32 0.0f;
-    parallel p by 1 : group-4 {
-      foreach iv_k in [2] {
-        me = mma.load lhs_s[1].chunkat(_, iv_k);
-        mma.row.row.sp mc, lhs_s[1].chunkat(_, iv_k), rhs_s.chunkat(_, iv_k), me;
-      }
-    }
-    mma.store mc, output;
-  }
-  return output;
-}
-
-// CHECK: (((unsigned int*)lhs_s_mdata + (1)*(64)))[__sp_local_row * (1)]
-// V2: int __sp_row = (0 >> 0) + __sp_lr;

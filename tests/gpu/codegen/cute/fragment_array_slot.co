@@ -16,3 +16,21 @@ __co__ auto fragment_array_slot() {
 // CHECK: float mc[24];
 // CHECK: mc[(0)*(8) +
 // CHECK: mc[(2)*(8) +
+
+__device__ __forceinline__ void consume_fragment(float* values) {
+  values[0] = values[0] + 1.0f;
+}
+
+// A whole array element passed to a device call addresses its slot with the
+// fragment layout's registers-per-thread (the declaration's slot stride), not
+// the span's element count.
+__co__ auto fragment_array_call() {
+  parallel p by 32 : thread {
+    frag f32 [16, 16] mc[3] {0.0f};
+    call consume_fragment(mc[2]);
+  }
+  return 0;
+}
+
+// CHECK-LABEL: __choreo_device_fragment_array_call
+// CHECK: consume_fragment({{.*}}mc + (2)*(8));
