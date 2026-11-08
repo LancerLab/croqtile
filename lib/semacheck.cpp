@@ -1660,6 +1660,43 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
       return total;
     };
 
+    // A static slot count multiplies the element extent, so distribute
+    // integer factors over additive totals before comparing them
+    // (e.g. 3 * (M + 1) becomes 3 * M + 3).
+    std::function<ValueItem(const ValueItem&)> distribute =
+        [&](const ValueItem& total) -> ValueItem {
+      auto norm = total->Normalize();
+      if (auto mul = dyn_cast<sbe::BinaryOperation>(norm);
+          mul && mul->GetOpCode() == OpCode::MULTIPLY) {
+        auto factor_and_value =
+            [&](const ValueItem& factor,
+                const ValueItem& value) -> std::optional<ValueItem> {
+          if (!VIInt(factor)) return std::nullopt;
+          auto distributed = distribute(value);
+          auto add = dyn_cast<sbe::BinaryOperation>(distributed);
+          if (!add || add->GetOpCode() != OpCode::ADD) return std::nullopt;
+          auto lhs = sbe::bop(OpCode::MULTIPLY, factor, add->GetLeft())
+                         ->Normalize();
+          auto rhs = sbe::bop(OpCode::MULTIPLY, factor, add->GetRight())
+                         ->Normalize();
+          return sbe::bop(OpCode::ADD, lhs, rhs)->Normalize();
+        };
+        if (auto distributed =
+                factor_and_value(mul->GetLeft(), mul->GetRight()))
+          return *distributed;
+        if (auto distributed =
+                factor_and_value(mul->GetRight(), mul->GetLeft()))
+          return *distributed;
+      }
+      if (auto add = dyn_cast<sbe::BinaryOperation>(norm);
+          add && add->GetOpCode() == OpCode::ADD) {
+        auto lhs = distribute(add->GetLeft());
+        auto rhs = distribute(add->GetRight());
+        return sbe::bop(OpCode::ADD, lhs, rhs)->Normalize();
+      }
+      return norm;
+    };
+
     auto additive_base_offset =
         [](const ValueItem& total) -> std::pair<ValueItem, int64_t> {
       auto norm = total->Normalize();
@@ -1676,13 +1713,15 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     auto src_total = total_elems(n.from, fty);
     auto dst_total = total_elems(n.to, tty);
     if (src_total && dst_total) {
-      auto equal = VIBool(sbe::oc_eq(*src_total, *dst_total)->Normalize());
+      auto src_canon = distribute(*src_total);
+      auto dst_canon = distribute(*dst_total);
+      auto equal = VIBool(sbe::oc_eq(src_canon, dst_canon)->Normalize());
       bool mismatch = equal.has_value() && !*equal;
       if (!equal.has_value()) {
         // sbe::oc_eq does not cancel a shared expression plus constants
         // (e.g. M vs M + 1), so compare the additive bases and offsets.
-        auto src_offset = additive_base_offset(*src_total);
-        auto dst_offset = additive_base_offset(*dst_total);
+        auto src_offset = additive_base_offset(src_canon);
+        auto dst_offset = additive_base_offset(dst_canon);
         mismatch = *src_offset.first == *dst_offset.first &&
                    src_offset.second != dst_offset.second;
       }

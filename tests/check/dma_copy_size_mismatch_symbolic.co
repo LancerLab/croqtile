@@ -9,4 +9,13 @@ __co__ void dma_copy_size_mismatch_symbolic(int M) {
   dma.copy src => dst;
 }
 
+// A static slot count multiplies the element extent, hiding the offset inside
+// a product until the factor is distributed.
+__co__ void dma_copy_size_mismatch_product(int M) {
+  global f32 [M] src[3];
+  global f32 [M + 1] dst[3];
+  dma.copy src => dst;
+}
+
 // CHECK: error: DMA statement has a size mismatch between 'from' and 'to': {{.*}}M != {{.*}}M + 1
+// CHECK: error: DMA statement has a size mismatch between 'from' and 'to': {{.*}}dma_copy_size_mismatch_product::M * 3) != {{.*}}dma_copy_size_mismatch_product::M + 1) * 3)
