@@ -5544,23 +5544,38 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         bool policy_is_fp8 = mma_policy.find("E4M3") != std::string::npos ||
                              mma_policy.find("E5M2") != std::string::npos;
         bool fp8_sparse_k64 = policy_is_fp8 && k_val && *k_val == 64;
-        bool prepack_single_col = false;
-        if (load_from_sty && load_from_sty->Dims() >= 2) {
-          if (auto meta_cols = VIInt(load_from_sty->GetShape().ValueAt(1)))
-            prepack_single_col = (*meta_cols == 1);
-        }
         bool meta_64 = k_val && *k_val > 32 && !fp8_sparse_k64;
         std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
+        bool v2_mode = use_prepack_v2.GetValue();
+        std::string ref_sym = lca->RefSymbol();
+        auto prepackInfo =
+            resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue() || v2_mode);
+        // With a `<ref>_mdata` alias the mma.load operand is the A buffer;
+        // the metadata layout parameters (strides, single-column form) come
+        // from the buffer the metadata was actually resolved from.
+        bool prepack_single_col = false;
+        auto single_col = [](const SpannedType& sty) {
+          if (sty.Dims() < 2) return false;
+          if (auto meta_cols = VIInt(sty.GetShape().ValueAt(1)))
+            return *meta_cols == 1;
+          return false;
+        };
+        if (!prepackInfo.resolved_sym.empty() &&
+            prepackInfo.resolved_sym != ref_sym) {
+          if (auto meta_sty = dyn_cast<SpannedType>(
+                  GetSymbolType(prepackInfo.resolved_sym))) {
+            strides = meta_sty->GetStrides();
+            prepack_single_col = single_col(*meta_sty);
+          }
+        } else if (load_from_sty) {
+          prepack_single_col = single_col(*load_from_sty);
+        }
         if (strides.size() < 2) {
           Error1(n.LOC(), "sparse metadata must be at least 2-dimensional.");
           break;
         }
         std::string row_stride = ValueSTR(strides.at(0));
         std::string col_stride = ValueSTR(strides.at(1));
-        bool v2_mode = use_prepack_v2.GetValue();
-        std::string ref_sym = lca->RefSymbol();
-        auto prepackInfo =
-            resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue() || v2_mode);
         // The prepacked metadata may live in a span-array slot; the snippets
         // index from the buffer base, so fold the slot offset in. Built on
         // demand: the tile/single-column snippets take their own address.
@@ -5584,7 +5599,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           base += ")";
           return base;
         };
-
         if (!prepackInfo.use_packed_u32) {
           ds << d_indent << "auto " << sym
              << " = wgmma_make_sparse_metadata_desc<" << STR(ssmi.shape.at(2))
@@ -5595,20 +5609,22 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           break;
         }
 
+        // The metadata tile address comes from the metadata buffer, not the
+        // A operand: with a `<ref>_mdata` alias, tile_addr points into the A
+        // buffer. In the same-buffer form tile_addr is already the slot- and
+        // chunk-adjusted metadata address (chunkat lives in the
+        // metadata-element frame).
+        const std::string meta_base = MetaBase();
+        const std::string meta_tile =
+            prepackInfo.resolved_sym == ref_sym ? ValueSTR(tile_addr)
+                                                : meta_base;
+
         ds << d_indent << meta_ty << " " << sym << " = 0;\n";
         ds << d_indent << "{\n";
         ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
         if (fp8_sparse_k64) {
-          // The metadata tile address must come from the metadata buffer
-          // itself. With a separate `<ref>_mdata` alias, tile_addr points
-          // into the A operand (a different object), so the V2 pointer
-          // difference was invalid and the V1 path read the packed A as
-          // metadata. MetaBase() is the slot-adjusted metadata base in both
-          // the same-buffer and alias cases, so the row offset starts at the
-          // slot's tile base.
-          const std::string meta_tile = MetaBase();
           if (v2_mode) {
-            emitFp8PrepackedV2TileLoadSnippet(sym, meta_tile, meta_tile,
+            emitFp8PrepackedV2TileLoadSnippet(sym, meta_base, meta_tile,
                                               row_stride, col_stride);
           } else {
             emitFp8PrepackedU32TileLoadSnippet(sym, meta_tile, row_stride,
@@ -5617,14 +5633,13 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         } else if (v2_mode) {
           if (prepack_single_col) {
             auto tile_off = GenOffset(op.LoadFrom());
-            emitPrepackedV2TileLoadSnippet(sym, MetaBase(), ValueSTR(tile_addr),
+            emitPrepackedV2TileLoadSnippet(sym, meta_base, ValueSTR(tile_addr),
                                            row_stride, ValueSTR(tile_off));
           } else {
-            const std::string base = MetaBase();
             std::string k_idx_expr, warp_idx_expr;
             if (PrepackedMetadataIndexExprs(n.LOC(), k_idx_expr,
                                             warp_idx_expr))
-              emitPrepackedV2Snippet(sym, base, row_stride, col_stride,
+              emitPrepackedV2Snippet(sym, meta_base, row_stride, col_stride,
                                      k_idx_expr, warp_idx_expr);
           }
         } else {
@@ -5635,7 +5650,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             std::string k_idx_expr, warp_idx_expr;
             if (PrepackedMetadataIndexExprs(n.LOC(), k_idx_expr,
                                             warp_idx_expr))
-              emitPrepackedU32Snippet(sym, MetaBase(), row_stride, col_stride,
+              emitPrepackedU32Snippet(sym, meta_base, row_stride, col_stride,
                                       k_idx_expr, warp_idx_expr);
           }
         }
@@ -10677,17 +10692,17 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     Shape host_stride = g_stride;
     size_t host_rank = g_shape.Rank();
 
-    // A view box wider than the map's innermost extent is incoherent
-    // (driver reject or silent zero-fill). This covers the branches whose
-    // map inner extent is the source's innermost dimension; the root-subview
-    // branch derives its inner extent from g_stride[0] and is not covered.
+    // A box wider than the map's innermost extent is incoherent (driver
+    // reject or silent zero-fill), whether the box comes from an inline view
+    // or a named view variable. Diagnosed per branch against the map's own
+    // inner extent: the source's innermost dimension, or g_stride[0] for a
+    // root-subview descriptor flattened from its root.
     const bool has_view =
-        !desc.HasRootParam() &&
         std::any_of(g_ca->AllOperations().begin(), g_ca->AllOperations().end(),
                     [](const auto& sop) { return isa<AST::SOP::View>(sop); });
-    auto CheckViewBox = [&]() {
-      if (!has_view || t_shape.Rank() < 2) return;
-      if (sbe::cgt(t_shape.LeadingValue(), g_shape.LeadingValue()))
+    auto CheckViewBox = [&](ValueItem map_inner) {
+      if (t_shape.Rank() < 2) return;
+      if (sbe::cgt(t_shape.LeadingValue(), map_inner))
         Error1(g_ca->LOC(),
                "TMA view box is wider than the tensor map's innermost extent.");
     };
@@ -10705,6 +10720,8 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
       const auto& root_shape = desc.GetRootParamShape();
 
       ValueItem inner_dim = g_stride[0];
+      // The flattened map's inner extent is the subview's outermost stride.
+      CheckViewBox(inner_dim);
       ValueItem total_elems = sbe::nu(1);
       for (size_t i = 0; i < root_shape.Rank(); ++i)
         total_elems = total_elems * root_shape.ValueAt(i);
@@ -10729,12 +10746,17 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
           const ValueList& t_strides = g_ca->LastOp()->GetBlockStrides();
           if (t_strides.size() == t_shape.Rank() &&
               (sbe::cne(t_strides.back(), sbe::nu(1)) ||
-               sbe::cne(t_strides[t_strides.size() - 2], inner_dim) ||
-               sbe::cgt(t_shape.ValueAt(t_shape.Rank() - 1), inner_dim))) {
+               sbe::cne(t_strides[t_strides.size() - 2], inner_dim))) {
             Error1(g_ca->LOC(),
                    "TMA view layout does not match the flattened tensor map "
                    "(contiguous innermost dimension, row stride equal to the "
-                   "source's innermost extent, inner extent within it).");
+                   "source's innermost extent).");
+          } else if (sbe::cgt(t_shape.LeadingValue(), inner_dim)) {
+            // Kept independent of the stride-rank precondition: a view whose
+            // stride list rank differs still must not request a wider box.
+            Error1(g_ca->LOC(),
+                   "TMA view box is wider than the tensor map's innermost "
+                   "extent.");
           }
         }
         ValueItem outer_dim = sbe::nu(1);
@@ -10747,7 +10769,7 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
       } else {
         // A rank-2 source with a view still takes its box from the viewed
         // tile; the box must stay coherent with the map (see CheckViewBox).
-        CheckViewBox();
+        CheckViewBox(g_shape.LeadingValue());
         std::vector<ValueItem> byte_strides;
         for (size_t i = 0; i < host_stride.Rank(); ++i)
           byte_strides.push_back(host_stride.ValueAt(i) *
@@ -10759,7 +10781,7 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
         base_expr = SSMName((g_unscoped + "__device"), true);
       else
         base_expr = SSMName(InScopeName(g_unscoped) + "__device", true);
-      CheckViewBox();
+      CheckViewBox(g_shape.LeadingValue());
       std::vector<ValueItem> byte_strides;
       for (size_t i = 0; i < host_stride.Rank(); ++i)
         byte_strides.push_back(host_stride.ValueAt(i) *

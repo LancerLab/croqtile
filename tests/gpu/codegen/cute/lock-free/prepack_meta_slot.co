@@ -64,7 +64,7 @@ __co__ auto prepack_mdata_slot(u32 [64, 4] meta, f16 [64, 16] lhs_packed,
 }
 
 // CHECK: uint32_t __sp_u32_val = ((unsigned int*)meta_s + (1)*(256))[__sp_packed_row * (4) + __sp_k_idx * (1)];
-// CHECK: uint32_t __sp_u32_val = ((unsigned int*)lhs_s_mdata + (1)*(256))[__sp_packed_row * (16) + __sp_k_idx * (1)];
+// CHECK: uint32_t __sp_u32_val = ((unsigned int*)lhs_s_mdata + (1)*(256))[__sp_packed_row * (4) + __sp_k_idx * (1)];
 // V2: me = ((const uint32_t*)(((unsigned int*)meta_s + (1)*(256))))[((__sp_packed_row >> 4) * (4) + __sp_k_idx) * 16 + (__sp_packed_row & 15)];
 // V2: me = ((const uint32_t*)(((unsigned int*)meta_s + (1)*(64))) + ((__sp_row >> 4) << 4) + (__sp_row & 15))[(0 & 0) << 4];
 
@@ -96,5 +96,5 @@ __co__ auto prepack_broadcast_mdata(u32 [64, 4] meta, f16 [64, 16] lhs_packed,
 // V2: int __sp_k_idx = (0) * 2 + (0);
 
 // Broadcast metadata stays at the buffer base (no `[1]` slot subscript).
-// CHECK: uint32_t __sp_u32_val = lhs_s_mdata[__sp_packed_row * (16) + __sp_k_idx * (1)];
-// V2: me = ((const uint32_t*)(lhs_s_mdata))[((__sp_packed_row >> 4) * (16) + __sp_k_idx) * 16 + (__sp_packed_row & 15)];
+// CHECK: uint32_t __sp_u32_val = lhs_s_mdata[__sp_packed_row * (4) + __sp_k_idx * (1)];
+// V2: me = ((const uint32_t*)(lhs_s_mdata))[((__sp_packed_row >> 4) * (4) + __sp_k_idx) * 16 + (__sp_packed_row & 15)];

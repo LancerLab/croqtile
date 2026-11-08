@@ -26,7 +26,7 @@ __co__ void tma_view_overwide_stride(global f32 [64, 32, 16] x) {
   }
 }
 
-// CHECK: error: TMA view layout does not match the flattened tensor map
+// CHECK: error: TMA view box is wider than the tensor map's innermost extent.
 
 // A rank-2 source with an over-wide view box is diagnosed too: the box's
 // innermost extent must stay within the map's inner extent.
@@ -72,4 +72,39 @@ __co__ auto tma_view_store_local_wide(f32 [64, 32] x) {
 }
 
 // CHECK: error: TMA view box is wider than the tensor map's innermost extent.
+// CHECK: error: TMA view box is wider than the tensor map's innermost extent.
+
+// A named view variable takes the root-subview descriptor path; its
+// over-wide box is diagnosed there too.
+__co__ void tma_view_named_wide(global f32 [64, 32] x) {
+  parallel b by 1 : block {
+    v = x.view(32, 64);
+    load = tma.copy.async v => shared;
+    wait load;
+  }
+}
+
+// CHECK: error: TMA view box is wider than the tensor map's innermost extent.
+
+// A computed root subview flattened to 2-D uses its outermost stride as the
+// map's inner extent; a view box wider than that is diagnosed.
+__co__ void tma_view_root_subview_wide(global f32 [2, 64, 4, 128] input) {
+  parallel bm by 1 : block {
+    in_head = input.subspan(1, 64, 1, 128).at(0, 0, 0, 0).sqz();
+    load = tma.copy.async in_head.view(8, 1024) => shared;
+    wait load;
+  }
+}
+
+// CHECK: error: TMA view box is wider than the tensor map's innermost extent.
+
+// A view whose explicit stride list rank differs from the tile rank still
+// must not request a box wider than the map.
+__co__ void tma_view_stride_rank_mismatch(global f32 [64, 32, 16] x) {
+  parallel b by 1 : block {
+    load = tma.copy.async x.view(128, 32: 16) => shared;
+    wait load;
+  }
+}
+
 // CHECK: error: TMA view box is wider than the tensor map's innermost extent.

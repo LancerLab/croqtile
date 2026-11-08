@@ -79,3 +79,15 @@ __co__ void tma_view_shadow_ok(f32 [64, 32] x) {
 // (stderr is not merged into the CHECK run: a CHECK-LABEL would bind to the
 // kernel name inside an info diagnostic and truncate the checked region.)
 // NOERR: tma_load_2d_shared_cta_global_mbarrier
+
+// A named layout-preserving view also stays valid.
+__co__ void tma_view_named_ok(global f32 [64, 32] x) {
+  parallel b by 1 : block {
+    v = x.view(64, 32);
+    load = tma.copy.async v => shared;
+    wait load;
+  }
+}
+
+// CHECK-LABEL: __choreo_device_tma_view_named_ok
+// CHECK: tma_load_2d_shared_cta_global_mbarrier
