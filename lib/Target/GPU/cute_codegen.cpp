@@ -5583,15 +5583,20 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ds << d_indent << "{\n";
         ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
         if (fp8_sparse_k64) {
+          // The metadata tile address must come from the metadata buffer
+          // itself. With a separate `<ref>_mdata` alias, tile_addr points
+          // into the A operand (a different object), so the V2 pointer
+          // difference was invalid and the V1 path read the packed A as
+          // metadata. MetaBase() is the slot-adjusted metadata base in both
+          // the same-buffer and alias cases, so the row offset starts at the
+          // slot's tile base.
+          const std::string meta_tile = MetaBase();
           if (v2_mode) {
-            // tile_addr already includes the operand's slot; use the same
-            // slot-adjusted base so the snippet's row offset is intra-slot.
-            emitFp8PrepackedV2TileLoadSnippet(sym, MetaBase(),
-                                              ValueSTR(tile_addr), row_stride,
-                                              col_stride);
+            emitFp8PrepackedV2TileLoadSnippet(sym, meta_tile, meta_tile,
+                                              row_stride, col_stride);
           } else {
-            emitFp8PrepackedU32TileLoadSnippet(sym, ValueSTR(tile_addr),
-                                               row_stride, col_stride);
+            emitFp8PrepackedU32TileLoadSnippet(sym, meta_tile, row_stride,
+                                               col_stride);
           }
         } else if (v2_mode) {
           if (prepack_single_col) {
