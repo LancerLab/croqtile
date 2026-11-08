@@ -2296,6 +2296,33 @@ CuteCodeGen::resolvePrepackedU32Meta(const std::string& ref_sym,
   return info;
 }
 
+std::string CuteCodeGen::PrepackedMetaBase(
+    const PrepackedU32Info& info, const std::string& operand_sym,
+    const AST::NodeList& subs) const {
+  if (subs.empty()) return info.device_name;
+  std::string base = info.device_name;
+  // The offset's element type/stride come from the symbol the metadata buffer
+  // was actually resolved from (`_mdata` alias).
+  const std::string& off_sym =
+      info.resolved_sym.empty() ? operand_sym : info.resolved_sym;
+  // Only a metadata buffer that is itself a span array can take the operand's
+  // slot indices. A plain broadcast span must stay at its base:
+  // AppendArraySlotOffset's subscript fallback would turn a data element into
+  // the metadata pointer.
+  auto off_ty = dyn_cast<ArrayType>(GetSymbolType(off_sym));
+  if (!off_ty) return info.device_name;
+  // A one-slot metadata array is a broadcast like a plain buffer: folding the
+  // operand's slot index would address past its only slot.
+  if (off_ty->ArrayRank() == 1) {
+    if (auto cnt = VIInt(off_ty->Dimension(0)))
+      if (*cnt == 1) return info.device_name;
+  }
+  AppendArraySlotOffset(base, off_sym, subs, false);
+  base.insert(0, "(");
+  base += ")";
+  return base;
+}
+
 void CuteCodeGen::emitPrepackedU32Snippet(const std::string& metaVar,
                                           const std::string& deviceArray,
                                           const std::string& rowStride,
@@ -5621,31 +5648,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         // index from the buffer base, so fold the slot offset in. Built on
         // demand: the tile/single-column snippets take their own address.
         auto MetaBase = [&]() -> std::string {
-          if (!lca->indices || lca->indices->AllValues().empty())
-            return prepackInfo.device_name;
-          std::string base = prepackInfo.device_name;
-          // The offset's element type/stride come from the symbol the
-          // metadata buffer was actually resolved from (`_mdata` alias).
-          const std::string& off_sym = prepackInfo.resolved_sym.empty()
-                                           ? lca->data->name
-                                           : prepackInfo.resolved_sym;
-          // Only a metadata buffer that is itself a span array can take the
-          // operand's slot indices. A plain broadcast span must stay at its
-          // base: AppendArraySlotOffset's subscript fallback would turn a
-          // data element into the metadata pointer.
-          auto off_ty = dyn_cast<ArrayType>(GetSymbolType(off_sym));
-          if (!off_ty)
-            return prepackInfo.device_name;
-          // A one-slot metadata array is a broadcast like a plain buffer:
-          // folding the operand's slot index would address past its only slot.
-          if (off_ty->ArrayRank() == 1) {
-            if (auto cnt = VIInt(off_ty->Dimension(0)))
-              if (*cnt == 1) return prepackInfo.device_name;
-          }
-          AppendArraySlotOffset(base, off_sym, lca->indices, false);
-          base.insert(0, "(");
-          base += ")";
-          return base;
+          const AST::NodeList no_subs;
+          return PrepackedMetaBase(
+              prepackInfo, lca->data->name,
+              lca->indices ? lca->indices->AllValues() : no_subs);
         };
         if (!prepackInfo.use_packed_u32) {
           ds << d_indent << "auto " << sym
@@ -5850,6 +5856,32 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       auto c_sym = AST::FragName(op.ExecOperand(0));
       auto a_sym = AST::FragName(op.ExecOperand(1));
       auto b_sym = AST::FragName(op.ExecOperand(2));
+      // The A operand may be a span-array reference (`a_s[slot]`) or an
+      // ElemOf expression; both carry the slot subscripts that select the
+      // prepacked metadata stage.
+      auto operand_slot_info = [](const ptr<AST::Expr>& operand,
+                                  std::string& base_sym, AST::NodeList& subs) {
+        subs.clear();
+        base_sym.clear();
+        if (!operand) return;
+        if (auto ca = dyn_cast<AST::ChunkAt>(operand->GetReference())) {
+          base_sym = ca->data->name;
+          if (ca->indices) subs = ca->indices->AllValues();
+          return;
+        }
+        if (operand->GetOp() != Op::ElemOf) {
+          if (auto id = operand->GetSymbol()) base_sym = id->name;
+          return;
+        }
+        base_sym = AST::GetArrayBaseSymbol(*operand)->name;
+        const AST::Expr* cur = operand.get();
+        while (cur->GetOp() == Op::ElemOf) {
+          subs.push_back(cur->GetR());
+          if (isa<AST::Identifier>(cur->GetL())) break;
+          cur = cast<AST::Expr>(cur->GetL().get());
+        }
+        std::reverse(subs.begin(), subs.end());
+      };
       const size_t exec_output_start = ds.str().size();
       has_pending_wgmma_finalize = true;
       pending_wgmma_acc_sym = ssm.DeviceName(c_sym);
@@ -5876,10 +5908,17 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           auto k_val = VIInt(ssmi_a.shape.at(2));
           bool policy_is_fp8 = mma_policy.find("E4M3") != std::string::npos ||
                                mma_policy.find("E5M2") != std::string::npos;
-          // Detect host prepacked-u32 metadata for the exec site
+          // Detect host prepacked-u32 metadata for the exec site. The A
+          // operand's span-array slot is the metadata slot, so fold it into
+          // the buffer base instead of always reading slot 0.
           bool v2_mode_exec = use_prepack_v2.GetValue();
           auto prepackInfo = resolvePrepackedU32Meta(
               a_sym, use_prepack.GetValue() || v2_mode_exec);
+          std::string a_base_sym;
+          AST::NodeList a_subs;
+          operand_slot_info(op.ExecOperand(1), a_base_sym, a_subs);
+          std::string meta_device = PrepackedMetaBase(
+              prepackInfo, a_base_sym.empty() ? a_sym : a_base_sym, a_subs);
           if (!prepackInfo.use_packed_u32) {
             ds << d_indent << "auto " << meta_var
                << " = wgmma_make_sparse_metadata_desc<"
@@ -5897,11 +5936,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             if (PrepackedMetadataIndexExprs(n.LOC(), k_idx_expr,
                                             warp_idx_expr)) {
               if (v2_mode_exec)
-                emitPrepackedV2Snippet(meta_var, prepackInfo.device_name, "128",
-                                       "1", k_idx_expr, warp_idx_expr);
+                emitPrepackedV2Snippet(meta_var, meta_device, "128", "1",
+                                       k_idx_expr, warp_idx_expr);
               else
-                emitPrepackedU32Snippet(meta_var, prepackInfo.device_name, "128",
-                                        "1", k_idx_expr, warp_idx_expr);
+                emitPrepackedU32Snippet(meta_var, meta_device, "128", "1",
+                                        k_idx_expr, warp_idx_expr);
             }
             ds << d_indent << "}\n";
           }
@@ -6628,8 +6667,21 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                  "use");
           return false;
         }
-        if (metadata_name.empty() ||
-            (!metadata_is_register &&
+        // Implicit-E prepacked metadata: the A operand's slot selects the
+        // metadata slot, so the exec-site fallback can build the descriptor
+        // itself. Keep rejecting implicit E for non-prepacked metadata.
+        bool implicit_slot_meta = false;
+        if (metadata_name.empty() &&
+            (use_prepack.GetValue() || use_prepack_v2.GetValue())) {
+          std::string a_base_sym;
+          AST::NodeList a_subs;
+          operand_slot_info(op.ExecOperand(1), a_base_sym, a_subs);
+          if (!a_subs.empty())
+            implicit_slot_meta =
+                resolvePrepackedU32Meta(a_sym, true).use_packed_u32;
+        }
+        if ((metadata_name.empty() && !implicit_slot_meta) ||
+            (!metadata_name.empty() && !metadata_is_register &&
              !explicit_mma_loads_.count(metadata_scoped))) {
           if (metadata_is_non_u32_scalar)
             Error1(n.LOC(),

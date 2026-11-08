@@ -427,6 +427,11 @@ private:
 
   PrepackedU32Info resolvePrepackedU32Meta(const std::string& ref_sym,
                                            bool forceFlag);
+  // Base address of a prepacked metadata buffer for the given operand: fold
+  // the operand's span-array slots into the resolved metadata device name.
+  std::string PrepackedMetaBase(const PrepackedU32Info& info,
+                                const std::string& operand_sym,
+                                const AST::NodeList& subs) const;
   // The prepacked dense formats index the packed layout by the canonical
   // loop variables `iv_k` (K tile) and `iv_warp` (warp chunk), emitted as
   // `__iv_iv_k`/`__iv_iv_warp`. Match them by name so any nesting order
