@@ -155,3 +155,15 @@ __co__ auto tma_view_store_local_stride(f32 [64, 64] x) {
 }
 
 // CHECK: error: TMA view layout does not match the flattened tensor map
+
+// A computed root subview derives its map inner extent from the subview's
+// outermost stride; an explicit-stride view that ignores it must be diagnosed.
+__co__ void tma_view_root_subview_stride(global f32 [2, 64, 4, 128] input) {
+  parallel bm by 1 : block {
+    in_head = input.subspan(1, 64, 1, 128).at(0, 0, 0, 0).sqz();
+    load = tma.copy.async in_head.view(64, 128: 128, 1) => shared;
+    wait load;
+  }
+}
+
+// CHECK: error: TMA view layout does not match the flattened tensor map

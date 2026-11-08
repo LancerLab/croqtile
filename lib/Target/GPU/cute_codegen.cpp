@@ -10785,6 +10785,8 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
         total_elems = total_elems * root_shape.ValueAt(i);
       ValueItem outer_dim = total_elems / inner_dim;
 
+      // The flattened map's inner extent is the subview's outermost stride.
+      CheckViewStrides(inner_dim);
       host_shape = Shape({outer_dim, inner_dim});
       host_stride = Shape({inner_dim * gmem_ty->ElementSizeValue(),
                            gmem_ty->ElementSizeValue()});
