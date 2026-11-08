@@ -1,0 +1,33 @@
+// A fragment array stores registers-per-thread registers per slot. When the
+// array is used as a WGMMA register operand, a ChunkAt slot access must fold
+// that register stride, not the span element count.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__device__ __forceinline__ void consume_fragment(float* values) {
+  values[0] = values[0] + 1.0f;
+}
+
+__co__ auto wgmma_fragment_array_chunkat(f16 [64, 16] lhs, f16 [64, 16] rhs) {
+  f16 [64, 64] output{0.0f};
+  parallel {bm, bn} by [1, 1] : block {
+    mc = mma.fill.f32 0.0f;
+    frag f16[64, 16] q[2] {0.0f};
+    lhs_s = dma.copy lhs.chunkat(bm, _) => shared;
+    rhs_s = dma.copy rhs.chunkat(bn, _) => shared;
+    parallel p by 1 : group-4 {
+      mma.load lhs_s, q;
+      mma.row.row mc, q, rhs_s;
+    }
+    with {i, j} in [1, 1] {
+      call consume_fragment(q[1].chunkat(i, j));
+    }
+    mma.store mc, output.chunkat(bm, bn);
+  }
+  return output;
+}
+
+// CHECK-LABEL: __choreo_device_wgmma_fragment_array_chunkat
+// CHECK: consume_fragment({{.*}}q + (1)*(8) + {{.*}});
+// CHECK-NOT: q + (1)*(1024)

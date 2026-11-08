@@ -11795,7 +11795,15 @@ const ValueItem CuteCodeGen::TileAddr(const ptr<AST::ChunkAt>& ca, bool is_host,
   } else
     base_str = ExprSTR(ca->data, is_host);
 
-  AppendArraySlotOffset(base_str, ca->data->name, ca->indices, is_host);
+  // A fragment array stores `regs_per_thread` registers per slot, not the
+  // span's element count. Use the declared fragment stride for its slot
+  // offset; shared/global buffers keep the span-element stride.
+  std::optional<size_t> slot_stride;
+  const std::string scoped = InScopeName(ca->data->name);
+  if (FCtx(fname).HasFragmentInfo(scoped))
+    slot_stride = FCtx(fname).GetFragmentInfo(scoped).regs_per_thread;
+  AppendArraySlotOffset(base_str, ca->data->name, ca->indices, is_host,
+                        slot_stride);
 
   return sbe::sym(base_str) + offset;
 }
