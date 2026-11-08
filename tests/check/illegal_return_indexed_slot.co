@@ -1,0 +1,11 @@
+// Returning an indexed slot of a span array is not a whole symbol, so the
+// single-span return scaffold cannot represent it.
+//
+// RUN: not choreo %s 2>&1 | FileCheck %s
+
+__co__ auto ret_indexed_slot() {
+  f32 [4] tiles[3];
+  return tiles[0];
+}
+
+// CHECK: error: returning an indexed slot of a span array is not supported

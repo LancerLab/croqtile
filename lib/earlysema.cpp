@@ -3761,6 +3761,22 @@ bool EarlySemantics::Visit(AST::Return& n) {
       return false;
     }
 
+    // The return scaffold only represents whole symbols. Reject an indexed
+    // slot of a span array before memory reuse and liveness analysis, both of
+    // which assume return operands are symbols or future data references.
+    if (auto e = dyn_cast<AST::Expr>(n.value.get()); e && e->op == Op::ElemOf) {
+      auto base = AST::GetArrayBaseSymbol(*e);
+      auto base_ty = GetSymbolType(base->name);
+      if (auto fty = dyn_cast<FutureType>(base_ty))
+        base_ty = fty->GetSpannedType();
+      if (isa<SpannedArrayType>(base_ty)) {
+        Error1(n.LOC(),
+               "returning an indexed slot of a span array is not supported; "
+               "return a single-span value instead.");
+        return false;
+      }
+    }
+
     if (CCtx().HasFeature(ChoreoFeature::NSVR)) {
       if (isa<ScalarType>(vty)) {
         Error1(
