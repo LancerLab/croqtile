@@ -3064,6 +3064,19 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         IncrDeviceIndent();
       }
       auto ec = sty->GetShape().ElementCountValue();
+      // fp8 element types have no implicit conversion from a float literal,
+      // so the initial value goes through the same element conversion as the
+      // fragment initializer. Other element types keep the raw literal: their
+      // sub-byte/bool forms are constructible directly and are not covered by
+      // ExprCastSTR.
+      const BaseType init_elem = GetBaseType(*sty);
+      const bool cast_init = init_elem == BaseType::F8_E4M3 ||
+                             init_elem == BaseType::F8_E5M2;
+      auto InitValueSTR = [&]() -> std::string {
+        if (!cast_init) return ExprSTR(n.init_value);
+        return ExprCastSTR(n.init_value, std::nullopt, init_elem,
+                           GetBaseType(*n.init_value->GetType()), false);
+      };
       if (auto sat = dyn_cast<SpannedArrayType>(nty)) {
         // Every slot of the declaration is initialized; the slot stride
         // follows the declaration (physical for pooled/aligned slots).
@@ -3072,7 +3085,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         // Unique per declaration: sibling local arrays share the scope.
         const std::string init_name = "__init_" + sym;
         ds << d_indent << "const " << bts << " " << init_name << " = "
-           << ExprSTR(n.init_value) << ";\n";
+           << InitValueSTR() << ";\n";
         ds << d_indent << "for (int __slot = 0; __slot < " << slot_count
            << "; ++__slot) {\n";
         IncrDeviceIndent();
@@ -3086,10 +3099,10 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       } else if (ec == sbe::nu(1)) {
         // Single-element span: index the declaration (an array or pointer)
         // instead of assigning to it, which is ill-typed for a C array.
-        ds << d_indent << sym << "[0] = " << ExprSTR(n.init_value) << ";\n";
+        ds << d_indent << sym << "[0] = " << InitValueSTR() << ";\n";
       } else {
         ds << d_indent << "for (int i = 0; i < " << ValueSTR(ec) << "; ++i) ";
-        ds << sym << "[i] = " << ExprSTR(n.init_value) << ";\n";
+        ds << sym << "[i] = " << InitValueSTR() << ";\n";
       }
       if (sto == Storage::SHARED) {
         DecrDeviceIndent();

@@ -25,3 +25,26 @@ __co__ void init_span_arrays(f32 [8] x) {
 // NOMEM: float* __p = ((float*)(s)) + __slot * (8);
 // NOMEM: __shared__ alignas(256) float t[2][64];
 // NOMEM: float* __p = ((float*)(t)) + __slot * (64);
+
+// fp8 element types are initialized through the element conversion
+// (from_f32), not a raw literal assignment that does not compile. Other
+// element types (u8/sub-byte/bool) keep the raw literal, which constructs
+// directly.
+__co__ void init_fp8_span(f8_e4m3 [8] x) {
+  parallel p by 1 : block {
+    shared f8_e4m3 [8] s[2] {1.0f};
+    dma.copy x => s[1];
+  }
+}
+
+// DEFAULT: const f8_e4m3 __init_s = choreo::utils::from_f32<f8_e4m3>(1.000000f);
+
+// A non-array span takes the per-element loop path with the same conversion.
+__co__ void init_fp8_scalar_span(f8_e4m3 [8] x) {
+  parallel p by 1 : block {
+    shared f8_e4m3 [8] s {1.0f};
+    dma.copy x => s;
+  }
+}
+
+// DEFAULT: for (int i = 0; i < 8; ++i) s[i] = choreo::utils::from_f32<f8_e4m3>(1.000000f);
