@@ -1,0 +1,57 @@
+// A shared buffer declared in one scope must not inherit the swizzle mode of a
+// same-named buffer from a sibling scope. Both WGMMA descriptors below must use
+// the natural (unswizzled) mode for the second scope's buffer. A nested
+// same-named declaration must likewise leave the enclosing buffer's swizzle
+// intact for later uses.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ auto swizzle_sibling_scope(f16 [64, 64] lhs, f16 [64, 64] rhs) {
+  f16 [64, 64] output{0.0f};
+  parallel outer by 1 : block {
+    parallel pb0 by 1 : group-4 {
+      shared f16 [64, 64] s;
+      dma.copy.swiz<128> lhs => s;
+    }
+    parallel pb1 by 1 : group-4 {
+      shared f16 [64, 64] s;
+      shared f16 [64, 64] t;
+      dma.copy rhs => s;
+      dma.copy rhs => t;
+      mc = mma.fill.f32 0.0f;
+      mma.row.row mc, s, t;
+      mma.store mc, output;
+    }
+  }
+  return output;
+}
+
+// The first scope is genuinely swizzled; the second scope must stay natural.
+// CHECK: Layout_K_SW128_Atom<f16>
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::NS>
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::NS>
+
+// A nested same-named declaration must clear only that nested buffer's
+// provenance; the enclosing buffer must keep its swizzle after the inner scope.
+__co__ auto swizzle_nested_scope(f16 [64, 64] lhs, f16 [64, 64] rhs) {
+  f16 [64, 64] output{0.0f};
+  parallel outer by 1 : block {
+    shared f16 [64, 64] s;
+    shared f16 [64, 64] t;
+    dma.copy.swiz<128> lhs => s;
+    dma.copy rhs => t;
+    parallel inner by 1 : group-4 {
+      shared f16 [64, 64] s;
+      dma.copy rhs => s;
+    }
+    mc = mma.fill.f32 0.0f;
+    mma.row.row mc, s, t;
+    mma.store mc, output;
+  }
+  return output;
+}
+// CHECK: Layout_K_SW128_Atom<f16>
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::NS>
+

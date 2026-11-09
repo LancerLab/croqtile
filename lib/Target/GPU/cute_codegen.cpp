@@ -2704,6 +2704,10 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
   // if a symbol is declared but have no symbol value(optimized value)
   // pass it to device func even it is unused.
   auto sname = InScopeName(sym);
+  // A declaration must not inherit swizzle provenance from a same-named buffer
+  // in a sibling scope through the raw-name fallback lookup.
+  shared_buf_swiz_.erase(sym);
+  shared_buf_swiz_.erase(sname);
   if (isa<ScalarType>(nty))
     if (auto mem = n.GetMemory(); mem && mem->Get() == Storage::SHARED)
       shared_scalar_syms_.insert(sname);
@@ -6252,6 +6256,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         SwizMode swizzle = SwizMode::NONE;
         if (auto it = shared_buf_swiz_.find(source_sym);
             it != shared_buf_swiz_.end())
+          swizzle = it->second;
+        else if (auto it = shared_buf_swiz_.find(source_scoped);
+                 it != shared_buf_swiz_.end())
           swizzle = it->second;
 
         bool is_mn_major =
