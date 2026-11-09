@@ -29,4 +29,4 @@ __co__ auto prepack_fp8_warp_mismatch(u32 [64, 2] meta,
   return output;
 }
 
-// CHECK: error: prepacked metadata 'me' is loaded with warp chunk loop '__iv_ww' but consumed with warp chunk loop '__iv_wa'
+// CHECK: error: prepacked metadata 'me' is loaded with warp chunk loop 'thread-preset' but consumed with warp chunk loop '__iv_wa'

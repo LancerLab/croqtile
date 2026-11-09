@@ -1643,7 +1643,6 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     if (!explicit_scale_accum_scopes.empty())
       explicit_scale_accum_scopes.pop_back();
     if (!foreach_iv_stack_.empty()) foreach_iv_stack_.pop_back();
-    if (!foreach_extent_stack_.empty()) foreach_extent_stack_.pop_back();
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     DecrDeviceIndent();
     if (!it->stmts->None()) {
@@ -5977,16 +5976,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           if (!meta_sty || meta_sty->Dims() < 2) return canonical_warp;
           auto warp_extent = VIInt(meta_sty->GetShape().ValueAt(1));
           if (!warp_extent || *warp_extent <= 0) return canonical_warp;
-          std::string preset_warp;
-          for (size_t i = 0; i < foreach_iv_stack_.size(); ++i) {
-            if (i >= foreach_extent_stack_.size() ||
-                foreach_extent_stack_[i] != *warp_extent)
-              continue;
-            if (foreach_iv_stack_[i] == a_k_loop) continue;
-            if (!preset_warp.empty()) return canonical_warp;
-            preset_warp = foreach_iv_stack_[i];
-          }
-          return preset_warp.empty() ? canonical_warp : preset_warp;
+          // The tile loader maps the warp axis to threads; no enclosing loop
+          // feeds this metadata slot.  Compare consumers against the layout
+          // preset explicitly instead of guessing from equal loop extents.
+          return "thread-preset";
         };
         if (strides.size() < 2) {
           Error1(n.LOC(), "sparse metadata must be at least 2-dimensional.");
@@ -9909,16 +9902,6 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
       else
         foreach_iv_stack_.push_back("__iv_" + rng0->GetRVName());
     }
-    int64_t iv_extent = -1;
-    if (auto bty = dyn_cast<BoundedType>(rng0->GetIV()->GetType())) {
-      auto lb = VIInt(bty->GetLowerBound());
-      auto ub = VIInt(bty->GetUpperBound());
-      if (lb && ub) {
-        auto step = bty->GetStep();
-        iv_extent = (step > 1) ? (*ub - *lb) / step + 1 : *ub - *lb;
-      }
-    }
-    foreach_extent_stack_.push_back(iv_extent);
   }
 
   if (!IsHost() && n.GetBody()) {
