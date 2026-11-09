@@ -1335,7 +1335,14 @@ void HIPCodeGen::EmitDMAPad(AST::DMA& n, const HIPDMALoweringDecision& dec,
   auto pad_cfg = dyn_cast<PadConfig>(n.config);
   assert(pad_cfg && "pad DMA must have PadConfig");
 
-  auto to_size_expr = UnScopedSizeExpr(*to_sty);
+  auto from_array = GetFullSpannedArrayType(*n.GetFrom());
+  auto to_array = GetFullSpannedArrayType(*n.GetTo());
+  const bool slot_extended = from_array && to_array;
+
+  // A full span-array destination is a whole declaration, including every
+  // slot's physical stride. A single span keeps its existing text.
+  auto to_size_expr = slot_extended ? TotalSizeExprFor(*n.GetTo(), *to_sty)
+                                    : UnScopedSizeExpr(*to_sty);
 
   std::string pad_val = "0";
   if (pad_cfg->GetPadValue()) pad_val = ExprSTR(pad_cfg->GetPadValue(), false);
@@ -1362,8 +1369,16 @@ void HIPCodeGen::EmitDMAPad(AST::DMA& n, const HIPDMALoweringDecision& dec,
   }
   while ((int)pad_low_vals.size() < rank) pad_low_vals.push_back("0");
 
-  auto from_size_expr = UnScopedSizeExpr(*from_sty);
-  auto from_elem_count = from_size_expr + " / sizeof(" + bt_name + ")";
+  std::string from_elem_count;
+  if (slot_extended) {
+    auto total_elems = (from_array->ElemCount() *
+                        from_shape.ElementCountValue())
+                           ->Normalize();
+    from_elem_count = ValueSTR(total_elems);
+  } else {
+    auto from_size_expr = UnScopedSizeExpr(*from_sty);
+    from_elem_count = from_size_expr + " / sizeof(" + bt_name + ")";
+  }
 
   auto from_vals = from_shape.Value();
   auto to_vals = to_shape.Value();
@@ -1376,8 +1391,17 @@ void HIPCodeGen::EmitDMAPad(AST::DMA& n, const HIPDMALoweringDecision& dec,
   ds << d_indent << "for (size_t __i = threadIdx.x; __i < " << from_elem_count
      << "; __i += blockDim.x) {\n";
 
-  // Decompose flat index __i into multi-dim coords using from_shape
-  ds << d_indent << "  size_t __rem = __i;\n";
+  // Decompose flat index __i into multi-dim coords using from_shape. A full
+  // span-array is laid out slot-major, so peel the slot before the element
+  // coordinates and address each slot by its physical element stride.
+  if (slot_extended) {
+    auto elem_per_slot = ValueSTR(from_shape.ElementCountValue());
+    ds << d_indent << "  size_t __slot = __i / (" << elem_per_slot << ");\n";
+    ds << d_indent << "  size_t __elem = __i % (" << elem_per_slot << ");\n";
+    ds << d_indent << "  size_t __rem = __elem;\n";
+  } else {
+    ds << d_indent << "  size_t __rem = __i;\n";
+  }
   for (int d = 0; d < rank; ++d) {
     std::string dim_name = "__d" + std::to_string(d);
     if (d < rank - 1) {
@@ -1408,20 +1432,37 @@ void HIPCodeGen::EmitDMAPad(AST::DMA& n, const HIPDMALoweringDecision& dec,
       ds << coord;
     }
   }
+  if (slot_extended)
+    ds << " + __slot * ("
+       << ValueSTR(to_array->PhysicalSlotStrideElementsValue()) << ")";
   ds << ";\n";
 
-  ds << d_indent << "  ((" << bt_name << "*)" << to_expr << ")[__dst_idx] = (("
-     << bt_name << "*)" << from_expr << ")[__i];\n";
+  if (slot_extended) {
+    ds << d_indent << "  size_t __src_idx = __slot * ("
+       << ValueSTR(from_array->PhysicalSlotStrideElementsValue())
+       << ") + __elem;\n";
+    ds << d_indent << "  ((" << bt_name << "*)" << to_expr
+       << ")[__dst_idx] = ((" << bt_name << "*)" << from_expr
+       << ")[__src_idx];\n";
+  } else {
+    ds << d_indent << "  ((" << bt_name << "*)" << to_expr
+       << ")[__dst_idx] = ((" << bt_name << "*)" << from_expr << ")[__i];\n";
+  }
   ds << d_indent << "}\n";
 }
 
-void HIPCodeGen::EmitDMATranspose(AST::DMA&, const HIPDMALoweringDecision& dec,
+void HIPCodeGen::EmitDMATranspose(AST::DMA& n,
+                                  const HIPDMALoweringDecision& dec,
                                   const std::string& from_expr,
                                   const std::string& to_expr,
                                   const ptr<SpannedType>& from_sty,
                                   const ptr<SpannedType>& to_sty) {
   auto bt_name = HIPNameBaseType(dec.elem_type);
   if (!from_sty) return;
+
+  auto from_array = GetFullSpannedArrayType(*n.GetFrom());
+  auto to_array = GetFullSpannedArrayType(*n.GetTo());
+  const bool slot_extended = from_array && to_array;
 
   auto from_shape = from_sty->GetShape();
   auto to_shape = to_sty->GetShape();
@@ -1432,8 +1473,16 @@ void HIPCodeGen::EmitDMATranspose(AST::DMA&, const HIPDMALoweringDecision& dec,
     for (int i = rank - 1; i >= 0; --i) perm.push_back(i);
   }
 
-  auto from_size_expr = UnScopedSizeExpr(*from_sty);
-  auto from_elem_count = from_size_expr + " / sizeof(" + bt_name + ")";
+  std::string from_elem_count;
+  if (slot_extended) {
+    auto total_elems = (from_array->ElemCount() *
+                        from_shape.ElementCountValue())
+                           ->Normalize();
+    from_elem_count = ValueSTR(total_elems);
+  } else {
+    auto from_size_expr = UnScopedSizeExpr(*from_sty);
+    from_elem_count = from_size_expr + " / sizeof(" + bt_name + ")";
+  }
 
   auto from_vals = from_shape.Value();
   auto to_vals = to_shape.Value();
@@ -1446,8 +1495,18 @@ void HIPCodeGen::EmitDMATranspose(AST::DMA&, const HIPDMALoweringDecision& dec,
   ds << d_indent << "for (size_t __i = threadIdx.x; __i < " << from_elem_count
      << "; __i += blockDim.x) {\n";
 
+  // A full span-array is laid out slot-major: peel the slot before the
+  // element coordinates and address each slot by its physical element stride.
+  if (slot_extended) {
+    auto elem_per_slot = ValueSTR(from_shape.ElementCountValue());
+    ds << d_indent << "  size_t __slot = __i / (" << elem_per_slot << ");\n";
+    ds << d_indent << "  size_t __elem = __i % (" << elem_per_slot << ");\n";
+    ds << d_indent << "  size_t __rem = __elem;\n";
+  } else {
+    ds << d_indent << "  size_t __rem = __i;\n";
+  }
+
   // Decompose flat index into source multi-dim coords
-  ds << d_indent << "  size_t __rem = __i;\n";
   for (int d = 0; d < rank; ++d) {
     std::string dim_name = "__d" + std::to_string(d);
     if (d < rank - 1) {
@@ -1476,10 +1535,22 @@ void HIPCodeGen::EmitDMATranspose(AST::DMA&, const HIPDMALoweringDecision& dec,
       ds << coord;
     }
   }
+  if (slot_extended)
+    ds << " + __slot * ("
+       << ValueSTR(to_array->PhysicalSlotStrideElementsValue()) << ")";
   ds << ";\n";
 
-  ds << d_indent << "  ((" << bt_name << "*)" << to_expr << ")[__dst_idx] = (("
-     << bt_name << "*)" << from_expr << ")[__i];\n";
+  if (slot_extended) {
+    ds << d_indent << "  size_t __src_idx = __slot * ("
+       << ValueSTR(from_array->PhysicalSlotStrideElementsValue())
+       << ") + __elem;\n";
+    ds << d_indent << "  ((" << bt_name << "*)" << to_expr
+       << ")[__dst_idx] = ((" << bt_name << "*)" << from_expr
+       << ")[__src_idx];\n";
+  } else {
+    ds << d_indent << "  ((" << bt_name << "*)" << to_expr
+       << ")[__dst_idx] = ((" << bt_name << "*)" << from_expr << ")[__i];\n";
+  }
   ds << d_indent << "}\n";
 }
 

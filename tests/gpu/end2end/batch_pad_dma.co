@@ -17,6 +17,24 @@ __co__ auto batch_pad(f32 [4, 8, 16, 16] i, int padding) {
   return out;
 }
 
+// A multi-slot pad must apply the inner pad mapping to every slot, including
+// the slot's physical allocation stride.
+__co__ auto slot_pad(f32 [16, 16] a, f32 [16, 16] b) {
+  f32 [800] output;
+  parallel p by 1 : block {
+    shared f32 [16, 16] buf[2];
+    dma.copy a => buf[0];
+    dma.copy b => buf[1];
+    shared f32 [20, 20] padded[2];
+    dma.pad<{2, 2}, {2, 2}, {0, 0}, 0.0f> buf => padded;
+    parallel t by 400 : thread {
+      output.at(t) = padded[0].at(t / 20, t % 20);
+      output.at(400 + t) = padded[1].at(t / 20, t % 20);
+    }
+  }
+  return output;
+}
+
 int main() {
   const int padding = 1;
   auto a = choreo::make_spandata<choreo::f32>(4, 8, 16, 16);
@@ -38,7 +56,27 @@ int main() {
           }
         }
 
+  auto p = choreo::make_spandata<choreo::f32>(16, 16);
+  auto q = choreo::make_spandata<choreo::f32>(16, 16);
+  for (size_t i = 0; i < 256; ++i) {
+    p.data()[i] = (float)i;
+    q.data()[i] = (float)(1000 + i);
+  }
+  auto slot_result = slot_pad(p.view(), q.view());
+  for (size_t s = 0; s < 2; ++s)
+    for (size_t h = 0; h < 20; ++h)
+      for (size_t w = 0; w < 20; ++w) {
+        float expect = 0.0f;
+        if (h >= 2 && h < 18 && w >= 2 && w < 18)
+          expect = (s == 0 ? p[h - 2][w - 2] : q[h - 2][w - 2]);
+        if (slot_result[s * 400 + h * 20 + w] != expect) {
+          std::cout << "slot pad mismatch" << std::endl;
+          return 1;
+        }
+      }
+
   std::cout << "Test Passed\n" << std::endl;
+  return 0;
 }
 
 // CHECK: Test Passed

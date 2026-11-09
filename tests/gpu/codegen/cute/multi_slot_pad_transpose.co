@@ -1,0 +1,57 @@
+// Multi-slot pad and transpose apply the element-shaped operation to every
+// slot, using each slot's physical element stride.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void pad_multi_slot() {
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      alignas(4096) shared f32 [16, 32] buf[2];
+      alignas(4096) shared f32 [20, 40] output[2];
+      dma.pad<{2, 4}, {2, 4}, {0, 0}, 0.0f> buf => output;
+    }
+}
+
+__co__ void copy_multi_slot() {
+  global f32 [16, 32] input[2];
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      shared f32 [16, 32] buf[2];
+      dma.copy input => buf;
+    }
+}
+
+__co__ void transp_multi_slot() {
+  global f32 [8, 16] input[2];
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      alignas(4096) shared f32 [16, 8] output[2];
+      dma.transp<1, 0> input => output;
+    }
+}
+
+// Pad: the slot loop wraps the whole per-slot pad lowering.
+// CHECK-LABEL: __choreo_device_pad_multi_slot
+// CHECK:         for (int __slot = 0; __slot < 2; ++__slot)
+// CHECK:           cute::make_smem_ptr<float>((float*)buf + __slot * (1024))
+// CHECK:           cute::make_smem_ptr<float>((float*)output + __slot * (1024))
+// CHECK:           cute::fill(__tensor{{[0-9]+}}_output, 0.000000f)
+// The inner padded data tensor keeps the slot base in front of the pad offset.
+// CHECK:           cute::make_smem_ptr<float>((float*)output + (__slot * (1024)) + __pad_offset{{[0-9]+}})
+// CHECK:           choreo::naive_copy(__tensor{{[0-9]+}}_buf, __tensor{{[0-9]+}}_output
+
+// Copy: a whole span-array copy iterates every slot through the same
+// slot-major batch loop.
+// CHECK-LABEL: __choreo_device_copy_multi_slot
+// CHECK:         for (int __slot = 0; __slot < 2; ++__slot)
+// CHECK:           cute::make_gmem_ptr<float>((float*)input + __slot * (512))
+// CHECK:           cute::make_smem_ptr<float>((float*)buf + __slot * (512))
+
+// Transpose: source and destination both advance by their own physical slot
+// stride, including the destination's aligned padding.
+// CHECK-LABEL: __choreo_device_transp_multi_slot
+// CHECK:         for (int __slot = 0; __slot < 2; ++__slot)
+// CHECK:           cute::make_gmem_ptr<float>((float*)input + __slot * (128))
+// CHECK:           cute::make_smem_ptr<float>((float*)output + __slot * (1024))
+// CHECK:           choreo::tiled_copy<{{.*}}>(__tensor{{[0-9]+}}_input, __tensor{{[0-9]+}}_output

@@ -54,3 +54,39 @@ __co__ auto transp_chunkat(s32 [32, 16] input) {
 // CHECK-LABEL: __global__ void __choreo_device_transp_chunkat
 // chunkat offset = p * 16 * 16 = p * 256
 // CHECK:         ((int*)(input) + (blockIdx.x * 256))
+
+// --- Test 4: transpose of a multi-slot span array with aligned destination ---
+__co__ void transp_multi_slot() {
+  global s32 [8, 16] input[2];
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      alignas(4096) shared s32 [16, 8] output[2];
+      dma.transp<1, 0> input => output;
+    }
+}
+
+// CHECK-LABEL: __global__ void __choreo_device_transp_multi_slot
+// CHECK:         for (size_t __i = threadIdx.x; __i < 256; __i += blockDim.x)
+// CHECK:           size_t __slot = __i / (128)
+// CHECK:           size_t __elem = __i % (128)
+// perm<1,0>: dst[d1][d0], then add the aligned physical slot stride
+// CHECK:           size_t __dst_idx = __d1 * (8) + __d0 + __slot * (1024)
+// packed source slot stride
+// CHECK:           size_t __src_idx = __slot * (128) + __elem
+
+// --- Test 5: a one-slot array still lowers as a single span ---
+__co__ void transp_one_slot_array() {
+  global s32 [8, 16] src[1];
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      shared s32 [16, 8] out;
+      dma.transp<1, 0> src => out;
+    }
+}
+
+// The one-slot array is layout-equivalent to a plain span: no slot peel and
+// no slot stride on either side.
+// CHECK-LABEL: __global__ void __choreo_device_transp_one_slot_array
+// CHECK:         for (size_t __i = threadIdx.x; __i < 512ULL / sizeof(int); __i += blockDim.x)
+// CHECK:           size_t __dst_idx = __d1 * (8) + __d0
+// CHECK:           ((int*)out)[__dst_idx] = ((int*)src)[__i]

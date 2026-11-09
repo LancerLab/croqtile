@@ -1,25 +1,28 @@
 // RUN: not choreo %s 2>&1 | FileCheck %s
 
-__co__ auto pad_multi_slot() {
+// Mixed array/span operands remain unsupported: the slot dimension is only
+// well defined when both sides are full span arrays.
+__co__ auto pad_multi_slot_mixed() {
   f32 [2, 4] src[3];
   parallel p by 1 : block {
     dma.pad<{1, 2}, {1, 2}, {0, 0}, 0.0f> src => local;
   }
 }
 
-__co__ auto transp_multi_slot() {
-  s32 [2, 16] src[3];
-  s32 [16, 2] dst[3];
-  dma.transp<1, 0> src => dst;
-}
-
-// A multi-slot destination is rejected too.
+// A multi-slot source into a single-span destination is also mixed.
 __co__ auto transp_multi_slot_dst() {
   s32 [2, 16] src;
   s32 [16, 2] dst[3];
   dma.transp<1, 0> src => dst;
 }
 
-// CHECK: error: pad/transpose of a multi-slot span array is not supported; apply the DMA to one slot at a time.
-// CHECK: error: pad/transpose of a multi-slot span array is not supported; apply the DMA to one slot at a time.
-// CHECK: error: pad/transpose of a multi-slot span array is not supported; apply the DMA to one slot at a time.
+// Both sides are full arrays, but their slot counts disagree.
+__co__ auto pad_multi_slot_count() {
+  f32 [2, 4] src[3];
+  f32 [4, 6] dst[2];
+  dma.pad<{1, 1}, {1, 1}, {0, 0}, 0.0f> src => dst;
+}
+
+// CHECK: error: pad/transpose of a multi-slot span array requires every operand to be a full span array; apply the DMA to one slot at a time.
+// CHECK: error: pad/transpose of a multi-slot span array requires every operand to be a full span array; apply the DMA to one slot at a time.
+// CHECK: error: pad/transpose span-array operands must have the same slot count.

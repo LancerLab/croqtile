@@ -49,3 +49,43 @@ __co__ auto pad_chunkat_src(s32 [64, 32] input) {
 // CHECK:         = (int)-1
 // pad_low offsets [2, 1]
 // CHECK:         (__d0 + 2) * (35) + (__d1 + 1)
+
+// --- Test 3: pad of a multi-slot span array with aligned slots ---
+__co__ void pad_multi_slot() {
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      alignas(4096) shared s32 [16, 32] buf[2];
+      alignas(4096) shared s32 [20, 40] output[2];
+      dma.pad<{2, 4}, {2, 4}, {0, 0}, 99> buf => output;
+    }
+}
+
+// CHECK-LABEL: __global__ void __choreo_device_pad_multi_slot
+// fill the whole declaration: 2 slots * 4096-byte physical stride
+// CHECK:         for (size_t __i = threadIdx.x; __i < 8192ULL / sizeof(int); __i += blockDim.x)
+// copy all logical elements: 2 slots * 16 * 32
+// CHECK:         for (size_t __i = threadIdx.x; __i < 1024; __i += blockDim.x)
+// CHECK:           size_t __slot = __i / (512)
+// CHECK:           size_t __elem = __i % (512)
+// destination adds the aligned physical slot stride
+// CHECK:           size_t __dst_idx = (__d0 + 2) * (40) + (__d1 + 4) + __slot * (1024)
+// source uses its own aligned physical slot stride
+// CHECK:           size_t __src_idx = __slot * (1024) + __elem
+
+// --- Test 4: a one-slot array still lowers as a single span ---
+__co__ void pad_one_slot_array() {
+  parallel p by 1 : block
+    parallel q by 32 : thread {
+      shared s32 [4, 8] buf[1];
+      shared s32 [6, 10] out;
+      dma.pad<{1, 1}, {1, 1}, {0, 0}, 7> buf => out;
+    }
+}
+
+// The one-slot array is layout-equivalent to a plain span: whole destination
+// fill, then the source copy with no slot decomposition.
+// CHECK-LABEL: __global__ void __choreo_device_pad_one_slot_array
+// CHECK:         for (size_t __i = threadIdx.x; __i < 240ULL / sizeof(int); __i += blockDim.x)
+// CHECK:         for (size_t __i = threadIdx.x; __i < 128ULL / sizeof(int); __i += blockDim.x)
+// CHECK:           size_t __dst_idx = (__d0 + 1) * (10) + (__d1 + 1)
+// CHECK:           ((int*)out)[__dst_idx] = ((int*)buf)[__i]

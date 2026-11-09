@@ -1510,30 +1510,49 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     }
   }
 
-  // Pad and transpose lower with one-span loop bounds, so a multi-slot
-  // span-array operand would silently process only its first slot. Require
-  // callers to apply the DMA to one slot at a time until slot-extended
-  // shapes are supported by those paths.
+  // A full span-array operand is slot-major; pad/transpose lower one slot at a
+  // time only when both operands are full arrays with the same slot count.
+  // A one-slot array stays on the single-span path, and a multi-slot array
+  // mixed with a plain span still requires per-slot DMAs.
   if (n.operation == ".transp" || n.operation == ".pad") {
-    auto is_multi_slot = [&](const ptr<AST::Node>& operand) {
+    auto full_array_slots =
+        [&](const ptr<AST::Node>& operand) -> std::optional<ValueItem> {
       if (auto ca = dyn_cast<AST::ChunkAt>(operand);
           ca && ca->NoOperation() &&
           (!ca->indices || ca->indices->None())) {
         auto sym_ty = GetSymbolType(ca->RefSymbol());
         if (auto fty = dyn_cast<FutureType>(sym_ty))
           sym_ty = fty->GetSpannedType();
-        if (auto aty = dyn_cast<SpannedArrayType>(sym_ty)) {
-          auto slot_count = VIInt(aty->ElemCount());
-          return slot_count && *slot_count > 1;
-        }
+        if (auto aty = dyn_cast<SpannedArrayType>(sym_ty))
+          return aty->ElemCount();
       }
-      return false;
+      return std::nullopt;
     };
-    if (is_multi_slot(n.from) || is_multi_slot(n.to)) {
-      Error1(n.LOC(),
-             "pad/transpose of a multi-slot span array is not supported; "
-             "apply the DMA to one slot at a time.");
-      return false;
+    auto from_slots = full_array_slots(n.from);
+    auto to_slots = full_array_slots(n.to);
+    if (from_slots.has_value() != to_slots.has_value()) {
+      // A one-slot array is layout-equivalent to a plain span, so keep
+      // lowering it as a single span; only a genuinely multi-slot array
+      // needs the other operand to be a full array too.
+      auto array_slots = from_slots ? from_slots : to_slots;
+      auto count = VIInt(*array_slots);
+      if (!count || *count > 1) {
+        Error1(n.LOC(),
+               "pad/transpose of a multi-slot span array requires every "
+               "operand to be a full span array; apply the DMA to one slot at "
+               "a time.");
+        return false;
+      }
+    }
+    if (from_slots && to_slots) {
+      auto f_count = VIInt(*from_slots);
+      auto t_count = VIInt(*to_slots);
+      if (f_count && t_count && *f_count != *t_count) {
+        Error1(n.LOC(),
+               "pad/transpose span-array operands must have the same slot "
+               "count.");
+        return false;
+      }
     }
   }
 

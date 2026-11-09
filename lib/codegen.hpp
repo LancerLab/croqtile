@@ -813,6 +813,17 @@ protected:
     return TotalSizeExprOf(chunk_ty, true);
   }
 
+  // Full declaration span-array for a whole-operand reference, or null for
+  // an indexed slot/subview or a non-array type.
+  ptr<SpannedArrayType> GetFullSpannedArrayType(const AST::Node& node) const {
+    auto ca = dyn_cast<AST::ChunkAt>(&node);
+    if (!ca || !ca->NoOperation() || (ca->indices && !ca->indices->None()))
+      return nullptr;
+    auto ty = GetSymbolType(ca->RefSymbol());
+    if (auto fty = dyn_cast<FutureType>(ty)) ty = fty->GetSpannedType();
+    return dyn_cast<SpannedArrayType>(ty);
+  }
+
   Storage FutureStorage(const std::string& n) const {
     assert(PrefixedWith(n, "::") && "requires a scoped name.");
     if (cgi.GetFunctionSharedFutures(fname).count(n))

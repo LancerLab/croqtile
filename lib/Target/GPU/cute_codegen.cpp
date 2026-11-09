@@ -4432,6 +4432,27 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       t_mds_offset = ValueSTR(GenOffset(t_ca));
     }
 
+    auto from_array = GetFullSpannedArrayType(*n.GetFrom());
+    auto to_array = GetFullSpannedArrayType(*n.GetTo());
+    const bool slot_extended = (n.operation == ".copy" ||
+                                n.operation == ".pad" ||
+                                n.operation == ".transp") &&
+                               from_array && to_array;
+    if (slot_extended) {
+      ds << d_indent << "for (int __slot = 0; __slot < "
+         << ValueSTR(from_array->ElemCount()) << "; ++__slot) {\n";
+      IncrDeviceIndent();
+      auto slot_offset = [&](const std::string& base,
+                             const ptr<SpannedArrayType>& aty) {
+        std::string add =
+            "__slot * (" + ValueSTR(aty->PhysicalSlotStrideElementsValue()) +
+            ")";
+        return (base.empty() || base == "0") ? add : "(" + base + ") + " + add;
+      };
+      f_mds_offset = slot_offset(f_mds_offset, from_array);
+      t_mds_offset = slot_offset(t_mds_offset, to_array);
+    }
+
     std::vector<size_t> transp_config;
     if (n.operation == ".transp")
       transp_config = cast<TransposeConfig>(n.GetConfig())->dim_values;
@@ -4650,19 +4671,25 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         ds << d_indent << "cute::fill(" << t_mds_name << ", " << pad_val_expr
            << ");\n";
 
-      // Compute pad_low offset and declare the inner data sub-tensor.
+      // Compute pad_low offset and declare the inner data sub-tensor. The
+      // layout offset is relative to the padded tensor's data pointer, so
+      // keep the tensor base offset (e.g. the per-slot stride) in front of
+      // it; layout() does not include the pointer offset.
       std::string pad_offset = "__pad_offset" + std::to_string(pad_cnt);
       ds << d_indent << "auto " << pad_offset << " = " << t_mds_name
          << ".layout()("
          << "cute::make_coord(" << pcmvSTR(pad_config->pad_low) << "));\n";
       pad_offset_expr = pad_offset;
+      std::string t_pad_base = pad_offset;
+      if (!t_mds_offset.empty() && t_mds_offset != "0")
+        t_pad_base = "(" + t_mds_offset + ") + " + pad_offset;
 
       auto f_data_shape = dma_plan->IsTiledDMA() ? dma_plan->GetBoxOfFrom()
                                                  : dma_plan->from_ca_shape;
       const auto t_pad_mds =
           GenTensorDecl(RemoveSuffix(t_buf_name, ".data()"), t_buf.second,
                         t_sty->GetStorage(), t_sty->ElementType(), f_data_shape,
-                        false, pad_offset, ValueSTR(t_stride, false, true), {},
+                        false, t_pad_base, ValueSTR(t_stride, false, true), {},
                         use_wgmma_layout_t, swizzle_mode);
       ds << t_pad_mds.second;
       copy_dst = t_pad_mds.first;
@@ -4724,7 +4751,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     }
 
     // --- Emit the actual copy (shared for .copy, .transp, and .pad) ---
-    bool suppress_fence = has_batch_loop;
+    bool suppress_fence = has_batch_loop || slot_extended;
 
     if (dma_plan->dyn_box && dma_plan->IsTiledDMA()) {
       // Dynamic box: emit explicit tiling loop over runtime extents.
@@ -4848,7 +4875,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       ds << d_indent << "}\n"; // rn loop
       DecrDeviceIndent();
       ds << d_indent << "}\n"; // rm loop
-      if (!has_batch_loop) {
+      if (!has_batch_loop && !slot_extended) {
         // No enclosing batch loop -> emit fence here after all dyn_box loops.
         CUDA_COPY_ATOM fence_atom =
             dma_plan->tiled_params_fast ? dma_plan->atom_fast : dma_plan->atom;
@@ -4905,6 +4932,16 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         DecrDeviceIndent();
         ds << d_indent << "}\n";
       }
+      if (dma_plan->IsTiledDMA() && !slot_extended) {
+        CUDA_COPY_ATOM fence_atom =
+            dma_plan->tiled_params_fast ? dma_plan->atom_fast : dma_plan->atom;
+        emit_copy_fence(fence_atom);
+      }
+    }
+
+    if (slot_extended) {
+      DecrDeviceIndent();
+      ds << d_indent << "}\n";
       if (dma_plan->IsTiledDMA()) {
         CUDA_COPY_ATOM fence_atom =
             dma_plan->tiled_params_fast ? dma_plan->atom_fast : dma_plan->atom;
