@@ -219,6 +219,59 @@ __co__ auto prepack_renamed_lastk_meta_col_a(u32 [64, 4] meta,
   return output;
 }
 
+// A canonical K role is decisive even when the warp role is renamed and the
+// unchunked A operand cannot identify K.  The K-first metadata order must not
+// overwrite the canonical K with the positional fallback.
+__co__ auto prepack_partial_canon_kfirst(u32 [64, 4] meta,
+                                         f16 [64, 16] lhs_packed,
+                                         f16 [8, 32] rhs) {
+  f32 [64, 8] output{0.0f};
+  parallel by 1 : block {
+    shared u32 [64, 4] meta_s[2];
+    shared f16 [64, 16] lhs_s[2];
+    dma.copy meta => meta_s[1];
+    dma.copy lhs_packed => lhs_s[1];
+    rhs_s = dma.copy rhs => shared;
+    mc = mma.fill.f32 0.0f;
+    parallel p by 1 : group-4 {
+      foreach iv_k in [2] {
+        foreach ww in [1] {
+          me = mma.load meta_s[1].chunkat(iv_k, ww);
+          mma.row.row.sp mc, lhs_s[1], rhs_s, me;
+        }
+      }
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// The same partial-canonical loops with the established last-is-K metadata
+// order must resolve to the same canonical K role.
+__co__ auto prepack_partial_canon_lastk(u32 [64, 4] meta,
+                                        f16 [64, 16] lhs_packed,
+                                        f16 [8, 32] rhs) {
+  f32 [64, 8] output{0.0f};
+  parallel by 1 : block {
+    shared u32 [64, 4] meta_s[2];
+    shared f16 [64, 16] lhs_s[2];
+    dma.copy meta => meta_s[1];
+    dma.copy lhs_packed => lhs_s[1];
+    rhs_s = dma.copy rhs => shared;
+    mc = mma.fill.f32 0.0f;
+    parallel p by 1 : group-4 {
+      foreach iv_k in [2] {
+        foreach ww in [1] {
+          me = mma.load meta_s[1].chunkat(ww, iv_k);
+          mma.row.row.sp mc, lhs_s[1], rhs_s, me;
+        }
+      }
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
 // CHECK: int __sp_k_idx = (__iv_kk) * 2 + (__iv_ww);
 // V2: int __sp_k_idx = (__iv_kk) * 2 + (__iv_ww);
 // CHECK: int __sp_k_idx = (__iv_kk) * 2 + (__iv_ww);
@@ -235,3 +288,7 @@ __co__ auto prepack_renamed_lastk_meta_col_a(u32 [64, 4] meta,
 // V2: int __sp_k_idx = (__iv_kk) * 2 + (__iv_ww);
 // CHECK: int __sp_k_idx = (__iv_kk) * 2 + (__iv_ww);
 // V2: int __sp_k_idx = (__iv_kk) * 2 + (__iv_ww);
+// CHECK: int __sp_k_idx = (__iv_iv_k) * 2 + (__iv_ww);
+// V2: int __sp_k_idx = (__iv_iv_k) * 2 + (__iv_ww);
+// CHECK: int __sp_k_idx = (__iv_iv_k) * 2 + (__iv_ww);
+// V2: int __sp_k_idx = (__iv_iv_k) * 2 + (__iv_ww);

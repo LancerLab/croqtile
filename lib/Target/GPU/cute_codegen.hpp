@@ -543,22 +543,20 @@ private:
                     "operand's K loop '" + a_k_iv + "'");
         return false;
       }
-    } else if (operand) {
-      // Without an A K chunk IV, a renamed loop pair cannot tell a K-first
-      // metadata order from the last-is-K convention. A canonical role name
-      // is the only remaining evidence; otherwise reject the ambiguous form
-      // rather than silently assuming last-is-K.
-      if (metadata_order && !canonical_role) {
+    } else if (operand && !canonical_role) {
+      // Without a canonical role or an A K chunk IV, a renamed loop pair
+      // cannot tell a K-first metadata order from the last-is-K convention.
+      // Reject the ambiguous form rather than silently assuming last-is-K.
+      if (metadata_order) {
         Error1(loc, "prepacked metadata loop order cannot be determined "
                     "without an A K chunk or canonical 'iv_k'/'iv_warp' loop "
                     "names; use a chunked A operand or an explicit order "
                     "annotation");
         return false;
       }
-      // Legacy positional form for canonical or implicit-A roles. The
-      // metadata buffer's established convention is last-is-K; the A axis
-      // must not reinterpret that order without an A K IV to match.
-      const int fallback_axis = metadata_order ? -1 : k_axis;
+      // Legacy positional form for implicit-A roles. The metadata buffer's
+      // established convention is last-is-K; the A axis must not reinterpret
+      // that order without an A K IV to match.
       for (const auto& sop : operand->AllOperations()) {
         auto ta = dyn_cast<AST::SOP::TileAt>(sop);
         if (!ta || !ta->GetIndices()) continue;
@@ -568,8 +566,8 @@ private:
           if (!id || id->name == "_") continue;
           auto iv = match_loop(id->name);
           if (iv.empty()) continue;
-          bool is_k = fallback_axis >= 0
-                          ? static_cast<int>(pos) == fallback_axis
+          bool is_k = k_axis >= 0
+                          ? static_cast<int>(pos) == k_axis
                           : pos + 1 == indices.size();
           if (is_k) {
             kExpr = iv;
