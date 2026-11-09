@@ -469,20 +469,40 @@ private:
       // variable consumed by a while/apply loop) cannot be resolved to a
       // packed tile. Reject it instead of silently re-reading tile 0.
       std::string unresolved;
+      auto scan_node = [&](auto&& self, const ptr<AST::Node>& node) {
+        if (!node || !unresolved.empty()) return;
+        if (AST::GetIntLiteral(node)) return;
+        if (auto id = AST::GetIdentifier(node)) {
+          if (id->name == "_" || id->name == "__choreo_no_tiling__") return;
+          unresolved = id->name;
+          return;
+        }
+        auto expr = dyn_cast<AST::Expr>(node);
+        if (!expr) return;
+        switch (expr->GetForm()) {
+        case AST::Expr::Unary:
+          self(self, expr->GetR());
+          break;
+        case AST::Expr::Binary:
+          self(self, expr->GetL());
+          self(self, expr->GetR());
+          break;
+        case AST::Expr::Ternary:
+          self(self, expr->GetC());
+          self(self, expr->GetL());
+          self(self, expr->GetR());
+          break;
+        case AST::Expr::Reference:
+          break;
+        }
+      };
       auto scan_indices = [&](const ptr<AST::ChunkAt>& chunk) {
         if (!chunk || !unresolved.empty()) return;
         for (const auto& sop : chunk->AllOperations()) {
           auto ta = dyn_cast<AST::SOP::TileAt>(sop);
           if (!ta || !ta->GetIndices()) continue;
-          for (const auto& node : ta->GetIndices()->AllValues()) {
-            if (AST::GetIntLiteral(node)) continue;
-            auto id = AST::GetIdentifier(node);
-            if (!id || id->name == "_" ||
-                id->name == "__choreo_no_tiling__")
-              continue;
-            unresolved = id->name;
-            return;
-          }
+          for (const auto& node : ta->GetIndices()->AllValues())
+            scan_node(scan_node, node);
         }
       };
       scan_indices(operand);
