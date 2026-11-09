@@ -318,10 +318,10 @@ private:
   // Used to derive inline phase formulas for mbarrier waits and to resolve
   // the K-tile/warp-chunk roles of prepacked metadata indexing.
   std::vector<std::string> foreach_iv_stack_;
-  // Enclosing foreach bodies, used to locate the exec that consumes an
-  // explicit prepacked metadata load so its A-operand chunk indices can be
-  // reconciled with the metadata chunk order.
-  std::vector<ptr<AST::MultiNodes>> foreach_body_stack_;
+  // Bodies enclosing the currently visited node, innermost last.  A metadata
+  // load only sees consumers in its own lexical scope, so this stack both
+  // isolates sibling scopes and locates the execs that consume the load.
+  std::vector<ptr<AST::MultiNodes>> body_stack_;
   bool in_named_var_decl_ = false;
   bool has_analyzed_warpspec = false;
   bool warpspec_wgmma_arrived = false;

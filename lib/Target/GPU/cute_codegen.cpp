@@ -442,9 +442,10 @@ void CuteCodeGen::FindMetadataExecs(
       }
     }
     if (name.empty()) return;
-    if (name != meta_sym && name != InScopeName(meta_sym) &&
-        UnScopedName(name) != UnScopedName(meta_sym))
-      return;
+    // Accept the exact scoped declaration reached from the load.  Do not fall
+    // back to the unscoped name: a same-named fragment in a sibling scope is a
+    // different declaration and must not be collected as a consumer.
+    if (name != meta_sym && name != InScopeName(meta_sym)) return;
     if (std::find(execs.begin(), execs.end(), op.get()) == execs.end())
       execs.push_back(op.get());
     return;
@@ -1447,12 +1448,14 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
     emit_call = false;
   }
 
+  if (n.HasBody() && n.GetBody()) body_stack_.push_back(n.GetBody());
   return true;
 }
 
 bool CuteCodeGen::InMidVisitImpl(AST::Node& n) {
   if (auto ie = dyn_cast<AST::IfElseBlock>(&n)) {
     if (!ie->HasElse()) return true;
+    if (!body_stack_.empty()) body_stack_.back() = ie->GetElseBody();
     PopEmittedNames();
     PushEmittedNames();
     DecrIndent();
@@ -1626,7 +1629,6 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     if (!explicit_scale_accum_scopes.empty())
       explicit_scale_accum_scopes.pop_back();
     if (!foreach_iv_stack_.empty()) foreach_iv_stack_.pop_back();
-    if (!foreach_body_stack_.empty()) foreach_body_stack_.pop_back();
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     DecrDeviceIndent();
     if (!it->stmts->None()) {
@@ -1660,6 +1662,8 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (isa<AST::NamedVariableDecl>(&n)) {
     emit_call = true;
   }
+  if (n.HasBody() && n.GetBody() && !body_stack_.empty())
+    body_stack_.pop_back();
   return true;
 }
 
@@ -5754,9 +5758,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ptr<AST::ChunkAt> a_operand;
         int a_k_axis = -1;
         std::vector<const AST::MMAOperation*> metadata_execs;
-        for (auto it = foreach_body_stack_.rbegin();
-             it != foreach_body_stack_.rend(); ++it)
-          FindMetadataExecs(*it, sym, metadata_execs);
+        if (!body_stack_.empty())
+          FindMetadataExecs(body_stack_.back(), sym, metadata_execs);
         const AST::MMAOperation* metadata_exec =
             metadata_execs.empty() ? nullptr : metadata_execs.front();
         if (metadata_exec) {
@@ -9702,8 +9705,6 @@ AutomapStrategy CuteCodeGen::AnalyzeAutomap(const AST::ForeachBlock& n) {
 
 bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
-
-  foreach_body_stack_.push_back(n.GetBody());
 
   explicit_scale_accum_scopes.push_back(
       !IsHost() ? AnalyzeExplicitScaleAccumScope(n.GetBody())
