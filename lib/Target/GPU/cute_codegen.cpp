@@ -11474,10 +11474,33 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     // TMA out-of-bounds-fill pattern (padded boundary tiles) and stay legal.
     // The swizzle split rewrites both shapes, so this uses the pre-split
     // t_shape/host_shape.
-    if (has_view && t_shape.Rank() >= 2 && host_shape.Rank() >= 1 &&
-        sbe::cgt(t_shape.LeadingValue(), host_shape.LeadingValue()))
-      Error1(g_ca->LOC(),
-             "TMA view box is wider than the tensor map's innermost extent.");
+    if (has_view && t_shape.Rank() >= 2 && host_shape.Rank() >= 1) {
+      auto view_inner = t_shape.LeadingValue();
+      auto map_inner = host_shape.LeadingValue();
+      if (sbe::cgt(view_inner, map_inner)) {
+        AgentFacts facts;
+        facts.category = "tma-view-box";
+        facts.constraint = "TMA view box within the flattened tensor map";
+        facts.predicate = "view.box_inner <= map.inner";
+        facts.observed.push_back("view.box_inner = " + ValueSTR(view_inner));
+        facts.observed.push_back("map.inner = " + ValueSTR(map_inner));
+        facts.valid = "view.box_inner <= map.inner";
+        facts.repair_do =
+            "Reshape the view so its innermost box extent does not exceed the "
+            "tensor map's innermost extent.";
+        facts.repair_why =
+            "A wider view box does not describe the flattened map and would "
+            "zero-fill beyond it.";
+        facts.repair_alt =
+            "Use a non-view TMA copy, or split the copy along the innermost "
+            "dimension.";
+        facts.confidence = "certain";
+        ErrorWithFacts(
+            g_ca->LOC(),
+            "TMA view box is wider than the tensor map's innermost extent.",
+            facts);
+      }
+    }
 
     // When TMA swizzle is enabled and the box inner dimension (in bytes)
     // exceeds the swizzle width, CUDA requires boxDim[0]*elemSize <=
@@ -11505,12 +11528,33 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
         size_t inner_bytes = (size_t)*inner_val * elem_size;
         if (inner_bytes > (size_t)swiz_bytes) {
           if (inner_bytes % (size_t)swiz_bytes != 0) {
-            Error1(g_ca->LOC(),
-                   "swizzled TMA copy inner extent (" +
-                       std::to_string(*inner_val) + " elements, " +
-                       std::to_string(inner_bytes) +
-                       " bytes) must be a multiple of the swizzle width (" +
-                       std::to_string(swiz_bytes) + " bytes).");
+            AgentFacts facts;
+            facts.category = "tma-swizzle";
+            facts.constraint = "Swizzled TMA box inner extent alignment";
+            facts.predicate = "inner_bytes % swizzle_bytes == 0";
+            facts.observed.push_back("inner_elements = " +
+                                     std::to_string(*inner_val));
+            facts.observed.push_back("inner_bytes = " +
+                                     std::to_string(inner_bytes));
+            facts.observed.push_back("swizzle_bytes = " +
+                                     std::to_string(swiz_bytes));
+            facts.valid = "inner_bytes % swizzle_bytes == 0";
+            facts.repair_do =
+                "Make the box inner extent a multiple of the swizzle width, "
+                "or reduce it to at most the swizzle width.";
+            facts.repair_why =
+                "The swizzle split must cover whole swizzle-sized groups.";
+            facts.repair_alt =
+                "Use a smaller swizzle width or pad the innermost dimension.";
+            facts.confidence = "certain";
+            ErrorWithFacts(g_ca->LOC(),
+                           "swizzled TMA copy inner extent (" +
+                               std::to_string(*inner_val) + " elements, " +
+                               std::to_string(inner_bytes) +
+                               " bytes) must be a multiple of the swizzle "
+                               "width (" +
+                               std::to_string(swiz_bytes) + " bytes).",
+                           facts);
             return;
           }
           size_t swiz_elems = (size_t)swiz_bytes / elem_size;

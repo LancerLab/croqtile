@@ -7,6 +7,7 @@
 //
 // REQUIRES: TARGET-SM_90A
 // RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+// RUN: not choreo -es -t cute -arch=sm_90a -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s --check-prefix=FACTS
 
 __co__ void tma_view_reshape_inner(global f32 [64, 32, 16] x) {
   parallel b by 1 : block {
@@ -167,3 +168,10 @@ __co__ void tma_view_root_subview_stride(global f32 [2, 64, 4, 128] input) {
 }
 
 // CHECK: error: TMA view layout does not match the flattened tensor map
+
+// The over-wide view diagnostic carries both the requested box inner extent
+// and the map inner extent, plus a concrete repair.
+// FACTS: <diagnostic severity="error" category="tma-view-box"{{.*}}>
+// FACTS-NEXT: <constraint>TMA view box within the flattened tensor map; predicate: view.box_inner &lt;= map.inner</constraint>
+// FACTS-NEXT: <observed>view.box_inner = 32; map.inner = 16; valid: view.box_inner &lt;= map.inner</observed>
+// FACTS: <do>Reshape the view so its innermost box extent does not exceed the tensor map&apos;s innermost extent.</do>

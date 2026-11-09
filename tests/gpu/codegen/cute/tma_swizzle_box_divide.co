@@ -7,6 +7,7 @@
 // RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
 // RUN: not choreo -es -t cute -arch=sm_90a %s -o %s.result 2>&1 | FileCheck %s
 // RUN: FileCheck %s --check-prefix=MAP < %s.result && rm -f %s.result
+// RUN: not choreo -es -t cute -arch=sm_90a -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s --check-prefix=FACTS
 
 __co__ void tma_swizzle_box_divide(f16 [64, 96] x) {
   parallel p by 32 : block {
@@ -20,3 +21,10 @@ __co__ void tma_swizzle_box_divide(f16 [64, 96] x) {
 // The kernel launch still references the tensor map, so the host declaration
 // must be emitted even though the invalid split is not encoded.
 // MAP: alignas(64) CUtensorMap __choreo_tma_0_tensor_map{};
+
+// The diagnostic also publishes the observed box bytes and swizzle width so
+// an agent can pick the right repair without re-parsing the message.
+// FACTS: <diagnostic severity="error" category="tma-swizzle"{{.*}}>
+// FACTS-NEXT: <constraint>Swizzled TMA box inner extent alignment; predicate: inner_bytes % swizzle_bytes == 0</constraint>
+// FACTS-NEXT: <observed>inner_elements = 96; inner_bytes = 192; swizzle_bytes = 128; valid: inner_bytes % swizzle_bytes == 0</observed>
+// FACTS: <do>Make the box inner extent a multiple of the swizzle width, or reduce it to at most the swizzle width.</do>
