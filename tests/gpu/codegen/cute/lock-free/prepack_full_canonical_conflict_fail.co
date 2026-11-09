@@ -1,0 +1,34 @@
+// Both canonical roles are named, but the operand and metadata use a different
+// loop for K.  The canonical names must not bypass the role-conflict checks.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a --use-prepack %s -o - 2>&1 | FileCheck %s
+
+__co__ auto prepack_full_canonical_conflict(u32 [64, 4] meta,
+                                            f16 [64, 16] lhs_packed,
+                                            f16 [8, 32] rhs) {
+  f32 [64, 8] output{0.0f};
+  parallel by 1 : block {
+    shared u32 [64, 4] meta_s[2];
+    shared f16 [64, 16] lhs_s[2];
+    dma.copy meta => meta_s[1];
+    dma.copy lhs_packed => lhs_s[1];
+    rhs_s = dma.copy rhs => shared;
+    mc = mma.fill.f32 0.0f;
+    parallel p by 1 : group-4 {
+      foreach iv_k in [2] {
+        foreach iv_warp in [1] {
+          foreach ww in [1] {
+            me = mma.load meta_s[1].chunkat(iv_k, ww);
+            mma.row.row.sp mc, lhs_s[1].chunkat(_, ww),
+                rhs_s.chunkat(_, ww), me;
+          }
+        }
+      }
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// CHECK: error: prepacked metadata role conflict: canonical K loop '__iv_iv_k' disagrees with the A operand K chunk loop '__iv_ww'

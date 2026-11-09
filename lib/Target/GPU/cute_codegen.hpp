@@ -479,7 +479,6 @@ private:
         w_found = true;
       }
     }
-    if (k_found && w_found) return true;
     const bool canonical_role = k_found || w_found;
 
     // When the exec A operand exposes a chunk IV at the MMA K axis, that IV
