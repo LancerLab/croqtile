@@ -5730,6 +5730,23 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             ds << "[" << ValueSTR(dim) << "]";
         ds << "[" << reg_num_d << "];\n";
         ssm.MapDeviceSymbol(InScopeName(sym), sym);
+        if (aty) {
+          // A fill-declared fragment array holds reg_num_d registers per
+          // slot, like an ordinary `frag` array declaration. Record the
+          // per-slot stride for TileAddr/ChunkAt consumers, which read
+          // FragmentInfo.
+          const std::string fill_scoped = InScopeNameForRef(sym);
+          FragmentLayoutInfo finfo;
+          finfo.regs_per_thread = reg_num_d;
+          if (FCtx(fname).HasFragmentLayout(fill_scoped))
+            finfo.thread_count_expr =
+                FCtx(fname).GetFragmentLayout(fill_scoped).thread_count_expr;
+          else
+            finfo.thread_count_expr = current_thread_count_expr.empty()
+                                          ? std::string("blockDim.x")
+                                          : current_thread_count_expr;
+          FCtx(fname).SetFragmentInfo(fill_scoped, finfo);
+        }
       }
       const size_t fill_init_begin = ds.str().size();
       // TODO: #pragma unroll

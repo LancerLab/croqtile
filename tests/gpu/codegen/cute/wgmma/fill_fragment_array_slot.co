@@ -1,0 +1,34 @@
+// A fill-declared fragment array must register one slot's register count, just
+// like an ordinary `frag` array declaration.  Without that metadata a
+// ChunkAt on a non-zero slot falls back to the logical span element count and
+// addresses the wrong registers.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v '^ *//' | FileCheck %s
+
+__device__ __forceinline__ void consume_fragment(float* values) {
+  values[0] = values[0] + 1.0f;
+}
+
+__co__ auto fill_fragment_array_slot(f16 [64, 16] lhs, f16 [16, 16] rhs) {
+  f16 [64, 16] output{0.0f};
+  parallel pb by 1 : block {
+    lhs_s = dma.copy lhs => shared;
+    rhs_s = dma.copy rhs => shared;
+    parallel g by 1 : group-4 {
+      // Fill declaration of a nested fragment array; each slot holds the
+      // eight f32 accumulator registers for the 64x16 output.
+      frag.f32 mc[2][3] {0.0f};
+      mma.row.col mc[1][2], lhs_s, rhs_s;
+      with {i, j} in [1, 1] {
+        call consume_fragment(mc[1][2].chunkat(i, j));
+      }
+      mma.store mc[1][2], output;
+    }
+  }
+  return output;
+}
+
+// CHECK-LABEL: __choreo_device_fill_fragment_array_slot
+// CHECK: float mc[2][3][8];
+// CHECK: consume_fragment((float*)((float*)mc + ((1)*3+2)*(8)
