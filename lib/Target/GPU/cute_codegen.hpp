@@ -436,6 +436,11 @@ private:
   std::string PrepackedMetaBase(const PrepackedU32Info& info,
                                 const std::string& operand_sym,
                                 const AST::NodeList& subs) const;
+  // Emit `<frag>_mdata_ptr` for a sparse A load when the source has a declared
+  // `<ref>_mdata` buffer (or is a future). Returns true when a pointer was
+  // emitted and records the scoped fragment name for the exec-site checks.
+  bool EmitSparseAMdataPtr(const std::string& frag_sym,
+                           const ptr<AST::ChunkAt>& load_from);
   // The prepacked dense formats index the packed layout by the canonical
   // loop variables `iv_k` (K tile) and `iv_warp` (warp chunk), emitted as
   // `__iv_iv_k`/`__iv_iv_warp`. Match them by name so any nesting order

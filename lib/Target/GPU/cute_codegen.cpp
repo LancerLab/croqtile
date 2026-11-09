@@ -2330,6 +2330,48 @@ std::string CuteCodeGen::PrepackedMetaBase(
   return base;
 }
 
+bool CuteCodeGen::EmitSparseAMdataPtr(
+    const std::string& frag_sym, const ptr<AST::ChunkAt>& load_from) {
+  if (!load_from) return false;
+  const std::string ref_sym = load_from->RefSymbol();
+  if (ref_sym.empty()) return false;
+
+  const std::string mdata_sym_name = ref_sym + "_mdata";
+  auto mdata_base = [&](const std::string& name) {
+    std::string base = name;
+    // The metadata buffer may be a span array indexed like the A operand;
+    // fold the operand's slot into its base. A plain broadcast metadata
+    // buffer must stay at its base (its AppendArraySlotOffset fallback would
+    // subscript a data word).
+    if (load_from->indices && !load_from->indices->AllValues().empty() &&
+        dyn_cast<ArrayType>(GetSymbolType(mdata_sym_name))) {
+      AppendArraySlotOffset(base, mdata_sym_name, load_from->indices, false);
+      base = "(" + base + ")";
+    }
+    return base;
+  };
+
+  bool emitted = false;
+  if (SSTab().IsDeclared(mdata_sym_name)) {
+    auto mdata_key = InScopeName(mdata_sym_name) + ".data";
+    if (ssm.HasDeviceName(mdata_key)) {
+      ds << d_indent << "uint8_t* " << frag_sym << "_mdata_ptr = (uint8_t*)"
+         << mdata_base(ssm.DeviceName(mdata_key)) << ";\n";
+      emitted = true;
+    } else if (ssm.HasDeviceName(InScopeName(mdata_sym_name))) {
+      ds << d_indent << "uint8_t* " << frag_sym << "_mdata_ptr = (uint8_t*)"
+         << mdata_base(ssm.DeviceName(InScopeName(mdata_sym_name))) << ";\n";
+      emitted = true;
+    }
+  } else if (isa<FutureType>(GetSymbolType(ref_sym))) {
+    ds << d_indent << "uint8_t* " << frag_sym
+       << "_mdata_ptr = (uint8_t*)" << ref_sym << ".mdata();\n";
+    emitted = true;
+  }
+  if (emitted) sparse_a_mdata_ptr_frags_.insert(InScopeName(frag_sym));
+  return emitted;
+}
+
 void CuteCodeGen::emitPrepackedU32Snippet(const std::string& metaVar,
                                           const std::string& deviceArray,
                                           const std::string& rowStride,
@@ -5762,8 +5804,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
       auto ca = op.LoadFrom();
       auto parent_sym = ca->RefSymbol();
-      if (policy_is_sparse)
+      if (policy_is_sparse) {
         sparse_a_load_source_[InScopeName(sym)] = parent_sym;
+        EmitSparseAMdataPtr(sym, ca);
+      }
       auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
       switch (GetMmaLoadShapeWarningKind(ssmi, parent_ty)) {
       case MmaLoadShapeWarningKind::Dynamic:
@@ -6767,9 +6811,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                  "use");
           return false;
         }
-        // Implicit-E prepacked metadata: the A operand's slot selects the
-        // metadata slot, so the exec-site fallback can build the descriptor
-        // itself. Keep rejecting implicit E for non-prepacked metadata.
+        // Implicit-E metadata is accepted when it is prepacked, or when the
+        // A load emitted a pointer for a declared `<ref>_mdata` buffer.
         bool implicit_slot_meta = false;
         if (metadata_name.empty() &&
             (use_prepack.GetValue() || use_prepack_v2.GetValue())) {
@@ -6780,7 +6823,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             implicit_slot_meta =
                 resolvePrepackedU32Meta(a_sym, true).use_packed_u32;
         }
-        if ((metadata_name.empty() && !implicit_slot_meta) ||
+        bool implicit_declared_meta =
+            metadata_name.empty() &&
+            sparse_a_mdata_ptr_frags_.count(InScopeName(a_sym)) > 0;
+        if ((metadata_name.empty() && !implicit_slot_meta &&
+             !implicit_declared_meta) ||
             (!metadata_name.empty() && !metadata_is_register &&
              !explicit_mma_loads_.count(metadata_scoped))) {
           if (metadata_is_non_u32_scalar)
@@ -7734,44 +7781,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           std::string ref_sym = op.LoadFrom()->RefSymbol();
           if (!ref_sym.empty()) {
             sparse_a_load_source_[InScopeName(sym)] = ref_sym;
-            auto mdata_sym_name = ref_sym + "_mdata";
-            auto mdata_base = [&](const std::string& name) {
-              std::string base = name;
-              // The metadata buffer may be a span array indexed like the A
-              // operand; fold the operand's slot into its base. A plain
-              // broadcast metadata buffer must stay at its base (its
-              // AppendArraySlotOffset fallback would subscript a data word).
-              if (auto lca = op.LoadFrom();
-                  lca && lca->indices && !lca->indices->AllValues().empty() &&
-                  dyn_cast<ArrayType>(GetSymbolType(mdata_sym_name))) {
-                AppendArraySlotOffset(base, mdata_sym_name, lca->indices,
-                                      false);
-                base = "(" + base + ")";
-              }
-              return base;
-            };
-            bool mdata_ptr_emitted = false;
-            if (SSTab().IsDeclared(mdata_sym_name)) {
-              auto mdata_key = InScopeName(mdata_sym_name) + ".data";
-              if (ssm.HasDeviceName(mdata_key)) {
-                ds << d_indent << "uint8_t* " << sym
-                   << "_mdata_ptr = (uint8_t*)"
-                   << mdata_base(ssm.DeviceName(mdata_key)) << ";\n";
-                mdata_ptr_emitted = true;
-              } else if (ssm.HasDeviceName(InScopeName(mdata_sym_name))) {
-                ds << d_indent << "uint8_t* " << sym
-                   << "_mdata_ptr = (uint8_t*)"
-                   << mdata_base(ssm.DeviceName(InScopeName(mdata_sym_name)))
-                   << ";\n";
-                mdata_ptr_emitted = true;
-              }
-            } else if (isa<FutureType>(GetSymbolType(ref_sym))) {
-              ds << d_indent << "uint8_t* " << sym << "_mdata_ptr = (uint8_t*)"
-                 << ref_sym << ".mdata();\n";
-              mdata_ptr_emitted = true;
-            }
-            if (mdata_ptr_emitted)
-              sparse_a_mdata_ptr_frags_.insert(InScopeName(sym));
+            EmitSparseAMdataPtr(sym, op.LoadFrom());
           }
         }
       } else if (ssmi.frag == MMAInfo::FRAG_C) {
