@@ -2875,8 +2875,6 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         auto base_name = base_sym_node->name;
         auto base_scoped = InScopeNameForRef(base_name);
         auto sit = shared_buf_swiz_.find(base_scoped);
-        if (sit == shared_buf_swiz_.end())
-          sit = shared_buf_swiz_.find(base_name);
         if (sit != shared_buf_swiz_.end())
           shared_buf_swiz_[InScopeNameForRef(sym)] = sit->second;
       }
@@ -3717,8 +3715,6 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
           auto base_name = base_sym->name;
           auto base_scoped = InScopeNameForRef(base_name);
           auto sit = shared_buf_swiz_.find(base_scoped);
-          if (sit == shared_buf_swiz_.end())
-            sit = shared_buf_swiz_.find(base_name);
           auto alias_scoped = InScopeNameForRef(name);
           if (sit != shared_buf_swiz_.end()) {
             auto swiz = sit->second;
@@ -6326,15 +6322,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
       SwizMode source_swizzle = SwizMode::NONE;
       auto source_ref = ca->RefSymbol();
-      for (const auto& name : {InScopeNameForRef(source_ref), source_ref,
-                               InScopeName(source_ref),
-                               UnScopedName(source_ref)}) {
-        if (auto it = shared_buf_swiz_.find(name);
-            it != shared_buf_swiz_.end()) {
-          source_swizzle = it->second;
-          break;
-        }
-      }
+      if (auto it = shared_buf_swiz_.find(InScopeNameForRef(source_ref));
+          it != shared_buf_swiz_.end())
+        source_swizzle = it->second;
       ds << d_indent << NameBaseType(source_sty->ElementType()) << " " << sym
          << "[" << layout.regs_per_thread << "];\n";
       ds << d_indent << "{\n";
@@ -6741,8 +6731,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         // it through live_chunk_aliases to find the underlying root buffer.
         // This propagates swizzle from TMA-loaded buffers to reference aliases.
         if (!ca && !source_sym.empty() &&
-            shared_buf_swiz_.find(source_scoped) == shared_buf_swiz_.end() &&
-            shared_buf_swiz_.find(source_sym) == shared_buf_swiz_.end()) {
+            shared_buf_swiz_.find(source_scoped) == shared_buf_swiz_.end()) {
           auto ait = live_chunk_aliases.find(source_sym);
           if (ait == live_chunk_aliases.end())
             ait = live_chunk_aliases.find(source_scoped);
@@ -6855,9 +6844,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         SwizMode swizzle = SwizMode::NONE;
         if (auto it = shared_buf_swiz_.find(source_scoped);
             it != shared_buf_swiz_.end())
-          swizzle = it->second;
-        else if (auto it = shared_buf_swiz_.find(source_sym);
-                 it != shared_buf_swiz_.end())
           swizzle = it->second;
 
         bool is_mn_major =
