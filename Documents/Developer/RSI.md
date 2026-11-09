@@ -193,8 +193,11 @@ evidence is a build plus lit tests; kernel tuning stays in the
    `nvidia-smi --query-gpu=name,compute_cap` 探测架构；shim 输出已知的
    `NVIDIA H800 PCIe, 9.0`，放在 `/tmp/fakebin/nvidia-smi` 并 `chmod +x`，运行时
    `PATH=/tmp/fakebin:$PATH`）。
-5. **卡死的 GPU 进程不要反复 kill**：`R` 状态且 `SIGKILL` pending（或 `D` 驱动等待）
-   且 `nvidia-smi` 挂起时，只能重启或 root GPU 重置。
+5. **卡死的 GPU 进程不要反复 kill，也不要反复探测**：`R` 状态且 `SIGKILL` pending
+   （或 `D` 驱动等待）且 `nvidia-smi` 挂起时，只能重启或 root GPU 重置。`nvidia-smi`
+   探测必须单实例：若某次 `timeout 10 nvidia-smi` 超时后进程仍存活，立即停止探测
+   并把 e2e 记为 `not-run`，绝不再起新的 `nvidia-smi`——D 状态的探测进程不可杀，
+   叠起来会把驱动彻底堵死（2026-11-09 campaign 第 79 轮起即因此丢失 19 轮 e2e）。
 6. **如实报告**：套件没跑完就写"未完成 + 原因 + 待补验证"，不要把部分结果当全绿。
 7. **产物与日志**：需要静态分析时用 `choreo -gs` 生成 host 脚本/CUDA，再用
    `nvcc -ptx` / `-cubin` + `cuobjdump -sass` 离线分析（不需要 GPU）；产物放 `/tmp`。
