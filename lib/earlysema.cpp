@@ -253,6 +253,13 @@ bool EarlySemantics::Visit(AST::MultiValues& n) {
   if (n.HasNote("array_dims")) {
     for (const auto& d : n.AllValues()) {
       auto dty = d->GetType();
+      if (!dty) {
+        // An unresolved placeholder (`_`) has no node type. Diagnose it
+        // instead of dereferencing the null type below.
+        Error1(d->LOC(), "Dimension of array can only be const integer "
+                         "value, but got a placeholder '_'.");
+        continue;
+      }
       if (!isa<ScalarIntegerType>(dty))
         Error1(d->LOC(), "Dimension of array can only be const integer "
                          "value, but got value of type " +

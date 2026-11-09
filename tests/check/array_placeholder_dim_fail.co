@@ -1,0 +1,16 @@
+// A placeholder cannot be an array dimension.  The compiler must diagnose it
+// rather than dereferencing the dimension's missing node type in
+// EarlySemantics.
+//
+// RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+__co__ void placeholder_array_dim(int M) {
+  parallel by 1 : block {
+    parallel by 1 : thread {
+      shared s8 [M] arr[_];
+    }
+  }
+}
+
+// CHECK: error: symbol `_' is used before declaration.
+// CHECK: error: Dimension of array can only be const integer value, but got a placeholder '_'.
