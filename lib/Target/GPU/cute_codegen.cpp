@@ -1585,7 +1585,6 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     if (!explicit_scale_accum_scopes.empty())
       explicit_scale_accum_scopes.pop_back();
     if (!foreach_iv_stack_.empty()) foreach_iv_stack_.pop_back();
-    if (!foreach_role_stack_.empty()) foreach_role_stack_.pop_back();
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     DecrDeviceIndent();
     if (!it->stmts->None()) {
@@ -5777,7 +5776,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                 operand_is_metadata ? ValueSTR(GenOffset(lca)) : "0");
           } else {
             std::string k_idx_expr, warp_idx_expr;
-            if (PrepackedMetadataIndexExprs(n.LOC(), k_idx_expr,
+            if (PrepackedMetadataIndexExprs(n.LOC(), lca, k_idx_expr,
                                             warp_idx_expr))
               emitPrepackedV2Snippet(sym, meta_base, row_stride, col_stride,
                                      k_idx_expr, warp_idx_expr);
@@ -5787,7 +5786,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             emitPrepackedU32TileLoadSnippet(sym, meta_tile, row_stride);
           else {
             std::string k_idx_expr, warp_idx_expr;
-            if (PrepackedMetadataIndexExprs(n.LOC(), k_idx_expr,
+            if (PrepackedMetadataIndexExprs(n.LOC(), lca, k_idx_expr,
                                             warp_idx_expr))
               emitPrepackedU32Snippet(sym, meta_base, row_stride, col_stride,
                                       k_idx_expr, warp_idx_expr);
@@ -6073,9 +6072,15 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                 emitPrepackedU32TileLoadSnippet(meta_var, meta_device,
                                                 row_stride);
             } else {
+              ptr<AST::ChunkAt> a_chunk;
+              if (auto a_expr = op.ExecOperand(1)) {
+                if (auto ref = a_expr->GetReference())
+                  a_chunk = dyn_cast<AST::ChunkAt>(ref);
+              }
               std::string k_idx_expr, warp_idx_expr;
-              if (PrepackedMetadataIndexExprs(n.LOC(), k_idx_expr,
-                                              warp_idx_expr)) {
+              if (PrepackedMetadataIndexExprs(n.LOC(), a_chunk, k_idx_expr,
+                                              warp_idx_expr,
+                                              GetWGMMAKAxis(ssmi_a))) {
                 if (v2_mode_exec)
                   emitPrepackedV2Snippet(meta_var, meta_device, row_stride,
                                          col_stride, k_idx_expr, warp_idx_expr);
@@ -9631,8 +9636,6 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
       else
         foreach_iv_stack_.push_back("__iv_" + rng0->GetRVName());
     }
-    foreach_role_stack_.push_back(
-        ResolveForeachRole(foreach_iv_stack_.back(), rng0->GetRVName()));
   }
 
   if (!IsHost() && n.GetBody()) {
