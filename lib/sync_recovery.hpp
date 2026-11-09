@@ -38,6 +38,9 @@ private:
     // The slot the insertion guards (empty for fences, which carry their own
     // frontier).
     std::string buffer;
+    // A read-drain may be discharged by a synchronous engine read only when
+    // no earlier async read of the same slot is outstanding.
+    bool self_discharge = false;
   };
   std::map<const AST::Node*, std::vector<PendingInsert>> pending_inserts_;
   // Preorder index of every statement, from the liveness analyzer.
@@ -74,7 +77,7 @@ private:
   // (the same fence entity or the same wait primitive at the same site).
   void AddInsert(const AST::Node* anchor, const ptr<AST::Node>& node,
                  bool after, int not_before = -1,
-                 const std::string& buffer = {});
+                 const std::string& buffer = {}, bool self_discharge = false);
 
   // Availability fold over the enclosing statement list: drops insertions
   // covered by an operation that dominates their anchor (evaluate at splice
