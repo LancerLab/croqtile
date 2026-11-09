@@ -5,6 +5,8 @@
 //
 // REQUIRES: TARGET-SM_90A
 // RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+// RUN: not choreo -es -t cute -arch=sm_90a %s -o %s.result 2>&1 | FileCheck %s
+// RUN: FileCheck %s --check-prefix=MAP < %s.result && rm -f %s.result
 
 __co__ void tma_swizzle_box_divide(f16 [64, 96] x) {
   parallel p by 32 : block {
@@ -14,3 +16,7 @@ __co__ void tma_swizzle_box_divide(f16 [64, 96] x) {
 }
 
 // CHECK: error: swizzled TMA copy inner extent (96 elements, 192 bytes) must be a multiple of the swizzle width (128 bytes).
+
+// The kernel launch still references the tensor map, so the host declaration
+// must be emitted even though the invalid split is not encoded.
+// MAP: alignas(64) CUtensorMap __choreo_tma_0_tensor_map{};

@@ -11475,6 +11475,7 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     // atom-major shared-memory layout (matching WGMMA B128 expectations):
     //   [outer, inner] -> [groups, outer, swiz_elems]
     // After Reverse for CUDA: [swiz_elems, outer, groups]
+    hs << h_indent << "alignas(64) CUtensorMap " << map_name << "{};\n";
     int swiz_bytes = 0;
     switch (tma_swizzle) {
     case TMA_Swizzle::B32: swiz_bytes = 32; break;
@@ -11568,7 +11569,6 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
     hs << h_indent << "uint32_t " << desc.GetName() << "_elem_strides[] = {"
        << ValueSTR(ValxN(sbe::nu(1), box_shape.Rank())) << "};\n";
 
-    hs << h_indent << "alignas(64) CUtensorMap " << map_name << "{};\n";
     hs << h_indent << "CUresult " << map_name
        << "_res = cuTensorMapEncodeTiled(\n";
     hs << h_indent << "        &" << map_name << ",\n";
