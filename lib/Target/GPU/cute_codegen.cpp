@@ -5900,6 +5900,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         // indexing a different warp chunk than the load; reject that mismatch
         // instead of reading metadata for the wrong warp tile.
         auto CheckLoadWarp = [&](const std::string& load_warp) -> bool {
+          // A literal "0" is the tile/thread-preset form: the metadata layout
+          // has no loop-valued warp slot to compare against.
           if (load_warp.empty() || load_warp == "0") return true;
           for (const auto& consumer : metadata_consumers) {
             auto consumer_warp = ConsumerWarpLoop(consumer);
@@ -5914,6 +5916,41 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             return false;
           }
           return true;
+        };
+        // The single-column and fp8 tile-load paths do not call
+        // PrepackedMetadataIndexExprs.  Recover the load's warp role from the
+        // metadata operand's chunkat directly, using the consumers' shared A K
+        // loop to distinguish the K slot from the warp slot.
+        auto ResolveLoadWarp = [&]() -> std::string {
+          std::string a_k_loop;
+          for (const auto& consumer : metadata_consumers) {
+            a_k_loop = ExecAKLoop(consumer.exec, consumer.ivs);
+            if (!a_k_loop.empty()) break;
+          }
+          std::string canonical_warp;
+          for (const auto& iv : foreach_iv_stack_)
+            if (iv == "__iv_iv_warp") canonical_warp = iv;
+          // Without an A K loop there is no way to tell which metadata slot
+          // is warp; only a canonical warp role is safe to use.
+          if (a_k_loop.empty()) return canonical_warp;
+          for (const auto& sop : lca->AllOperations()) {
+            auto ta = dyn_cast<AST::SOP::TileAt>(sop);
+            if (!ta || !ta->GetIndices()) continue;
+            for (const auto& node : ta->GetIndices()->AllValues()) {
+              auto id = AST::GetIdentifier(node);
+              if (!id || id->name == "_") continue;
+              std::string iv;
+              for (const auto& candidate : foreach_iv_stack_)
+                if (id->name == candidate ||
+                    id->name == UnScopedName(candidate)) {
+                  iv = candidate;
+                  break;
+                }
+              if (iv.empty() || iv == a_k_loop) continue;
+              return iv;
+            }
+          }
+          return {};
         };
         std::string ref_sym = lca->RefSymbol();
         auto prepackInfo =
@@ -5971,18 +6008,21 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ds << d_indent << "{\n";
         ds << d_indent << "  int __sp_tid = threadIdx.x % 128;\n";
         if (fp8_sparse_k64) {
-          if (v2_mode) {
-            emitFp8PrepackedV2TileLoadSnippet(sym, meta_base, meta_tile,
-                                              row_stride, col_stride);
-          } else {
-            emitFp8PrepackedU32TileLoadSnippet(sym, meta_tile, row_stride,
-                                               col_stride);
+          if (CheckLoadWarp(ResolveLoadWarp())) {
+            if (v2_mode) {
+              emitFp8PrepackedV2TileLoadSnippet(sym, meta_base, meta_tile,
+                                                row_stride, col_stride);
+            } else {
+              emitFp8PrepackedU32TileLoadSnippet(sym, meta_tile, row_stride,
+                                                 col_stride);
+            }
           }
         } else if (v2_mode) {
           if (prepack_single_col) {
-            emitPrepackedV2TileLoadSnippet(
-                sym, meta_base, meta_tile, row_stride,
-                operand_is_metadata ? ValueSTR(GenOffset(lca)) : "0");
+            if (CheckLoadWarp(ResolveLoadWarp()))
+              emitPrepackedV2TileLoadSnippet(
+                  sym, meta_base, meta_tile, row_stride,
+                  operand_is_metadata ? ValueSTR(GenOffset(lca)) : "0");
           } else {
             std::string k_idx_expr, warp_idx_expr;
             if (PrepackedMetadataIndexExprs(n.LOC(), lca, k_idx_expr,
@@ -5993,9 +6033,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                                      k_idx_expr, warp_idx_expr);
           }
         } else {
-          if (prepack_single_col)
-            emitPrepackedU32TileLoadSnippet(sym, meta_tile, row_stride);
-          else {
+          if (prepack_single_col) {
+            if (CheckLoadWarp(ResolveLoadWarp()))
+              emitPrepackedU32TileLoadSnippet(sym, meta_tile, row_stride);
+          } else {
             std::string k_idx_expr, warp_idx_expr;
             if (PrepackedMetadataIndexExprs(n.LOC(), lca, k_idx_expr,
                                             warp_idx_expr, a_k_axis,
