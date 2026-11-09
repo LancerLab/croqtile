@@ -438,6 +438,11 @@ private:
 
   PrepackedU32Info resolvePrepackedU32Meta(const std::string& ref_sym,
                                            bool forceFlag);
+  // Slot-adjust a metadata buffer's device base from operand slot indices.
+  // A one-slot metadata array is a broadcast and stays at its base.
+  std::string MetadataSlotBase(const std::string& device_base,
+                               const std::string& off_sym,
+                               const AST::NodeList& subs) const;
   // Base address of a prepacked metadata buffer for the given operand: fold
   // the operand's span-array slots into the resolved metadata device name.
   std::string PrepackedMetaBase(const PrepackedU32Info& info,

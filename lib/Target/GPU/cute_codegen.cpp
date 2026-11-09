@@ -2384,31 +2384,38 @@ CuteCodeGen::resolvePrepackedU32Meta(const std::string& ref_sym,
   return info;
 }
 
-std::string CuteCodeGen::PrepackedMetaBase(
-    const PrepackedU32Info& info, const std::string& operand_sym,
+std::string CuteCodeGen::MetadataSlotBase(
+    const std::string& device_base, const std::string& off_sym,
     const AST::NodeList& subs) const {
-  if (subs.empty()) return info.device_name;
-  std::string base = info.device_name;
-  // The offset's element type/stride come from the symbol the metadata buffer
-  // was actually resolved from (`_mdata` alias).
-  const std::string& off_sym =
-      info.resolved_sym.empty() ? operand_sym : info.resolved_sym;
+  if (subs.empty()) return device_base;
   // Only a metadata buffer that is itself a span array can take the operand's
   // slot indices. A plain broadcast span must stay at its base:
   // AppendArraySlotOffset's subscript fallback would turn a data element into
   // the metadata pointer.
   auto off_ty = dyn_cast<ArrayType>(GetSymbolType(off_sym));
-  if (!off_ty) return info.device_name;
+  if (!off_ty) return device_base;
   // A one-slot metadata array is a broadcast like a plain buffer: folding the
   // operand's slot index would address past its only slot.
   if (off_ty->ArrayRank() == 1) {
     if (auto cnt = VIInt(off_ty->Dimension(0)))
-      if (*cnt == 1) return info.device_name;
+      if (*cnt == 1) return device_base;
   }
+  std::string base = device_base;
   AppendArraySlotOffset(base, off_sym, subs, false);
   base.insert(0, "(");
   base += ")";
   return base;
+}
+
+std::string CuteCodeGen::PrepackedMetaBase(
+    const PrepackedU32Info& info, const std::string& operand_sym,
+    const AST::NodeList& subs) const {
+  if (subs.empty()) return info.device_name;
+  // The offset's element type/stride come from the symbol the metadata buffer
+  // was actually resolved from (`_mdata` alias).
+  const std::string& off_sym =
+      info.resolved_sym.empty() ? operand_sym : info.resolved_sym;
+  return MetadataSlotBase(info.device_name, off_sym, subs);
 }
 
 bool CuteCodeGen::EmitSparseAMdataPtr(
@@ -2419,17 +2426,12 @@ bool CuteCodeGen::EmitSparseAMdataPtr(
 
   const std::string mdata_sym_name = ref_sym + "_mdata";
   auto mdata_base = [&](const std::string& name) {
-    std::string base = name;
-    // The metadata buffer may be a span array indexed like the A operand;
-    // fold the operand's slot into its base. A plain broadcast metadata
-    // buffer must stay at its base (its AppendArraySlotOffset fallback would
-    // subscript a data word).
-    if (load_from->indices && !load_from->indices->AllValues().empty() &&
-        dyn_cast<ArrayType>(GetSymbolType(mdata_sym_name))) {
-      AppendArraySlotOffset(base, mdata_sym_name, load_from->indices, false);
-      base = "(" + base + ")";
-    }
-    return base;
+    // The metadata buffer may be a span array indexed like the A operand.
+    // MetadataSlotBase folds the operand's slot into its base, while keeping
+    // a plain or one-slot broadcast buffer at its base.
+    if (!load_from->indices) return name;
+    return MetadataSlotBase(name, mdata_sym_name,
+                            load_from->indices->AllValues());
   };
 
   bool emitted = false;
