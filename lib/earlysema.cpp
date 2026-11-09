@@ -1508,8 +1508,7 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
   }
 
   auto dty = GetSymbolType(n.GetDataName());
-  ptr<Type> accessed_ty = dty;
-  bool partial_slot = false;
+  ptr<SpannedType> sty;
   if (n.AccessArrayElement()) {
     auto slot = ResolveSlotAccessType(dty, n.GetArrayIndices().size());
     if (slot.error == SlotAccessError::NotArray) {
@@ -1523,19 +1522,19 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
                       "declared slot rank.");
       return false;
     }
-    partial_slot = slot.partial;
-    accessed_ty = slot.type;
-  }
-  auto sty = dyn_cast<SpannedType>(accessed_ty);
-
-  if (!sty || partial_slot) {
-    if (n.AccessArrayElement())
+    if (slot.error == SlotAccessError::Incomplete) {
       Error1(n.LOC(), "span-array slot access must select a complete slot "
                       "before '.at(...)'.");
-    else
-      Error1(n.LOC(), "expect '" + n.GetDataName() +
-                          "' a spanned type but got " + PSTR(dty) + ".");
-    return false;
+      return false;
+    }
+    sty = slot.slot;
+  } else {
+    sty = dyn_cast<SpannedType>(dty);
+    if (!sty) {
+      Error1(n.LOC(), "expect '" + n.GetDataName() + "' a spanned type but got " +
+                          PSTR(dty) + ".");
+      return false;
+    }
   }
 
   size_t idx_count = 0;

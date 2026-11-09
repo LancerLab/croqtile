@@ -499,6 +499,7 @@ bool TypeInference::Visit(AST::DataAccess& n) {
   SetNodeType(*n.data, dty);
 
   ptr<Type> accessed_ty = dty;
+  ptr<SpannedType> sty;
   if (n.AccessArrayElement()) {
     auto slot = ResolveSlotAccessType(dty, n.GetArrayIndices().size());
     if (slot.error == SlotAccessError::NotArray) {
@@ -511,11 +512,18 @@ bool TypeInference::Visit(AST::DataAccess& n) {
                       "declared slot rank.");
       return false;
     }
+    if (slot.error == SlotAccessError::Incomplete && n.AccessElement()) {
+      Error1(n.LOC(), "span-array slot access must select a complete slot "
+                      "before '.at(...)'.");
+      return false;
+    }
     accessed_ty = slot.type;
+    sty = slot.slot;
+  } else if (n.AccessElement()) {
+    sty = dyn_cast<SpannedType>(dty);
   }
 
   if (n.AccessElement()) {
-    auto sty = dyn_cast<SpannedType>(accessed_ty);
     if (!sty) {
       Error1(n.LOC(), "span-array slot access must select a complete slot "
                       "before '.at(...)'.");

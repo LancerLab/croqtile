@@ -2855,28 +2855,6 @@ struct SpannedArrayType final : public ArrayType,
   __UDT_TYPE_INFO__(ArrayType, SpannedArrayType)
 };
 
-enum class SlotAccessError { None, NotArray, TooMany };
-
-struct SlotAccessResult {
-  ptr<Type> type;
-  SlotAccessError error = SlotAccessError::None;
-  bool partial = false;
-};
-
-// Resolve a span-array slot subscript to the selected slot type. The same rank
-// rule is used by the early-semantics and type-inference passes; callers keep
-// their own diagnostics. SubScriptType returns a SpannedArrayType for both a
-// complete and a partial slot selection, so partial records an unfinished slot.
-inline SlotAccessResult ResolveSlotAccessType(const ptr<Type>& dty,
-                                              size_t slot_count) {
-  auto aty = dyn_cast<SpannedArrayType>(dty);
-  if (!aty) return {nullptr, SlotAccessError::NotArray, false};
-  if (slot_count > aty->ArrayRank())
-    return {nullptr, SlotAccessError::TooMany, false};
-  return {aty->SubScriptType(slot_count), SlotAccessError::None,
-          slot_count < aty->ArrayRank()};
-}
-
 // Specialization: use the same judgement as the corresponding scalar type
 template <>
 inline bool isa<EventType>(Type* ty) {
@@ -2962,6 +2940,34 @@ inline SpannedType* dyn_cast<SpannedType>(Type* ty) {
 template <>
 inline SpannedType* dyn_cast<SpannedType>(const Type* ty) {
   return dyn_cast<SpannedType>(const_cast<Type*>(ty));
+}
+
+enum class SlotAccessError { None, NotArray, TooMany, Incomplete };
+
+struct SlotAccessResult {
+  // The selected slot type, including a partial slot selection.
+  ptr<Type> type;
+  // The complete slot type; null unless error is None.
+  ptr<SpannedType> slot;
+  SlotAccessError error = SlotAccessError::None;
+};
+
+// Resolve a span-array slot subscript to the selected slot type. The same rank
+// and completeness rules are used by the early-semantics and type-inference
+// passes; callers keep their own diagnostics. SubScriptType returns a
+// SpannedArrayType for both complete and partial slot selections, so Incomplete
+// records an unfinished slot.
+inline SlotAccessResult ResolveSlotAccessType(const ptr<Type>& dty,
+                                              size_t slot_count) {
+  auto aty = dyn_cast<SpannedArrayType>(dty);
+  if (!aty) return {nullptr, nullptr, SlotAccessError::NotArray};
+  if (slot_count > aty->ArrayRank())
+    return {nullptr, nullptr, SlotAccessError::TooMany};
+  auto selected = aty->SubScriptType(slot_count);
+  auto slot = dyn_cast<SpannedType>(selected);
+  if (!slot || slot_count < aty->ArrayRank())
+    return {selected, nullptr, SlotAccessError::Incomplete};
+  return {selected, slot, SlotAccessError::None};
 }
 
 inline bool IsActualVectorType(const ptr<Type>& ty) {
