@@ -424,7 +424,8 @@ CuteCodeGen::FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const {
 
 void CuteCodeGen::FindMetadataExecs(
     const ptr<AST::Node>& node, const std::string& meta_sym,
-    std::vector<const AST::MMAOperation*>& execs) const {
+    std::vector<std::string>& ivs,
+    std::vector<MetadataConsumer>& consumers) const {
   if (!node) return;
   if (auto mma = dyn_cast<AST::MMA>(node.get())) {
     auto op = mma->GetOperation();
@@ -446,22 +447,35 @@ void CuteCodeGen::FindMetadataExecs(
     // back to the unscoped name: a same-named fragment in a sibling scope is a
     // different declaration and must not be collected as a consumer.
     if (name != meta_sym && name != InScopeName(meta_sym)) return;
-    if (std::find(execs.begin(), execs.end(), op.get()) == execs.end())
-      execs.push_back(op.get());
+    if (std::none_of(consumers.begin(), consumers.end(),
+                     [&](const MetadataConsumer& c) {
+                       return c.exec == op.get();
+                     }))
+      consumers.push_back({op.get(), ivs});
     return;
   }
   if (auto mn = dyn_cast<AST::MultiNodes>(node.get())) {
     for (const auto& child : mn->values)
-      FindMetadataExecs(child, meta_sym, execs);
+      FindMetadataExecs(child, meta_sym, ivs, consumers);
     return;
   }
   if (auto as = dyn_cast<AST::Assignment>(node.get())) {
-    FindMetadataExecs(as->value, meta_sym, execs);
+    FindMetadataExecs(as->value, meta_sym, ivs, consumers);
+    return;
+  }
+  if (auto fe = dyn_cast<AST::ForeachBlock>(node.get())) {
+    std::string loop_iv;
+    if (auto id = fe->GetIV()) loop_iv = UnScopedName(id->name);
+    if (!loop_iv.empty()) ivs.push_back(loop_iv);
+    if (fe->GetBody())
+      FindMetadataExecs(fe->GetBody(), meta_sym, ivs, consumers);
+    if (!loop_iv.empty()) ivs.pop_back();
     return;
   }
   if (auto ie = dyn_cast<AST::IfElseBlock>(node.get()))
-    FindMetadataExecs(ie->else_stmts, meta_sym, execs);
-  if (node->HasBody()) FindMetadataExecs(node->GetBody(), meta_sym, execs);
+    FindMetadataExecs(ie->else_stmts, meta_sym, ivs, consumers);
+  if (node->HasBody())
+    FindMetadataExecs(node->GetBody(), meta_sym, ivs, consumers);
 }
 
 bool CuteCodeGen::IsU32RegisterMetadata(const ptr<Type>& ty,
@@ -5757,11 +5771,14 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         // metadata chunk order.
         ptr<AST::ChunkAt> a_operand;
         int a_k_axis = -1;
-        std::vector<const AST::MMAOperation*> metadata_execs;
+        std::vector<std::string> consumer_ivs = foreach_iv_stack_;
+        std::vector<MetadataConsumer> metadata_consumers;
         if (!body_stack_.empty())
-          FindMetadataExecs(body_stack_.back(), sym, metadata_execs);
+          FindMetadataExecs(body_stack_.back(), sym, consumer_ivs,
+                            metadata_consumers);
         const AST::MMAOperation* metadata_exec =
-            metadata_execs.empty() ? nullptr : metadata_execs.front();
+            metadata_consumers.empty() ? nullptr
+                                       : metadata_consumers.front().exec;
         if (metadata_exec) {
           auto a_expr = metadata_exec->ExecOperand(1);
           if (a_expr) {
@@ -5775,7 +5792,9 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         }
         // The metadata value is shared by all consumers, so they must agree
         // on which loop supplies the K tile.
-        auto ExecAKLoop = [&](const AST::MMAOperation* exec) -> std::string {
+        auto ExecAKLoop = [&](const AST::MMAOperation* exec,
+                              const std::vector<std::string>& ivs)
+            -> std::string {
           auto a_expr = exec->ExecOperand(1);
           if (!a_expr) return {};
           auto ref = a_expr->GetReference();
@@ -5794,7 +5813,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
               if (axis < 0 && pos + 1 != indices.size()) continue;
               auto id = AST::GetIdentifier(indices[pos]);
               if (!id || id->name == "_") continue;
-              for (const auto& iv : foreach_iv_stack_)
+              for (const auto& iv : ivs)
                 if (id->name == iv || id->name == UnScopedName(iv)) return iv;
             }
           }
@@ -5802,8 +5821,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         };
         std::string first_a_k_loop;
         bool metadata_conflict = false;
-        for (const auto* exec : metadata_execs) {
-          auto a_k_loop = ExecAKLoop(exec);
+        for (const auto& consumer : metadata_consumers) {
+          auto a_k_loop = ExecAKLoop(consumer.exec, consumer.ivs);
           if (a_k_loop.empty()) continue;
           if (first_a_k_loop.empty()) {
             first_a_k_loop = a_k_loop;
@@ -5813,6 +5832,35 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                                 "chunk loops '" +
                                 UnScopedName(first_a_k_loop) + "' and '" +
                                 UnScopedName(a_k_loop) + "'");
+            metadata_conflict = true;
+            break;
+          }
+        }
+        if (metadata_conflict) break;
+        // The same metadata value also has a single warp-chunk role.  Once
+        // the consumers agree on K, they must also name the same warp loop;
+        // otherwise every consumer after the first is indexed with the wrong
+        // warp chunk.
+        auto ConsumerWarpLoop = [&](const MetadataConsumer& consumer)
+            -> std::string {
+          auto a_k_loop = ExecAKLoop(consumer.exec, consumer.ivs);
+          for (auto it = consumer.ivs.rbegin(); it != consumer.ivs.rend();
+               ++it)
+            if (*it != a_k_loop) return *it;
+          return {};
+        };
+        std::string first_warp_loop;
+        for (const auto& consumer : metadata_consumers) {
+          auto warp_loop = ConsumerWarpLoop(consumer);
+          if (warp_loop.empty()) continue;
+          if (first_warp_loop.empty()) {
+            first_warp_loop = warp_loop;
+          } else if (warp_loop != first_warp_loop) {
+            Error1(n.LOC(), "prepacked metadata '" + sym +
+                                "' is consumed by execs with different warp "
+                                "chunk loops '" +
+                                UnScopedName(first_warp_loop) + "' and '" +
+                                UnScopedName(warp_loop) + "'");
             metadata_conflict = true;
             break;
           }

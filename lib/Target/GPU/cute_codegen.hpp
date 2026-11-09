@@ -933,10 +933,18 @@ private:
   bool HasWGMMAInFunction() const;
   const AST::MMAOperation*
   FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const;
+  // An exec consuming a prepacked metadata fragment, together with the
+  // foreach induction variables enclosing it.  The IVs identify the consumer's
+  // K and warp loop roles even when the load is outside those loops.
+  struct MetadataConsumer {
+    const AST::MMAOperation* exec = nullptr;
+    std::vector<std::string> ivs;
+  };
   // Collect every exec in `n` whose metadata operand is `meta_sym`.
   void FindMetadataExecs(const ptr<AST::Node>& n,
                          const std::string& meta_sym,
-                         std::vector<const AST::MMAOperation*>& execs) const;
+                         std::vector<std::string>& ivs,
+                         std::vector<MetadataConsumer>& consumers) const;
   void EmitWGMMAFinalize(std::ostringstream& os, const std::string& indent,
                          bool force_wait = false);
   bool IsU32RegisterMetadata(const ptr<Type>& ty,
