@@ -468,8 +468,10 @@ const char* CoveringOp(const AST::Node* s, const AST::MultiNodes& n, size_t j,
   if (isa<AST::Fence>(&ins)) {
     if (auto* f = dyn_cast<AST::Fence>(s)) {
       const FenceEntity e = f->GetEntity();
-      if (e == FenceEntity::TMA || e == FenceEntity::DMA ||
-          e == FenceEntity::ALL)
+      // Only engine-path fences publish to the async proxy. The CUTE backend
+      // lowers ALL/THREADS to a generic threadfence, which does not establish
+      // `fence.proxy.async`, so they cannot cover the inserted proxy fence.
+      if (e == FenceEntity::TMA || e == FenceEntity::DMA)
         return "available proxy fence";
     }
   }
