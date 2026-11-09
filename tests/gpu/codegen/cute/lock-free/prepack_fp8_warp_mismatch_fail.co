@@ -1,0 +1,32 @@
+// The fp8 K=64 tile-load form has no metadata chunkat, so its warp preset
+// comes from the metadata tile layout: the 2-column tile maps to the enclosing
+// `ww` loop.  A consumer that indexes `wa` on the A M chunk must be diagnosed.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a --use-prepack %s -o - 2>&1 | FileCheck %s
+
+__co__ auto prepack_fp8_warp_mismatch(u32 [64, 2] meta,
+                                     f8_e4m3 [64, 32] lhs_packed,
+                                     f8_e4m3 [8, 64] rhs) {
+  f32 [64, 8] output{0.0f};
+  parallel by 1 : block {
+    shared u32 [64, 2] meta_s[2];
+    shared f8_e4m3 [64, 32] lhs_s[2];
+    dma.copy meta => meta_s[1];
+    dma.copy lhs_packed => lhs_s[1];
+    rhs_s = dma.copy rhs => shared;
+    mc = mma.fill.f32 0.0f;
+    parallel p by 1 : group-4 {
+      foreach ww in [2] {
+        me = mma.load meta_s[1];
+        foreach wa in [1] {
+          mma.row.row.sp mc, lhs_s[1].chunkat(wa, _), rhs_s, me;
+        }
+      }
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// CHECK: error: prepacked metadata 'me' is loaded with warp chunk loop '__iv_ww' but consumed with warp chunk loop '__iv_wa'

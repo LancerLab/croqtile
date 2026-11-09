@@ -1643,6 +1643,7 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     if (!explicit_scale_accum_scopes.empty())
       explicit_scale_accum_scopes.pop_back();
     if (!foreach_iv_stack_.empty()) foreach_iv_stack_.pop_back();
+    if (!foreach_extent_stack_.empty()) foreach_extent_stack_.pop_back();
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     DecrDeviceIndent();
     if (!it->stmts->None()) {
@@ -5917,41 +5918,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           }
           return true;
         };
-        // The single-column and fp8 tile-load paths do not call
-        // PrepackedMetadataIndexExprs.  Recover the load's warp role from the
-        // metadata operand's chunkat directly, using the consumers' shared A K
-        // loop to distinguish the K slot from the warp slot.
-        auto ResolveLoadWarp = [&]() -> std::string {
-          std::string a_k_loop;
-          for (const auto& consumer : metadata_consumers) {
-            a_k_loop = ExecAKLoop(consumer.exec, consumer.ivs);
-            if (!a_k_loop.empty()) break;
-          }
-          std::string canonical_warp;
-          for (const auto& iv : foreach_iv_stack_)
-            if (iv == "__iv_iv_warp") canonical_warp = iv;
-          // Without an A K loop there is no way to tell which metadata slot
-          // is warp; only a canonical warp role is safe to use.
-          if (a_k_loop.empty()) return canonical_warp;
-          for (const auto& sop : lca->AllOperations()) {
-            auto ta = dyn_cast<AST::SOP::TileAt>(sop);
-            if (!ta || !ta->GetIndices()) continue;
-            for (const auto& node : ta->GetIndices()->AllValues()) {
-              auto id = AST::GetIdentifier(node);
-              if (!id || id->name == "_") continue;
-              std::string iv;
-              for (const auto& candidate : foreach_iv_stack_)
-                if (id->name == candidate ||
-                    id->name == UnScopedName(candidate)) {
-                  iv = candidate;
-                  break;
-                }
-              if (iv.empty() || iv == a_k_loop) continue;
-              return iv;
-            }
-          }
-          return {};
-        };
         std::string ref_sym = lca->RefSymbol();
         auto prepackInfo =
             resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue() || v2_mode);
@@ -5969,6 +5935,59 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         } else if (load_from_sty) {
           prepack_single_col = IsSingleColumnMetadata(*load_from_sty);
         }
+        auto meta_sty = load_from_sty;
+        if (!prepackInfo.resolved_sym.empty() &&
+            prepackInfo.resolved_sym != ref_sym)
+          meta_sty = dyn_cast<SpannedType>(
+              GetSymbolType(prepackInfo.resolved_sym));
+        // The single-column and fp8 tile-load paths do not call
+        // PrepackedMetadataIndexExprs.  Recover the load's warp role from the
+        // metadata operand's chunkat directly, using the consumers' shared A K
+        // loop to distinguish the K slot from the warp slot.  Forms without a
+        // chunkat take their warp preset from the metadata tile's column axis,
+        // mapped to an enclosing loop with the same extent.
+        auto ResolveLoadWarp = [&]() -> std::string {
+          std::string a_k_loop;
+          for (const auto& consumer : metadata_consumers) {
+            a_k_loop = ExecAKLoop(consumer.exec, consumer.ivs);
+            if (!a_k_loop.empty()) break;
+          }
+          std::string canonical_warp;
+          for (const auto& iv : foreach_iv_stack_)
+            if (iv == "__iv_iv_warp") canonical_warp = iv;
+          if (!a_k_loop.empty()) {
+            for (const auto& sop : lca->AllOperations()) {
+              auto ta = dyn_cast<AST::SOP::TileAt>(sop);
+              if (!ta || !ta->GetIndices()) continue;
+              for (const auto& node : ta->GetIndices()->AllValues()) {
+                auto id = AST::GetIdentifier(node);
+                if (!id || id->name == "_") continue;
+                std::string iv;
+                for (const auto& candidate : foreach_iv_stack_)
+                  if (id->name == candidate ||
+                      id->name == UnScopedName(candidate)) {
+                    iv = candidate;
+                    break;
+                  }
+                if (iv.empty() || iv == a_k_loop) continue;
+                return iv;
+              }
+            }
+          }
+          if (!meta_sty || meta_sty->Dims() < 2) return canonical_warp;
+          auto warp_extent = VIInt(meta_sty->GetShape().ValueAt(1));
+          if (!warp_extent || *warp_extent <= 0) return canonical_warp;
+          std::string preset_warp;
+          for (size_t i = 0; i < foreach_iv_stack_.size(); ++i) {
+            if (i >= foreach_extent_stack_.size() ||
+                foreach_extent_stack_[i] != *warp_extent)
+              continue;
+            if (foreach_iv_stack_[i] == a_k_loop) continue;
+            if (!preset_warp.empty()) return canonical_warp;
+            preset_warp = foreach_iv_stack_[i];
+          }
+          return preset_warp.empty() ? canonical_warp : preset_warp;
+        };
         if (strides.size() < 2) {
           Error1(n.LOC(), "sparse metadata must be at least 2-dimensional.");
           break;
@@ -9890,6 +9909,16 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
       else
         foreach_iv_stack_.push_back("__iv_" + rng0->GetRVName());
     }
+    int64_t iv_extent = -1;
+    if (auto bty = dyn_cast<BoundedType>(rng0->GetIV()->GetType())) {
+      auto lb = VIInt(bty->GetLowerBound());
+      auto ub = VIInt(bty->GetUpperBound());
+      if (lb && ub) {
+        auto step = bty->GetStep();
+        iv_extent = (step > 1) ? (*ub - *lb) / step + 1 : *ub - *lb;
+      }
+    }
+    foreach_extent_stack_.push_back(iv_extent);
   }
 
   if (!IsHost() && n.GetBody()) {

@@ -318,6 +318,8 @@ private:
   // Used to derive inline phase formulas for mbarrier waits and to resolve
   // the K-tile/warp-chunk roles of prepacked metadata indexing.
   std::vector<std::string> foreach_iv_stack_;
+  // Parallel iteration extents for foreach_iv_stack_; -1 when unknown.
+  std::vector<int64_t> foreach_extent_stack_;
   // Bodies enclosing the currently visited node, innermost last.  A metadata
   // load only sees consumers in its own lexical scope, so this stack both
   // isolates sibling scopes and locates the execs that consume the load.
