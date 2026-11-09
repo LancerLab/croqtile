@@ -519,6 +519,7 @@ private:
     }
 
     if (!a_k_iv.empty() && operand) {
+      const std::string canonical_warp = w_found ? warpExpr : std::string();
       // A canonical role is explicit source evidence, while the A chunk IV is
       // inferred from the operand. If they disagree, the metadata cannot be
       // indexed without choosing an arbitrary priority.
@@ -550,6 +551,14 @@ private:
             k_found = true;
             metadata_has_k = true;
           } else {
+            if (!canonical_warp.empty() && iv != canonical_warp) {
+              Error1(loc, "prepacked metadata role conflict: canonical warp "
+                          "loop '" +
+                          UnScopedName(canonical_warp) +
+                          "' is not the metadata warp loop '" +
+                          UnScopedName(iv) + "'");
+              return false;
+            }
             warpExpr = iv;
             w_found = true;
           }
