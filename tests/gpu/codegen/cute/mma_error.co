@@ -26,4 +26,6 @@ __co__ auto matmul(f16 [M, K] lhs, f16 [K, N] rhs) {
 }
 
 // CHECK: error: the MMA operation of `::matmul::paraby_0::mc` cannot be executed.
-// CHECK: Assertion failed: MMA information is incomplete (maybe lack of mma exec).
+// The diagnostic must be reported without aborting codegen.
+// CHECK-NOT: Assertion failed
+// CHECK-NOT: MMA information is incomplete

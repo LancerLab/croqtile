@@ -5672,8 +5672,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
   if (!FCtx(fname).FragHasMMAType(scoped_frag_sym)) {
     Error1(n.LOC(), "the MMA operation of `" + scoped_frag_sym +
                         "` cannot be executed.");
-    choreo_unreachable(
-        "MMA information is incomplete (maybe lack of mma exec).");
+    return true;
   }
 
   auto TraverseWholeArrayBegin = [&](const ValueList& array_dims,
