@@ -386,17 +386,17 @@ bool DmaWritesSlot(const AST::DMA* dma, const std::string& buffer) {
   return dma->to != nullptr && MentionsBuffer(dma->to.get(), buffer);
 }
 
-// Does the phase leave an async engine read of the slot outstanding before
+// Does the function leave an async engine read of the slot outstanding before
 // `upto`? A synchronous read is self-discharging only when it is not hiding
 // earlier async work: a blocking copy retires its own read, not the groups
-// issued by a previous async copy.
+// issued by a previous async copy. Scan the whole prefix, not just the current
+// phase: an earlier phase can leave engine reads outstanding across a barrier,
+// and a false positive here only keeps a drain (under-removal).
 bool HasEarlierAsyncEngineRead(
-    const std::vector<const LivenessAnalyzer::Stmt*>& po, const HBGraph& g,
-    int phase, int upto, const std::string& buffer) {
+    const std::vector<const LivenessAnalyzer::Stmt*>& po, int upto,
+    const std::string& buffer) {
   if (upto < 0) return false;
-  const auto& ph = g.phases[phase];
-  for (size_t i = ph.first_stmt_id;
-       i < static_cast<size_t>(upto) && i < po.size(); ++i) {
+  for (size_t i = 0; i < static_cast<size_t>(upto) && i < po.size(); ++i) {
     auto* d = dyn_cast<AST::DMA>(po[i]);
     if (d != nullptr && d->IsAsync() && DmaReadsSlot(d, buffer)) return true;
   }
@@ -735,8 +735,7 @@ void SyncRecovery::RunRecovery() {
                   auto* d = dyn_cast<AST::DMA>(po[last_engine_read]);
                   can_self = d != nullptr && !d->IsAsync() &&
                              DmaReadsSlot(d, slot[i].buffer_id) &&
-                             !HasEarlierAsyncEngineRead(po, *g, a_last,
-                                                        last_engine_read,
+                             !HasEarlierAsyncEngineRead(po, last_engine_read,
                                                         slot[i].buffer_id);
                 }
                 AddInsert(site.stmt,
