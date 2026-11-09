@@ -1652,7 +1652,29 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
 
       if (sa) {
         auto src_buf = ssm.HostName(InScopeName(sa->id->name) + "__device");
-        hs << h_indent << bts << " * " << buf_sym << " = " << src_buf << ";\n";
+        hs << h_indent << bts << " * " << buf_sym << " = " << src_buf;
+        if (sa->subscriptions && sa->subscriptions->Count() > 0) {
+          auto src_ty = GetSymbolType(sa->id->name);
+          if (auto sat = dyn_cast<SpannedArrayType>(src_ty)) {
+            const auto& subs = sa->subscriptions->AllValues();
+            const auto& dims = sat->Dimensions();
+            if (!subs.empty() && subs.size() <= dims.size()) {
+              std::string idx;
+              for (size_t i = 0; i < subs.size(); ++i) {
+                if (idx.empty())
+                  idx = ExprSTR(subs[i], IsHost());
+                else
+                  idx = "(" + idx + ")*" + ValueSTR(dims[i]) + "+" +
+                        ExprSTR(subs[i], IsHost());
+              }
+              for (size_t i = subs.size(); i < dims.size(); ++i)
+                idx = "(" + idx + ")*" + ValueSTR(dims[i]);
+              hs << " + (" << idx << ")*("
+                 << ValueSTR(sat->PhysicalSlotStrideElementsValue()) << ")";
+            }
+          }
+        }
+        hs << ";\n";
       } else if (IsChoreoOutput(sname)) {
         hs << h_indent << "auto " << sym
            << " = choreo::make_spandata<choreo::" << STR(sty->e_type) << ", "
@@ -1669,7 +1691,10 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
       ssm.MapHostSymbol(sname + "__device", buf_sym);
       ssm.MapHostSymbol(sname, buf_sym);
       ssm.MapDeviceSymbolIfNotExist(sname, sym);
-      global_buffers.insert(buf_sym);
+      // A slot-subscribed span_as alias points into its source allocation and
+      // must not be freed.
+      if (!sa || !sa->subscriptions || sa->subscriptions->Count() == 0)
+        global_buffers.insert(buf_sym);
       return true;
     }
 

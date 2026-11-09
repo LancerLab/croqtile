@@ -1,0 +1,23 @@
+// A host alias of an indexed global span-array slot must carry the slot offset.
+//
+// RUN: choreo -es -t cute -arch=sm_86 %s -o - | FileCheck %s
+
+__co__ auto span_as_host_slot() {
+  global s32 [64] src[2];
+  alias = src[1].span_as(64);
+  s32 [64] output;
+  parallel p by 64 {
+    output.at(p) = alias.at(p);
+  }
+  return output;
+}
+
+// CHECK: alias__device = (int*)src__device + (1)*(64);
+
+// The output alias path applies the same slot offset.
+__co__ auto span_as_host_slot_output() {
+  global s32 [64] src[2];
+  alias_out = src[1].span_as(64);
+  return alias_out;
+}
+// CHECK: alias_out__device = (int*)src__device + (1)*(64);

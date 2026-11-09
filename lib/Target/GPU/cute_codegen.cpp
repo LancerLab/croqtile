@@ -2881,25 +2881,32 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
            << ", cudaMemcpyHostToDevice));\n";
       };
 
+      auto EmitSpanAsAlias = [&]() {
+        std::string base_expr = sa->id->name;
+        bool is_global_arg = false;
+        for (const auto& item : GetChoreoFuncIns(cgi)) {
+          if (UnScopedName(item.name) == sa->id->name) {
+            is_global_arg = (item.attr == ParamAttr::GLOBAL_INPUT);
+            break;
+          }
+        }
+        if (is_global_arg)
+          base_expr += ".data()";
+        else
+          base_expr += "__device";
+        if (sa->subscriptions && sa->subscriptions->Count() > 0)
+          AppendArraySlotOffset(base_expr, sa->id->name, sa->subscriptions,
+                                IsHost());
+        hs << h_indent << bts << " * " << buf_sym << " = " << base_expr
+           << ";\n";
+      };
+
       if (IsChoreoOutput(InScopeName(sym))) {
         // the sym is choreo output
         std::string sym_data = sym + ".data()";
         EmitMakeSpandata();
         if (sa) {
-          // is span_as
-          hs << h_indent << bts << " * " << buf_sym << " = " << sa->id->name;
-          bool is_global_arg = false;
-          for (const auto& item : GetChoreoFuncIns(cgi)) {
-            if (UnScopedName(item.name) == sa->id->name) {
-              is_global_arg = (item.attr == ParamAttr::GLOBAL_INPUT);
-              break;
-            }
-          }
-          if (is_global_arg)
-            hs << ".data();\n";
-          else
-            hs << "__device;\n";
-
+          EmitSpanAsAlias();
         } else {
           hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
           hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "
@@ -2919,19 +2926,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
                          << STR(FBInfo()) << "\n");
       } else {
         if (sa) {
-          // is span_as
-          hs << h_indent << bts << " * " << buf_sym << " = " << sa->id->name;
-          bool is_global_arg = false;
-          for (const auto& item : GetChoreoFuncIns(cgi)) {
-            if (UnScopedName(item.name) == sa->id->name) {
-              is_global_arg = (item.attr == ParamAttr::GLOBAL_INPUT);
-              break;
-            }
-          }
-          if (is_global_arg)
-            hs << ".data();\n";
-          else
-            hs << "__device;\n";
+          EmitSpanAsAlias();
         } else {
           hs << h_indent << bts << " * " << buf_sym << " = nullptr;\n";
           hs << h_indent << "choreo::abend_true(cudaMalloc(&" << buf_sym << ", "

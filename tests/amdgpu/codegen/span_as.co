@@ -13,3 +13,16 @@ __co__ auto span_as_alias(s32 [2, 3, 64] src) {
 // Host side: device pointer alias (no hipMalloc for reshaped)
 // CHECK: reshaped__device = src__device
 // CHECK-NOT: hipMalloc(&reshaped__device
+
+// A host alias of an indexed global span-array slot must carry the slot offset.
+__co__ auto span_as_host_slot() {
+  global s32 [64] src[2];
+  alias = src[1].span_as(64);
+  s32 [64] output;
+  parallel p by 64 {
+    output.at(p) = alias.at(p);
+  }
+  return output;
+}
+// CHECK: alias__device = src__device + (1)*(64);
+// CHECK-NOT: hipFree(alias__device
