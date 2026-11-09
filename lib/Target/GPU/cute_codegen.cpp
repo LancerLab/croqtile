@@ -2856,17 +2856,21 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       live_chunk_aliases.erase(sname);
     }
 
-    // Propagate swizzle for ElemOf/span_as aliases (e.g., `ma = arr[idx]`,
-    // `qa = buf.span_as(...)`).
+    // Propagate swizzle through shared-buffer aliases: ElemOf
+    // (`ma = arr[idx]`), span_as (`qa = buf.span_as(...)`), and plain
+    // identifier aliases (`qa = q_s`).
     auto decl_sty = GetSpannedType(NodeType(n));
     if (decl_sty && decl_sty->GetStorage() == Storage::SHARED && n.init_expr) {
       auto rhs_expr = dyn_cast<AST::Expr>(n.init_expr.get());
       ptr<AST::Identifier> base_sym_node = nullptr;
-      if (rhs_expr && rhs_expr->GetOp() == Op::ElemOf)
-        base_sym_node = AST::GetArrayBaseSymbol(*rhs_expr);
-      else if (rhs_expr)
-        if (auto sa = dyn_cast<AST::SpanAs>(rhs_expr->GetReference()))
+      if (rhs_expr) {
+        if (rhs_expr->GetOp() == Op::ElemOf)
+          base_sym_node = AST::GetArrayBaseSymbol(*rhs_expr);
+        else if (auto sa = dyn_cast<AST::SpanAs>(rhs_expr->GetReference()))
           base_sym_node = sa->id;
+        else
+          base_sym_node = AST::GetIdentifier(n.init_expr);
+      }
       if (base_sym_node) {
         auto base_name = base_sym_node->name;
         auto base_scoped = InScopeNameForRef(base_name);
@@ -3694,14 +3698,18 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
       live_chunk_aliases.erase(scoped_name);
     }
 
-    // Propagate swizzle for ElemOf-based aliases (e.g., `ma =
-    // lhs_load_s[stage]`). When the RHS is an array element access into a
-    // swizzled shared buffer, record the swizzle for the alias name so direct
-    // WGMMA can find it.
+    // Propagate swizzle through shared-buffer aliases: ElemOf
+    // (`ma = lhs_load_s[stage]`) and plain identifiers (`qa = q_s`). When the
+    // RHS resolves to a swizzled shared buffer, record the swizzle for the
+    // alias name so direct WGMMA can find it.
     if (sty && sty->GetStorage() == Storage::SHARED) {
       auto rhs_expr = dyn_cast<AST::Expr>(n.value.get());
-      if (rhs_expr && rhs_expr->GetOp() == Op::ElemOf) {
-        auto base_sym = AST::GetArrayBaseSymbol(*rhs_expr);
+      if (rhs_expr) {
+        ptr<AST::Identifier> base_sym = nullptr;
+        if (rhs_expr->GetOp() == Op::ElemOf)
+          base_sym = AST::GetArrayBaseSymbol(*rhs_expr);
+        else
+          base_sym = AST::GetIdentifier(n.value);
         if (base_sym) {
           auto base_name = base_sym->name;
           auto base_scoped = InScopeNameForRef(base_name);

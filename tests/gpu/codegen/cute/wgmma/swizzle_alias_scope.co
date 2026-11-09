@@ -68,3 +68,50 @@ __co__ auto swizzle_tma_load_scope(f16 [64, 16] lhs, f16 [16, 64] rhs) {
 // CHECK-LABEL: __choreo_device_swizzle_tma_load_scope
 // CHECK: size_t __mma_load_byte = __mma_load_logical * 2;
 // CHECK: ma[__mma_load_i] = __mma_load_src[(__mma_load_byte ^ ((__mma_load_byte & 896) >> 3)) / 2];
+
+// A plain shared-buffer alias has no array or span_as expression to inherit
+// swizzle from.  The alias must still pick up the source buffer's B128 mode,
+// otherwise the WGMMA descriptor is emitted as unswizzled even though q_s is
+// laid out with the B128 swizzle.
+__co__ void swizzle_plain_alias(global bf16 [128, 128] q, global bf16 [128, 128] k) {
+  parallel b by 1 : block {
+    shared bf16 [128, 128] q_s;
+    shared bf16 [128, 128] k_s;
+    dma.copy.swiz<128> q => q_s;
+    dma.copy.swiz<128> k => k_s;
+    parallel p by 1 : group-4 {
+      qa = q_s;
+      scores = mma.fill.f32 0.0f;
+      qk = mma.row.row.async scores, qa.view(64, 32), k_s.view(128, 32);
+      wait qk;
+    }
+  }
+}
+
+// CHECK-LABEL: __choreo_device_swizzle_plain_alias
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(__choreo_wgmma_ptr_3_iter)
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(__choreo_wgmma_ptr_4_iter)
+
+// The assignment form must propagate the same provenance.  qa is a real
+// shared buffer and is re-pointed at the swizzled q_s, so the WGMMA descriptor
+// on qa must use q_s's B128 mode rather than the natural layout.
+__co__ void swizzle_plain_alias_assign(global bf16 [128, 128] q, global bf16 [128, 128] k) {
+  parallel b by 1 : block {
+    shared bf16 [128, 128] q_s;
+    shared bf16 [128, 128] k_s;
+    shared bf16 [128, 128] qa;
+    dma.copy.swiz<128> q => q_s;
+    dma.copy.swiz<128> k => k_s;
+    parallel p by 1 : group-4 {
+      qa = q_s;
+      scores = mma.fill.f32 0.0f;
+      qk = mma.row.row.async scores, qa.view(64, 32), k_s.view(128, 32);
+      wait qk;
+    }
+  }
+}
+
+// CHECK-LABEL: __choreo_device_swizzle_plain_alias_assign
+// CHECK: qa = q_s;
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(__choreo_wgmma_ptr_5_iter)
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(__choreo_wgmma_ptr_6_iter)
