@@ -1,0 +1,40 @@
+// Two sibling scopes declare a same-named real TMA destination buffer with
+// different swizzle modes. Each WGMMA must read the mode of its own buffer,
+// resolved by reference scope, rather than a same-named buffer from the other
+// sibling.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void tma_swizzle_sibling_scope(global bf16[128, 128] q,
+                                      global bf16[128, 128] k,
+                                      global bf16[128, 128] r) {
+  parallel b by 1 : block {
+    parallel p0 by 1 : group-4 {
+      shared bf16[128, 128] q_s;
+      shared bf16[128, 128] k_s;
+      dma.copy.swiz<128> q => q_s;
+      dma.copy.swiz<128> k => k_s;
+      scores0 = mma.fill.f32 0.0f;
+      qk0 = mma.row.row.async scores0, q_s.view(64, 32), k_s.view(128, 32);
+      wait qk0;
+    }
+    parallel p1 by 1 : group-4 {
+      shared bf16[128, 128] q_s;
+      shared bf16[128, 128] k_s;
+      dma.copy.swiz<64> r => q_s;
+      dma.copy.swiz<128> k => k_s;
+      scores1 = mma.fill.f32 0.0f;
+      qk1 = mma.row.row.async scores1, q_s.view(64, 32), k_s.view(128, 32);
+      wait qk1;
+    }
+  }
+}
+
+// CHECK-LABEL: __choreo_device_tma_swizzle_sibling_scope
+// CHECK: Layout_K_SW128_Atom<bf16>
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(__choreo_wgmma_ptr_{{.*}}_iter)
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(__choreo_wgmma_ptr_{{.*}}_iter)
+// CHECK: Layout_K_SW64_Atom<bf16>
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B64>(__choreo_wgmma_ptr_{{.*}}_iter)
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(__choreo_wgmma_ptr_{{.*}}_iter)
