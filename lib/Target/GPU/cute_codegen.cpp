@@ -2877,10 +2877,8 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
         auto sit = shared_buf_swiz_.find(base_scoped);
         if (sit == shared_buf_swiz_.end())
           sit = shared_buf_swiz_.find(base_name);
-        if (sit != shared_buf_swiz_.end()) {
-          shared_buf_swiz_[sym] = sit->second;
-          shared_buf_swiz_[sname] = sit->second;
-        }
+        if (sit != shared_buf_swiz_.end())
+          shared_buf_swiz_[InScopeNameForRef(sym)] = sit->second;
       }
     }
   }
