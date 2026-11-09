@@ -4404,6 +4404,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
   // or always for TMA (which creates anonymous futures when unnamed).
   std::string future_name = claimFuture(t_buf.second, dma_plan);
   bool has_future = !future_name.empty();
+  // Anonymous futures have no symbol-table entry to scope by name, but their
+  // generated names are already unique within the device function.
+  auto FutureSwizzleKey = [&]() -> std::string {
+    return n.future.empty() ? future_name : InScopeName(future_name);
+  };
 
   auto DMACodeGen = [&]() {
     std::string f_mds_offset = "";
@@ -4489,7 +4494,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     }
 
     if (has_future && swizzle_mode != SwizMode::NONE)
-      shared_buf_swiz_[future_name] = swizzle_mode;
+      shared_buf_swiz_[FutureSwizzleKey()] = swizzle_mode;
     if (t_sty->GetStorage() == Storage::SHARED &&
         swizzle_mode != SwizMode::NONE) {
       shared_buf_swiz_[t_buf.first] = swizzle_mode;
@@ -4957,7 +4962,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
     if (t_sty->GetStorage() == Storage::SHARED &&
         swizzle_mode != SwizMode::NONE) {
-      if (has_future) shared_buf_swiz_[future_name] = swizzle_mode;
+      if (has_future)
+        shared_buf_swiz_[FutureSwizzleKey()] = swizzle_mode;
       shared_buf_swiz_[t_buf.first] = swizzle_mode;
       shared_buf_swiz_[InScopeName(t_sym)] = swizzle_mode;
     }
