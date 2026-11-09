@@ -3714,9 +3714,16 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
           auto sit = shared_buf_swiz_.find(base_scoped);
           if (sit == shared_buf_swiz_.end())
             sit = shared_buf_swiz_.find(base_name);
+          auto alias_scoped = InScopeNameForRef(name);
           if (sit != shared_buf_swiz_.end()) {
-            shared_buf_swiz_[name] = sit->second;
-            shared_buf_swiz_[scoped_name] = sit->second;
+            auto swiz = sit->second;
+            shared_buf_swiz_.erase(name);
+            shared_buf_swiz_[alias_scoped] = swiz;
+          } else {
+            // Re-pointing the alias at an unswizzled buffer drops any
+            // provenance it carried from an earlier assignment.
+            shared_buf_swiz_.erase(name);
+            shared_buf_swiz_.erase(alias_scoped);
           }
         }
       }

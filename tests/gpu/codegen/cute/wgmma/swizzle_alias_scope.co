@@ -121,6 +121,16 @@ __co__ void swizzle_plain_alias_assign(global bf16 [128, 128] q, global bf16 [12
       qk = mma.row.row.async scores, qa.view(64, 32), k_s.view(128, 32);
       wait qk;
     }
+
+    // Re-point the same shared alias at an unswizzled buffer in a later
+    // sibling. The stale B128 provenance must be cleared, not inherited.
+    parallel p1 by 1 : group-4 {
+      shared bf16 [128, 128] r_s;
+      qa = r_s;
+      scores1 = mma.fill.f32 0.0f;
+      qk1 = mma.row.row.async scores1, qa.view(64, 32), k_s.view(128, 32);
+      wait qk1;
+    }
   }
 }
 
@@ -128,3 +138,5 @@ __co__ void swizzle_plain_alias_assign(global bf16 [128, 128] q, global bf16 [12
 // CHECK: qa = q_s;
 // CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(__choreo_wgmma_ptr_7_iter)
 // CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(__choreo_wgmma_ptr_8_iter)
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::NS>(__choreo_wgmma_ptr_9_iter)
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(__choreo_wgmma_ptr_10_iter)
