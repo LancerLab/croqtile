@@ -51,6 +51,22 @@ __co__ void event_wait_redirect(f32 [2] a) {
   }
 }
 
+__co__ void nested_range_iv_repoint(global f32 [6, 4] a) {
+  parallel p by 1 : block {
+    shared f32 [1, 4] s;
+    shared event ev[3];
+    foreach {y} in [3] {
+      with {x} in [2] {
+        foreach x, y {
+          f = tma.copy.async a.subspan(1, 4).at(y * 2 + x, 0) => s;
+          wait f;
+          wait ev[y];
+        }
+      }
+    }
+  }
+}
+
 __co__ void shadowed_host_iv(f32 [64] x) {
   with i in [2] {
     with i in [3] {
@@ -124,6 +140,10 @@ __co__ void foreach_shadow_else_scope() {
 // CHECK: __iv_a + __iv_a__2
 // CHECK-LABEL: __global__{{.*}}event_wait_redirect
 // CHECK: ev[__iv_index].wait(((__iv_index & 3) >> 1));
+// The inner single-matcher with redirects the x range, but the later y range
+// must repoint the parity back to its own IV; before the fix it inherited x.
+// CHECK-LABEL: __global__{{.*}}nested_range_iv_repoint
+// CHECK: ev[__iv_y].wait(((__iv_y / 3) & 1));
 // CHECK-LABEL: __global__ void __choreo_device_shadowed_host_iv({{.*}}int __iv_i, int __iv_i__2)
 // CHECK-LABEL: __global__{{.*}}shadowed_param
 // CHECK: for (int __iv_index = 0; __iv_index < 2; ++__iv_index)

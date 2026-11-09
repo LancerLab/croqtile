@@ -10469,11 +10469,12 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
             // to the with source's declared iteration variable.
             ssm.RemapDeviceSymbol(iv_scoped, iv_name);
             ssm.RemapHostSymbol(iv_scoped, iv_name);
-            // Event-wait phases fall back to the stack entry; it must name
-            // the redirected loop variable.
-            if (!foreach_iv_stack_.empty())
-              foreach_iv_stack_.back() = iv_name;
           }
+          // The body is emitted after every range header, so leave the
+          // innermost range's effective IV on the stack. A later range must
+          // not inherit an earlier range's single-matcher redirect.
+          if (!foreach_iv_stack_.empty())
+            foreach_iv_stack_.back() = iv_name;
           auto lb = UnScopedExpr(ValueSTR(iv_bty->GetLowerBound()));
           auto ub = UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()));
           auto step = iv_bty->GetStep();
