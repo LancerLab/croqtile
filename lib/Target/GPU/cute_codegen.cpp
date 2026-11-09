@@ -422,9 +422,21 @@ CuteCodeGen::FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const {
   return nullptr;
 }
 
+static int64_t ForeachIterationExtent(const AST::ForeachBlock& fe) {
+  auto iv = fe.GetIV();
+  if (!iv) return -1;
+  auto bty = dyn_cast<BoundedType>(iv->GetType());
+  if (!bty) return -1;
+  auto lb = VIInt(bty->GetLowerBound());
+  auto ub = VIInt(bty->GetUpperBound());
+  if (!lb || !ub) return -1;
+  auto step = bty->GetStep();
+  return (step > 1) ? (*ub - *lb) / step + 1 : *ub - *lb;
+}
+
 void CuteCodeGen::FindMetadataExecs(
     const ptr<AST::Node>& node, const std::string& meta_sym,
-    std::vector<std::string>& ivs,
+    std::vector<std::string>& ivs, std::vector<int64_t>& iv_extents,
     std::vector<MetadataConsumer>& consumers) const {
   if (!node) return;
   if (auto mma = dyn_cast<AST::MMA>(node.get())) {
@@ -451,31 +463,39 @@ void CuteCodeGen::FindMetadataExecs(
                      [&](const MetadataConsumer& c) {
                        return c.exec == op.get();
                      }))
-      consumers.push_back({op.get(), ivs});
+      consumers.push_back({op.get(), ivs, iv_extents});
     return;
   }
   if (auto mn = dyn_cast<AST::MultiNodes>(node.get())) {
     for (const auto& child : mn->values)
-      FindMetadataExecs(child, meta_sym, ivs, consumers);
+      FindMetadataExecs(child, meta_sym, ivs, iv_extents, consumers);
     return;
   }
   if (auto as = dyn_cast<AST::Assignment>(node.get())) {
-    FindMetadataExecs(as->value, meta_sym, ivs, consumers);
+    FindMetadataExecs(as->value, meta_sym, ivs, iv_extents, consumers);
     return;
   }
   if (auto fe = dyn_cast<AST::ForeachBlock>(node.get())) {
     std::string loop_iv;
     if (auto id = fe->GetIV()) loop_iv = UnScopedName(id->name);
-    if (!loop_iv.empty()) ivs.push_back(loop_iv);
+    if (!loop_iv.empty()) {
+      ivs.push_back(loop_iv);
+      iv_extents.push_back(ForeachIterationExtent(*fe));
+    }
     if (fe->GetBody())
-      FindMetadataExecs(fe->GetBody(), meta_sym, ivs, consumers);
-    if (!loop_iv.empty()) ivs.pop_back();
+      FindMetadataExecs(fe->GetBody(), meta_sym, ivs, iv_extents,
+                        consumers);
+    if (!loop_iv.empty()) {
+      ivs.pop_back();
+      iv_extents.pop_back();
+    }
     return;
   }
   if (auto ie = dyn_cast<AST::IfElseBlock>(node.get()))
-    FindMetadataExecs(ie->else_stmts, meta_sym, ivs, consumers);
+    FindMetadataExecs(ie->else_stmts, meta_sym, ivs, iv_extents, consumers);
   if (node->HasBody())
-    FindMetadataExecs(node->GetBody(), meta_sym, ivs, consumers);
+    FindMetadataExecs(node->GetBody(), meta_sym, ivs, iv_extents,
+                      consumers);
 }
 
 bool CuteCodeGen::IsU32RegisterMetadata(const ptr<Type>& ty,
@@ -1643,6 +1663,7 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     if (!explicit_scale_accum_scopes.empty())
       explicit_scale_accum_scopes.pop_back();
     if (!foreach_iv_stack_.empty()) foreach_iv_stack_.pop_back();
+    if (!foreach_extent_stack_.empty()) foreach_extent_stack_.pop_back();
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     DecrDeviceIndent();
     if (!it->stmts->None()) {
@@ -5772,10 +5793,11 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         ptr<AST::ChunkAt> a_operand;
         int a_k_axis = -1;
         std::vector<std::string> consumer_ivs = foreach_iv_stack_;
+        std::vector<int64_t> consumer_iv_extents = foreach_extent_stack_;
         std::vector<MetadataConsumer> metadata_consumers;
         if (!body_stack_.empty())
           FindMetadataExecs(body_stack_.back(), sym, consumer_ivs,
-                            metadata_consumers);
+                            consumer_iv_extents, metadata_consumers);
         const AST::MMAOperation* metadata_exec =
             metadata_consumers.empty() ? nullptr
                                        : metadata_consumers.front().exec;
@@ -5899,6 +5921,18 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         // the only one, or may agree with every other consumer, while still
         // indexing a different warp chunk than the load; reject that mismatch
         // instead of reading metadata for the wrong warp tile.
+        std::optional<int64_t> tile_warp_extent;
+        auto ConsumerWarpExtent =
+            [&](const MetadataConsumer& consumer,
+                const std::string& warp) -> std::optional<int64_t> {
+          for (size_t i = 0; i < consumer.ivs.size() &&
+                             i < consumer.iv_extents.size();
+               ++i)
+            if (consumer.ivs[i] == warp ||
+                UnScopedName(consumer.ivs[i]) == UnScopedName(warp))
+              return consumer.iv_extents[i];
+          return std::nullopt;
+        };
         auto CheckLoadWarp = [&](const std::string& load_warp) -> bool {
           // A literal "0" is the tile/thread-preset form: the metadata layout
           // has no loop-valued warp slot to compare against.
@@ -5908,6 +5942,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             if (consumer_warp.empty()) continue;
             if (UnScopedName(consumer_warp) == UnScopedName(load_warp))
               continue;
+            if (load_warp == "thread-preset" && tile_warp_extent) {
+              auto warp_extent =
+                  ConsumerWarpExtent(consumer, consumer_warp);
+              if (warp_extent && *warp_extent == *tile_warp_extent)
+                continue;
+            }
             Error1(n.LOC(), "prepacked metadata '" + sym +
                                 "' is loaded with warp chunk loop '" +
                                 UnScopedName(load_warp) +
@@ -5939,12 +5979,17 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             prepackInfo.resolved_sym != ref_sym)
           meta_sty = dyn_cast<SpannedType>(
               GetSymbolType(prepackInfo.resolved_sym));
+        if (meta_sty && meta_sty->Dims() >= 2)
+          if (auto extent =
+                  VIInt(meta_sty->GetShape().ValueAt(1));
+              extent && *extent > 0)
+            tile_warp_extent = *extent;
         // The single-column and fp8 tile-load paths do not call
         // PrepackedMetadataIndexExprs.  Recover the load's warp role from the
         // metadata operand's chunkat directly, using the consumers' shared A K
         // loop to distinguish the K slot from the warp slot.  Forms without a
-        // chunkat take their warp preset from the metadata tile's column axis,
-        // mapped to an enclosing loop with the same extent.
+        // chunkat use the metadata tile's warp-preset column axis; the load
+        // check accepts a consumer loop whose extent matches that axis.
         auto ResolveLoadWarp = [&]() -> std::string {
           std::string a_k_loop;
           for (const auto& consumer : metadata_consumers) {
@@ -5973,9 +6018,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
               }
             }
           }
-          if (!meta_sty || meta_sty->Dims() < 2) return canonical_warp;
-          auto warp_extent = VIInt(meta_sty->GetShape().ValueAt(1));
-          if (!warp_extent || *warp_extent <= 0) return canonical_warp;
+          if (!tile_warp_extent) return canonical_warp;
           // The tile loader maps the warp axis to threads; no enclosing loop
           // feeds this metadata slot.  Compare consumers against the layout
           // preset explicitly instead of guessing from equal loop extents.
@@ -9902,6 +9945,7 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
       else
         foreach_iv_stack_.push_back("__iv_" + rng0->GetRVName());
     }
+    foreach_extent_stack_.push_back(ForeachIterationExtent(n));
   }
 
   if (!IsHost() && n.GetBody()) {

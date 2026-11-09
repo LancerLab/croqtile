@@ -318,6 +318,8 @@ private:
   // Used to derive inline phase formulas for mbarrier waits and to resolve
   // the K-tile/warp-chunk roles of prepacked metadata indexing.
   std::vector<std::string> foreach_iv_stack_;
+  // Parallel iteration extents for foreach_iv_stack_; -1 when unknown.
+  std::vector<int64_t> foreach_extent_stack_;
   // Bodies enclosing the currently visited node, innermost last.  A metadata
   // load only sees consumers in its own lexical scope, so this stack both
   // isolates sibling scopes and locates the execs that consume the load.
@@ -939,11 +941,13 @@ private:
   struct MetadataConsumer {
     const AST::MMAOperation* exec = nullptr;
     std::vector<std::string> ivs;
+    std::vector<int64_t> iv_extents;
   };
   // Collect every exec in `n` whose metadata operand is `meta_sym`.
   void FindMetadataExecs(const ptr<AST::Node>& n,
                          const std::string& meta_sym,
                          std::vector<std::string>& ivs,
+                         std::vector<int64_t>& iv_extents,
                          std::vector<MetadataConsumer>& consumers) const;
   void EmitWGMMAFinalize(std::ostringstream& os, const std::string& indent,
                          bool force_wait = false);
