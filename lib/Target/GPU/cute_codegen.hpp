@@ -315,8 +315,29 @@ private:
   std::vector<std::string> pending_named_event_primes_;
   std::vector<std::string> pending_tma_prefetch_names_;
   // Stack of innermost foreach loop induction variable names (__iv_xxx).
-  // Used to derive inline phase formulas for mbarrier waits.
+  // Used to derive inline phase formulas for mbarrier waits and to resolve
+  // the K-tile/warp-chunk roles of prepacked metadata indexing.
+  enum class ForeachIVRole { Unknown, K, Warp };
   std::vector<std::string> foreach_iv_stack_;
+  std::vector<ForeachIVRole> foreach_role_stack_;
+  ForeachIVRole ResolveForeachRole(const std::string& iv,
+                                   const std::string& source) const {
+    auto canonical = [](const std::string& name) {
+      if (name == "iv_k" || name == "__iv_iv_k") return ForeachIVRole::K;
+      if (name == "iv_warp" || name == "__iv_iv_warp")
+        return ForeachIVRole::Warp;
+      return ForeachIVRole::Unknown;
+    };
+    if (auto role = canonical(iv); role != ForeachIVRole::Unknown) return role;
+    if (auto role = canonical(source); role != ForeachIVRole::Unknown)
+      return role;
+    // A renamed outer loop is the K-tile loop; a loop nested below a K loop
+    // is the warp chunk. With no enclosing K role, assume the first
+    // non-canonical loop is the K loop.
+    for (auto role : foreach_role_stack_)
+      if (role == ForeachIVRole::K) return ForeachIVRole::Warp;
+    return ForeachIVRole::K;
+  }
   bool in_named_var_decl_ = false;
   bool has_analyzed_warpspec = false;
   bool warpspec_wgmma_arrived = false;
@@ -441,11 +462,11 @@ private:
   // emitted and records the scoped fragment name for the exec-site checks.
   bool EmitSparseAMdataPtr(const std::string& frag_sym,
                            const ptr<AST::ChunkAt>& load_from);
-  // The prepacked dense formats index the packed layout by the canonical
-  // loop variables `iv_k` (K tile) and `iv_warp` (warp chunk), emitted as
-  // `__iv_iv_k`/`__iv_iv_warp`. Match them by name so any nesting order
-  // works; a kernel with no loops is a single tile (0, 0). Returns false and
-  // diagnoses when the kernel has loops but not the canonical pair.
+  // The prepacked dense formats index the packed layout by the K-tile and
+  // warp-chunk loop roles, using the loop's actual emitted IV expression so
+  // renamed loops work. Canonical `iv_k`/`iv_warp` names remain a fallback;
+  // a kernel with no loops is a single tile (0, 0). Returns false and
+  // diagnoses when the roles genuinely cannot be resolved.
   bool PrepackedMetadataIndexExprs(const location& loc, std::string& kExpr,
                                    std::string& warpExpr) const {
     kExpr = "0";
@@ -453,13 +474,40 @@ private:
     if (foreach_iv_stack_.empty()) return true;
     bool k_found = false;
     bool w_found = false;
-    for (const auto& iv : foreach_iv_stack_) {
-      if (iv == "__iv_iv_k") {
-        kExpr = iv;
+    bool k_canonical = false;
+    size_t warp_index = 0;
+    for (size_t i = 0; i < foreach_iv_stack_.size(); ++i) {
+      auto role = i < foreach_role_stack_.size()
+                      ? foreach_role_stack_[i]
+                      : ForeachIVRole::Unknown;
+      if (role == ForeachIVRole::K) {
+        kExpr = foreach_iv_stack_[i];
         k_found = true;
-      } else if (iv == "__iv_iv_warp") {
-        warpExpr = iv;
+        k_canonical = foreach_iv_stack_[i] == "__iv_iv_k";
+      } else if (role == ForeachIVRole::Warp) {
+        warpExpr = foreach_iv_stack_[i];
         w_found = true;
+        warp_index = i;
+      }
+    }
+    // With only renamed loops the role stack maps the outermost enclosing
+    // loop to K, but an outer tile/stage loop above the K/warp pair is not
+    // part of the metadata index. When the selected K loop has no canonical
+    // name, take the loop immediately enclosing the warp loop as the K tile
+    // loop.
+    if (k_found && w_found && !k_canonical && warp_index > 0)
+      kExpr = foreach_iv_stack_[warp_index - 1];
+    // Keep the canonical-name match as a fallback for kernels whose role
+    // stack is unavailable or whose loop is nested in an unusual order.
+    if (!k_found || !w_found) {
+      for (const auto& iv : foreach_iv_stack_) {
+        if (iv == "__iv_iv_k") {
+          kExpr = iv;
+          k_found = true;
+        } else if (iv == "__iv_iv_warp") {
+          warpExpr = iv;
+          w_found = true;
+        }
       }
     }
     if (k_found && w_found) return true;

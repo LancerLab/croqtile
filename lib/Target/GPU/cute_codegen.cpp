@@ -1585,6 +1585,7 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     if (!explicit_scale_accum_scopes.empty())
       explicit_scale_accum_scopes.pop_back();
     if (!foreach_iv_stack_.empty()) foreach_iv_stack_.pop_back();
+    if (!foreach_role_stack_.empty()) foreach_role_stack_.pop_back();
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     DecrDeviceIndent();
     if (!it->stmts->None()) {
@@ -9630,6 +9631,8 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
       else
         foreach_iv_stack_.push_back("__iv_" + rng0->GetRVName());
     }
+    foreach_role_stack_.push_back(
+        ResolveForeachRole(foreach_iv_stack_.back(), rng0->GetRVName()));
   }
 
   if (!IsHost() && n.GetBody()) {
