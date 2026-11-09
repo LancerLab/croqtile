@@ -519,6 +519,23 @@ private:
     }
 
     if (!a_k_iv.empty() && operand) {
+      // A canonical role is explicit source evidence, while the A chunk IV is
+      // inferred from the operand. If they disagree, the metadata cannot be
+      // indexed without choosing an arbitrary priority.
+      if (k_found && a_k_iv != kExpr) {
+        Error1(loc, "prepacked metadata role conflict: canonical K loop '" +
+                    UnScopedName(kExpr) +
+                    "' disagrees with the A operand K chunk loop '" +
+                    UnScopedName(a_k_iv) + "'");
+        return false;
+      }
+      if (w_found && a_k_iv == warpExpr) {
+        Error1(loc, "prepacked metadata role conflict: canonical warp loop '" +
+                    UnScopedName(warpExpr) +
+                    "' is the A operand K chunk loop '" +
+                    UnScopedName(a_k_iv) + "'");
+        return false;
+      }
       bool metadata_has_k = false;
       for (const auto& sop : operand->AllOperations()) {
         auto ta = dyn_cast<AST::SOP::TileAt>(sop);
