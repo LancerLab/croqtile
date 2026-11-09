@@ -5895,6 +5895,26 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           }
         }
         if (metadata_conflict) break;
+        // The load's own warp slot is a third role source.  A consumer may be
+        // the only one, or may agree with every other consumer, while still
+        // indexing a different warp chunk than the load; reject that mismatch
+        // instead of reading metadata for the wrong warp tile.
+        auto CheckLoadWarp = [&](const std::string& load_warp) -> bool {
+          if (load_warp.empty() || load_warp == "0") return true;
+          for (const auto& consumer : metadata_consumers) {
+            auto consumer_warp = ConsumerWarpLoop(consumer);
+            if (consumer_warp.empty()) continue;
+            if (UnScopedName(consumer_warp) == UnScopedName(load_warp))
+              continue;
+            Error1(n.LOC(), "prepacked metadata '" + sym +
+                                "' is loaded with warp chunk loop '" +
+                                UnScopedName(load_warp) +
+                                "' but consumed with warp chunk loop '" +
+                                UnScopedName(consumer_warp) + "'");
+            return false;
+          }
+          return true;
+        };
         std::string ref_sym = lca->RefSymbol();
         auto prepackInfo =
             resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue() || v2_mode);
@@ -5967,7 +5987,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             std::string k_idx_expr, warp_idx_expr;
             if (PrepackedMetadataIndexExprs(n.LOC(), lca, k_idx_expr,
                                             warp_idx_expr, a_k_axis,
-                                            a_operand, true))
+                                            a_operand, true) &&
+                CheckLoadWarp(warp_idx_expr))
               emitPrepackedV2Snippet(sym, meta_base, row_stride, col_stride,
                                      k_idx_expr, warp_idx_expr);
           }
@@ -5978,7 +5999,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             std::string k_idx_expr, warp_idx_expr;
             if (PrepackedMetadataIndexExprs(n.LOC(), lca, k_idx_expr,
                                             warp_idx_expr, a_k_axis,
-                                            a_operand, true))
+                                            a_operand, true) &&
+                CheckLoadWarp(warp_idx_expr))
               emitPrepackedU32Snippet(sym, meta_base, row_stride, col_stride,
                                       k_idx_expr, warp_idx_expr);
           }
