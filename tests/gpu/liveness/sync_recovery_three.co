@@ -15,6 +15,7 @@
 // ELIDE-DAG: handover a -> b
 // ELIDE-DAG: handover b -> c
 // ELIDE-DAG: elide AST::CompletionWait (source wait on the draining copy)
+// ELIDE: [sync-recovery] summary: {{.*}} 0 completion waits discharged in place
 // ELIDE: f.wait();
 // ELIDE-NOT: cuda::ptx::cp_async_bulk_wait_group
 // ELIDE: sig1.arrive
