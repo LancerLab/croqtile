@@ -2869,7 +2869,7 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
           base_sym_node = sa->id;
       if (base_sym_node) {
         auto base_name = base_sym_node->name;
-        auto base_scoped = InScopeName(base_name);
+        auto base_scoped = InScopeNameForRef(base_name);
         auto sit = shared_buf_swiz_.find(base_scoped);
         if (sit == shared_buf_swiz_.end())
           sit = shared_buf_swiz_.find(base_name);
@@ -3704,7 +3704,7 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
         auto base_sym = AST::GetArrayBaseSymbol(*rhs_expr);
         if (base_sym) {
           auto base_name = base_sym->name;
-          auto base_scoped = InScopeName(base_name);
+          auto base_scoped = InScopeNameForRef(base_name);
           auto sit = shared_buf_swiz_.find(base_scoped);
           if (sit == shared_buf_swiz_.end())
             sit = shared_buf_swiz_.find(base_name);

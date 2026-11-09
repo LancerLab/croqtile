@@ -1,0 +1,40 @@
+// An alias must inherit the swizzle mode of the buffer it references, not a
+// same-named buffer from a sibling scope.  Here an outer q_s array slot is
+// loaded with B128, a sibling scope also declares q_s with B32, and the
+// aliasing scope has a later q_s declaration that is not visible at the
+// alias.  The alias lookup must resolve q_s as a reference, so qa keeps B128
+// instead of picking up the sibling's B32 mode through the raw-name fallback.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+__co__ void swizzle_alias_scope(global bf16[128, 128] q, global bf16[128, 128] k) {
+  parallel b by 1 : block {
+    shared bf16[128, 128] q_s[2];
+    shared bf16[128, 128] k_s;
+    dma.copy.swiz<128> q => q_s[0];
+    dma.copy.swiz<128> k => k_s;
+
+    // Sibling scope: same short name, different swizzle mode.
+    parallel p0 by 1 : group-4 {
+      shared bf16[128, 128] q_s[2];
+      dma.copy.swiz<32> q => q_s[0];
+    }
+
+    parallel p by 1 : group-4 {
+      qa = q_s[0];
+      // Declared after the alias, so the alias still refers to the outer q_s.
+      shared bf16[128, 128] q_s[2];
+      scores = mma.fill.f32 0.0f;
+      qk = mma.row.row.async scores, qa.view(64, 32), k_s.view(128, 32);
+      wait qk;
+    }
+  }
+}
+
+// CHECK-LABEL: __choreo_device_swizzle_alias_scope
+// CHECK: Layout_K_SW128_Atom<bf16>
+// CHECK: Layout_K_SW32_Atom<bf16>
+// CHECK: bf16* qa = (bf16*)((bf16*)q_s
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(__choreo_wgmma_ptr_0_iter)
+// CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(__choreo_wgmma_ptr_1_iter)
