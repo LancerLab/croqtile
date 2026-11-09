@@ -5762,6 +5762,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
       auto ca = op.LoadFrom();
       auto parent_sym = ca->RefSymbol();
+      if (policy_is_sparse)
+        sparse_a_load_source_[InScopeName(sym)] = parent_sym;
       auto parent_ty = GetSpannedType(GetSymbolType(parent_sym));
       switch (GetMmaLoadShapeWarningKind(ssmi, parent_ty)) {
       case MmaLoadShapeWarningKind::Dynamic:
@@ -5960,6 +5962,31 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           std::string a_base_sym;
           AST::NodeList a_subs;
           operand_slot_info(op.ExecOperand(1), a_base_sym, a_subs);
+          std::string ref_sym = a_base_sym.empty() ? a_sym : a_base_sym;
+          auto src_it = sparse_a_load_source_.find(InScopeName(a_sym));
+          if (src_it != sparse_a_load_source_.end())
+            ref_sym = src_it->second;
+          if (src_it == sparse_a_load_source_.end() && !a_base_sym.empty()) {
+            // A direct operand may be a `chunkat` alias of the shared A
+            // buffer; resolve the alias so the diagnostic names its metadata.
+            auto alias_it =
+                live_chunk_aliases.find(InScopeName(a_base_sym));
+            if (alias_it != live_chunk_aliases.end() && alias_it->second)
+              ref_sym = alias_it->second->RefSymbol();
+          }
+          auto ref_prepack = resolvePrepackedU32Meta(
+              ref_sym, use_prepack.GetValue() || v2_mode_exec);
+          // WGMMA does not declare a separate metadata pointer today;
+          // diagnose an implicit operand when the A buffer has no
+          // `<ref>_mdata` and no prepacked metadata.
+          if (!ref_sym.empty() && !SSTab().IsDeclared(ref_sym + "_mdata") &&
+              !ref_prepack.use_packed_u32) {
+            Error1(n.LOC(), "sparse WGMMA A operand '" + ref_sym +
+                                "' is missing its '" + ref_sym +
+                                "_mdata' metadata buffer; declare it or pass "
+                                "an explicit metadata operand");
+            return false;
+          }
           std::string meta_device = PrepackedMetaBase(
               prepackInfo, a_base_sym.empty() ? a_sym : a_base_sym, a_subs);
           if (!prepackInfo.use_packed_u32) {

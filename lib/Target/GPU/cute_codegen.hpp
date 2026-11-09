@@ -370,7 +370,7 @@ private:
   std::unordered_map<std::string, ptr<AST::ChunkAt>> live_chunk_aliases;
   std::unordered_set<std::string> explicit_mma_loads_;
   // A sparse A fragment's source buffer, recorded by mma.load so the sparse
-  // CTMMA exec site can diagnose a missing `<A>_mdata` declaration.
+  // CTMMA/WGMMA exec sites can diagnose a missing `<A>_mdata` declaration.
   std::unordered_map<std::string, std::string> sparse_a_load_source_;
   std::unordered_set<std::string> sparse_a_mdata_ptr_frags_;
   std::unordered_set<std::string> shared_scalar_syms_;

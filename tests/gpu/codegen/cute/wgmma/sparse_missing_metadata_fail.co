@@ -1,0 +1,25 @@
+// A sparse WGMMA exec without an explicit metadata operand consumes the A
+// fragment's `<A>_mdata_ptr`. WGMMA has no equivalent metadata pointer
+// declaration, so diagnose the missing `<ref>_mdata` buffer before emitting
+// the descriptor.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+__co__ auto wgmma_sparse_missing(f16 [64, 32] lhs_packed, f16 [8, 64] rhs) {
+  f32 [64, 8] output{0.0f};
+  parallel by 1 : block {
+    shared f16 [64, 32] a_s[2];
+    dma.copy lhs_packed => a_s[1];
+    rhs_s = dma.copy rhs => shared;
+    parallel wg by 1 : group-4 {
+      mc = mma.fill.f32 0.0f;
+      ma = mma.load a_s[1];
+      mma.row.row.sp mc, ma, rhs_s;
+      mma.store mc, output;
+    }
+  }
+  return output;
+}
+
+// CHECK: error: sparse WGMMA A operand 'a_s' is missing its 'a_s_mdata' metadata buffer; declare it or pass an explicit metadata operand
