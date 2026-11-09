@@ -500,19 +500,18 @@ bool TypeInference::Visit(AST::DataAccess& n) {
 
   ptr<Type> accessed_ty = dty;
   if (n.AccessArrayElement()) {
-    auto aty = dyn_cast<SpannedArrayType>(dty);
-    if (!aty) {
+    auto slot = ResolveSlotAccessType(dty, n.GetArrayIndices().size());
+    if (slot.error == SlotAccessError::NotArray) {
       Error1(n.LOC(),
              "expect '" + n.GetDataName() + "' an array-of-spanned type.");
       return false;
     }
-    const size_t slot_count = n.GetArrayIndices().size();
-    if (slot_count > aty->ArrayRank()) {
+    if (slot.error == SlotAccessError::TooMany) {
       Error1(n.LOC(), "span-array slot access has too many subscripts for the "
                       "declared slot rank.");
       return false;
     }
-    accessed_ty = aty->SubScriptType(slot_count);
+    accessed_ty = slot.type;
   }
 
   if (n.AccessElement()) {

@@ -1511,24 +1511,20 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
   ptr<Type> accessed_ty = dty;
   bool partial_slot = false;
   if (n.AccessArrayElement()) {
-    auto aty = dyn_cast<SpannedArrayType>(dty);
-    if (!aty) {
+    auto slot = ResolveSlotAccessType(dty, n.GetArrayIndices().size());
+    if (slot.error == SlotAccessError::NotArray) {
       Error1(n.LOC(), "expect '" + n.GetDataName() +
                           "' an array-of-spanned type but got " + PSTR(dty) +
                           ".");
       return false;
     }
-    // SubScriptType keeps returning a SpannedArrayType for both complete and
-    // partial slot subscripts; compare the subscript count with the declared
-    // slot-array rank to detect an unfinished slot.
-    const size_t slot_count = n.GetArrayIndices().size();
-    if (slot_count > aty->ArrayRank()) {
+    if (slot.error == SlotAccessError::TooMany) {
       Error1(n.LOC(), "span-array slot access has too many subscripts for the "
                       "declared slot rank.");
       return false;
     }
-    partial_slot = slot_count < aty->ArrayRank();
-    accessed_ty = aty->SubScriptType(slot_count);
+    partial_slot = slot.partial;
+    accessed_ty = slot.type;
   }
   auto sty = dyn_cast<SpannedType>(accessed_ty);
 
