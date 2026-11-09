@@ -5861,6 +5861,27 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           }
         }
         if (metadata_conflict) break;
+        // A metadata load lexically outside its consumers' K loop builds its
+        // index without that IV, so the exec reads the wrong K metadata.
+        // Point at the load rather than emitting an index that drops the loop.
+        for (const auto& consumer : metadata_consumers) {
+          auto a_k_loop = ExecAKLoop(consumer.exec, consumer.ivs);
+          if (a_k_loop.empty()) continue;
+          bool in_load_scope = false;
+          for (const auto& iv : foreach_iv_stack_)
+            if (a_k_loop == iv ||
+                UnScopedName(a_k_loop) == UnScopedName(iv)) {
+              in_load_scope = true;
+              break;
+            }
+          if (in_load_scope) continue;
+          Error1(n.LOC(), "prepacked metadata '" + sym +
+                              "' is loaded outside the K loop '" +
+                              UnScopedName(a_k_loop) + "' that indexes it");
+          metadata_conflict = true;
+          break;
+        }
+        if (metadata_conflict) break;
         // The same metadata value also has a single warp-chunk role.  Once
         // the consumers agree on K, they must also name the same warp loop;
         // otherwise every consumer after the first is indexed with the wrong
