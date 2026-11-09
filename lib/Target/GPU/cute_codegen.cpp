@@ -5861,20 +5861,19 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           }
         }
         if (metadata_conflict) break;
+        auto InLoadScope = [&](const std::string& loop) {
+          for (const auto& iv : foreach_iv_stack_)
+            if (loop == iv || UnScopedName(loop) == UnScopedName(iv))
+              return true;
+          return false;
+        };
         // A metadata load lexically outside its consumers' K loop builds its
         // index without that IV, so the exec reads the wrong K metadata.
         // Point at the load rather than emitting an index that drops the loop.
         for (const auto& consumer : metadata_consumers) {
           auto a_k_loop = ExecAKLoop(consumer.exec, consumer.ivs);
           if (a_k_loop.empty()) continue;
-          bool in_load_scope = false;
-          for (const auto& iv : foreach_iv_stack_)
-            if (a_k_loop == iv ||
-                UnScopedName(a_k_loop) == UnScopedName(iv)) {
-              in_load_scope = true;
-              break;
-            }
-          if (in_load_scope) continue;
+          if (InLoadScope(a_k_loop)) continue;
           Error1(n.LOC(), "prepacked metadata '" + sym +
                               "' is loaded outside the K loop '" +
                               UnScopedName(a_k_loop) + "' that indexes it");
@@ -6047,6 +6046,29 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           // preset explicitly instead of guessing from equal loop extents.
           return "thread-preset";
         };
+        // The packed index forms put the consumer's warp role at the load
+        // too, so a load outside that loop fixes the warp slot at 0.  The
+        // thread-preset tile forms (fp8 K=64 and single-column metadata) map
+        // the warp axis to threads instead, so their consumer loops need not
+        // enclose the load.  A load with its own loop-valued warp role is
+        // handled by CheckLoadWarp below, which keeps its existing mismatch
+        // diagnostic.
+        const std::string load_warp_role = ResolveLoadWarp();
+        const bool load_has_loop_warp =
+            !load_warp_role.empty() && load_warp_role != "0" &&
+            load_warp_role != "thread-preset";
+        if (!fp8_sparse_k64 && !prepack_single_col && !load_has_loop_warp) {
+          for (const auto& consumer : metadata_consumers) {
+            auto warp_loop = ConsumerWarpLoop(consumer);
+            if (warp_loop.empty() || InLoadScope(warp_loop)) continue;
+            Error1(n.LOC(), "prepacked metadata '" + sym +
+                                "' is loaded outside the warp loop '" +
+                                UnScopedName(warp_loop) + "' that indexes it");
+            metadata_conflict = true;
+            break;
+          }
+          if (metadata_conflict) break;
+        }
         if (strides.size() < 2) {
           Error1(n.LOC(), "sparse metadata must be at least 2-dimensional.");
           break;
