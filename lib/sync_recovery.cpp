@@ -85,7 +85,8 @@ bool SyncRecovery::Visit(AST::MultiNodes& n) {
 
 void SyncRecovery::AddInsert(const AST::Node* anchor,
                              const ptr<AST::Node>& node, bool after,
-                             int not_before, const std::string& buffer) {
+                             int not_before, const std::string& buffer,
+                             bool self_discharge) {
   auto& list = pending_inserts_[anchor];
   for (auto& p : list) {
     if (p.after != after) continue;
@@ -103,11 +104,13 @@ void SyncRecovery::AddInsert(const AST::Node* anchor,
           // A smaller pending count drains more: keep the stronger node.
           if (v->GetPending() < w->GetPending()) p.node = node;
           p.not_before = std::max(p.not_before, not_before);
+          p.self_discharge = p.self_discharge && self_discharge;
           return;
         }
     }
   }
-  list.push_back(PendingInsert{node, after, not_before, buffer});
+  list.push_back(
+      PendingInsert{node, after, not_before, buffer, self_discharge});
 }
 
 void SyncRecovery::Eliminate(std::vector<PendingInsert>& inserts,
@@ -129,7 +132,8 @@ void SyncRecovery::Eliminate(std::vector<PendingInsert>& inserts,
       if (pit == preorder_index_.end()) return nullptr; // our own insertion
       int sidx = pit->second;
       if (ins.not_before >= 0 && sidx <= ins.not_before) {
-        if (sidx == ins.not_before && SelfDischarging(s, *ins.node, ins.buffer))
+        if (sidx == ins.not_before && ins.self_discharge &&
+            SelfDischarging(s, *ins.node, ins.buffer))
           return "synchronous engine access";
         return nullptr;
       }
@@ -380,6 +384,23 @@ bool DmaReadsSlot(const AST::DMA* dma, const std::string& buffer) {
 
 bool DmaWritesSlot(const AST::DMA* dma, const std::string& buffer) {
   return dma->to != nullptr && MentionsBuffer(dma->to.get(), buffer);
+}
+
+// Does the phase leave an async engine read of the slot outstanding before
+// `upto`? A synchronous read is self-discharging only when it is not hiding
+// earlier async work: a blocking copy retires its own read, not the groups
+// issued by a previous async copy.
+bool HasEarlierAsyncEngineRead(
+    const std::vector<const LivenessAnalyzer::Stmt*>& po, const HBGraph& g,
+    int phase, int upto, const std::string& buffer) {
+  if (upto < 0) return false;
+  const auto& ph = g.phases[phase];
+  for (size_t i = ph.first_stmt_id;
+       i < static_cast<size_t>(upto) && i < po.size(); ++i) {
+    auto* d = dyn_cast<AST::DMA>(po[i]);
+    if (d != nullptr && d->IsAsync() && DmaReadsSlot(d, buffer)) return true;
+  }
+  return false;
 }
 
 // Does the handover producer guarantee its engine writes have retired before
@@ -707,13 +728,24 @@ void SyncRecovery::RunRecovery() {
               // full drain when the engine wrote it and the next tenant
               // reuses it. `engine-wait` classes are bound to the engine's
               // own event on the receiver and stay dump-only.
-              if (o.primitive.rfind("read-drain", 0) == 0)
+              if (o.primitive.rfind("read-drain", 0) == 0) {
+                bool can_self = false;
+                if (last_engine_read >= 0 &&
+                    static_cast<size_t>(last_engine_read) < po.size()) {
+                  auto* d = dyn_cast<AST::DMA>(po[last_engine_read]);
+                  can_self = d != nullptr && !d->IsAsync() &&
+                             DmaReadsSlot(d, slot[i].buffer_id) &&
+                             !HasEarlierAsyncEngineRead(po, *g, a_last,
+                                                        last_engine_read,
+                                                        slot[i].buffer_id);
+                }
                 AddInsert(site.stmt,
                           AST::Make<AST::CompletionWait>(
                               site.stmt->LOC(), FenceEntity::TMA,
                               CompletionWaitKind::READ_DRAIN, 0),
-                          site.after, last_engine_read, slot[i].buffer_id);
-              else if (o.primitive.rfind("P9:wait_group", 0) == 0)
+                          site.after, last_engine_read, slot[i].buffer_id,
+                          can_self);
+              } else if (o.primitive.rfind("P9:wait_group", 0) == 0)
                 AddInsert(site.stmt,
                           AST::Make<AST::CompletionWait>(
                               site.stmt->LOC(), FenceEntity::TMA,
