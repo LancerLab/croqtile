@@ -1,7 +1,7 @@
 // REQUIRES: TARGET-CPU
 // RUN: set -o pipefail; choreo -t cc -gs %s | CHOREO_TEST_INDEX=2 bash -s -- --execute 2>&1 | FileCheck %s --check-prefix=VALID
-// RUN: set -o pipefail; choreo -t cc -gs %s | CHOREO_TEST_INDEX=-1 not bash -s -- --execute 2>&1 | FileCheck %s --check-prefix=LOWER
-// RUN: set -o pipefail; choreo -t cc -gs %s | CHOREO_TEST_INDEX=4 not bash -s -- --execute 2>&1 | FileCheck %s --check-prefix=UPPER
+// RUN: set -o pipefail; choreo -t cc -gs %s | CHOREO_TEST_INDEX=-1 bash -c 'bash -s -- --execute; test $? -eq 134' 2>&1 | FileCheck %s --check-prefix=LOWER
+// RUN: set -o pipefail; choreo -t cc -gs %s | CHOREO_TEST_INDEX=4 bash -c 'bash -s -- --execute; test $? -eq 134' 2>&1 | FileCheck %s --check-prefix=UPPER
 
 #include "choreo.h"
 #include <cstdlib>

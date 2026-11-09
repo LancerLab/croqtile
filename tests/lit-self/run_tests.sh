@@ -6,6 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LIT_SH="${REPO_ROOT}/tests/lit.sh"
+NOT_SH="${REPO_ROOT}/tests/not.sh"
 TEST_DIR="${SCRIPT_DIR}"
 
 PASS=0; FAIL=0
@@ -162,6 +163,18 @@ echo "--- combined flags ---"
 check_grep "combined --sim=only --run-only=choreo" \
   'SKIP(sim=only):' 1 \
   bash "$LIT_SH" --sim=only --dry-run --run-only=choreo "$TEST_DIR/nonsim_req.co"
+
+# -- Test 8: not.sh exit-status handling ---------------------------------
+echo "--- not.sh exit status ---"
+
+check "not.sh true exits 1" "1" \
+  bash -c '"$@" >/dev/null 2>&1; echo $?' _ "$NOT_SH" true
+
+check "not.sh false exits 0" "0" \
+  bash -c '"$@" >/dev/null 2>&1; echo $?' _ "$NOT_SH" false
+
+check "not.sh propagates SIGABRT" "134" \
+  bash -c '"$@" >/dev/null 2>&1; echo $?' _ "$NOT_SH" sh -c 'kill -ABRT $$'
 
 # -- Summary --------------------------------------------------------------
 echo ""
