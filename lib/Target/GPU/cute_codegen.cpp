@@ -5885,8 +5885,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
       }
     } break;
     case AST::MMAOperation::Load: {
-      explicit_mma_loads_.insert(sym);
-      explicit_mma_loads_.insert(InScopeName(sym));
+      explicit_mma_loads_.insert(InScopeNameForRef(sym));
       std::string mma_policy = FCtx(fname).MMAPolicyOfFrag(InScopeName(sym));
       bool policy_is_sparse = mma_policy.find("SPARSE::") != std::string::npos;
       if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_E) {
@@ -7278,7 +7277,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         auto metadata_sym = metadata ? metadata->GetSymbol() : nullptr;
         auto metadata_name = metadata_sym ? metadata_sym->name : "";
         auto metadata_scoped =
-            metadata_sym ? InScopeName(metadata_name) : std::string();
+            metadata_sym ? InScopeNameForRef(metadata_name) : std::string();
         // F1: a plain u32 register may carry sparse metadata directly, e.g.
         // prefetched by the kernel, instead of mma.load from shared memory.
         // SM90 sparse atoms take one uint32_t metadata register (u64 would be
@@ -8193,8 +8192,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
     case AST::MMAOperation::Load: {
       // Track explicit MMA loads for every policy (CTMMA as well as WGMMA):
       // the sparse E-operand validation accepts a loaded metadata fragment.
-      explicit_mma_loads_.insert(sym);
-      explicit_mma_loads_.insert(InScopeName(sym));
+      explicit_mma_loads_.insert(InScopeNameForRef(sym));
       auto ca = op.LoadFrom();
       auto f_sym = ca->data->name;
       auto ty = GetSymbolType(f_sym);
@@ -8317,7 +8315,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         if (e_sym_provided) {
           auto e_sym = AST::FragName(e_sym_provided);
           auto e_ty = GetSymbolType(e_sym);
-          auto e_scoped = InScopeName(e_sym);
+          auto e_scoped = InScopeNameForRef(e_sym);
           // Accept a u32 scalar (a register, or a shared scalar read into a
           // register by the atom call) or a buffer that was explicitly
           // loaded with mma.load. A shared buffer passed by name would hand
@@ -8325,8 +8323,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           bool ok = false;
           if (auto scty = dyn_cast<ScalarType>(e_ty))
             ok = scty->GetBaseType() == BaseType::U32;
-          ok = ok || explicit_mma_loads_.count(e_sym) ||
-               explicit_mma_loads_.count(e_scoped);
+          ok = ok || explicit_mma_loads_.count(e_scoped);
           if (!ok) {
             Error1(n.LOC(), "sparse CTMMA metadata must be a plain u32 "
                             "register or loaded with mma.load");

@@ -1,0 +1,61 @@
+// An explicit metadata load in an enclosing scope must remain visible to a
+// sparse exec in an inner scope, while a same-named metadata operand in a
+// sibling scope must not inherit that load through its raw name.
+//
+// RUN: not choreo -es -t cute -arch=sm_90a %s -o - 2>&1 | grep -v '^ *//' | FileCheck %s
+
+__co__ auto explicit_outer_load(f16 [64, 16] lhs_packed, f16 [8, 32] rhs,
+                                u32 [64, 1] meta) {
+  f32 [64, 8] output{0.0f};
+  parallel by 1 : block {
+    shared u32 [64, 1] meta_s[2];
+    dma.copy meta => meta_s[1];
+    lhs_s = dma.copy lhs_packed => shared;
+    rhs_s = dma.copy rhs => shared;
+    mc = mma.fill.f32 0.0f;
+    parallel by 1 : group-4 {
+      me = mma.load meta_s[1];
+      foreach {iv_i} in [1] {
+        mma.row.row.sp mc, lhs_s, rhs_s, me;
+      }
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// The first sibling loads a metadata fragment named me. The second sibling
+// declares a different, unloaded me and passes it as the CTMMA explicit E
+// operand; the raw-name entry from the first load must not exempt it.
+__co__ auto ctmma_sibling_missing_explicit_load(
+    f16 [16, 16] lhs, u8 [16, 4] lhs_meta, f16 [8, 32] rhs) {
+  f32 [16, 8] output{0.0f};
+  parallel by 1 : block {
+    shared f16 [16, 16] a_s[2];
+    shared u8 [16, 4] a_s_mdata[2];
+    shared f16 [8, 32] b_s;
+    dma.copy lhs => a_s[1];
+    dma.copy lhs_meta => a_s_mdata[1];
+    dma.copy rhs => b_s;
+    mc = mma.fill.f32 0.0f;
+    parallel p by 32 : thread {
+      ma = mma.load a_s[1];
+      mb = mma.load b_s;
+      me = mma.load a_s_mdata[1];
+      mma.row.row.sp mc, ma, mb, me;
+    }
+    parallel q by 32 : thread {
+      shared f16 me;
+      ma = mma.load a_s[1];
+      mb = mma.load b_s;
+      mma.row.row.sp mc, ma, mb, me;
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// CHECK: error: sparse CTMMA metadata must be a plain u32 register or loaded with mma.load
+// CHECK-LABEL: __choreo_device_explicit_outer_load
+// CHECK: GMMA_64x8x32_F32F16F16_SS<{{.*}}>::fma({{.*}}, me);
+// CHECK-LABEL: __choreo_device_ctmma_sibling_missing_explicit_load
