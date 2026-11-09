@@ -1,0 +1,53 @@
+// A whole fragment-array slot (`mc[1]`, without `.at`) must address the
+// per-slot register block.  Ordinary fragment arrays are declared as a flat
+// `float mc[slots * regs]`, so the MMA operand must fold the slot through the
+// fragment layout's registers-per-thread; a raw `mc[1]` only advances one
+// register and a logical-span offset would run past the array.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v '^ *//' | FileCheck %s
+
+__device__ __forceinline__ void consume_fragment(float* values) {
+  values[0] = values[0] + 1.0f;
+}
+
+__co__ auto whole_slot_fragment_operand(f16 [64, 16] lhs, f16 [16, 16] rhs) {
+  f16 [64, 16] output{0.0f};
+  parallel pb by 1 : block {
+    lhs_s = dma.copy lhs => shared;
+    rhs_s = dma.copy rhs => shared;
+    frag f32 [64, 16] mc[3] {0.0f};
+    parallel g by 1 : group-4 {
+      mma.row.col mc[1], lhs_s, rhs_s;
+      mma.store mc[1], output;
+    }
+  }
+  return output;
+}
+
+__co__ auto whole_slot_fill_call(f16 [64, 16] lhs, f16 [16, 16] rhs) {
+  f16 [64, 16] output{0.0f};
+  parallel pb by 1 : block {
+    lhs_s = dma.copy lhs => shared;
+    rhs_s = dma.copy rhs => shared;
+    parallel g by 1 : group-4 {
+      frag.f32 mc[2] {0.0f};
+      mma.row.col mc[1], lhs_s, rhs_s;
+      call consume_fragment(mc[1]);
+      mma.store mc[1], output;
+    }
+  }
+  return output;
+}
+
+// CHECK-LABEL: __choreo_device_whole_slot_fragment_operand
+// CHECK: float mc[24];
+// CHECK: ((float*)mc + (1)*(8))[0]
+// CHECK: store_fragment_d<CUTE_WGMMA_M64K16, 16>({{.*}}, reinterpret_cast<float*>(((float*)mc + (1)*(8))));
+// CHECK-NOT: mc[1][0]
+// CHECK-NOT: (1)*(1024)
+
+// CHECK-LABEL: __choreo_device_whole_slot_fill_call
+// CHECK: float mc[2][8];
+// CHECK: consume_fragment((float*)(float*)mc + (1)*(8));
+// CHECK: store_fragment_d<CUTE_WGMMA_M64K16, 16>({{.*}}, reinterpret_cast<float*>(mc[1]));

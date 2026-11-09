@@ -12856,8 +12856,16 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
         }
         auto base_id = AST::GetArrayBaseSymbol(*expr);
         auto base_ty = GetSymbolType(base_id->name);
-        if (auto sat = dyn_cast<SpannedArrayType>(base_ty);
-            sat && !e->HasNote("mma_frag")) {
+        auto sat = dyn_cast<SpannedArrayType>(base_ty);
+        // MMA operand expressions carry the `mma_frag` note so that ordinary
+        // descriptor operands stay as raw subscripts. A whole fragment-array
+        // slot (`mc[1]`) is stored in a flat register array, though, so its
+        // slot must still be folded into a pointer offset before the
+        // consumer appends the per-thread register index.
+        const bool mma_frag_array_slot =
+            sat && e->HasNote("mma_frag") &&
+            sat->spty->GetStorage() == Storage::REG;
+        if (sat && (!e->HasNote("mma_frag") || mma_frag_array_slot)) {
           std::vector<ptr<AST::Node>> subscripts;
           ptr<AST::Expr> cur = expr;
           while (cur->GetOp() == Op::ElemOf) {
@@ -12882,7 +12890,13 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
             frag_stride = FCtx(fname).GetFragmentInfo(scoped).regs_per_thread;
           AppendArraySlotOffset(base, base_id->name, subscripts, is_host,
                                 frag_stride);
-          oss << base;
+          // The MMA operand consumers append `[reg]`; group the pointer
+          // arithmetic so the register index applies to the slot, not to the
+          // trailing stride literal.
+          if (mma_frag_array_slot)
+            oss << "(" << base << ")";
+          else
+            oss << base;
         } else {
           oss << OpExprSTR(expr->GetL(), "[]", true, is_host) << "["
               << OpExprSTR(expr->GetR(), "", true, is_host) << "]";

@@ -1294,7 +1294,8 @@ bool TypeInference::Visit(AST::MMA& n) {
       ModifySymbolType(acc->LOC(), acc_sym,
                        MakeDenseSpannedArrayType(res_sty->ElementType(),
                                                  res_sty->GetShape(),
-                                                 acc_aty->Dimensions()));
+                                                 acc_aty->Dimensions(),
+                                                 acc_sty->GetStorage()));
     } else
       ModifySymbolType(acc->LOC(), acc_sym, res_sty);
 
