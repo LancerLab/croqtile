@@ -1,0 +1,44 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | FileCheck %s
+
+// A C-accumulator chunk alias records its parent accumulator and K offset in
+// frag_chunk_rs_aliases_.  Re-pointing the same alias at a plain fragment must
+// drop that provenance so the next RS WGMMA uses the alias itself instead of
+// the old parent accumulator and out-of-scope K offset.
+__co__ auto frag_chunk_rs_repoint(global f16 [64, 16] a, global f16 [64, 16] b,
+                                  global f16 [16, 64] b2) {
+  f16 [64, 64] out{0.0f};
+  parallel {bm, bn} by [1, 1] : block {
+    a_s = dma.copy.swiz<128> a.chunkat(bm, _) => shared;
+    b_s = dma.copy.swiz<128> b.chunkat(bn, _) => shared;
+    b2_s = dma.copy.swiz<128> b2.chunkat(_, bn) => shared;
+
+    acc = mma.fill.f32 0.0f;
+    mma.row.row acc, a_s, b_s;
+
+    frag f16 [64, 64] acast;
+    apply {i, j} in acc.span
+      acast.at(i, j) = __to<f16>(acc.at(i, j));
+
+    frag f16 [64, 16] ca {0.0f};
+    frag f16 [64, 16] plain {0.0f};
+    foreach {iv_k0} in [1] {
+      ca = acast.chunkat(_, iv_k0);
+    }
+    ca = plain;
+
+    parallel g by 1 : group-4 {
+      acc1 = mma.fill.f32 0.0f;
+      mma.row.col acc1, ca, b2_s;
+      mma.store acc1, out.chunkat(bm, bn);
+    }
+  }
+  return out;
+}
+
+// CHECK-LABEL: __choreo_device_frag_chunk_rs_repoint
+// CHECK: ca = plain;
+// CHECK: warpgroup_fence_operand(acc1);
+// CHECK-NOT: warpgroup_fence_operand(acast);
+// CHECK: warpgroup_fence_operand(ca);
+// CHECK: MMA_64x64x16_F32F16F16_RS<{{.*}}>::fma(reinterpret_cast<const uint32_t*>(ca)[0]

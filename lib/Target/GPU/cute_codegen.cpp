@@ -3694,6 +3694,11 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
     } else {
       live_chunk_aliases.erase(name);
       live_chunk_aliases.erase(scoped_name);
+      // A plain assignment re-points the alias away from the C chunk, so
+      // drop any fragment-chunk RS provenance from an earlier assignment.
+      frag_chunk_rs_aliases_.erase(name);
+      frag_chunk_rs_aliases_.erase(scoped_name);
+      frag_chunk_rs_aliases_.erase(InScopeNameForRef(name));
     }
 
     // Propagate swizzle through shared-buffer aliases: ElemOf
