@@ -422,15 +422,15 @@ CuteCodeGen::FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const {
   return nullptr;
 }
 
-const AST::MMAOperation*
-CuteCodeGen::FindMetadataExec(const ptr<AST::Node>& node,
-                              const std::string& meta_sym) const {
-  if (!node) return nullptr;
+void CuteCodeGen::FindMetadataExecs(
+    const ptr<AST::Node>& node, const std::string& meta_sym,
+    std::vector<const AST::MMAOperation*>& execs) const {
+  if (!node) return;
   if (auto mma = dyn_cast<AST::MMA>(node.get())) {
     auto op = mma->GetOperation();
-    if (!op || !op->IsKind(AST::MMAOperation::Exec)) return nullptr;
+    if (!op || !op->IsKind(AST::MMAOperation::Exec)) return;
     auto mdata = op->ExecOperand(3);
-    if (!mdata) return nullptr;
+    if (!mdata) return;
     std::string name;
     if (auto id = mdata->GetSymbol()) {
       name = id->name;
@@ -441,23 +441,26 @@ CuteCodeGen::FindMetadataExec(const ptr<AST::Node>& node,
         name = ca->RefSymbol();
       }
     }
-    if (name.empty()) return nullptr;
+    if (name.empty()) return;
     if (name != meta_sym && name != InScopeName(meta_sym) &&
         UnScopedName(name) != UnScopedName(meta_sym))
-      return nullptr;
-    return op.get();
+      return;
+    if (std::find(execs.begin(), execs.end(), op.get()) == execs.end())
+      execs.push_back(op.get());
+    return;
   }
   if (auto mn = dyn_cast<AST::MultiNodes>(node.get())) {
     for (const auto& child : mn->values)
-      if (auto found = FindMetadataExec(child, meta_sym)) return found;
-    return nullptr;
+      FindMetadataExecs(child, meta_sym, execs);
+    return;
   }
-  if (auto as = dyn_cast<AST::Assignment>(node.get()))
-    return FindMetadataExec(as->value, meta_sym);
+  if (auto as = dyn_cast<AST::Assignment>(node.get())) {
+    FindMetadataExecs(as->value, meta_sym, execs);
+    return;
+  }
   if (auto ie = dyn_cast<AST::IfElseBlock>(node.get()))
-    if (auto found = FindMetadataExec(ie->else_stmts, meta_sym)) return found;
-  if (node->HasBody()) return FindMetadataExec(node->GetBody(), meta_sym);
-  return nullptr;
+    FindMetadataExecs(ie->else_stmts, meta_sym, execs);
+  if (node->HasBody()) FindMetadataExecs(node->GetBody(), meta_sym, execs);
 }
 
 bool CuteCodeGen::IsU32RegisterMetadata(const ptr<Type>& ty,
@@ -5750,10 +5753,12 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         // metadata chunk order.
         ptr<AST::ChunkAt> a_operand;
         int a_k_axis = -1;
-        const AST::MMAOperation* metadata_exec = nullptr;
+        std::vector<const AST::MMAOperation*> metadata_execs;
         for (auto it = foreach_body_stack_.rbegin();
-             it != foreach_body_stack_.rend() && !metadata_exec; ++it)
-          metadata_exec = FindMetadataExec(*it, sym);
+             it != foreach_body_stack_.rend(); ++it)
+          FindMetadataExecs(*it, sym, metadata_execs);
+        const AST::MMAOperation* metadata_exec =
+            metadata_execs.empty() ? nullptr : metadata_execs.front();
         if (metadata_exec) {
           auto a_expr = metadata_exec->ExecOperand(1);
           if (a_expr) {
@@ -5765,6 +5770,51 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                   GetWGMMAKAxis(cgi.GetSymbolMMA(InScopeName(a_sym))));
           }
         }
+        // The metadata value is shared by all consumers, so they must agree
+        // on which loop supplies the K tile.
+        auto ExecAKLoop = [&](const AST::MMAOperation* exec) -> std::string {
+          auto a_expr = exec->ExecOperand(1);
+          if (!a_expr) return {};
+          auto ref = a_expr->GetReference();
+          auto a_chunk = ref ? dyn_cast<AST::ChunkAt>(ref) : nullptr;
+          if (!a_chunk) return {};
+          auto a_sym = AST::FragName(a_expr);
+          if (a_sym.empty()) return {};
+          int axis = static_cast<int>(
+              GetWGMMAKAxis(cgi.GetSymbolMMA(InScopeName(a_sym))));
+          for (const auto& sop : a_chunk->AllOperations()) {
+            auto ta = dyn_cast<AST::SOP::TileAt>(sop);
+            if (!ta || !ta->GetIndices()) continue;
+            const auto& indices = ta->GetIndices()->AllValues();
+            for (size_t pos = 0; pos < indices.size(); ++pos) {
+              if (axis >= 0 && static_cast<int>(pos) != axis) continue;
+              if (axis < 0 && pos + 1 != indices.size()) continue;
+              auto id = AST::GetIdentifier(indices[pos]);
+              if (!id || id->name == "_") continue;
+              for (const auto& iv : foreach_iv_stack_)
+                if (id->name == iv || id->name == UnScopedName(iv)) return iv;
+            }
+          }
+          return {};
+        };
+        std::string first_a_k_loop;
+        bool metadata_conflict = false;
+        for (const auto* exec : metadata_execs) {
+          auto a_k_loop = ExecAKLoop(exec);
+          if (a_k_loop.empty()) continue;
+          if (first_a_k_loop.empty()) {
+            first_a_k_loop = a_k_loop;
+          } else if (a_k_loop != first_a_k_loop) {
+            Error1(n.LOC(), "prepacked metadata '" + sym +
+                                "' is consumed by execs with different A K "
+                                "chunk loops '" +
+                                UnScopedName(first_a_k_loop) + "' and '" +
+                                UnScopedName(a_k_loop) + "'");
+            metadata_conflict = true;
+            break;
+          }
+        }
+        if (metadata_conflict) break;
         std::string ref_sym = lca->RefSymbol();
         auto prepackInfo =
             resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue() || v2_mode);

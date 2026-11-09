@@ -933,9 +933,10 @@ private:
   bool HasWGMMAInFunction() const;
   const AST::MMAOperation*
   FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const;
-  // Find the first exec in `n` whose metadata operand is `meta_sym`.
-  const AST::MMAOperation* FindMetadataExec(const ptr<AST::Node>& n,
-                                            const std::string& meta_sym) const;
+  // Collect every exec in `n` whose metadata operand is `meta_sym`.
+  void FindMetadataExecs(const ptr<AST::Node>& n,
+                         const std::string& meta_sym,
+                         std::vector<const AST::MMAOperation*>& execs) const;
   void EmitWGMMAFinalize(std::ostringstream& os, const std::string& indent,
                          bool force_wait = false);
   bool IsU32RegisterMetadata(const ptr<Type>& ty,
