@@ -38,3 +38,33 @@ __co__ void swizzle_alias_scope(global bf16[128, 128] q, global bf16[128, 128] k
 // CHECK: bf16* qa = (bf16*)((bf16*)q_s
 // CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(__choreo_wgmma_ptr_0_iter)
 // CHECK: wgmma_make_smem_desc<WGMMA_MajorOrder::K_MAJOR, WGMMA_Swizzle::B128>(__choreo_wgmma_ptr_1_iter)
+
+// A TMA copy in an inner scope can target a shared buffer declared in an
+// enclosing scope.  Its swizzle entry must be filed under the reference-
+// resolved buffer scope so the later mma.load in another inner scope finds
+// the B128 mode and applies the XOR phase; otherwise the load reads the
+// swizzled buffer with the natural address arithmetic.
+__co__ auto swizzle_tma_load_scope(f16 [64, 16] lhs, f16 [16, 64] rhs) {
+  f16 [64, 64] output{0.0f};
+  parallel b by 1 : block {
+    shared f16 [64, 16] a_s;
+    shared f16 [16, 64] b_s;
+    parallel p by 1 : group-4 {
+      la = tma.copy.swiz<128> lhs.chunkat(_, _) => a_s;
+      lb = tma.copy.swiz<128> rhs.chunkat(_, _) => b_s;
+      // Declared after the copy, so the copy still targets the outer a_s.
+      shared f16 [64, 16] a_s;
+    }
+    parallel q by 1 : group-4 {
+      ma = mma.load a_s;
+      mc = mma.fill.f32 0.0f;
+      mma.row.col mc, ma, b_s;
+      mma.store mc, output;
+    }
+  }
+  return output;
+}
+
+// CHECK-LABEL: __choreo_device_swizzle_tma_load_scope
+// CHECK: size_t __mma_load_byte = __mma_load_logical * 2;
+// CHECK: ma[__mma_load_i] = __mma_load_src[(__mma_load_byte ^ ((__mma_load_byte & 896) >> 3)) / 2];

@@ -4644,7 +4644,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (t_sty->GetStorage() == Storage::SHARED &&
         swizzle_mode != SwizMode::NONE) {
       shared_buf_swiz_[t_buf.first] = swizzle_mode;
-      shared_buf_swiz_[InScopeName(t_sym)] = swizzle_mode;
+      shared_buf_swiz_[InScopeNameForRef(t_sym)] = swizzle_mode;
     }
 
     if (future_only) cooperatives.insert(InScopeName(n.future));
@@ -5127,7 +5127,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       if (has_future)
         shared_buf_swiz_[FutureSwizzleKey()] = swizzle_mode;
       shared_buf_swiz_[t_buf.first] = swizzle_mode;
-      shared_buf_swiz_[InScopeName(t_sym)] = swizzle_mode;
+      shared_buf_swiz_[InScopeNameForRef(t_sym)] = swizzle_mode;
     }
 
     if (auto idx = f_ca->IndexOfLastSpanAs()) {
@@ -6625,7 +6625,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             ca ? ca->RefSymbol()
                : (elemof_base ? elemof_base->name : (sym ? sym->name : ""));
         auto source_scoped =
-            source_sym.empty() ? source_sym : InScopeName(source_sym);
+            source_sym.empty() ? source_sym : InScopeNameForRef(source_sym);
 
         // If source_sym is an alias (assigned via `=` from a ChunkAt), resolve
         // it through live_chunk_aliases to find the underlying root buffer.
@@ -6640,7 +6640,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
             ca = ait->second;
             source_sym = ca->RefSymbol();
             source_scoped =
-                source_sym.empty() ? source_sym : InScopeName(source_sym);
+                source_sym.empty() ? source_sym : InScopeNameForRef(source_sym);
           }
         }
         bool is_chunk_rs_alias =
