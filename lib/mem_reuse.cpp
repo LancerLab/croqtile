@@ -782,6 +782,14 @@ void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,
             dbgs() << " (" << UnScopedExpr(a) << ", " << UnScopedExpr(b) << ")";
           dbgs() << "\n";
         }
+        // E2 audit: record every HB-legal overlay, even when the allocator
+        // finds no heap-size reduction for it.
+        if (!hb_overlapped_pairs.empty()) {
+          dbgs() << "info: HB overlap:";
+          for (const auto& [a, b] : hb_overlapped_pairs)
+            dbgs() << " (" << UnScopedExpr(a) << ", " << UnScopedExpr(b) << ")";
+          dbgs() << "\n";
+        }
       });
     }
   };
