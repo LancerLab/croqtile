@@ -557,7 +557,7 @@ void CuteCodeGen::AppendArraySlotOffset(
     std::string& buf_expr, const std::string& sym, const AST::NodeList& subs,
     bool is_host, const std::optional<size_t>& stride) const {
   if (subs.empty()) return;
-  auto sym_ty = GetSymbolType(sym);
+  auto sym_ty = GetScopedSymbolType(InScopeNameForRef(sym));
   auto array_ty = dyn_cast<ArrayType>(sym_ty);
   auto sty = GetSpannedType(sym_ty);
   if (!array_ty || !sty) {

@@ -1,0 +1,21 @@
+// A slot offset must use the same declaration as the base expression. Here an
+// outer alignas(256) span array has a 64-element slot stride, while a later
+// same-named inner span array has the packed 8-element stride. The access
+// before the inner declaration still refers to the outer array, so its slot
+// offset must keep the outer stride instead of picking up the shadowed type.
+//
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v '^ *//' | FileCheck %s
+
+__co__ void array_slot_shadow_scope(f32 [8] x) {
+  parallel b by 1 : block {
+    alignas(256) shared f32 [8] s[2];
+    parallel p by 1 : group-4 {
+      s0 = s[1];
+      // Declared after the access, so the access still refers to the outer s.
+      shared f32 [8] s[2];
+    }
+  }
+}
+
+// CHECK-LABEL: __choreo_device_array_slot_shadow_scope
+// CHECK: float* s0 = (float*)((float*)s + (1)*(64));
