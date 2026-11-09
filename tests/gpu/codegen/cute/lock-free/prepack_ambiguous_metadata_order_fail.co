@@ -1,0 +1,32 @@
+// An unchunked A operand has no K chunk IV, and renamed loops provide no
+// canonical iv_k/iv_warp role.  The metadata chunk order cannot be
+// determined, so the compiler must reject it rather than assume last-is-K.
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: not choreo -es -t cute -arch=sm_90a --use-prepack %s -o - 2>&1 | FileCheck %s
+
+__co__ auto prepack_ambiguous_metadata_order(u32 [64, 4] meta,
+                                             f16 [64, 16] lhs_packed,
+                                             f16 [8, 32] rhs) {
+  f32 [64, 8] output{0.0f};
+  parallel by 1 : block {
+    shared u32 [64, 4] meta_s[2];
+    shared f16 [64, 16] lhs_s[2];
+    dma.copy meta => meta_s[1];
+    dma.copy lhs_packed => lhs_s[1];
+    rhs_s = dma.copy rhs => shared;
+    mc = mma.fill.f32 0.0f;
+    parallel p by 1 : group-4 {
+      foreach kk in [2] {
+        foreach ww in [1] {
+          me = mma.load meta_s[1].chunkat(kk, ww);
+          mma.row.row.sp mc, lhs_s[1], rhs_s, me;
+        }
+      }
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// CHECK: error: prepacked metadata loop order cannot be determined without an A K chunk or canonical 'iv_k'/'iv_warp' loop names

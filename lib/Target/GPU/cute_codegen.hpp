@@ -480,6 +480,7 @@ private:
       }
     }
     if (k_found && w_found) return true;
+    const bool canonical_role = k_found || w_found;
 
     // When the exec A operand exposes a chunk IV at the MMA K axis, that IV
     // names the K role. Find the same IV in the metadata operand's chunkat:
@@ -543,7 +544,18 @@ private:
         return false;
       }
     } else if (operand) {
-      // Legacy positional form when the A operand has no K chunk IV. The
+      // Without an A K chunk IV, a renamed loop pair cannot tell a K-first
+      // metadata order from the last-is-K convention. A canonical role name
+      // is the only remaining evidence; otherwise reject the ambiguous form
+      // rather than silently assuming last-is-K.
+      if (metadata_order && !canonical_role) {
+        Error1(loc, "prepacked metadata loop order cannot be determined "
+                    "without an A K chunk or canonical 'iv_k'/'iv_warp' loop "
+                    "names; use a chunked A operand or an explicit order "
+                    "annotation");
+        return false;
+      }
+      // Legacy positional form for canonical or implicit-A roles. The
       // metadata buffer's established convention is last-is-K; the A axis
       // must not reinterpret that order without an A K IV to match.
       const int fallback_axis = metadata_order ? -1 : k_axis;

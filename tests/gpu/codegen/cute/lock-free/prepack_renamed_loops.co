@@ -1,7 +1,6 @@
 // Prepacked metadata indexing resolves the K-tile and warp-chunk roles from
-// the metadata operand's `chunkat` indices: the last index is the K slot and
-// the preceding index is the warp partition. Loop names and nesting order are
-// not used.
+// the A operand's K chunk IV and its position in the metadata `chunkat`.
+// Renamed loop names and nesting order are not used.
 //
 // REQUIRES: TARGET-SM_90A
 // RUN: choreo -es -t cute -arch=sm_90a --use-prepack %s -o - | grep -v '^ *//' | FileCheck %s
@@ -21,7 +20,8 @@ __co__ auto prepack_renamed_loops(u32 [64, 4] meta, f16 [64, 16] lhs_packed,
       foreach kk in [2] {
         foreach ww in [1] {
           me = mma.load meta_s[1].chunkat(ww, kk);
-          mma.row.row.sp mc, lhs_s[1], rhs_s, me;
+          mma.row.row.sp mc, lhs_s[1].chunkat(_, kk),
+              rhs_s.chunkat(_, kk), me;
         }
       }
     }
@@ -48,7 +48,8 @@ __co__ auto prepack_renamed_outer_loops(u32 [64, 4] meta,
         foreach kk in [2] {
           foreach ww in [1] {
             me = mma.load meta_s[1].chunkat(ww, kk);
-            mma.row.row.sp mc, lhs_s[1], rhs_s, me;
+            mma.row.row.sp mc, lhs_s[1].chunkat(_, kk),
+              rhs_s.chunkat(_, kk), me;
           }
         }
       }
@@ -74,7 +75,8 @@ __co__ auto prepack_renamed_wide_warp(u32 [64, 8] meta,
       foreach kk in [2] {
         foreach ww in [4] {
           me = mma.load meta_s[1].chunkat(ww, kk);
-          mma.row.row.sp mc, lhs_s[1], rhs_s, me;
+          mma.row.row.sp mc, lhs_s[1].chunkat(_, kk),
+              rhs_s.chunkat(_, kk), me;
         }
       }
     }
@@ -99,7 +101,8 @@ __co__ auto prepack_renamed_warp_outer(u32 [64, 4] meta,
       foreach ww in [1] {
         foreach kk in [2] {
           me = mma.load meta_s[1].chunkat(ww, kk);
-          mma.row.row.sp mc, lhs_s[1], rhs_s, me;
+          mma.row.row.sp mc, lhs_s[1].chunkat(_, kk),
+              rhs_s.chunkat(_, kk), me;
         }
       }
     }
@@ -110,23 +113,24 @@ __co__ auto prepack_renamed_warp_outer(u32 [64, 4] meta,
 
 // An intermediate loop whose range is smaller than the K loop must not be
 // selected as K.
-__co__ auto prepack_renamed_intermediate(u32 [64, 32] meta,
+__co__ auto prepack_renamed_intermediate(u32 [64, 8] meta,
                                          f16 [64, 16] lhs_packed,
                                          f16 [8, 32] rhs) {
   f32 [64, 8] output{0.0f};
   parallel by 1 : block {
-    shared u32 [64, 32] meta_s[2];
+    shared u32 [64, 8] meta_s[2];
     shared f16 [64, 16] lhs_s[2];
     dma.copy meta => meta_s[1];
     dma.copy lhs_packed => lhs_s[1];
     rhs_s = dma.copy rhs => shared;
     mc = mma.fill.f32 0.0f;
     parallel p by 1 : group-4 {
-      foreach kk in [8] {
-        foreach zz in [2] {
+      foreach kk in [2] {
+        foreach zz in [1] {
           foreach ww in [4] {
             me = mma.load meta_s[1].chunkat(ww, kk);
-            mma.row.row.sp mc, lhs_s[1], rhs_s, me;
+            mma.row.row.sp mc, lhs_s[1].chunkat(_, kk),
+              rhs_s.chunkat(_, kk), me;
           }
         }
       }
