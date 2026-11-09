@@ -1,0 +1,25 @@
+// A sparse CTMMA exec without an explicit metadata operand consumes the A
+// fragment's `<A>_mdata_ptr`, which is declared by mma.load only when the
+// matching `<A>_mdata` buffer exists. Without that buffer the generated C++
+// references an undeclared pointer, so diagnose it at the exec site.
+//
+// RUN: not choreo -es -t cute -arch=sm_86 %s 2>&1 | FileCheck %s
+
+__co__ auto ctmma_missing_meta(f16 [16, 16] lhs, f16 [8, 32] rhs) {
+  f32 [16, 8] output{0.0f};
+  parallel by 1 : block {
+    shared f16 [16, 16] a_s[2];
+    dma.copy lhs => a_s[1];
+    b_s = dma.copy rhs => shared;
+    mc = mma.fill.f32 0.0f;
+    parallel p by 32 : thread {
+      ma = mma.load a_s[1];
+      mb = mma.load b_s;
+      mma.row.row.sp mc, ma, mb;
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// CHECK: error: sparse CTMMA A operand 'a_s' is missing its 'a_s_mdata' metadata buffer; declare it or pass an explicit metadata operand

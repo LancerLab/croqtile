@@ -7706,6 +7706,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         if (policy_is_sparse && ssmi.frag == MMAInfo::FRAG_A) {
           std::string ref_sym = op.LoadFrom()->RefSymbol();
           if (!ref_sym.empty()) {
+            sparse_a_load_source_[InScopeName(sym)] = ref_sym;
             auto mdata_sym_name = ref_sym + "_mdata";
             auto mdata_base = [&](const std::string& name) {
               std::string base = name;
@@ -7722,22 +7723,28 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
               }
               return base;
             };
+            bool mdata_ptr_emitted = false;
             if (SSTab().IsDeclared(mdata_sym_name)) {
               auto mdata_key = InScopeName(mdata_sym_name) + ".data";
               if (ssm.HasDeviceName(mdata_key)) {
                 ds << d_indent << "uint8_t* " << sym
                    << "_mdata_ptr = (uint8_t*)"
                    << mdata_base(ssm.DeviceName(mdata_key)) << ";\n";
+                mdata_ptr_emitted = true;
               } else if (ssm.HasDeviceName(InScopeName(mdata_sym_name))) {
                 ds << d_indent << "uint8_t* " << sym
                    << "_mdata_ptr = (uint8_t*)"
                    << mdata_base(ssm.DeviceName(InScopeName(mdata_sym_name)))
                    << ";\n";
+                mdata_ptr_emitted = true;
               }
             } else if (isa<FutureType>(GetSymbolType(ref_sym))) {
               ds << d_indent << "uint8_t* " << sym << "_mdata_ptr = (uint8_t*)"
                  << ref_sym << ".mdata();\n";
+              mdata_ptr_emitted = true;
             }
+            if (mdata_ptr_emitted)
+              sparse_a_mdata_ptr_frags_.insert(InScopeName(sym));
           }
         }
       } else if (ssmi.frag == MMAInfo::FRAG_C) {
@@ -7803,6 +7810,24 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           }
           meta_var = e_sym;
         } else {
+          // The A load only declares `<frag>_mdata_ptr` when the source
+          // buffer has a `<ref>_mdata` declaration (or is a future). Without
+          // it the nibble reader below would reference an undeclared local.
+          // Both the source and the emitted-pointer state are keyed by the
+          // fragment's scoped name so a same-named fragment in a sibling
+          // scope cannot inherit the flag.
+          auto a_scoped = InScopeName(a_sym);
+          auto src_it = sparse_a_load_source_.find(a_scoped);
+          if (src_it != sparse_a_load_source_.end()) {
+            const std::string& ref_sym = src_it->second;
+            if (!sparse_a_mdata_ptr_frags_.count(a_scoped)) {
+              Error1(n.LOC(), "sparse CTMMA A operand '" + ref_sym +
+                                  "' is missing its '" + ref_sym +
+                                  "_mdata' metadata buffer; declare it or "
+                                  "pass an explicit metadata operand");
+              return false;
+            }
+          }
           auto& ssmi_a = cgi.GetSymbolMMA(InScopeName(a_sym));
           meta_var = a_sym + "_meta";
           std::string meta_ptr = a_sym + "_mdata_ptr";

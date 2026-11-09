@@ -369,6 +369,10 @@ private:
   std::vector<std::vector<ExplicitScaleAccumInfo>> explicit_scale_accum_scopes;
   std::unordered_map<std::string, ptr<AST::ChunkAt>> live_chunk_aliases;
   std::unordered_set<std::string> explicit_mma_loads_;
+  // A sparse A fragment's source buffer, recorded by mma.load so the sparse
+  // CTMMA exec site can diagnose a missing `<A>_mdata` declaration.
+  std::unordered_map<std::string, std::string> sparse_a_load_source_;
+  std::unordered_set<std::string> sparse_a_mdata_ptr_frags_;
   std::unordered_set<std::string> shared_scalar_syms_;
   // Scalar declarations without an initializer, keyed by scoped name. Used to
   // reject a sparse WGMMA metadata register that is consumed while unset.
@@ -580,6 +584,8 @@ private:
     hoisted_scale_accum_scopes.clear();
     live_chunk_aliases.clear();
     explicit_mma_loads_.clear();
+    sparse_a_load_source_.clear();
+    sparse_a_mdata_ptr_frags_.clear();
     shared_scalar_syms_.clear();
     uninitialized_scalars_.clear();
     single_matcher_iv_.clear();

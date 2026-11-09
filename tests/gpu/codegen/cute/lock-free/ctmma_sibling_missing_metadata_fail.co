@@ -1,0 +1,37 @@
+// A same-named sparse CTMMA A fragment in a sibling scope must not inherit
+// the "metadata pointer emitted" state of the first sibling. The second
+// fragment has no `<A>_mdata` buffer, so the implicit-metadata exec must be
+// diagnosed instead of referencing an undeclared `ma_mdata_ptr`.
+//
+// RUN: not choreo -es -t cute -arch=sm_86 %s 2>&1 | FileCheck %s
+
+__co__ auto ctmma_sibling_missing_meta(f16 [16, 16] lhs, u8 [16, 4] lhs_meta,
+                                       f16 [8, 32] rhs) {
+  f32 [16, 8] output{0.0f};
+  parallel by 1 : block {
+    shared f16 [16, 16] a_s[2];
+    shared f16 [16, 16] a_t[2];
+    shared u8 [16, 4] a_s_mdata[2];
+    dma.copy lhs => a_s[1];
+    dma.copy lhs => a_t[1];
+    dma.copy lhs_meta => a_s_mdata[1];
+    b_s = dma.copy rhs => shared;
+    mc = mma.fill.f32 0.0f;
+    // First sibling: declared metadata, so the state flag is set.
+    parallel p by 32 : thread {
+      ma = mma.load a_s[1];
+      mb = mma.load b_s;
+      mma.row.row.sp mc, ma, mb;
+    }
+    // Second sibling: same fragment name, no metadata buffer.
+    parallel q by 32 : thread {
+      ma = mma.load a_t[1];
+      mb = mma.load b_s;
+      mma.row.row.sp mc, ma, mb;
+    }
+    mma.store mc, output;
+  }
+  return output;
+}
+
+// CHECK: error: sparse CTMMA A operand 'a_t' is missing its 'a_t_mdata' metadata buffer; declare it or pass an explicit metadata operand
