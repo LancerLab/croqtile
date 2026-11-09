@@ -5840,13 +5840,42 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         // The same metadata value also has a single warp-chunk role.  Once
         // the consumers agree on K, they must also name the same warp loop;
         // otherwise every consumer after the first is indexed with the wrong
-        // warp chunk.
+        // warp chunk.  Read the warp role from the operand chunks: an
+        // unrelated loop nested around a consumer does not index either
+        // operand and must not be mistaken for a warp role.
+        auto OperandWarpLoop = [&](ptr<AST::Expr> operand,
+                                   const std::vector<std::string>& ivs)
+            -> std::string {
+          auto ref = operand->GetReference();
+          auto chunk = ref ? dyn_cast<AST::ChunkAt>(ref) : nullptr;
+          if (!chunk) return {};
+          auto sym = AST::FragName(operand);
+          if (sym.empty()) return {};
+          int axis = static_cast<int>(
+              GetWGMMAKAxis(cgi.GetSymbolMMA(InScopeName(sym))));
+          for (const auto& sop : chunk->AllOperations()) {
+            auto ta = dyn_cast<AST::SOP::TileAt>(sop);
+            if (!ta || !ta->GetIndices()) continue;
+            const auto& indices = ta->GetIndices()->AllValues();
+            for (size_t pos = 0; pos < indices.size(); ++pos) {
+              if (axis >= 0 && static_cast<int>(pos) == axis) continue;
+              if (axis < 0 && pos + 1 == indices.size()) continue;
+              auto id = AST::GetIdentifier(indices[pos]);
+              if (!id || id->name == "_") continue;
+              for (const auto& iv : ivs)
+                if (id->name == iv || id->name == UnScopedName(iv)) return iv;
+            }
+          }
+          return {};
+        };
         auto ConsumerWarpLoop = [&](const MetadataConsumer& consumer)
             -> std::string {
-          auto a_k_loop = ExecAKLoop(consumer.exec, consumer.ivs);
-          for (auto it = consumer.ivs.rbegin(); it != consumer.ivs.rend();
-               ++it)
-            if (*it != a_k_loop) return *it;
+          if (auto a = consumer.exec->ExecOperand(1))
+            if (auto warp = OperandWarpLoop(a, consumer.ivs); !warp.empty())
+              return warp;
+          if (auto b = consumer.exec->ExecOperand(2))
+            if (auto warp = OperandWarpLoop(b, consumer.ivs); !warp.empty())
+              return warp;
           return {};
         };
         std::string first_warp_loop;

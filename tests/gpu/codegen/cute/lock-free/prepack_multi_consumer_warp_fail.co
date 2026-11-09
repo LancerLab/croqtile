@@ -25,12 +25,12 @@ __co__ auto prepack_multi_consumer_warp(u32 [64, 4] meta,
       foreach kk in [2] {
         foreach ww in [1] {
           me = mma.load meta_s[1].chunkat(kk, ww);
-          foreach wa in [2] {
-            mma.row.row.sp mc, lhs_s[1].chunkat(_, kk),
+          foreach wa in [1] {
+            mma.row.row.sp mc, lhs_s[1].chunkat(wa, kk),
                 rhs_s.chunkat(_, kk), me;
           }
-          foreach wb in [2] {
-            mma.row.row.sp mc, lhs2_s[1].chunkat(_, kk),
+          foreach wb in [1] {
+            mma.row.row.sp mc, lhs2_s[1].chunkat(wb, kk),
                 rhs2_s.chunkat(_, kk), me;
           }
         }
