@@ -1691,10 +1691,8 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
       ssm.MapHostSymbol(sname + "__device", buf_sym);
       ssm.MapHostSymbol(sname, buf_sym);
       ssm.MapDeviceSymbolIfNotExist(sname, sym);
-      // A slot-subscribed span_as alias points into its source allocation and
-      // must not be freed.
-      if (!sa || !sa->subscriptions || sa->subscriptions->Count() == 0)
-        global_buffers.insert(buf_sym);
+      // A span_as alias points into its source allocation and owns no memory.
+      if (!sa) global_buffers.insert(buf_sym);
       return true;
     }
 
