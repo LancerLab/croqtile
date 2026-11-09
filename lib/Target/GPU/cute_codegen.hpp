@@ -391,11 +391,6 @@ private:
       single_matcher_iv_scopes_;
   std::unordered_map<std::string, SwizMode> shared_buf_swiz_;
 
-  struct TMAInnerSplit {
-    size_t swiz_elems;
-  };
-  std::unordered_map<std::string, TMAInnerSplit> tma_inner_splits_;
-
   struct FragChunkRSInfo {
     std::string parent_c_sym;
     std::string offset_var;
@@ -774,7 +769,6 @@ private:
     single_matcher_iv_.clear();
     single_matcher_iv_scopes_.clear();
     shared_buf_swiz_.clear();
-    tma_inner_splits_.clear();
     frag_chunk_rs_aliases_.clear();
     cluster_trigger_events_.clear();
     ready_event_names_.clear();

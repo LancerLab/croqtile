@@ -1,0 +1,33 @@
+// A valid swizzled TMA copy whose inner extent exceeds the swizzle width is
+// split into a rank-3 tensor map.  The device copy must materialize the same
+// three coordinates as the host map: [inner % swiz, outer, inner / swiz].
+//
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - | grep -v '^ *//' | FileCheck %s
+
+__co__ void tma_swizzle_split_load(global f16 [64, 256] x) {
+  parallel b by 1 : block {
+    shared f16 [64, 256] s;
+    load = tma.copy.async.swiz<128> x.view(64, 256).from(1, 64) => s;
+    wait load;
+  }
+}
+
+// Inner extent 64 elements is one 128-byte swizzle group, so the flat
+// coordinate (outer 1, inner 64) becomes (64 % 64, 1, 64 / 64).
+// CHECK-LABEL: __choreo_device_tma_swizzle_split_load
+// CHECK: tma_load_3d_shared_cta_global_mbarrier({{.*}}, 0, 1, 1);
+// CHECK: uint64_t __choreo_tma_0_shape[] = {64, 64, 4};
+// CHECK: uint32_t __choreo_tma_0_box_shape[] = {(uint32_t)(64), (uint32_t)(64), (uint32_t)(4)};
+
+__co__ void tma_swizzle_split_store(global f16 [64, 256] out) {
+  parallel b by 1 : block {
+    shared f16 [64, 256] s;
+    tma.copy.swiz<128> s => out.view(64, 256).from(1, 64);
+  }
+}
+
+// The store path must split the same coordinate and select the 3D bulk copy.
+// CHECK-LABEL: __choreo_device_tma_swizzle_split_store
+// CHECK: cde::cp_async_bulk_tensor_3d_shared_to_global(&__choreo_tma_1_tensor_map, 0, 1, 1, s);
+// CHECK: uint64_t __choreo_tma_1_shape[] = {64, 64, 4};

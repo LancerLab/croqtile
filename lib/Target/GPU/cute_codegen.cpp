@@ -5221,11 +5221,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       }
       size_t effective_tma_rank = t_shape.Rank();
       if (tma_idx >= 0) {
-        const std::string& desc_name = tma_descs[tma_idx].GetName();
-        auto split_it = tma_inner_splits_.find(desc_name);
-        if (split_it != tma_inner_splits_.end()) {
+        if (auto split = tma_descs[tma_idx].GetSwizElems()) {
           effective_tma_rank += 1;
-          auto se = sbe::nu((int64_t)split_it->second.swiz_elems);
+          auto se = sbe::nu((int64_t)*split);
           auto orig_inner = rev_indices.front();
           auto orig_outer = rev_indices.back();
           rev_indices.clear();
@@ -5549,10 +5547,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         bool has_split = false;
         sbe::Operand split_se;
         if (tma_idx >= 0) {
-          auto s2g_it = tma_inner_splits_.find(tma_descs[tma_idx].GetName());
-          if (s2g_it != tma_inner_splits_.end()) {
+          if (auto split = tma_descs[tma_idx].GetSwizElems()) {
             has_split = true;
-            split_se = sbe::nu((int64_t)s2g_it->second.swiz_elems);
+            split_se = sbe::nu((int64_t)*split);
             s2g_rank += 1;
           }
         }
@@ -11537,7 +11534,7 @@ void CuteCodeGen::EmitTMAConfiguration(AST::ParallelBy* pb) {
           host_stride = Shape(new_stride);
 
           host_rank += 1;
-          tma_inner_splits_[desc.GetName()] = {swiz_elems};
+          desc.SetSwizElems(swiz_elems);
         }
       }
     }

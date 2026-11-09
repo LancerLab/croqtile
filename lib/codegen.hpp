@@ -2,6 +2,7 @@
 #define CHOREO_CODEGEN_HPP_
 
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
@@ -298,6 +299,9 @@ private:
   // Rank of the tensor map actually encoded on the host (root-param/view
   // flattening and the swizzle split are emission decisions).
   size_t map_rank = GetInvalidRank();
+  // Element width of one swizzle group after a host-side swizzle split, or
+  // nullopt when the descriptor was not split.
+  std::optional<size_t> swiz_elems;
 
 public:
   TMADesc(const ptr<AST::ChunkAt>& f, const ptr<AST::ChunkAt>& t,
@@ -354,6 +358,8 @@ public:
   bool IsEventManaged() const { return event_managed; }
   size_t GetMapRank() const { return map_rank; }
   void SetMapRank(size_t rank) { map_rank = rank; }
+  std::optional<size_t> GetSwizElems() const { return swiz_elems; }
+  void SetSwizElems(size_t elems) { swiz_elems = elems; }
 
   // Root parameter resolution for TMA on computed subviews.
   // When the TMA source is not a direct function parameter (e.g.,
