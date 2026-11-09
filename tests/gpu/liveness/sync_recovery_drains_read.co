@@ -1,0 +1,54 @@
+// REQUIRES: TARGET-GPU
+// RUN: env CHOREO_SYNC_RECOVERY=1 CHOREO_SYNC_RECOVERY_KEEP=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>/dev/null | FileCheck --check-prefix=KEEP %s
+// RUN: env CHOREO_SYNC_RECOVERY=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>&1 | FileCheck --check-prefix=ELIDE %s
+//
+// Mirror of sync_recovery_drains.co: the producer engine-reads the slot first
+// (an async store) and engine-writes it last (an async load). The read drain's
+// precondition is therefore the *earlier* store, while the full drain's is the
+// later load. This locks the read direction of the direction-specific fold: a
+// single "last engine access" precondition would require the read drain to
+// follow the load, where the store's wait no longer covers it.
+
+// KEEP: g.wait();
+// KEEP-NEXT: cde::cp_async_bulk_wait_group_read<0>();
+// KEEP-NEXT: cuda::ptx::cp_async_bulk_wait_group(cuda::ptx::n32_t<0>{});
+// KEEP-NEXT: sig.arrive
+
+// ELIDE-COUNT-2: [sync-recovery] elide AST::CompletionWait (source wait on the draining copy)
+// ELIDE: g.wait();
+// ELIDE-NOT: cde::cp_async_bulk_wait_group_read<0>()
+// ELIDE-NOT: cuda::ptx::cp_async_bulk_wait_group
+// ELIDE: sig.arrive
+
+__co__ s32 [1, 16] reuse_drains_read(s32 [1, 16] src) {
+  s32 [1, 16] out;
+
+  parallel p by 1 : block {
+    parallel q by 2 : group-4 {
+      shared event sig;
+
+      inthreads.async (q == 1) {
+        shared s32 [1, 16] a;
+        f = tma.copy.async a => out;
+        wait f;
+        g = tma.copy.async src => a;
+        wait g;
+        trigger sig;
+      }
+
+      inthreads.async (q == 0) {
+        wait sig;
+        shared s32 [1, 16] b;
+        h = tma.copy.async src => b;
+        wait h;
+        out.at(0, 1) = b.at(0, 0);
+      }
+
+      sync.barrier : block;
+    }
+  }
+
+  return out;
+}
+
+int main() { return 0; }
