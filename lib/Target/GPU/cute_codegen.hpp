@@ -318,6 +318,10 @@ private:
   // Used to derive inline phase formulas for mbarrier waits and to resolve
   // the K-tile/warp-chunk roles of prepacked metadata indexing.
   std::vector<std::string> foreach_iv_stack_;
+  // Enclosing foreach bodies, used to locate the exec that consumes an
+  // explicit prepacked metadata load so its A-operand chunk indices can be
+  // reconciled with the metadata chunk order.
+  std::vector<ptr<AST::MultiNodes>> foreach_body_stack_;
   bool in_named_var_decl_ = false;
   bool has_analyzed_warpspec = false;
   bool warpspec_wgmma_arrived = false;
@@ -444,17 +448,25 @@ private:
                            const ptr<AST::ChunkAt>& load_from);
   // The prepacked dense formats index the packed layout by the K-tile and
   // warp-chunk loop roles. Canonical `iv_k`/`iv_warp` names are recognised
-  // first; otherwise the roles come from the operand's `chunkat` indices: the
-  // last index is the reduction/K slot and any preceding index is the
-  // M/warp-partition slot. A kernel with no loops is a single tile (0, 0).
-  // Returns false and diagnoses when the roles cannot be resolved.
-  bool PrepackedMetadataIndexExprs(const location& loc,
-                                   const ptr<AST::ChunkAt>& operand,
-                                   std::string& kExpr, std::string& warpExpr,
-                                   int k_axis = -1) const {
+  // first. At the exec site the roles come from the A operand's `chunkat`
+  // indices. At an explicit metadata load, the A K chunk IV is matched against
+  // the metadata chunk indices, so either metadata chunk order resolves to
+  // the same K IV. A kernel with no loops is a single tile (0, 0). Returns
+  // false and diagnoses when the roles cannot be resolved.
+  bool PrepackedMetadataIndexExprs(
+      const location& loc, const ptr<AST::ChunkAt>& operand,
+      std::string& kExpr, std::string& warpExpr, int k_axis = -1,
+      const ptr<AST::ChunkAt>& a_operand = nullptr,
+      bool metadata_order = false) const {
     kExpr = "0";
     warpExpr = "0";
     if (foreach_iv_stack_.empty()) return true;
+
+    auto match_loop = [&](const std::string& name) -> std::string {
+      for (const auto& iv : foreach_iv_stack_)
+        if (name == iv || name == UnScopedName(iv)) return iv;
+      return {};
+    };
 
     bool k_found = false;
     bool w_found = false;
@@ -467,8 +479,74 @@ private:
         w_found = true;
       }
     }
+    if (k_found && w_found) return true;
 
-    if ((!k_found || !w_found) && operand) {
+    // When the exec A operand exposes a chunk IV at the MMA K axis, that IV
+    // names the K role. Find the same IV in the metadata operand's chunkat:
+    // its position there determines the metadata layout, independent of
+    // whether the metadata chunk order is last-is-K or K-first.
+    std::string a_k_iv;
+    bool a_has_tile = false;
+    if (a_operand) {
+      bool a_axis_exposed = k_axis < 0;
+      for (const auto& sop : a_operand->AllOperations()) {
+        auto ta = dyn_cast<AST::SOP::TileAt>(sop);
+        if (!ta || !ta->GetIndices()) continue;
+        a_has_tile = true;
+        const auto& indices = ta->GetIndices()->AllValues();
+        if (k_axis >= 0 && static_cast<size_t>(k_axis) < indices.size())
+          a_axis_exposed = true;
+        for (size_t pos = 0; pos < indices.size(); ++pos) {
+          if (k_axis >= 0 && static_cast<int>(pos) != k_axis) continue;
+          if (k_axis < 0 && pos + 1 != indices.size()) continue;
+          auto id = AST::GetIdentifier(indices[pos]);
+          if (!id || id->name == "_") continue;
+          auto iv = match_loop(id->name);
+          if (!iv.empty()) a_k_iv = iv;
+        }
+      }
+      if (a_has_tile && !a_axis_exposed) {
+        Error1(loc, "prepacked metadata indexing cannot locate the A K axis "
+                    "in the operand chunk indices");
+        return false;
+      }
+      if (a_has_tile && a_k_iv.empty()) {
+        Error1(loc, "prepacked metadata indexing cannot determine the A K "
+                    "loop from the operand chunk indices");
+        return false;
+      }
+    }
+
+    if (!a_k_iv.empty() && operand) {
+      bool metadata_has_k = false;
+      for (const auto& sop : operand->AllOperations()) {
+        auto ta = dyn_cast<AST::SOP::TileAt>(sop);
+        if (!ta || !ta->GetIndices()) continue;
+        for (const auto& node : ta->GetIndices()->AllValues()) {
+          auto id = AST::GetIdentifier(node);
+          if (!id || id->name == "_") continue;
+          auto iv = match_loop(id->name);
+          if (iv.empty()) continue;
+          if (iv == a_k_iv) {
+            kExpr = iv;
+            k_found = true;
+            metadata_has_k = true;
+          } else {
+            warpExpr = iv;
+            w_found = true;
+          }
+        }
+      }
+      if (!metadata_has_k) {
+        Error1(loc, "prepacked metadata chunk indices do not contain the A "
+                    "operand's K loop '" + a_k_iv + "'");
+        return false;
+      }
+    } else if (operand) {
+      // Legacy positional form when the A operand has no K chunk IV. The
+      // metadata buffer's established convention is last-is-K; the A axis
+      // must not reinterpret that order without an A K IV to match.
+      const int fallback_axis = metadata_order ? -1 : k_axis;
       for (const auto& sop : operand->AllOperations()) {
         auto ta = dyn_cast<AST::SOP::TileAt>(sop);
         if (!ta || !ta->GetIndices()) continue;
@@ -476,25 +554,22 @@ private:
         for (size_t pos = 0; pos < indices.size(); ++pos) {
           auto id = AST::GetIdentifier(indices[pos]);
           if (!id || id->name == "_") continue;
-          for (const auto& iv : foreach_iv_stack_) {
-            if (id->name != iv && id->name != UnScopedName(iv)) continue;
-            bool is_k = k_axis >= 0
-                            ? static_cast<int>(pos) == k_axis
-                            : pos + 1 == indices.size();
-            if (is_k) {
-              kExpr = iv;
-              k_found = true;
-            } else {
-              warpExpr = iv;
-              w_found = true;
-            }
+          auto iv = match_loop(id->name);
+          if (iv.empty()) continue;
+          bool is_k = fallback_axis >= 0
+                          ? static_cast<int>(pos) == fallback_axis
+                          : pos + 1 == indices.size();
+          if (is_k) {
+            kExpr = iv;
+            k_found = true;
+          } else {
+            warpExpr = iv;
+            w_found = true;
           }
         }
       }
     }
 
-    // When the operand identifies only one role, the sole remaining loop is
-    // the other role. More than one remaining loop is ambiguous.
     if (k_found != w_found) {
       std::string remaining;
       size_t candidates = 0;
@@ -823,6 +898,9 @@ private:
   bool HasWGMMAInFunction() const;
   const AST::MMAOperation*
   FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const;
+  // Find the first exec in `n` whose metadata operand is `meta_sym`.
+  const AST::MMAOperation* FindMetadataExec(const ptr<AST::Node>& n,
+                                            const std::string& meta_sym) const;
   void EmitWGMMAFinalize(std::ostringstream& os, const std::string& indent,
                          bool force_wait = false);
   bool IsU32RegisterMetadata(const ptr<Type>& ty,

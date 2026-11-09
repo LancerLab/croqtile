@@ -422,6 +422,44 @@ CuteCodeGen::FindFirstScaledWGMMAExec(const ptr<AST::Node>& n) const {
   return nullptr;
 }
 
+const AST::MMAOperation*
+CuteCodeGen::FindMetadataExec(const ptr<AST::Node>& node,
+                              const std::string& meta_sym) const {
+  if (!node) return nullptr;
+  if (auto mma = dyn_cast<AST::MMA>(node.get())) {
+    auto op = mma->GetOperation();
+    if (!op || !op->IsKind(AST::MMAOperation::Exec)) return nullptr;
+    auto mdata = op->ExecOperand(3);
+    if (!mdata) return nullptr;
+    std::string name;
+    if (auto id = mdata->GetSymbol()) {
+      name = id->name;
+    } else if (auto ref = mdata->GetReference()) {
+      if (auto expr = dyn_cast<AST::Expr>(ref)) {
+        if (auto id = expr->GetSymbol()) name = id->name;
+      } else if (auto ca = dyn_cast<AST::ChunkAt>(ref)) {
+        name = ca->RefSymbol();
+      }
+    }
+    if (name.empty()) return nullptr;
+    if (name != meta_sym && name != InScopeName(meta_sym) &&
+        UnScopedName(name) != UnScopedName(meta_sym))
+      return nullptr;
+    return op.get();
+  }
+  if (auto mn = dyn_cast<AST::MultiNodes>(node.get())) {
+    for (const auto& child : mn->values)
+      if (auto found = FindMetadataExec(child, meta_sym)) return found;
+    return nullptr;
+  }
+  if (auto as = dyn_cast<AST::Assignment>(node.get()))
+    return FindMetadataExec(as->value, meta_sym);
+  if (auto ie = dyn_cast<AST::IfElseBlock>(node.get()))
+    if (auto found = FindMetadataExec(ie->else_stmts, meta_sym)) return found;
+  if (node->HasBody()) return FindMetadataExec(node->GetBody(), meta_sym);
+  return nullptr;
+}
+
 bool CuteCodeGen::IsU32RegisterMetadata(const ptr<Type>& ty,
                                        const std::string& scoped) const {
   auto scty = dyn_cast<ScalarType>(ty);
@@ -1585,6 +1623,7 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     if (!explicit_scale_accum_scopes.empty())
       explicit_scale_accum_scopes.pop_back();
     if (!foreach_iv_stack_.empty()) foreach_iv_stack_.pop_back();
+    if (!foreach_body_stack_.empty()) foreach_body_stack_.pop_back();
   } else if (auto it = dyn_cast<AST::InThreadsBlock>(&n)) {
     DecrDeviceIndent();
     if (!it->stmts->None()) {
@@ -5706,6 +5745,26 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         bool meta_64 = k_val && *k_val > 32 && !fp8_sparse_k64;
         std::string meta_ty = meta_64 ? "uint64_t" : "uint32_t";
         bool v2_mode = use_prepack_v2.GetValue();
+        // Find the exec consuming this metadata fragment in an enclosing
+        // body so its A operand's chunk IVs can be matched against the
+        // metadata chunk order.
+        ptr<AST::ChunkAt> a_operand;
+        int a_k_axis = -1;
+        const AST::MMAOperation* metadata_exec = nullptr;
+        for (auto it = foreach_body_stack_.rbegin();
+             it != foreach_body_stack_.rend() && !metadata_exec; ++it)
+          metadata_exec = FindMetadataExec(*it, sym);
+        if (metadata_exec) {
+          auto a_expr = metadata_exec->ExecOperand(1);
+          if (a_expr) {
+            if (auto ref = a_expr->GetReference())
+              a_operand = dyn_cast<AST::ChunkAt>(ref);
+            auto a_sym = AST::FragName(a_expr);
+            if (!a_sym.empty())
+              a_k_axis = static_cast<int>(
+                  GetWGMMAKAxis(cgi.GetSymbolMMA(InScopeName(a_sym))));
+          }
+        }
         std::string ref_sym = lca->RefSymbol();
         auto prepackInfo =
             resolvePrepackedU32Meta(ref_sym, use_prepack.GetValue() || v2_mode);
@@ -5777,7 +5836,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           } else {
             std::string k_idx_expr, warp_idx_expr;
             if (PrepackedMetadataIndexExprs(n.LOC(), lca, k_idx_expr,
-                                            warp_idx_expr))
+                                            warp_idx_expr, a_k_axis,
+                                            a_operand, true))
               emitPrepackedV2Snippet(sym, meta_base, row_stride, col_stride,
                                      k_idx_expr, warp_idx_expr);
           }
@@ -5787,7 +5847,8 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
           else {
             std::string k_idx_expr, warp_idx_expr;
             if (PrepackedMetadataIndexExprs(n.LOC(), lca, k_idx_expr,
-                                            warp_idx_expr))
+                                            warp_idx_expr, a_k_axis,
+                                            a_operand, true))
               emitPrepackedU32Snippet(sym, meta_base, row_stride, col_stride,
                                       k_idx_expr, warp_idx_expr);
           }
@@ -9591,6 +9652,8 @@ AutomapStrategy CuteCodeGen::AnalyzeAutomap(const AST::ForeachBlock& n) {
 
 bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
+
+  foreach_body_stack_.push_back(n.GetBody());
 
   explicit_scale_accum_scopes.push_back(
       !IsHost() ? AnalyzeExplicitScaleAccumScope(n.GetBody())
