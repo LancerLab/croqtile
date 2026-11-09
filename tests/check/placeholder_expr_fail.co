@@ -1,0 +1,13 @@
+// A placeholder is not a value in expression position.  The compiler must
+// report it directly instead of treating `_` as an undeclared symbol and
+// leaving a missing node type for later passes.
+//
+// RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+
+__co__ void placeholder_expr() {
+  int x = _;
+}
+
+// CHECK-NOT: symbol `_' is used before declaration.
+// CHECK: error: placeholder `_` is not a value; use it only in a dimension or chunkat wildcard position.
+// CHECK-NOT: symbol `_' is used before declaration.

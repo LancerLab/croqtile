@@ -1911,6 +1911,13 @@ bool EarlySemantics::Visit(AST::Identifier& n) {
                                   MakeIntegerType()); // named dim is integer
     } else
       ReportErrorWhenViolateODR(n.LOC(), n.name, __FILE__, __LINE__);
+  } else if (n.name == "_" && !SSTab().IsDeclared(n.name)) {
+    // `_` is the wildcard/placeholder token, not a user symbol.  It is only
+    // meaningful in wildcard positions; elsewhere it is not a value.  Give it
+    // an integer fallback so later passes never see a missing node type.
+    Error1(n.LOC(), "placeholder `_` is not a value; use it only in a "
+                    "dimension or chunkat wildcard position.");
+    SetNodeType(n, MakeIntegerType());
   } else {
     if (in_template_param && !SSTab().IsDeclared(n.name)) {
       Warning(n.LOC(), "symbol `" + n.name + "' is used before declaration.");

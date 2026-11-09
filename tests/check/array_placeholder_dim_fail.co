@@ -1,6 +1,5 @@
-// A placeholder cannot be an array dimension.  The compiler must diagnose it
-// rather than dereferencing the dimension's missing node type in
-// EarlySemantics.
+// A placeholder cannot be an array dimension.  The compiler must report the
+// reserved placeholder token rather than treating it as an undeclared symbol.
 //
 // RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
 
@@ -12,5 +11,6 @@ __co__ void placeholder_array_dim(int M) {
   }
 }
 
-// CHECK: error: symbol `_' is used before declaration.
-// CHECK: error: Dimension of array can only be const integer value, but got a placeholder '_'.
+// CHECK-NOT: symbol `_' is used before declaration.
+// CHECK: error: placeholder `_` is not a value; use it only in a dimension or chunkat wildcard position.
+// CHECK-NOT: symbol `_' is used before declaration.
