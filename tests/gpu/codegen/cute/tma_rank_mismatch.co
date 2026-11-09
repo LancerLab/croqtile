@@ -4,6 +4,7 @@
 //
 // REQUIRES: TARGET-SM_90A
 // RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+// RUN: not choreo -es -t cute -arch=sm_90a -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s --check-prefix=FACTS
 
 __co__ void tma_rank_mismatch(global f32 [8, 16, 32] x) {
   parallel b by 1 : block {
@@ -25,3 +26,12 @@ __co__ void tma_view_raises_rank(global f32 [2, 128, 128] x) {
 
 // CHECK: error: TMA descriptor rank does not match the tile rank.
 // CHECK: error: TMA instruction rank (3) does not match the tensor-map rank (2).
+
+// Both rank checks publish the observed ranks. The first load has fewer
+// descriptor coordinates than the three-dimensional tile; the view-based
+// loads request a three-dimensional instruction while the map stays 2-D.
+// FACTS: <diagnostic severity="error" category="tma-rank"{{.*}}>
+// FACTS-NEXT: <constraint>TMA descriptor coordinates match the tile rank; predicate: coordinate_count == tile_rank</constraint>
+// FACTS-NEXT: <observed>coordinate_count = 2; tile_rank = 3; valid: coordinate_count == tile_rank</observed>
+// FACTS: <constraint>TMA instruction rank matches the tensor-map rank; predicate: instruction_rank == map_rank</constraint>
+// FACTS-NEXT: <observed>instruction_rank = 3; map_rank = 2; valid: instruction_rank == map_rank</observed>

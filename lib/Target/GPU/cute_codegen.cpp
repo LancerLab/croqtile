@@ -5233,11 +5233,29 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         }
         size_t map_rank = tma_descs[tma_idx].GetMapRank();
         if (IsValidRank(map_rank) && map_rank != effective_tma_rank) {
-          Error1(n.LOC(),
-                 "TMA instruction rank (" +
-                     std::to_string(effective_tma_rank) +
-                     ") does not match the tensor-map rank (" +
-                     std::to_string(map_rank) + ").");
+          AgentFacts facts;
+          facts.category = "tma-rank";
+          facts.constraint = "TMA instruction rank matches the tensor-map rank";
+          facts.predicate = "instruction_rank == map_rank";
+          facts.observed.push_back("instruction_rank = " +
+                                   std::to_string(effective_tma_rank));
+          facts.observed.push_back("map_rank = " +
+                                   std::to_string(map_rank));
+          facts.valid = "instruction_rank == map_rank";
+          facts.repair_do =
+              "Make the TMA tile rank match the tensor-map rank, or re-view "
+              "the source so the descriptor rank equals the split tile rank.";
+          facts.repair_why =
+              "The instruction coordinate arity must match the tensor map.";
+          facts.repair_alt =
+              "Use a non-view TMA copy, or adjust the view and split ranks.";
+          facts.confidence = "certain";
+          ErrorWithFacts(n.LOC(),
+                         "TMA instruction rank (" +
+                             std::to_string(effective_tma_rank) +
+                             ") does not match the tensor-map rank (" +
+                             std::to_string(map_rank) + ").",
+                         facts);
         }
       }
       if (effective_tma_rank > 3) {
@@ -5246,7 +5264,26 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
                    std::to_string(effective_tma_rank) + ").");
       }
       if (rev_indices.size() < effective_tma_rank) {
-        Error1(n.LOC(), "TMA descriptor rank does not match the tile rank.");
+        AgentFacts facts;
+        facts.category = "tma-rank";
+        facts.constraint = "TMA descriptor coordinates match the tile rank";
+        facts.predicate = "coordinate_count == tile_rank";
+        facts.observed.push_back("coordinate_count = " +
+                                 std::to_string(rev_indices.size()));
+        facts.observed.push_back("tile_rank = " +
+                                 std::to_string(effective_tma_rank));
+        facts.valid = "coordinate_count == tile_rank";
+        facts.repair_do =
+            "Make the TMA tile rank match the number of descriptor "
+            "coordinates, or adjust the view that produced the subview.";
+        facts.repair_why =
+            "The issue path needs one coordinate per tile dimension.";
+        facts.repair_alt =
+            "Use a non-view TMA copy, or pad the missing tile dimensions.";
+        facts.confidence = "certain";
+        ErrorWithFacts(n.LOC(),
+                       "TMA descriptor rank does not match the tile rank.",
+                       facts);
         rev_indices.resize(effective_tma_rank, sbe::nu(0));
       }
 
@@ -5565,16 +5602,60 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         if (tma_idx >= 0) {
           size_t map_rank = tma_descs[tma_idx].GetMapRank();
           if (IsValidRank(map_rank) && map_rank != s2g_rank) {
-            Error1(n.LOC(),
-                   "TMA store instruction rank (" + std::to_string(s2g_rank) +
-                       ") does not match the tensor-map rank (" +
-                       std::to_string(map_rank) + ").");
+            AgentFacts facts;
+            facts.category = "tma-store-rank";
+            facts.constraint =
+                "TMA store instruction rank matches the tensor-map rank";
+            facts.predicate = "instruction_rank == map_rank";
+            facts.observed.push_back("instruction_rank = " +
+                                     std::to_string(s2g_rank));
+            facts.observed.push_back("map_rank = " +
+                                     std::to_string(map_rank));
+            facts.valid = "instruction_rank == map_rank";
+            facts.repair_do =
+                "Make the store tile rank match the tensor-map rank, or "
+                "re-view the destination so the descriptor rank equals the "
+                "split tile rank.";
+            facts.repair_why =
+                "The store instruction coordinate arity must match the "
+                "tensor map.";
+            facts.repair_alt =
+                "Use a non-view TMA store, or adjust the view and split "
+                "ranks.";
+            facts.confidence = "certain";
+            ErrorWithFacts(n.LOC(),
+                           "TMA store instruction rank (" +
+                               std::to_string(s2g_rank) +
+                               ") does not match the tensor-map rank (" +
+                               std::to_string(map_rank) + ").",
+                           facts);
           }
         }
         ValueList s2g_indices = make_s2g_indices(s2g_indices_orig);
         if (s2g_indices.size() != s2g_rank) {
-          Error1(n.LOC(),
-                 "TMA store coordinates do not match the instruction rank.");
+          AgentFacts facts;
+          facts.category = "tma-store-rank";
+          facts.constraint =
+              "TMA store coordinates match the instruction rank";
+          facts.predicate = "coordinate_count == instruction_rank";
+          facts.observed.push_back("coordinate_count = " +
+                                   std::to_string(s2g_indices.size()));
+          facts.observed.push_back("instruction_rank = " +
+                                   std::to_string(s2g_rank));
+          facts.valid = "coordinate_count == instruction_rank";
+          facts.repair_do =
+              "Make the store tile rank match the swizzled instruction rank, "
+              "or adjust the view that produced the coordinates.";
+          facts.repair_why =
+              "The store helper consumes one coordinate per instruction "
+              "dimension.";
+          facts.repair_alt =
+              "Use a non-swizzled store, or adjust the shared tile rank.";
+          facts.confidence = "certain";
+          ErrorWithFacts(n.LOC(),
+                         "TMA store coordinates do not match the instruction "
+                         "rank.",
+                         facts);
           s2g_indices.resize(s2g_rank, sbe::nu(0));
         }
 

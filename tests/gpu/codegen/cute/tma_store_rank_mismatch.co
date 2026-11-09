@@ -3,6 +3,7 @@
 //
 // REQUIRES: TARGET-SM_90A
 // RUN: not choreo -es -t cute -arch=sm_90a %s 2>&1 | FileCheck %s
+// RUN: not choreo -es -t cute -arch=sm_90a -agent-diagnostics=- %s -o /dev/null 2>/dev/null | FileCheck %s --check-prefix=FACTS
 
 __co__ void tma_store_rank_mismatch(global f32 [256] out) {
   parallel b by 1 : block {
@@ -12,3 +13,10 @@ __co__ void tma_store_rank_mismatch(global f32 [256] out) {
 }
 
 // CHECK: error: TMA store coordinates do not match the instruction rank.
+
+// The store-coordinate diagnostic reports both the generated coordinate count
+// (the swizzle split expands it) and the instruction rank it must satisfy.
+// FACTS: <diagnostic severity="error" category="tma-store-rank"{{.*}}>
+// FACTS-NEXT: <constraint>TMA store coordinates match the instruction rank; predicate: coordinate_count == instruction_rank</constraint>
+// FACTS-NEXT: <observed>coordinate_count = 3; instruction_rank = 2; valid: coordinate_count == instruction_rank</observed>
+// FACTS: <do>Make the store tile rank match the swizzled instruction rank, or adjust the view that produced the coordinates.</do>
