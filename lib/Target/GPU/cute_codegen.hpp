@@ -463,7 +463,36 @@ private:
       bool allow_absent_warp_zero = false) const {
     kExpr = "0";
     warpExpr = "0";
-    if (foreach_iv_stack_.empty()) return true;
+    if (foreach_iv_stack_.empty()) {
+      // A single static metadata tile is still indexed (0, 0), but a
+      // chunk index that names a non-foreach loop (for example a bounded
+      // variable consumed by a while/apply loop) cannot be resolved to a
+      // packed tile. Reject it instead of silently re-reading tile 0.
+      std::string unresolved;
+      auto scan_indices = [&](const ptr<AST::ChunkAt>& chunk) {
+        if (!chunk || !unresolved.empty()) return;
+        for (const auto& sop : chunk->AllOperations()) {
+          auto ta = dyn_cast<AST::SOP::TileAt>(sop);
+          if (!ta || !ta->GetIndices()) continue;
+          for (const auto& node : ta->GetIndices()->AllValues()) {
+            if (AST::GetIntLiteral(node)) continue;
+            auto id = AST::GetIdentifier(node);
+            if (!id || id->name == "_" ||
+                id->name == "__choreo_no_tiling__")
+              continue;
+            unresolved = id->name;
+            return;
+          }
+        }
+      };
+      scan_indices(operand);
+      scan_indices(a_operand);
+      if (unresolved.empty()) return true;
+      Error1(loc, "prepacked metadata chunk index '" + UnScopedName(unresolved) +
+                      "' is not a foreach loop variable; use a foreach "
+                      "K/warp loop to index the metadata tile");
+      return false;
+    }
 
     auto match_loop = [&](const std::string& name) -> std::string {
       for (const auto& iv : foreach_iv_stack_)
