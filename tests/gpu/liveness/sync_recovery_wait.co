@@ -1,6 +1,6 @@
 // REQUIRES: TARGET-GPU
-// RUN: env CHOREO_SYNC_RECOVERY=1 CHOREO_SYNC_RECOVERY_KEEP=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>/dev/null | FileCheck --check-prefix=KEEP %s
-// RUN: env CHOREO_SYNC_RECOVERY=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>&1 | FileCheck --check-prefix=ELIDE %s
+// RUN: env CHOREO_SYNC_RECOVERY=1 CHOREO_SYNC_RECOVERY_KEEP=1 choreo -n -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>&1 | FileCheck --check-prefix=KEEP %s
+// RUN: env CHOREO_SYNC_RECOVERY=1 choreo -n -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>&1 | FileCheck --check-prefix=ELIDE %s
 //
 // Sync-recovery completion wait: tenant y is engine-read (dma copy out of the
 // slot); tenant x then overwrites the same slot. The coloring merges them, so
@@ -11,14 +11,17 @@
 // trigger that hands the slot over.
 //
 // The copy here is synchronous (no future), so its reads have retired before
-// the next statement runs: the availability fold discharges the obligation
-// in place and removes the queued wait (ELIDE run). KEEP=1 skips elimination
-// and shows the raw synthesis output, including the emitted primitive.
+// the next statement runs. Synthesis still queues the drain (KEEP), and
+// elimination discharges it against the blocking access itself. The count is
+// reported as self-discharged, not as a cover-based elision.
 
+// KEEP-DAG: [sync-recovery] insert AST::CompletionWait before stmt
+// KEEP-DAG: [sync-recovery] summary: {{.*}}1 completion waits inserted
 // KEEP: cde::cp_async_bulk_wait_group_read<0>();
 // KEEP-NEXT: (void)sig.arrive();
 
-// ELIDE-DAG: [sync-recovery] elide AST::CompletionWait (synchronous engine access)
+// ELIDE: [sync-recovery] elide AST::CompletionWait (synchronous engine access)
+// ELIDE: [sync-recovery] summary: {{.*}}1 completion waits self-discharged
 // ELIDE-NOT: cde::cp_async_bulk_wait_group_read<0>()
 // ELIDE: (void)sig.arrive();
 

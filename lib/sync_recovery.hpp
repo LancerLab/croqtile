@@ -51,6 +51,8 @@ private:
   size_t inserted_waits_ = 0;
   size_t elided_fences_ = 0;
   size_t elided_waits_ = 0;
+  size_t self_waits_ = 0;
+  size_t discharged_waits_ = 0;
   size_t total_slots_ = 0, total_handovers_ = 0, hb_merged_handovers_ = 0;
   // Debug aid: keep the raw insertion set (skip elimination) so the dump and
   // the emitted code can be attributed to synthesis alone.

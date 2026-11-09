@@ -39,7 +39,9 @@ bool SyncRecovery::RunOnProgramImpl(AST::Node& root) {
          << total_handovers_ << " handovers (" << hb_merged_handovers_
          << " hb-merged), " << inserted_fences_ << " fences, "
          << inserted_waits_ << " completion waits inserted, " << elided_fences_
-         << " fences, " << elided_waits_ << " completion waits elided\n";
+         << " fences, " << elided_waits_ << " completion waits elided, "
+         << self_waits_ << " completion waits self-discharged, "
+         << discharged_waits_ << " completion waits discharged in place\n";
   return true;
 }
 
@@ -165,6 +167,8 @@ void SyncRecovery::Eliminate(std::vector<PendingInsert>& inserts,
     }
     if (isa<AST::Fence>(ins.node.get()))
       ++elided_fences_;
+    else if (std::string(reason) == "synchronous engine access")
+      ++self_waits_;
     else
       ++elided_waits_;
     dbgs() << "[sync-recovery] elide " << ins.node->TypeNameString() << " ("
@@ -376,6 +380,75 @@ bool DmaReadsSlot(const AST::DMA* dma, const std::string& buffer) {
 
 bool DmaWritesSlot(const AST::DMA* dma, const std::string& buffer) {
   return dma->to != nullptr && MentionsBuffer(dma->to.get(), buffer);
+}
+
+// Does the handover producer guarantee its engine writes have retired before
+// the receiver's phase-entry event wait? The receiver's first access is
+// ordered after its `wait <sig>` only if the producer's closing trigger is
+// ordered after the writes: either the trigger carries the copies' native
+// completion (`trigger <sig> after f`) or it is immediately preceded by a
+// source `wait <f>` on every async copy that wrote the slot. The latter is
+// the common "wait the copy, then signal" idiom; both let the receiver's
+// source event wait discharge the engine-wait obligation in place.
+bool SourceEventWaitDischarges(
+    const std::vector<const LivenessAnalyzer::Stmt*>& po, const HBGraph& g,
+    const std::vector<int>& prod_phases, int prod_phase, int recv_phase,
+    const std::string& buffer, const AST::Node* closing_stmt, int trig_idx) {
+  if (closing_stmt == nullptr) return false;
+  const auto& pp = g.phases[prod_phase];
+  const auto& rp = g.phases[recv_phase];
+  // The receiver's phase must start at the wait on the same event the
+  // producer triggers; a chained or barrier-ordered handover is not covered.
+  if (pp.signal_out.empty() || rp.signal_in != pp.signal_out) return false;
+  auto* trig = dyn_cast<AST::Trigger>(const_cast<AST::Node*>(closing_stmt));
+  if (trig == nullptr || trig->GetEvents().size() != 1) return false;
+
+  // Futures whose completion the trigger itself binds (native expect_tx).
+  std::set<std::string> trigger_bound;
+  if (trig->HasDependencies())
+    for (const auto& dependency : trig->GetDependencies()) {
+      auto id = AST::GetIdentifier(*dependency);
+      if (!id) return false;
+      trigger_bound.insert(UnScopedExpr(id->name));
+    }
+  // Futures awaited by the statement immediately before the trigger. Requiring
+  // an immediate predecessor in the same statement list (not merely the
+  // previous preorder statement across a synthetic scope end) keeps a wait
+  // inside a conditional branch from being mistaken for an unconditional one.
+  std::set<std::string> awaited;
+  if (trig_idx > 0 && trig_idx <= (int)po.size()) {
+    if (auto* w = dyn_cast<AST::Wait>(po[trig_idx - 1])) {
+      for (const auto& t : w->GetTargets()) {
+        auto id = AST::GetIdentifier(*t);
+        if (!id) continue;
+        awaited.insert(UnScopedExpr(id->name));
+      }
+    }
+  }
+
+  // Every async engine write to the slot must be ordered before the trigger.
+  // A write in an earlier producer phase is not covered by a wait placed just
+  // before the closing trigger, so it needs the trigger's own binding.
+  bool saw_async_write = false;
+  for (int p : prod_phases) {
+    const auto& ph = g.phases[p];
+    for (size_t i = ph.first_stmt_id; i <= ph.last_stmt_id && i < po.size();
+         ++i) {
+      auto* d = dyn_cast<AST::DMA>(po[i]);
+      if (d == nullptr || !d->IsAsync() || !DmaWritesSlot(d, buffer)) continue;
+      saw_async_write = true;
+      const std::string f = UnScopedExpr(d->future);
+      if (trigger_bound.count(f)) {
+        // The native expect_tx lowering is a TMA-load path. SemaChecker
+        // already rejects trigger-after on a non-shared event.
+        if (!d->IsTMA()) return false;
+        continue;
+      }
+      if (p == prod_phase && awaited.count(f)) continue;
+      return false;
+    }
+  }
+  return saw_async_write;
 }
 
 // Direction filter for drain preconditions: a read drain folds against the
@@ -613,6 +686,7 @@ void SyncRecovery::RunRecovery() {
           // the sync that hands the slot over --- i.e. inside the producer
           // tenant, at the phase boundary (never on the receiver).
           auto site = ProducerFrontier(po, *g, a_last);
+          bool event_discharge = false;
           if (site.stmt != nullptr) {
             const int last_access = LastSlotAccessIndex(
                 po, *g, a_last, slot[i].buffer_id, AccessDir::Any);
@@ -645,9 +719,31 @@ void SyncRecovery::RunRecovery() {
                               site.stmt->LOC(), FenceEntity::TMA,
                               CompletionWaitKind::FULL_DRAIN, 0),
                           site.after, last_engine_write, slot[i].buffer_id);
+              // `engine-wait` classes are bound to the engine's own event on
+              // the receiver. When the receiver's phase starts at a wait on
+              // the producer's trigger event and the producer has already
+              // ordered the engine writes before that trigger, the source
+              // event wait discharges the obligation in place; no primitive
+              // is synthesized. KEEP shows the raw synthesis (nothing), so
+              // the attribution is only recorded on the normal path.
+              else if (o.primitive.rfind("engine-wait", 0) == 0 &&
+                       !keep_insertions_ && !event_discharge) {
+                auto idx_it = preorder_index_.find(site.stmt);
+                const int trig_idx =
+                    idx_it == preorder_index_.end() ? -1 : idx_it->second;
+                if (SourceEventWaitDischarges(po, *g, phase_lists[i], a_last,
+                                              b_first, slot[i].buffer_id,
+                                              site.stmt, trig_idx)) {
+                  event_discharge = true;
+                  ++discharged_waits_;
+                }
+              }
             }
           }
           dbgs() << "\n";
+          if (event_discharge)
+            dbgs() << "[sync-recovery] discharge AST::CompletionWait"
+                   << " (source event wait)\n";
         }
     }
   }
