@@ -1,24 +1,25 @@
-// A prepacked metadata load hoisted outside the consumer's warp loop builds
-// its warp slot at 0.  The consumer's A operand exposes no K loop here, so the
-// K-loop guard is silent and the warp role must be checked explicitly.
+// A prepacked metadata load hoisted outside a multi-iteration consumer warp
+// loop builds its warp slot at 0.  The consumer's A operand exposes no K loop
+// here, so the K-loop guard is silent and the warp role must be checked
+// explicitly.
 //
 // REQUIRES: TARGET-SM_90A
 // RUN: not choreo -es -t cute -arch=sm_90a --use-prepack %s -o - 2>&1 | FileCheck %s
 
 __co__ auto prepack_hoisted_warp_metadata(u32 [64, 4] meta,
-                                         f16 [64, 16] lhs_packed,
+                                         f16 [128, 16] lhs_packed,
                                          f16 [8, 32] rhs) {
-  f32 [64, 8] output{0.0f};
+  f32 [128, 8] output{0.0f};
   parallel by 1 : block {
     shared u32 [64, 4] meta_s[2];
-    shared f16 [64, 16] lhs_s[2];
+    shared f16 [128, 16] lhs_s[2];
     dma.copy meta => meta_s[1];
     dma.copy lhs_packed => lhs_s[1];
     rhs_s = dma.copy rhs => shared;
     mc = mma.fill.f32 0.0f;
     parallel p by 1 : group-4 {
       me = mma.load meta_s[1];
-      foreach ww in [1] {
+      foreach ww in [2] {
         mma.row.row.sp mc, lhs_s[1].chunkat(ww, _), rhs_s, me;
       }
     }

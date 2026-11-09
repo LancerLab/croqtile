@@ -5867,13 +5867,31 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
               return true;
           return false;
         };
+        auto ConsumerLoopExtent =
+            [&](const MetadataConsumer& consumer,
+                const std::string& loop) -> std::optional<int64_t> {
+          for (size_t i = 0; i < consumer.ivs.size() &&
+                             i < consumer.iv_extents.size();
+               ++i)
+            if (consumer.ivs[i] == loop ||
+                UnScopedName(consumer.ivs[i]) == UnScopedName(loop))
+              return consumer.iv_extents[i];
+          return std::nullopt;
+        };
+        bool allow_absent_k_zero = false;
         // A metadata load lexically outside its consumers' K loop builds its
         // index without that IV, so the exec reads the wrong K metadata.
         // Point at the load rather than emitting an index that drops the loop.
+        // A unit-extent loop is the load's fixed slot 0, so it is not a hoist.
         for (const auto& consumer : metadata_consumers) {
           auto a_k_loop = ExecAKLoop(consumer.exec, consumer.ivs);
           if (a_k_loop.empty()) continue;
           if (InLoadScope(a_k_loop)) continue;
+          auto extent = ConsumerLoopExtent(consumer, a_k_loop);
+          if (extent && *extent == 1) {
+            allow_absent_k_zero = true;
+            continue;
+          }
           Error1(n.LOC(), "prepacked metadata '" + sym +
                               "' is loaded outside the K loop '" +
                               UnScopedName(a_k_loop) + "' that indexes it");
@@ -5944,17 +5962,6 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         // indexing a different warp chunk than the load; reject that mismatch
         // instead of reading metadata for the wrong warp tile.
         std::optional<int64_t> tile_warp_extent;
-        auto ConsumerWarpExtent =
-            [&](const MetadataConsumer& consumer,
-                const std::string& warp) -> std::optional<int64_t> {
-          for (size_t i = 0; i < consumer.ivs.size() &&
-                             i < consumer.iv_extents.size();
-               ++i)
-            if (consumer.ivs[i] == warp ||
-                UnScopedName(consumer.ivs[i]) == UnScopedName(warp))
-              return consumer.iv_extents[i];
-          return std::nullopt;
-        };
         auto CheckLoadWarp = [&](const std::string& load_warp) -> bool {
           // A literal "0" is the tile/thread-preset form: the metadata layout
           // has no loop-valued warp slot to compare against.
@@ -5966,7 +5973,7 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
               continue;
             if (load_warp == "thread-preset" && tile_warp_extent) {
               auto warp_extent =
-                  ConsumerWarpExtent(consumer, consumer_warp);
+                  ConsumerLoopExtent(consumer, consumer_warp);
               if (warp_extent && *warp_extent == *tile_warp_extent)
                 continue;
             }
@@ -6057,10 +6064,16 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
         const bool load_has_loop_warp =
             !load_warp_role.empty() && load_warp_role != "0" &&
             load_warp_role != "thread-preset";
+        bool allow_absent_warp_zero = false;
         if (!fp8_sparse_k64 && !prepack_single_col && !load_has_loop_warp) {
           for (const auto& consumer : metadata_consumers) {
             auto warp_loop = ConsumerWarpLoop(consumer);
             if (warp_loop.empty() || InLoadScope(warp_loop)) continue;
+            auto extent = ConsumerLoopExtent(consumer, warp_loop);
+            if (extent && *extent == 1) {
+              allow_absent_warp_zero = true;
+              continue;
+            }
             Error1(n.LOC(), "prepacked metadata '" + sym +
                                 "' is loaded outside the warp loop '" +
                                 UnScopedName(warp_loop) + "' that indexes it");
@@ -6125,9 +6138,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
                   operand_is_metadata ? ValueSTR(GenOffset(lca)) : "0");
           } else {
             std::string k_idx_expr, warp_idx_expr;
-            if (PrepackedMetadataIndexExprs(n.LOC(), lca, k_idx_expr,
-                                            warp_idx_expr, a_k_axis,
-                                            a_operand, true) &&
+            if (PrepackedMetadataIndexExprs(
+                    n.LOC(), lca, k_idx_expr, warp_idx_expr, a_k_axis,
+                    a_operand, true, allow_absent_k_zero,
+                    allow_absent_warp_zero) &&
                 CheckLoadWarp(warp_idx_expr))
               emitPrepackedV2Snippet(sym, meta_base, row_stride, col_stride,
                                      k_idx_expr, warp_idx_expr);
@@ -6138,9 +6152,10 @@ bool CuteCodeGen::Visit(AST::MMA& n) {
               emitPrepackedU32TileLoadSnippet(sym, meta_tile, row_stride);
           } else {
             std::string k_idx_expr, warp_idx_expr;
-            if (PrepackedMetadataIndexExprs(n.LOC(), lca, k_idx_expr,
-                                            warp_idx_expr, a_k_axis,
-                                            a_operand, true) &&
+            if (PrepackedMetadataIndexExprs(
+                    n.LOC(), lca, k_idx_expr, warp_idx_expr, a_k_axis,
+                    a_operand, true, allow_absent_k_zero,
+                    allow_absent_warp_zero) &&
                 CheckLoadWarp(warp_idx_expr))
               emitPrepackedU32Snippet(sym, meta_base, row_stride, col_stride,
                                       k_idx_expr, warp_idx_expr);

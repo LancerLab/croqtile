@@ -464,7 +464,8 @@ private:
       const location& loc, const ptr<AST::ChunkAt>& operand,
       std::string& kExpr, std::string& warpExpr, int k_axis = -1,
       const ptr<AST::ChunkAt>& a_operand = nullptr,
-      bool metadata_order = false) const {
+      bool metadata_order = false, bool allow_absent_k_zero = false,
+      bool allow_absent_warp_zero = false) const {
     kExpr = "0";
     warpExpr = "0";
     if (foreach_iv_stack_.empty()) return true;
@@ -612,6 +613,16 @@ private:
       }
     }
 
+    // A unit-extent consumer role that is hoisted out of the load has one
+    // possible value, so the load's fixed 0 is the same index.
+    if (allow_absent_k_zero && !k_found) {
+      kExpr = "0";
+      k_found = true;
+    }
+    if (allow_absent_warp_zero && !w_found) {
+      warpExpr = "0";
+      w_found = true;
+    }
     if (k_found != w_found) {
       std::string remaining;
       size_t candidates = 0;
