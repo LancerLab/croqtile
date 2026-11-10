@@ -19,11 +19,38 @@
 using namespace Choreo;
 
 namespace {
+// Scope attached to a source wait/trigger. A loop context is needed to prove
+// that an event wait and its producer trigger range over the same iteration
+// space; `conditional` keeps a wait inside a branch or a while from being
+// mistaken for a must-executed cover.
+struct SyncScope {
+  const AST::ForeachBlock* loop = nullptr;
+  const AST::WithBlock* with = nullptr;
+  bool conditional = false;
+};
+
+struct FunctionSyncInfo {
+  std::map<const AST::Wait*, SyncScope> waits;
+  std::map<const AST::Trigger*, SyncScope> triggers;
+  std::map<const AST::DMA*, SyncScope> dmas;
+  std::vector<const AST::DMA*> async_dmas;
+};
+
 // Elimination helpers (defined with the analysis utilities below).
 const char* CoveringOp(const AST::Node* s, const AST::MultiNodes& n, size_t j,
-                       const AST::Node& ins, const std::string& buffer);
+                       const AST::Node& ins, const std::string& buffer,
+                       const FunctionSyncInfo* info);
 bool SelfDischarging(const AST::Node* s, const AST::Node& ins,
                      const std::string& buffer);
+void CollectSyncInfo(const AST::Node* n, const SyncScope& scope,
+                     FunctionSyncInfo& info);
+const AST::ChoreoFunction*
+EnclosingFunction(const std::vector<AST::Node*>& stack);
+bool EventWaitCovers(const AST::Wait& wait, const AST::CompletionWait& insert,
+                     const std::string& buffer, const FunctionSyncInfo& info);
+bool LoopSummaryCovers(const AST::Node* site, const AST::CompletionWait& insert,
+                       const std::string& buffer, const FunctionSyncInfo& info,
+                       const std::map<const AST::Node*, int>& preorder);
 } // namespace
 
 bool SyncRecovery::RunOnProgramImpl(AST::Node& root) {
@@ -118,10 +145,31 @@ void SyncRecovery::Eliminate(std::vector<PendingInsert>& inserts,
   if (keep_insertions_ || inserts.empty()) return;
   assert(!visit_stack_.empty() && visit_stack_.back() == &n &&
          "elimination must run at the list currently being visited");
+  FunctionSyncInfo sync_info;
+  bool have_sync_info = false;
+  if (const auto* fn = EnclosingFunction(visit_stack_)) {
+    CollectSyncInfo(fn->GetBody().get(), SyncScope{}, sync_info);
+    have_sync_info = true;
+  }
+
   std::vector<PendingInsert> keep;
   keep.reserve(inserts.size());
   for (const auto& ins : inserts) {
     const char* reason = nullptr;
+    // A loop summary covers an insertion when every async access the drain
+    // would retire is issued inside that loop and waited before the loop's
+    // next iteration. The loop itself may precede the producer's last access
+    // in preorder, so this fold is checked before the per-statement prefix.
+    if (auto* cw = dyn_cast<AST::CompletionWait>(ins.node.get());
+        cw != nullptr && have_sync_info) {
+      long last = ins.after ? (long)anchor_idx : (long)anchor_idx - 1;
+      for (long j = 0; j <= last && reason == nullptr; ++j) {
+        const AST::Node* s = n.SubAt((size_t)j).get();
+        if (preorder_index_.find(s) == preorder_index_.end()) continue;
+        if (LoopSummaryCovers(s, *cw, ins.buffer, sync_info, preorder_index_))
+          reason = "loop-summary source wait";
+      }
+    }
     // A statement covers the insertion iff it executes on every path that
     // reaches the insertion site and follows the producer's last access. Both
     // the enclosing-list prefix and the prefixes of its ancestor lists have
@@ -137,7 +185,8 @@ void SyncRecovery::Eliminate(std::vector<PendingInsert>& inserts,
           return "synchronous engine access";
         return nullptr;
       }
-      return CoveringOp(s, lst, j, *ins.node, ins.buffer);
+      return CoveringOp(s, lst, j, *ins.node, ins.buffer,
+                        have_sync_info ? &sync_info : nullptr);
     };
 
     // Site-level slice: the prefix of the enclosing statement list.
@@ -513,12 +562,339 @@ bool SelfDischarging(const AST::Node* s, const AST::Node& ins,
   return d != nullptr && !d->IsAsync() && DmaReadsSlot(d, buffer);
 }
 
+// Record, for every wait/trigger/DMA in one Choreo function, the innermost
+// loop and `with` context in which it executes. The loop context is what lets
+// an event wait and its producer trigger prove the same iteration space.
+void CollectSyncInfo(const AST::Node* n, const SyncScope& scope,
+                     FunctionSyncInfo& info) {
+  if (n == nullptr) return;
+  if (auto* f = dyn_cast<AST::ForeachBlock>(n)) {
+    SyncScope inner = scope;
+    inner.loop = f;
+    if (f->GetBody()) CollectSyncInfo(f->GetBody().get(), inner, info);
+    return;
+  }
+  if (auto* w = dyn_cast<AST::WithBlock>(n)) {
+    SyncScope inner = scope;
+    inner.with = w;
+    if (w->GetBody()) CollectSyncInfo(w->GetBody().get(), inner, info);
+    return;
+  }
+  if (auto* ie = dyn_cast<AST::IfElseBlock>(n)) {
+    SyncScope inner = scope;
+    inner.conditional = true;
+    if (ie->GetThenBody())
+      CollectSyncInfo(ie->GetThenBody().get(), inner, info);
+    if (ie->GetElseBody())
+      CollectSyncInfo(ie->GetElseBody().get(), inner, info);
+    return;
+  }
+  if (auto* wh = dyn_cast<AST::WhileBlock>(n)) {
+    SyncScope inner = scope;
+    inner.conditional = true;
+    if (wh->GetBody()) CollectSyncInfo(wh->GetBody().get(), inner, info);
+    return;
+  }
+  if (auto* wt = dyn_cast<AST::Wait>(n)) {
+    info.waits[wt] = scope;
+    return;
+  }
+  if (auto* tr = dyn_cast<AST::Trigger>(n)) {
+    info.triggers[tr] = scope;
+    return;
+  }
+  if (auto* d = dyn_cast<AST::DMA>(n)) {
+    info.dmas[d] = scope;
+    if (d->IsAsync()) info.async_dmas.push_back(d);
+    return;
+  }
+  if (auto* mn = dyn_cast<AST::MultiNodes>(n)) {
+    for (size_t i = 0; i < mn->Count(); ++i)
+      CollectSyncInfo(mn->SubAt(i).get(), scope, info);
+    return;
+  }
+  if (auto* b = dyn_cast<AST::Block>(n)) {
+    if (b->GetBody()) CollectSyncInfo(b->GetBody().get(), scope, info);
+    return;
+  }
+}
+
+const AST::ChoreoFunction*
+EnclosingFunction(const std::vector<AST::Node*>& stack) {
+  for (auto it = stack.rbegin(); it != stack.rend(); ++it)
+    if (auto* f = dyn_cast<AST::ChoreoFunction>(*it)) return f;
+  return nullptr;
+}
+
+const AST::WithIn* FindWithIn(const AST::WithBlock* w, const std::string& iv) {
+  if (w == nullptr || w->withins == nullptr) return nullptr;
+  for (size_t i = 0; i < w->withins->Count(); ++i) {
+    auto* wi = dyn_cast<AST::WithIn>(w->withins->SubAt(i).get());
+    if (wi != nullptr && wi->with != nullptr && wi->with->name == iv) return wi;
+  }
+  return nullptr;
+}
+
+// Two loops define the same iteration space when their visible range variables
+// have the same bounds. Choreo keeps the bounds on the surrounding `with`
+// clause rather than on the normalized Foreach, so compare the matching
+// WithIn expressions; fall back to explicit loop bounds when present.
+bool SameLoopExtent(const SyncScope& a, const SyncScope& b) {
+  if (a.loop == nullptr || b.loop == nullptr) return a.loop == b.loop;
+  const auto& ar = a.loop->GetRanges();
+  const auto& br = b.loop->GetRanges();
+  if (ar.empty() || ar.size() != br.size()) return false;
+  for (size_t i = 0; i < ar.size(); ++i) {
+    auto* ra = dyn_cast<AST::LoopRange>(ar[i].get());
+    auto* rb = dyn_cast<AST::LoopRange>(br[i].get());
+    if (ra == nullptr || rb == nullptr) return false;
+    if (ra->GetIVName() != rb->GetIVName()) return false;
+    const AST::WithIn* wa = FindWithIn(a.with, ra->GetIVName());
+    const AST::WithIn* wb = FindWithIn(b.with, rb->GetIVName());
+    if (wa != nullptr || wb != nullptr) {
+      if (wa == nullptr || wb == nullptr) return false;
+      if ((wa->with_matchers && wa->with_matchers->Count() != 0) ||
+          (wb->with_matchers && wb->with_matchers->Count() != 0))
+        return false;
+      if (wa->in == nullptr || wb->in == nullptr) return false;
+      if (PSTR(wa->in) != PSTR(wb->in)) return false;
+      continue;
+    }
+    const auto text = [](const ptr<AST::Node>& p) {
+      return p ? PSTR(p) : std::string();
+    };
+    if (text(ra->lbound) != text(rb->lbound) ||
+        text(ra->ubound) != text(rb->ubound))
+      return false;
+    const bool sa = IsValidStep(ra->step);
+    const bool sb = IsValidStep(rb->step);
+    if (sa != sb || (sa && ra->step != rb->step)) return false;
+  }
+  return true;
+}
+
+// A source event wait covers a completion drain when (a) the waited event is
+// triggered after every async engine access the drain would retire, and (b)
+// the producer trigger and receiver wait range over the same iterations. The
+// trigger-after lowering signals the event only after the bound TMA copies
+// complete, so the wait is a completion observation, not just an issue-order
+// observation.
+bool EventWaitCovers(const AST::Wait& wait, const AST::CompletionWait& insert,
+                     const std::string& buffer, const FunctionSyncInfo& info) {
+  if (buffer.empty() || insert.GetEngine() != FenceEntity::TMA) return false;
+  const CompletionWaitKind kind = insert.GetKind();
+  if (kind != CompletionWaitKind::FULL_DRAIN &&
+      kind != CompletionWaitKind::READ_DRAIN)
+    return false;
+  auto wit = info.waits.find(&wait);
+  if (wit == info.waits.end() || wit->second.conditional) return false;
+  const SyncScope& wait_scope = wit->second;
+
+  std::set<std::string> async_futures;
+  for (const auto* d : info.async_dmas)
+    if (!d->future.empty()) async_futures.insert(UnScopedExpr(d->future));
+
+  for (const auto& target : wait.GetTargets()) {
+    if (target == nullptr) continue;
+    // A future wait is not an event wait. If the name also appears as an async
+    // future, prefer the future interpretation and let the future-wait fold
+    // handle it; this avoids treating a same-named event as covered.
+    auto id = AST::GetIdentifier(*target);
+    if (id && async_futures.count(UnScopedExpr(id->name)) != 0) continue;
+    const std::string key = PSTR(target);
+    const AST::Trigger* trigger = nullptr;
+    int matches = 0;
+    bool any_conditional = false;
+    for (const auto& [candidate, scope] : info.triggers) {
+      if (candidate->GetEvents().size() != 1) continue;
+      if (PSTR(candidate->GetEvents()[0]) != key) continue;
+      ++matches;
+      if (scope.conditional) any_conditional = true;
+      if (matches == 1) trigger = candidate;
+    }
+    if (matches != 1 || any_conditional || trigger == nullptr ||
+        !trigger->HasDependencies())
+      continue;
+
+    auto tit = info.triggers.find(trigger);
+    if (tit == info.triggers.end() || !SameLoopExtent(wait_scope, tit->second))
+      continue;
+
+    std::set<std::string> bound;
+    bool bad = false;
+    for (const auto& dep : trigger->GetDependencies()) {
+      auto id = AST::GetIdentifier(*dep);
+      if (!id) {
+        bad = true;
+        break;
+      }
+      bound.insert(UnScopedExpr(id->name));
+    }
+    if (bad) continue;
+
+    bool covered = false;
+    bool covered_write = false;
+    for (const auto* d : info.async_dmas) {
+      const bool reads = DmaReadsSlot(d, buffer);
+      const bool writes = DmaWritesSlot(d, buffer);
+      if (!reads && !writes) continue;
+      if (kind == CompletionWaitKind::READ_DRAIN && !reads) continue;
+      auto dit = info.dmas.find(d);
+      if (dit == info.dmas.end() || dit->second.conditional) {
+        bad = true;
+        break;
+      }
+      if (!d->IsTMA()) {
+        bad = true;
+        break;
+      }
+      const std::string future = UnScopedExpr(d->future);
+      if (future.empty() || bound.count(future) == 0) {
+        bad = true;
+        break;
+      }
+      covered = true;
+      if (writes) covered_write = true;
+    }
+    if (bad || !covered) continue;
+    if (kind == CompletionWaitKind::FULL_DRAIN && !covered_write) continue;
+    return true;
+  }
+  return false;
+}
+
+bool ContainsEarlyExit(const AST::Node* n) {
+  if (n == nullptr) return false;
+  if (isa<AST::Break>(n) || isa<AST::Continue>(n) || isa<AST::Return>(n))
+    return true;
+  if (auto* ie = dyn_cast<AST::IfElseBlock>(n)) {
+    return ContainsEarlyExit(ie->GetThenBody().get()) ||
+           ContainsEarlyExit(ie->GetElseBody().get());
+  }
+  if (auto* mn = dyn_cast<AST::MultiNodes>(n)) {
+    for (size_t i = 0; i < mn->Count(); ++i)
+      if (ContainsEarlyExit(mn->SubAt(i).get())) return true;
+    return false;
+  }
+  if (auto* b = dyn_cast<AST::Block>(n))
+    return ContainsEarlyExit(b->GetBody().get());
+  return false;
+}
+
+// Loops that execute unconditionally when their parent statement does. Only a
+// Foreach directly under WithBlock wrappers is accepted; an If/While wrapper
+// would make the source wait path-conditional.
+void CollectGuaranteedLoops(const AST::Node* n,
+                            std::vector<const AST::Node*>& loops) {
+  if (n == nullptr) return;
+  if (isa<AST::ForeachBlock>(n)) {
+    loops.push_back(n);
+    return;
+  }
+  if (auto* w = dyn_cast<AST::WithBlock>(n)) {
+    // A normalized `with k in N` loop may still be represented by the
+    // WithBlock itself (the loop body is its statement list), so treat a
+    // non-empty with-clause as a loop candidate as well as scanning inside it.
+    if (w->withins && w->withins->Count() > 0) loops.push_back(w);
+    if (w->GetBody())
+      for (size_t i = 0; i < w->GetBody()->Count(); ++i)
+        CollectGuaranteedLoops(w->GetBody()->SubAt(i).get(), loops);
+    return;
+  }
+  if (auto* mn = dyn_cast<AST::MultiNodes>(n))
+    for (size_t i = 0; i < mn->Count(); ++i)
+      CollectGuaranteedLoops(mn->SubAt(i).get(), loops);
+}
+
+// A preceding loop is a complete source-side drain when every async access to
+// the slot is issued in that loop and is waited by a future wait later in the
+// same iteration. The loop's exit then leaves no async access outstanding, so
+// a later full/read drain has nothing left to retire.
+bool LoopSummaryCovers(const AST::Node* site, const AST::CompletionWait& insert,
+                       const std::string& buffer, const FunctionSyncInfo& info,
+                       const std::map<const AST::Node*, int>& preorder) {
+  if (buffer.empty() || insert.GetEngine() != FenceEntity::TMA) return false;
+  const CompletionWaitKind kind = insert.GetKind();
+  if (kind != CompletionWaitKind::FULL_DRAIN &&
+      kind != CompletionWaitKind::READ_DRAIN)
+    return false;
+
+  std::vector<const AST::Node*> loops;
+  CollectGuaranteedLoops(site, loops);
+  for (const auto* loop : loops) {
+    const auto* foreach = dyn_cast<AST::ForeachBlock>(loop);
+    const auto* with = dyn_cast<AST::WithBlock>(loop);
+    const AST::MultiNodes* body =
+        foreach ? foreach->GetBody().get() : with->GetBody().get();
+    if (body == nullptr || ContainsEarlyExit(body)) continue;
+
+    const auto in_loop = [&](const SyncScope& scope) {
+      if (foreach != nullptr) return scope.loop == foreach;
+      return scope.loop == nullptr && scope.with == with;
+    };
+
+    std::set<std::string> async_futures;
+    for (const auto* d : info.async_dmas)
+      if (!d->future.empty()) async_futures.insert(UnScopedExpr(d->future));
+
+    std::map<std::string, int> waited_at;
+    for (const auto& [wait, scope] : info.waits) {
+      if (!in_loop(scope) || scope.conditional) continue;
+      auto pit = preorder.find(wait);
+      if (pit == preorder.end()) continue;
+      for (const auto& target : wait->GetTargets()) {
+        auto* expr = dyn_cast<AST::Expr>(target.get());
+        if (expr == nullptr || expr->GetForm() != AST::Expr::Reference)
+          continue;
+        auto id = AST::GetIdentifier(*target);
+        if (!id) continue;
+        const std::string future = UnScopedExpr(id->name);
+        if (async_futures.count(future) == 0) continue;
+        auto it = waited_at.find(future);
+        if (it == waited_at.end() || it->second < pit->second)
+          waited_at[future] = pit->second;
+      }
+    }
+
+    bool covered = false;
+    bool covered_write = false;
+    bool bad = false;
+    for (const auto* d : info.async_dmas) {
+      const bool reads = DmaReadsSlot(d, buffer);
+      const bool writes = DmaWritesSlot(d, buffer);
+      if (!reads && !writes) continue;
+      if (kind == CompletionWaitKind::READ_DRAIN && !reads) continue;
+      auto dit = info.dmas.find(d);
+      if (dit == info.dmas.end() || !in_loop(dit->second) ||
+          dit->second.conditional) {
+        bad = true;
+        break;
+      }
+      const std::string future = UnScopedExpr(d->future);
+      auto wt = waited_at.find(future);
+      auto pit = preorder.find(d);
+      if (future.empty() || wt == waited_at.end() || pit == preorder.end() ||
+          pit->second >= wt->second) {
+        bad = true;
+        break;
+      }
+      covered = true;
+      if (writes) covered_write = true;
+    }
+    if (bad || !covered) continue;
+    if (kind == CompletionWaitKind::FULL_DRAIN && !covered_write) continue;
+    return true;
+  }
+  return false;
+}
+
 // Covering order (Table 1 instantiation, must direction): an operation
 // available at the insertion site that discharges everything the insertion
 // would. Returns a short attribution string, or nullptr when it does not
 // cover.
 const char* CoveringOp(const AST::Node* s, const AST::MultiNodes& n, size_t j,
-                       const AST::Node& ins, const std::string& buffer) {
+                       const AST::Node& ins, const std::string& buffer,
+                       const FunctionSyncInfo* info) {
   if (auto* w = dyn_cast<AST::CompletionWait>(&ins)) {
     if (auto* cw = dyn_cast<AST::CompletionWait>(s)) {
       if (cw->GetEngine() != FenceEntity::TMA &&
@@ -536,6 +912,11 @@ const char* CoveringOp(const AST::Node* s, const AST::MultiNodes& n, size_t j,
       return nullptr;
     }
     if (auto* wt = dyn_cast<AST::Wait>(s)) {
+      // An event wait is a completion observation when its trigger binds the
+      // same TMA copies the drain would retire. This is the loop-carried
+      // `wait full.at(k)` / `trigger full.at(k) after copy` idiom.
+      if (info != nullptr && EventWaitCovers(*wt, *w, buffer, *info))
+        return "source event wait on the draining copy";
       // A wait on a future covers the drain only if that future belongs to an
       // async copy that touched this slot in the covered direction (the wait
       // retires that copy's outstanding work).
