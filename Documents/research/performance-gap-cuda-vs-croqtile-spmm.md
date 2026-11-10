@@ -451,3 +451,29 @@ memory/TMA activity profile, or the epilogue's TMA stores. Every future A/B on
 this kernel must report the derived clock alongside wall time, because a
 wall difference can be a clock difference (the earlier `me = 0` +4% and
 epilogue-store +2.9% results may partly be clock changes).
+
+Clock sweep over kernel variants (same instrumentation and derivation):
+
+| variant | wall | derived clock |
+| --- | ---: | ---: |
+| full kernel (baseline) | 6.37 ms | 0.805 GHz |
+| metadata removed (`me = 0`) | 5.97 ms | 0.802 GHz |
+| epilogue global store removed | 6.28 ms | 0.799 GHz |
+| per-atom commit/wait | 6.37 ms | 0.801 GHz |
+| per-atom-pair commit (2 commits/stage) | 6.38 ms | 0.800 GHz |
+| one tile per CTA (4096 CTAs) | 6.43 ms | 0.819 GHz |
+| fill only (no MMA, TMA/waits only) | 2.99 ms | **1.125 GHz** |
+| CUDA reference | 4.93 ms | **1.00-1.04 GHz** |
+
+The clock is invariant at ~0.80 GHz for every kernel that contains the MMA
+loop, regardless of metadata, epilogue, commit granularity, or tiles per CTA;
+only removing the MMA entirely (fill-only) unlocks 1.125 GHz. So the DVFS
+state is set by the MMA+fill steady state, and the CUDA kernel reaches
+1.03 GHz in that same state. The open question is the power draw of the two
+MMA loops; nvidia-smi cannot resolve the 6 ms bursts (it reports 345 MHz /
+51 W throughout a sustained repeat loop because the host-side prep dominates
+the sampling window). The next measurement should sample NVML from a marker
+just before the timed launch loop.
+
+Note: `clock64` is used only as a relative cycle counter (cycles/wall); the
+absolute SM count of the H800 PCIe cancels out of the comparison.
