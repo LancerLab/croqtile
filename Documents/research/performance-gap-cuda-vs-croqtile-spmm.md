@@ -419,3 +419,35 @@ visible `mma` to infer the fragment layout (`the MMA operation of ... cannot
 be executed` when the atoms exist only inside `__cpp__`); breaking past this
 needs a fragment-layout declaration in the language, not another source-level
 knob.
+
+## 10. 2026-11-11: the remaining gap is DVFS, not instruction scheduling
+
+Both kernels were instrumented with `clock64()` at the same shape and run
+interleaved on GPU 1 with GPU 0 verified idle. Measurement order was reversed
+in separate runs and does not change the result.
+
+| per SM / per stage | CroqTile 1445 | CUDA 1803 |
+| --- | ---: | ---: |
+| SM cycles per SM (total) | 5.11M | 5.08M |
+| operand-wait cycles per stage | 185 | 134 |
+| atom+drain cycles per stage | 2,289 | 2,424 |
+| wall time | 6.37 ms | 4.93 ms |
+| **derived SM clock (cycles / wall)** | **0.802-0.807 GHz** | **1.00-1.04 GHz** |
+| % of the sparse peak scaled to that clock | ~100% | ~100% |
+
+The two kernels execute the **same number of SM cycles** (within 0.6%) and the
+CroqTile kernel's atom+drain phase is actually slightly cheaper. The wall
+ratio 4.93/6.37 = 0.774 equals the clock ratio 0.805/1.03: **the entire
+remaining ~25% is the SM clock the GPU's DVFS selects for each kernel.** Both
+run at ~100% of the 3026-TFLOPS sparse peak scaled to their own clock (1784 vs
+1773, 1385 vs 1388), so the CroqTile kernel is already at the per-cycle
+hardware limit; the CUDA kernel gets a 28% higher clock for the same tensor
+work.
+
+Open question for the next pass: what makes DVFS pick 1.03 GHz for the CUDA
+kernel and 0.80 GHz for ours at identical per-cycle work? Candidates: the
+launch shape (640 vs 544 threads, 1024 CTAs of 4 tiles vs 4096 of 1), the
+memory/TMA activity profile, or the epilogue's TMA stores. Every future A/B on
+this kernel must report the derived clock alongside wall time, because a
+wall difference can be a clock difference (the earlier `me = 0` +4% and
+epilogue-store +2.9% results may partly be clock changes).
