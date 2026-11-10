@@ -246,3 +246,16 @@ TEST_F(ExpressionTest, LogicalAndOrExpressionStructure) {
   EXPECT_NE(text.find("||"), std::string::npos);
   EXPECT_NE(text.find("x"), std::string::npos);
 }
+
+TEST_F(ExpressionTest, BooleanEqualityProbes) {
+  // The equality probes must compare booleans logically instead of building a
+  // boolean subtraction.
+  EXPECT_TRUE(may_eq(tru, tru));
+  EXPECT_FALSE(may_eq(tru, fls));
+  EXPECT_TRUE(may_ne(tru, fls));
+  EXPECT_FALSE(may_ne(tru, tru));
+  EXPECT_TRUE(must_ne(tru, fls));
+  EXPECT_FALSE(must_ne(tru, tru));
+  EXPECT_TRUE(must_eq(tru, tru));
+  EXPECT_FALSE(must_eq(tru, fls));
+}

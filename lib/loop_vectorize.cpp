@@ -38,7 +38,7 @@ bool LoopAnalysis::AfterVisitImpl(AST::Node& n) {
 }
 
 bool LoopAnalysis::Visit(AST::ForeachBlock& n) {
-  auto iv = n.GetRV();
+  auto iv = n.GetIV();
 
   ptr<Loop> loop = n.loop;
   auto loop_name = loop->LoopName();

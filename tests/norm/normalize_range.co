@@ -12,34 +12,34 @@ __co__ void foo(f32 [128, 256, 512] i, u8[16] ii) {
 }
 
 // CHECK: AST::ForeachBlock: replace 
-// CHECK: `- Iteration variables: a
+// CHECK: `- Iteration variables: __iv_a (source: a)
 // CHECK: `- Loop Control: (1: ( (ubound p)  - 1) :1) with 
-// CHECK: `- Iteration variables: a
+// CHECK: `- Iteration variables: __iv_a (source: a)
 // CHECK: `- Loop Control: (anon_0: ( (ubound p)  - 1) :1).
 // CHECK: AST::ForeachBlock: replace 
-// CHECK: `- Iteration variables: a
+// CHECK: `- Iteration variables: __iv_a (source: a)
 // CHECK: `- Loop Control: (anon_0: ( (ubound p)  - 1) :1) with 
-// CHECK: `- Iteration variables: a
+// CHECK: `- Iteration variables: __iv_a (source: a)
 // CHECK: `- Loop Control: (anon_0:anon_1:1).
 // CHECK: AST::ForeachBlock: replace 
-// CHECK: `- Iteration variables: b
+// CHECK: `- Iteration variables: __iv_b (source: b)
 // CHECK: `- Loop Control: ( (ii.span(0) * 2) : (sizeof ii) :1) with 
-// CHECK: `- Iteration variables: b
+// CHECK: `- Iteration variables: __iv_b (source: b)
 // CHECK: `- Loop Control: (anon_2: (sizeof ii) :1).
 // CHECK: AST::ForeachBlock: replace 
-// CHECK: `- Iteration variables: c
+// CHECK: `- Iteration variables: __iv_c (source: c)
 // CHECK: `- Loop Control: ( ( (sizeof t)  % 3) : ( (sizeof ii)  cdiv 3) :1) with 
-// CHECK: `- Iteration variables: c
+// CHECK: `- Iteration variables: __iv_c (source: c)
 // CHECK: `- Loop Control: (anon_3: ( (sizeof ii)  cdiv 3) :1).
 // CHECK: AST::ForeachBlock: replace 
-// CHECK: `- Iteration variables: b
+// CHECK: `- Iteration variables: __iv_b (source: b)
 // CHECK: `- Loop Control: (anon_2: (sizeof ii) :1) with 
-// CHECK: `- Iteration variables: b
+// CHECK: `- Iteration variables: __iv_b (source: b)
 // CHECK: `- Loop Control: (anon_2:anon_4:1).
 // CHECK: AST::ForeachBlock: replace 
-// CHECK: `- Iteration variables: c
+// CHECK: `- Iteration variables: __iv_c (source: c)
 // CHECK: `- Loop Control: (anon_3: ( (sizeof ii)  cdiv 3) :1) with 
-// CHECK: `- Iteration variables: c
+// CHECK: `- Iteration variables: __iv_c (source: c)
 // CHECK: `- Loop Control: (anon_3:anon_5:1).
 // CHECK: Hoisted: 
 // CHECK: `- Assign: anon_2 =  (ii.span(0) * 2) 

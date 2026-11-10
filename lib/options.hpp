@@ -5,11 +5,13 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <set>
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "aux.hpp"
@@ -36,6 +38,7 @@ public:
   virtual const std::string Description() const = 0;
   virtual const std::string GetName() const = 0;
   virtual const std::string GetAlias() const = 0;
+  virtual std::string ValueString() const = 0;
 
 public:
   virtual void SetError(const std::string&) = 0;
@@ -72,6 +75,11 @@ public:
 
   const std::string GetName() const override { return name; }
   const std::string GetAlias() const override { return alias; }
+  std::string ValueString() const override {
+    std::ostringstream os;
+    os << std::boolalpha << value;
+    return os.str();
+  }
 
 private:
   std::string err;
@@ -100,11 +108,20 @@ private:
   bool stdin_as_input = false;
 
   std::ostringstream ess;
+  std::string invocation;
   int ret_code = 0;
 
 public:
   const std::string GetOutputFileName() const { return output_filename; }
   const std::string GetInputFileName() const { return input_filename; }
+  const std::string& GetInvocation() const { return invocation; }
+  std::map<std::string, std::string> EffectiveOptions() const {
+    std::map<std::string, std::string> result;
+    for (const auto& [name, option] : options)
+      if (name == option->GetName()) result[name] = option->ValueString();
+    return result;
+  }
+  void SetInvocation(std::string value) { invocation = std::move(value); }
   const std::string GetInputName() const {
     return RemoveDirectoryPrefix(RemoveSuffix(input_filename, ".co"));
   }
@@ -141,6 +158,7 @@ public:
     stdin_as_input = false;
 
     ess.str("");
+    invocation.clear();
     ret_code = 0;
   }
 

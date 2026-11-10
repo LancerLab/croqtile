@@ -46,7 +46,12 @@ wait qk;
 trigger qk_done;
 ```
 
-Waiting or binding the same dynamic future instance more than once is an error.
+Operation futures and native completion bindings must be consumed once.
+Targets may support idempotent waits for reusable DMA data futures: waiting
+on an empty `dma.any` or an already completed instance is then a no-op.
+This does not change operation-future or native event-publication rules.
+Issuing another transfer into a still-pending DMA future is invalid; complete
+it before reissue.
 A data-future symbol may still appear at multiple static wait sites in a
 swap/rotation pipeline, where each execution observes a different dynamic
 instance. If several consumers need one completion, publish one event and let

@@ -83,3 +83,22 @@ parallel p by 6 {
 In the code outside `parallel q by 2`, only the thread with `q == 0` executes. This is because the target hardware (e.g., CUDA) physically launches `p * q` threads, but the outer-only code should run once per outer group.
 
 *(Reference: `tests/check/illegal_inthreads.co`, `tests/gpu/check/active_threads_basic.co`)*
+
+## Operation Levels
+
+Implicit masking also determines the level of an effectful operation. A DMA
+that touches `shared` runs at the level of the scope it is written in: the
+block scope fulfils it once per block, the thread scope fulfils it as one part
+per lane. A trailing `: block` / `: group` / `: thread` annotation overrides
+the scope default:
+
+```choreo
+parallel p by 8, q by 128 {
+  smem = dma.copy.async i0.chunkat(p, _) => shared : block;
+  wait smem;
+}
+```
+
+When each lane stages its own part of a shared buffer, that layout is stated in
+the source (a lane dimension plus a lane-indexed destination), never inferred.
+See [DMA Basics](dma-basics.md#execution-level) for details.

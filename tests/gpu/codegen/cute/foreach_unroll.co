@@ -1,4 +1,4 @@
-// RUN: choreo -es -t cute -arch=sm_86 %s -o - | FileCheck %s
+// RUN: choreo -es -t cute -arch=sm_86 --max-local-mem-capacity=4096 %s -o - | FileCheck %s
 
 __co__ void test_unroll(f32 [32, 18, 9] a) {
   parallel p by 3 : block {

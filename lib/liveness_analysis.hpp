@@ -160,6 +160,11 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
     bool buffer_related = false;
   };
 
+  struct RegionLiveness {
+    VarSet live_in;
+    VarSet live_out;
+  };
+
   // ---- Construction ----
 
   LivenessAnalyzer()
@@ -176,7 +181,7 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 
   // When adding a new statement node type to HasStmt(), also add a Visit()
   // override and DumpStmtBriefly() case, then update this count.
-  static constexpr size_t NumVisitOverrides() { return 21; }
+  static constexpr size_t NumVisitOverrides() { return 22; }
 
   static VarSet& SetUnionInPlace(VarSet& a, const VarSet& b);
   static VarSet& SetDiffInPlace(VarSet& a, const VarSet& b);
@@ -188,6 +193,8 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   const std::unordered_map<std::string, Ranges>& VarRanges() const {
     return var_ranges;
   }
+
+  RegionLiveness GetRegionLiveness(const AST::Node* region) const;
 
   // Resource classes used by the DMA resource allocator.  BUFFER is handled by
   // MemReuse; FUTURE and EVENT are the finite completion slots this allocator
@@ -205,14 +212,15 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
   std::unordered_map<std::string, Ranges>
   ResourceRanges(ResourceClass rc) const;
 
-  // True if `fut` (a scoped DMA-future name) is routed through the DTE pool
-  // rather than a named completion context.  Codegen uses the pool iff the DMA
-  // storage is non-SHARED (EmitFutureClaim: use_pool = use_dte_pool &&
-  // sto != Storage::SHARED, with sto = min(from, to)).  The pool decision is
-  // recorded during Visit(DMA) by resolving each side's storage exactly like
-  // the codegen (future `.data` sources resolve through FutureType), so future
-  // names and inferred `local` destinations are handled correctly.
-  bool IsPoolFuture(const std::string& fut) const;
+  // True if `fut` (a scoped DMA-future name) is routed through a reusable
+  // named completion context rather than a per-DMA context.  Codegen selects
+  // the named slot iff the DMA storage is non-SHARED (with `sto` taken as the
+  // more restrictive of the source and destination tiers); SHARED-storage
+  // futures use per-DMA contexts.  The decision is recorded during Visit(DMA)
+  // by resolving each side's storage exactly like the codegen (future `.data`
+  // sources resolve through FutureType), so future names and inferred `local`
+  // destinations are handled correctly.
+  bool IsNamedContextFuture(const std::string& fut) const;
 
   // ---- Visitor overrides ----
 
@@ -238,6 +246,7 @@ public:
   bool Visit(AST::DMA&) override;
   bool Visit(AST::BufferMap&) override;
   bool Visit(AST::MMA&) override;
+  bool Visit(AST::FragReduce&) override;
   bool Visit(AST::ChunkAt&) override;
   bool Visit(AST::Wait&) override;
   bool Visit(AST::Call&) override;
@@ -330,10 +339,10 @@ private:
   std::set<std::string> future_vars;
   std::set<std::string> event_vars;
 
-  // Scoped names of DMA futures routed through the DTE pool (non-SHARED
-  // storage). Populated in Visit(DMA) by mirroring the codegen use_pool
-  // condition (sto = min(from,to) != Storage::SHARED).
-  std::set<std::string> pool_futures;
+  // Scoped names of DMA futures routed through a named completion context
+  // (non-SHARED storage). Populated in Visit(DMA) by mirroring the codegen
+  // non-SHARED-storage condition (sto = min(from,to) != Storage::SHARED).
+  std::set<std::string> named_context_futures;
 
   // -- CFG / basic block state --
   inline void ConnectBB(ptr<BB> x, ptr<BB> y) {

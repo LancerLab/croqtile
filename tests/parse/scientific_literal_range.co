@@ -1,0 +1,4 @@
+// RUN: not choreo -t cc -sa=SEMA %s 2>&1 | FileCheck %s
+
+__co__ f32 overflow_literal() { return 1e999f; }
+// CHECK: error: f32 literal out of range

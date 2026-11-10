@@ -77,6 +77,7 @@ enum class AssessOutcome {
   STATIC_TRUE,  ///< Proven safe at compile time -- no code generated.
   STATIC_FALSE, ///< Proven unsafe at compile time -- compile error/warning.
   RUNTIME,      ///< Cannot evaluate -- runtime assertion emitted.
+  UNKNOWN,      ///< Warning-only policy retained an unresolved predicate.
 };
 
 inline const std::string STR(const AssessOutcome& o) {
@@ -118,6 +119,8 @@ struct AssessmentEntry {
   AssessMechanism mechanism = AssessMechanism::CANONICAL;
   /// Index into Assessor::assertions (RUNTIME only); SIZE_MAX otherwise.
   size_t assertion_idx = static_cast<size_t>(-1);
+  std::string predicate;
+  std::string guard;
 };
 
 struct AssessResult {
@@ -161,6 +164,10 @@ struct Assertion {
   AssertionCost cost = AssertionCost::LOW;
   bool enabled = true;
   UsageType usage_type = UsageType::UnClassified;
+  // Retain the assessment record and source location even when another
+  // enabled assertion checks the same predicate at the same emission site.
+  bool duplicate = false;
+  size_t duplicate_of = static_cast<size_t>(-1);
 
   /// Return the node to use for site-assertion emission mapping.
   AST::Node* EmitTarget() const {
@@ -172,6 +179,8 @@ struct Assertion {
 class Assessor {
 private:
   std::vector<Assertion> assertions;
+  std::string current_predicate_;
+  std::string current_guard_;
   Visitor* visitor = nullptr;
 
   /// Raw assertion insertion (no evaluation, no visitor required).

@@ -11,7 +11,7 @@ __co__ auto mem_reuse_static(u8 [K, N] i0, u8 [K, N] i1) {
   u8 [i0.span] output;
 
   parallel p by 8, q by 128 {
-    smem1 = dma.copy.async i0.chunkat(p, _) => shared;
+    smem1 = dma.copy.async i0.chunkat(p, _) => shared : block;
     shared u8 [smem1.span] output_s{0};
     wait smem1;
 
@@ -21,7 +21,7 @@ __co__ auto mem_reuse_static(u8 [K, N] i0, u8 [K, N] i1) {
     }
 
     // smem2 reuse smem1
-    smem2 = dma.copy.async i1.chunkat(p, _) => shared;
+    smem2 = dma.copy.async i1.chunkat(p, _) => shared : block;
     wait smem2;
 
     foreach i in [output_s.span(0)] {
@@ -30,7 +30,7 @@ __co__ auto mem_reuse_static(u8 [K, N] i0, u8 [K, N] i1) {
     }
 
     sync.barrier : block;
-    dma.copy output_s => output.chunkat(p, _);
+    dma.copy output_s => output.chunkat(p, _) : block;
   }
 
   return output;

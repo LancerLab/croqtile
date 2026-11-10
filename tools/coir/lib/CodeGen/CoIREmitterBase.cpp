@@ -447,7 +447,9 @@ void CoIREmitterBase::emitConstant(arith::ConstantOp op) {
     os() << getIndent() << "const " << emitElementType(op.getType()) << " "
          << name << " = ";
     llvm::SmallString<16> strVal;
-    floatAttr.getValue().toString(strVal, 6, 0);
+    // Natural precision round-trips the APFloat; six digits can change even
+    // f32 constants (for example 1e-12f) before the kernel executes.
+    floatAttr.getValue().toString(strVal, 0, 0);
     os() << strVal << ";\n";
   } else {
     os() << getIndent() << "auto " << name << " = /* constant */;\n";

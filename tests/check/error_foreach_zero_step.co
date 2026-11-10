@@ -1,0 +1,16 @@
+// A zero `foreach` step has no useful semantics: the induction variable never
+// advances, so the lowered loop does not terminate.  It must be rejected at
+// compile time -- it previously crashed the assertion cost model (SIGFPE).
+//
+// RUN: not choreo -es -t cc %s -o /dev/null 2>&1 | FileCheck %s
+
+__co__ void zero_step(f32 [6, 4] x) {
+  parallel p by 1 : block {
+    with {a} in [6] {
+      foreach a(0:6:0) {
+        x.at(a, 0) = 1.0f;
+      }
+    }
+  }
+}
+// CHECK: error: invalid step 0 in the iteration space; the loop variable never advances, so the loop would not terminate. Use a step of at least 1.

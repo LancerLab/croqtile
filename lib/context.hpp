@@ -99,6 +99,9 @@ struct DMABufferInfo {
   DMABufferKind to_kind = DOK_UNKNOWN;
   Storage from_sto = Storage::DEFAULT; // source buffer storage tier
   Storage to_sto = Storage::DEFAULT;   // destination buffer storage tier
+  // Compiler-created destination for "=> local/shared/global". Its address
+  // follows the future binding through rotate; explicit buffer bases do not.
+  bool implicit_buffer = false;
 };
 
 // per-function(name) future-buffer info
@@ -441,6 +444,27 @@ struct MemReuseStats {
       0; // sum of heap_size from static allocations
 };
 
+/// Peak compile-time memory usage per storage tier, aggregated across all
+/// functions. Values are bytes; a tier is present only if the target manages
+/// its usage.
+struct MemUsageStats {
+  struct Tier {
+    size_t peak_bytes = 0;           // peak live compile-time usage
+    size_t limit_bytes = 0;          // budget the usage was checked against
+    bool has_runtime_extent = false; // usage also depends on runtime extents
+  };
+  std::map<Storage, Tier> tiers; // keyed by storage tier
+  std::map<std::string, std::map<Storage, Tier>> functions;
+  // Tiers holding runtime-managed allocations whose size is decided by input
+  // parameters (detected while planning memory reuse).
+  std::set<Storage> runtime_decided;
+  std::map<std::string, std::set<Storage>> runtime_decided_functions;
+};
+
+/// Print the per-storage memory-usage statistics section to stderr.
+/// Used by both the AST pipeline and the CoIR pipeline (CoCC).
+void PrintMemUsageStats(const MemUsageStats& s);
+
 /// Aggregate statistics for assessments and assertions across all functions.
 struct AssessmentStats {
   size_t total = 0;            // total assessments evaluated
@@ -463,7 +487,7 @@ struct AssessmentStats {
   size_t runtime_medium = 0;   // runtime assertions with medium estimated cost
   size_t runtime_high = 0;     // runtime assertions with high estimated cost
   size_t runtime_enabled = 0;  // runtime assertions enabled for emission
-  size_t runtime_disabled = 0; // runtime assertions suppressed by cost filter
+  size_t runtime_disabled = 0; // suppressed by cost filter or duplicate removal
   // Per-usage-type assessment counts (total evaluated, including static)
   size_t unclassified_total = 0;  // UsageType::ShapeCompatibility
   size_t shape_compat_total = 0;  // UsageType::ShapeCompatibility
@@ -502,6 +526,7 @@ private:
   AssessmentStats assessment_stats;  // accumulated across all functions
   VectorizerStats vectorizer_stats;  // accumulated across all functions
   MemReuseStats mem_reuse_stats;     // accumulated across all functions
+  MemUsageStats mem_usage_stats;     // peak per-tier usage across all functions
   BufferAccessLog buffer_access_log; // buffer access log from analysis
   std::unique_ptr<Target> compile_target = nullptr;
   std::map<std::string, std::unique_ptr<Target>> device_targets;
@@ -572,8 +597,6 @@ private:
                              // transcendentals (exp/div) in generated code.
   bool use_target_lib = false; // Lower __lib_* builtins to target library calls
                                // (e.g. native hardware library calls).
-  bool use_dte_pool = false;   // Reuse a persistent DTE pool for anonymous
-                               // and named DMAs to prevent resource exhaustion.
   std::string debug_file_dir;  // directory for compiler debug artifacts
   std::string api_mode = "cffi"; // API mode for generated code
   std::string device_namespace;  // namespace wrapping generated device kernels
@@ -750,6 +773,12 @@ public:
     return GetTarget().GetMemCapacity(sto, GetArch());
   }
 
+  // Best-practice per-thread `local` budget (soft limit). Independent of the
+  // user override, which only raises the hard cap.
+  size_t GetLocalMemBudget() const {
+    return GetTarget().GetLocalMemBudget(GetArch());
+  }
+
   // return memory alignment in byte. Used in memory reuse pass.
   size_t GetMemoryAlignmentByte(const ArchId& arch, Storage sto) const {
     if (sto == Storage::SHARED && SharedMemAlignment() != 0)
@@ -839,6 +868,8 @@ public:
   VectorizerStats& GetVectorizerStats() { return vectorizer_stats; }
   const MemReuseStats& GetMemReuseStats() const { return mem_reuse_stats; }
   MemReuseStats& GetMemReuseStats() { return mem_reuse_stats; }
+  const MemUsageStats& GetMemUsageStats() const { return mem_usage_stats; }
+  MemUsageStats& GetMemUsageStats() { return mem_usage_stats; }
   const BufferAccessLog& GetBufferAccessLog() const {
     return buffer_access_log;
   }
@@ -854,7 +885,6 @@ public:
   bool FastCompile() const { return fast_compile; }
   bool UseFastMath() const { return use_fast_math; }
   bool UseTargetLib() const { return use_target_lib; }
-  bool UseDtePool() const { return use_dte_pool; }
   const std::string& GetDebugFileDir() const { return debug_file_dir; }
   void SetDebugFileDir(const std::string& dir) { debug_file_dir = dir; }
   const std::string& GetApiMode() const { return api_mode; }
@@ -902,7 +932,6 @@ public:
   void SetFastCompile(bool value) { fast_compile = value; }
   void SetUseFastMath(bool value) { use_fast_math = value; }
   void SetUseTargetLib(bool value) { use_target_lib = value; }
-  void SetUseDtePool(bool value) { use_dte_pool = value; }
   void SetSharedMemAlignment(size_t value) { shared_mem_alignment = value; }
   void SetInhibitWarning(bool value) { inhibit_warning = value; }
   void SetWarningAsError(bool value) { warning_as_error = value; }

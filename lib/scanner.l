@@ -75,8 +75,9 @@ static bool accumulate_expr_buffer = false;
 id          [a-zA-Z_][a-zA-Z0-9_]*
 num         (0|[1-9][0-9]*)[uU]?[lL]{0,2}
 hex_num     0[xX][0-9a-fA-F]+[uU]?[lL]{0,2}
-fpnum       -?[0-9]+\.[0-9]+
-fpnum_f     -?[0-9]+\.[0-9]+[fF]
+exponent    [eE][+-]?[0-9]+
+fpnum       ([0-9]+\.[0-9]+({exponent})?|[0-9]+{exponent})
+fpnum_f     {fpnum}[fF]
 cstr        \"([^"\\]|\\.)*\"
 blank       [ \t\r]
 attr_id     (__{id}__|\[\[{blank}*{id}{blank}*(?:\({blank}*{cstr}{blank}*\){blank}*)?\]\])
@@ -411,6 +412,10 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
 <PB_ATTR>{
   "launch_bounds" { BEGIN(CO_FUNC); return Choreo::Parser::make_LAUNCHBOUNDS(yytext, loc); }
   "maxnreg"    { BEGIN(CO_FUNC); return Choreo::Parser::make_MAXNREG(yytext, loc); }
+  "g""cu::no_mem_alias_in_vldst_tar" { BEGIN(CO_FUNC); return Choreo::Parser::make_TARGET_NO_MEM_ALIAS_IN_VLDST_TAR(yytext, loc); }
+  "g""cu::loop_iterator_less_than_1024" { BEGIN(CO_FUNC); return Choreo::Parser::make_TARGET_LOOP_ITERATOR_LESS_THAN_1024(yytext, loc); }
+  "g""cu::enable_software_pipeliner" { BEGIN(CO_FUNC); return Choreo::Parser::make_TARGET_ENABLE_SOFTWARE_PIPELINER(yytext, loc); }
+  "g""cu::enable_bc_resolver" { BEGIN(CO_FUNC); return Choreo::Parser::make_TARGET_ENABLE_BC_RESOLVER(yytext, loc); }
   [ \t\n]    ; /* Ignore whitespace */
   .          { BEGIN(CO_FUNC); yyless(0); }
 }
@@ -505,8 +510,20 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
                  }
                }
              }
-  {fpnum}    return Choreo::Parser::make_DFPVAL(std::stod(yytext), loc);
-  {fpnum_f}  return Choreo::Parser::make_FPVAL(std::stof(yytext), loc);
+  {fpnum}    {
+               errno = 0;
+               double value = std::strtod(yytext, nullptr);
+               if (!std::isfinite(value) || (errno == ERANGE && value == 0))
+                 throw Choreo::Parser::syntax_error(loc, "f64 literal out of range");
+               return Choreo::Parser::make_DFPVAL(value, loc);
+             }
+  {fpnum_f}  {
+               errno = 0;
+               float value = std::strtof(yytext, nullptr);
+               if (!std::isfinite(value) || (errno == ERANGE && value == 0))
+                 throw Choreo::Parser::syntax_error(loc, "f32 literal out of range");
+               return Choreo::Parser::make_FPVAL(value, loc);
+             }
   {cstr}     { // Remove the surrounding quotes and unescape
                std::string str = yytext;
                str = str.substr(1, str.length() - 2); // Remove the quotes
@@ -702,6 +719,8 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
   "apply"    return Choreo::Parser::make_APPLY(yytext, loc);
   "reduce_max" return Choreo::Parser::make_REDUCE_MAX_STMT(yytext, loc);
   "reduce_sum" return Choreo::Parser::make_REDUCE_SUM_STMT(yytext, loc);
+  "reduce_min" return Choreo::Parser::make_REDUCE_MIN_STMT(yytext, loc);
+  "reduce_prod" return Choreo::Parser::make_REDUCE_PROD_STMT(yytext, loc);
   "all_reduce_sum" return Choreo::Parser::make_ALL_REDUCE_SUM_STMT(yytext, loc);
   "copy"     return Choreo::Parser::make_COPY_STMT(yytext, loc);
   "wait"     return Choreo::Parser::make_WAIT(yytext, loc);

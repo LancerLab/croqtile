@@ -58,6 +58,14 @@ public:
 
   bool IsAsmSupported(const ArchId&) const override { return true; }
 
+  // The fragment lowering reduces along the last dimension only, and it
+  // implements max and sum. reduce_min / reduce_prod have no functor in the
+  // runtime header, and the column direction has no layout mapping, so both
+  // are diagnostics rather than statements lowered as something else.
+  unsigned ReduceStatementDirections(const ArchId&) const override {
+    return ReduceStatementBit("max", 1) | ReduceStatementBit("sum", 1);
+  }
+
   int DefaultOptLevel(const ArchId&) const override { return 3; }
 
   const std::set<SwizMode>

@@ -405,7 +405,7 @@ public:
     if (cannot_proceed) return true;
 
     // @xx == some int literal should be done in valno pass.
-    // TODO(wsj): associate with LoopRange node, work later!
+    // TODO(wsj): associate with RangeExpr node, work later!
 
     return true;
   }
@@ -496,7 +496,7 @@ public:
     return true;
   }
 
-  bool Visit(AST::LoopRange& n) override {
+  bool Visit(AST::RangeExpr& n) override {
     TraceEachVisit(n);
     if (cannot_proceed) return true;
 

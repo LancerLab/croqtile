@@ -32,10 +32,215 @@ struct NormBase : public VisitorWithScope {
   NormBase(const std::string& name) : VisitorWithScope(name) {}
 };
 
+// Canonicalize the legacy range-source sugar `foreach a(lb:ub[:step])` into an
+// explicit iteration variable `__iv_a`. In the sugar form `a` doubles as both
+// the range source (the within-declared bounded variable) and the iteration
+// variable; canonicalization splits the two roles:
+//   - assign a fresh iteration variable `__iv_<name>` to the range
+//   - rewrite body *value* references to `<name>` into `__iv_<name>`
+//   - keep bound-access forms that read `<name>`'s bound (`<name>(-1)`,
+//     `ubound(<name>)`, `#<name>`, `<name> #+ ...`, `<name> #- ...`, etc.)
+//     referring to the range source `<name>`; the binary `#`
+//     (`L * ubound(R) + R`) is NOT a bound access - both operands are plain
+//     values and are rewritten
+struct ForeachCanon final : public NormBase {
+private:
+  // Rewrite contexts (range-source name -> iteration-variable name), one per
+  // enclosing sugar foreach; the innermost active context is last.
+  std::vector<std::pair<std::string, std::string>> ctx;
+  // Number of contexts pushed per ForeachBlock, for balanced pops.
+  std::vector<size_t> pops;
+  // Bound operands of in-flight bound-access expressions. These keep the
+  // range-source name (they refer to the bound, not the iteration variable).
+  std::unordered_set<const AST::Node*> bound_operands;
+  // Range source identifiers are metadata references, not body uses. They are
+  // visited before RangeExpr itself, so protect them before generic rewriting.
+  std::unordered_set<const AST::Node*> range_sources;
+  // Multi-dimensional range sources declared by the enclosing `with` blocks.
+  // LoopNorm expands these into nested matcher ranges, where it assigns the
+  // canonical iteration variables. Canonicalizing them here would rewrite the
+  // body to an IV that is not part of the expanded loop hierarchy. Scalar
+  // (1-dim) sources are canonicalized here instead. One set per active `with`
+  // block so identically named sources in sibling scopes (or other functions)
+  // do not mask one another.
+  std::vector<std::unordered_set<std::string>> multi_dim_scope_stack;
+
+  // Return the bound operand of a bound-access expression, or nullptr when the
+  // expression is not a bound access. The bound operand keeps the range-source
+  // name; any other operand is a plain value and is rewritten.
+  static ptr<AST::Node> BoundOperand(const AST::Expr& e) {
+    return e.GetBoundOperand();
+  }
+
+public:
+  ForeachCanon() : NormBase("foreach-canon") {}
+
+  bool BeforeVisitImpl(AST::Node& n) override {
+    if (isa<AST::WithBlock>(&n)) multi_dim_scope_stack.emplace_back();
+
+    // Protect range-source identifiers before their range subtree is visited.
+    // A nested `with`/foreach shares the source Identifier node with its
+    // RangeExpr (see parser.yy), so an enclosing foreach's rewrite context
+    // must not rename it; otherwise the nested source would be re-prefixed.
+    if (auto fb = dyn_cast<AST::ForeachBlock>(&n))
+      for (auto& rn : fb->GetRanges())
+        if (auto rng = dyn_cast<AST::RangeExpr>(rn))
+          range_sources.insert(rng->GetRV().get());
+
+    auto e = dyn_cast<AST::Expr>(&n);
+    if (!e) return true;
+
+    if (auto bound = BoundOperand(*e)) {
+      bound_operands.insert(bound.get());
+      // `bound` is usually a `ref(<name>)` Expr wrapping the Identifier, so
+      // mark the underlying symbol too. Otherwise the Identifier's own Visit
+      // (which never goes through BeforeVisit) would rewrite it.
+      if (auto bexpr = dyn_cast<AST::Expr>(bound))
+        if (auto sym = bexpr->GetSymbol()) bound_operands.insert(sym.get());
+      return true;
+    }
+    if (bound_operands.count(&n)) return true; // bound operand: keep name
+    if (ctx.empty()) return true;
+
+    if (auto sym = e->GetSymbol()) {
+      for (auto it = ctx.rbegin(); it != ctx.rend(); ++it) {
+        if (sym->name == it->first) {
+          sym->name = it->second;
+          break;
+        }
+      }
+    }
+    return true;
+  }
+
+  // Bare Identifiers (e.g. ChunkAt indices, which are stored directly as
+  // Identifiers rather than wrapped in an Expr reference) still denote value
+  // references to the loop variable and must be rewritten too. Unlike Expr,
+  // Identifier::accept only dispatches Visit, so handle the rewrite here.
+  bool Visit(AST::Identifier& n) override {
+    if (bound_operands.count(&n) || range_sources.count(&n)) return true;
+    if (ctx.empty()) return true;
+    for (auto it = ctx.rbegin(); it != ctx.rend(); ++it) {
+      if (n.name == it->first) {
+        n.name = it->second;
+        break;
+      }
+    }
+    return true;
+  }
+
+  // ChunkAt::accept visits only `sa` and the bare `indices` field; the
+  // SpannedOperations (Chunk/ChunkAt/SubSpan/...) live in `operations` and
+  // must be traversed explicitly so their indices and tiling factors get the
+  // same rewrite treatment as any other body expression.
+  bool Visit(AST::ChunkAt& n) override {
+    for (auto op : n.AllOperations()) op->accept(*this);
+    return true;
+  }
+
+  bool AfterVisitImpl(AST::Node& n) override {
+    if (auto e = dyn_cast<AST::Expr>(&n)) {
+      if (auto bound = BoundOperand(*e)) bound_operands.erase(bound.get());
+    } else if (isa<AST::ForeachBlock>(&n) && !pops.empty()) {
+      size_t count = pops.back();
+      pops.pop_back();
+      while (count-- > 0) ctx.pop_back();
+    } else if (isa<AST::WithBlock>(&n) && !multi_dim_scope_stack.empty()) {
+      multi_dim_scope_stack.pop_back();
+    }
+    return true;
+  }
+
+  // Record `with` variables whose dimensionality is > 1. LoopNorm expands
+  // those into nested matcher foreaches (assigning the canonical matcher IVs);
+  // canonicalizing them here would rewrite the body to an IV not part of the
+  // expanded loop hierarchy. Scalar (1-dim) with-sources still get a canonical
+  // scalar `__iv_<name>` here. Dimensionality is read from the bounded type,
+  // which EarlySemantics already resolved (BoundedIntegerType => 1 dim,
+  // BoundedITupleType => dims > 1).
+  bool Visit(AST::WithIn& n) override {
+    if (!n.with || multi_dim_scope_stack.empty()) return true;
+    if (auto bty = dyn_cast<BoundedType>(n.with->GetType()))
+      if (bty->Dims() > 1) multi_dim_scope_stack.back().insert(n.with->name);
+    return true;
+  }
+
+  bool Visit(AST::ForeachBlock& n) override {
+    size_t pushed = 0;
+    for (auto& rn : n.GetRanges()) {
+      auto rng = cast<AST::RangeExpr>(rn);
+      if (rng->HasExplicitIV()) continue;
+
+      // LoopNorm canonicalizes all `with` sources after matcher expansion.
+      // Skip sources declared multi-dimensional by an enclosing `with` block;
+      // their IVs are assigned during matcher expansion. The per-block sets
+      // keep identically named sources in other scopes from masking scalars.
+      const std::string src = rng->GetIVName();
+      bool multi_dim = false;
+      for (auto& scope : multi_dim_scope_stack)
+        if (scope.count(src)) {
+          multi_dim = true;
+          break;
+        }
+      if (multi_dim) continue;
+
+      const std::string name = rng->GetIVName();
+      const std::string fresh = "__iv_" + name;
+
+      auto iv = AST::Make<AST::Identifier>(rng->LOC(), fresh);
+      auto placeholder = MakeUnknownBoundedIntegerType();
+      iv->SetType(placeholder);
+      SSTab().DefineSymbol(fresh, placeholder);
+      rng->iv = iv;
+
+      ctx.emplace_back(name, fresh);
+      ++pushed;
+    }
+    if (pushed > 0) pops.push_back(pushed);
+    return true;
+  }
+};
+
 struct LoopNorm final : public NormBase {
 public:
   std::map<std::string, ptr<AST::MultiValues>> matcher_map; // map of with-in
 
+private:
+  struct MatcherIVCanon final : public VisitorWithScope {
+    std::map<std::string, std::string> names;
+
+    explicit MatcherIVCanon(const std::map<std::string, std::string>& names)
+        : VisitorWithScope("loopnorm-matcher-iv"), names(names) {}
+
+    bool BeforeVisitImpl(AST::Node& n) override {
+      if (auto e = dyn_cast<AST::Expr>(&n)) {
+        if (auto sym = e->GetSymbol()) {
+          auto it = names.find(sym->name);
+          if (it != names.end()) sym->name = it->second;
+        }
+      }
+      return true;
+    }
+
+    bool AfterVisitImpl(AST::Node&) override { return true; }
+
+    bool Visit(AST::Identifier& n) override {
+      auto it = names.find(n.name);
+      if (it != names.end()) n.name = it->second;
+      return true;
+    }
+
+    // ChunkAt stores its chained spanned operations separately from the
+    // regular child nodes. Traverse them here so matcher-IV canonicalization
+    // also updates indices in `.At(...)`, `.chunkat(...)`, and related
+    // operations.
+    bool Visit(AST::ChunkAt& n) override {
+      for (auto op : n.AllOperations()) op->accept(*this);
+      return true;
+    }
+  };
+
+public:
   LoopNorm() : NormBase("loopnorm") {}
   bool BeforeVisitImpl(AST::Node& n) override {
     if (trace_visit) dbgs() << "before visiting " << n.TypeNameString() << "\n";
@@ -58,18 +263,44 @@ public:
       if (auto fb = dyn_cast<AST::ForeachBlock>(n.SubAt(idx))) {
         std::vector<ptr<AST::ForeachBlock>> loops;
 
-        auto rng = cast<AST::LoopRange>(fb->ranges->ValueAt(0));
+        auto rng = cast<AST::RangeExpr>(fb->ranges->ValueAt(0));
         auto cname = rng->GetRVName();
         if (fb->ranges->Count() == 1 && matcher_map.count(cname)) {
           // single range, multiple loops (range dim > 1)
+          std::map<std::string, std::string> canonical_matchers;
+          // ForeachCanon may already have split a scalar source into a
+          // canonical IV (for example `r` -> `__iv_r`). LoopNorm then expands
+          // the same source into matcher components (`r__elem__0`, ...).
+          // Rewrite that pre-expansion IV as well, otherwise body references
+          // keep naming a placeholder that is no longer part of the loop
+          // hierarchy and later shape inference sees an unknown type.
+          const auto pre_expansion_iv = rng->GetIVName();
+          bool map_pre_expansion_iv = pre_expansion_iv.rfind("__iv_", 0) == 0;
           for (auto matcher : matcher_map[cname]->values) {
             auto matcher_iv = AST::GetIdentifier(matcher);
             auto iv_ty = matcher_iv->GetType();
             auto iv_name = matcher_iv->name;
-            auto new_iv = AST::Make<AST::Identifier>(rng->LOC(), iv_name);
+            auto canonical_iv_name = "__iv_" + iv_name;
+            canonical_matchers[iv_name] = canonical_iv_name;
+            // Scalar with-sources may have been flattened to a single
+            // `name__elem__0` matcher after ForeachCanon ran. References in
+            // the original body then still use the old `__iv_name` spelling;
+            // carry that spelling through the expansion too.
+            const auto elem_marker = iv_name.rfind("__elem__");
+            if (elem_marker != std::string::npos)
+              canonical_matchers["__iv_" + iv_name.substr(0, elem_marker)] =
+                  canonical_iv_name;
+            if (map_pre_expansion_iv) {
+              canonical_matchers[pre_expansion_iv] = canonical_iv_name;
+              map_pre_expansion_iv = false;
+            }
+            auto new_iv =
+                AST::Make<AST::Identifier>(rng->LOC(), canonical_iv_name);
             new_iv->SetType(iv_ty);
             auto ranges = AST::Make<AST::MultiValues>(fb->ranges->LOC());
-            ranges->Append(AST::Make<AST::LoopRange>(rng->LOC(), new_iv));
+            auto new_rng = AST::Make<AST::RangeExpr>(rng->LOC(), matcher_iv);
+            new_rng->iv = new_iv;
+            ranges->Append(new_rng);
             auto stmts = AST::Make<AST::MultiNodes>(fb->stmts->LOC());
             auto new_fb =
                 AST::Make<AST::ForeachBlock>(fb->LOC(), ranges, stmts);
@@ -78,6 +309,8 @@ public:
             new_fb->loop = loop;
             loops.push_back(new_fb);
           }
+          MatcherIVCanon canon(canonical_matchers);
+          fb->stmts->accept(canon);
         } else if (fb->ranges->Count() > 1) {
           // multiple ranges, multiple loops (unless automap keeps flat
           // iteration)
@@ -93,7 +326,7 @@ public:
             }
           }
           if (has_automap) {
-            auto first_rng = cast<AST::LoopRange>(fb->ranges->ValueAt(0));
+            auto first_rng = cast<AST::RangeExpr>(fb->ranges->ValueAt(0));
             auto loop = std::make_shared<Loop>(
                 GenerateLoopName(), first_rng->GetIV()->GetType(), fb->LOC());
             fb->loop = loop;
@@ -101,7 +334,7 @@ public:
           }
           const auto& ranges = fb->GetRangeNodes();
           for (size_t i = 0; i < ranges->Count(); ++i) {
-            auto rng = cast<AST::LoopRange>(ranges->ValueAt(i));
+            auto rng = cast<AST::RangeExpr>(ranges->ValueAt(i));
             auto ranges = AST::Make<AST::MultiValues>(rng->LOC());
             ranges->Append(rng);
             auto stmts = AST::Make<AST::MultiNodes>(fb->stmts->LOC());
@@ -143,7 +376,7 @@ public:
                 assert(sub_fb->ranges->Count() == 1 &&
                        "expect only one range in the loop hierarchy.");
                 if (arg_id->name ==
-                    dyn_cast<AST::LoopRange>(sub_fb->GetRanges()[0])
+                    dyn_cast<AST::RangeExpr>(sub_fb->GetRanges()[0])
                         ->GetRVName()) {
                   found = true;
                   sub_fb->suffixs = suffixs;
@@ -249,6 +482,17 @@ private:
       auto ref = operand->GetReference();
       if (auto chunk = dyn_cast<AST::ChunkAt>(ref))
         return cast<AST::ChunkAt>(chunk->Clone());
+      if (operand->op == Op::ElemOf) {
+        auto indices = AST::Make<AST::MultiValues>(operand->LOC());
+        ptr<AST::Expr> current = operand;
+        while (current && current->op == Op::ElemOf) {
+          indices->Insert(current->GetR()->Clone(), 0);
+          current = dyn_cast<AST::Expr>(current->GetL());
+        }
+        auto base = AST::GetArrayBaseSymbol(*operand);
+        return AST::Make<AST::ChunkAt>(
+            operand->LOC(), cast<AST::Identifier>(base->Clone()), indices);
+      }
       auto id = cast<AST::Identifier>(ref);
       return AST::Make<AST::ChunkAt>(operand->LOC(),
                                      cast<AST::Identifier>(id->Clone()));
@@ -433,6 +677,26 @@ public:
 
   bool Visit(AST::Expr& n) override {
     TraceEachVisit(n);
+    if (n.IsUnary() && n.op == Op::Sub) {
+      // Multiplication by a same-type -1 preserves signed zero, unlike 0 - x.
+      // Lower here so both classic codegen and CoIR reuse numeric arithmetic.
+      auto elem = ScalarOrVectorElementType(n.GetType());
+      ptr<AST::Node> factor = AST::Make<AST::IntLiteral>(n.LOC(), -1);
+      if (elem == BaseType::F32)
+        factor = AST::Make<AST::FloatLiteral>(n.LOC(), -1.0f);
+      else if (elem == BaseType::F64)
+        factor = AST::Make<AST::FloatLiteral>(n.LOC(), -1.0);
+      else if (elem != BaseType::S32) {
+        auto cast = GenCastExprNode(elem, BaseType::S32, factor);
+        cast->SetExplicit();
+        factor = cast;
+      }
+      if (auto vty = dyn_cast<VectorType>(n.GetType()))
+        factor->AddNote("broadcast", std::to_string(vty->ElemCount()));
+      n.SetL(factor);
+      n.SetForm(AST::Expr::Binary);
+      n.op = Op::Mul;
+    }
     if (list_ref) { // could be with syntax sugar
       auto Apply = [this](const ptr<AST::Expr>& expr) -> ptr<AST::Expr> {
         if (!expr) return nullptr;
@@ -787,11 +1051,14 @@ public:
       n.sa.reset();
     }
 
-    // hoist any arith inside of chunkat positions
+    // Hoist index and view-offset expressions into statement-local scalars.
+    // Memory reads cannot be value-numbered directly by shape inference.
     for (auto tsi : n.AllOperations()) {
+      auto offsets = tsi->GetOffsets();
+      auto positions = offsets ? offsets : tsi->GetIndices();
       std::vector<std::pair<int, ptr<AST::Node>>> repls;
       int i = -1;
-      for (auto& v : tsi->IndexNodes()) {
+      for (auto& v : offsets ? tsi->OffsetNodes() : tsi->IndexNodes()) {
         ++i;
         auto expr = cast<AST::Expr>(v);
         if (expr->op == Op::GetIth) {
@@ -837,12 +1104,11 @@ public:
       }
       for (auto& repl : repls) {
         VST_DEBUG(dbgs() << n.TypeNameString() << ": replace "
-                         << PSTR(tsi->GetIndices()->ValueAt(repl.first))
-                         << " with ");
+                         << PSTR(positions->ValueAt(repl.first)) << " with ");
 
-        tsi->GetIndices()->SetValueAt(repl.first, repl.second);
+        positions->SetValueAt(repl.first, repl.second);
 
-        VST_DEBUG(dbgs() << PSTR(tsi->GetIndices()->ValueAt(repl.first)) << "("
+        VST_DEBUG(dbgs() << PSTR(positions->ValueAt(repl.first)) << "("
                          << PSTR(repl.second->GetType()) << ").\n");
       }
     }
@@ -927,7 +1193,7 @@ public:
       int i = -1;
       for (auto& v : n.GetRanges()) {
         ++i;
-        auto lr = cast<AST::LoopRange>(v);
+        auto lr = cast<AST::RangeExpr>(v);
         auto& bound = get_bound(lr);
         if (bound == nullptr) continue;
 
@@ -982,7 +1248,7 @@ public:
                          << "replace "
                          << PSTR(n.GetRangeNodes()->ValueAt(repl.first))
                          << " with ");
-        auto lr = cast<AST::LoopRange>(n.GetRangeNodes()->values[repl.first]);
+        auto lr = cast<AST::RangeExpr>(n.GetRangeNodes()->values[repl.first]);
         set_bound(lr, repl.second);
         VST_DEBUG(dbgs() << PSTR(n.GetRangeNodes()->ValueAt(repl.first))
                          << ".\n");
@@ -1124,6 +1390,7 @@ public:
 
     auto new_pb = cast<AST::ParallelBy>(pb.Clone());
     new_pb->SetOuter(false);
+    new_pb->ClearTargetFunctionAttributes();
     // pb is now the outer level
     pb.SetLevel(pl);
     pb.SetEnforced(false);
@@ -1768,13 +2035,14 @@ public:
 
 class Normalizer : public VisitorGroup {
 private:
+  ForeachCanon fcanon;
   CompoundNorm comp;
   ParaByFiller filler;
   LoopNorm ln;
   PredNorm pn;
 
 public:
-  Normalizer() : VisitorGroup("norm", comp, filler, ln, pn) {}
+  Normalizer() : VisitorGroup("norm", fcanon, comp, filler, ln, pn) {}
 };
 
 } // end namespace Choreo

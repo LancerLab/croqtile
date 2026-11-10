@@ -355,7 +355,7 @@ void MockInterpreter::ExecForeach(AST::ForeachBlock& n) {
 
   std::vector<RangeInfo> ranges;
   for (auto& r : n.ranges->AllValues()) {
-    auto lr = cast<AST::LoopRange>(r);
+    auto lr = cast<AST::RangeExpr>(r);
     RangeInfo ri;
     ri.iv_name = lr->GetIVName();
 

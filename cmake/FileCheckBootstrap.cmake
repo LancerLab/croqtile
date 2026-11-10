@@ -2,15 +2,15 @@
 # Ensure the FileCheck utility (from LLVM) is available for lit.sh tests.
 #
 # Search order:
-#   1. extern/bin/FileCheck               (already present from a prior kit)
-#   2. extern/llvm-project/bin/FileCheck  (from CoIR LLVM download)
+#   1. extern/llvm-project/bin/FileCheck  (from CoIR LLVM download)
+#   2. extern/bin/FileCheck               (already present from a prior kit)
 #   3. Download from FILECHECK_URL in cmake/deps.conf (prebuilt kit)
 #   4. Download from LLVM_URL in cmake/deps.conf, extract bin/FileCheck
 #   5. System PATH (FileCheck, FileCheck-18, ..., FileCheck-14)
 #
 # When CoIR is enabled (default), LLVM is downloaded by LLVMBootstrap.cmake
-# and FileCheck is found at extern/llvm-project/bin/FileCheck (strategy 2).
-# For choreo-only builds, strategy 3 or 4 provides FileCheck.
+# and FileCheck is found at extern/llvm-project/bin/FileCheck (strategy 1).
+# For choreo-only builds, strategy 2, 3 or 4 provides FileCheck.
 # System PATH is the last resort -- it may find a Python port that is not
 # fully compatible, so download-based strategies are preferred.
 #
@@ -30,14 +30,14 @@ macro(_fc_found _path _source)
   return()
 endmacro()
 
-# 1. extern/bin/FileCheck
-if(EXISTS "${_FC_EXTERN_BIN}")
-  _fc_found("${_FC_EXTERN_BIN}" "")
-endif()
-
-# 2. extern/llvm-project/bin/FileCheck (available after LLVMBootstrap)
+# 1. extern/llvm-project/bin/FileCheck (available after LLVMBootstrap)
 if(EXISTS "${_FC_LLVM_BIN}")
   _fc_found("${_FC_LLVM_BIN}" "")
+endif()
+
+# 2. extern/bin/FileCheck
+if(EXISTS "${_FC_EXTERN_BIN}")
+  _fc_found("${_FC_EXTERN_BIN}" "")
 endif()
 
 # --- Read deps.conf ---

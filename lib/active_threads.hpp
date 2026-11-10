@@ -415,7 +415,7 @@ public:
   bool Visit(AST::Synchronize&) override { return true; }
   bool Visit(AST::Select&) override { return true; }
   bool Visit(AST::Return&) override { return true; }
-  bool Visit(AST::LoopRange&) override { return true; }
+  bool Visit(AST::RangeExpr&) override { return true; }
   bool Visit(AST::ForeachBlock&) override { return true; }
   bool Visit(AST::WhileBlock&) override { return true; }
   bool Visit(AST::IfElseBlock&) override { return true; }

@@ -2760,20 +2760,28 @@ struct EventArrayType final : public ArrayType,
 struct SpannedArrayType final : public ArrayType,
                                 public TypeIDProvider<SpannedArrayType> {
   ptr<SpannedType> spty = nullptr;
-  explicit SpannedArrayType(BaseType ft, const ptr<MDSpanType>& s,
-                            const ValueList& strd, Storage m,
-                            const ValueList& ads)
-      : ArrayType(ads), spty(std::make_shared<SpannedType>(ft, s, strd, m)) {}
+  // Explicit source-level alignment for each logical spanned-array slot.
+  // Zero preserves the historical tightly-packed layout.
+  size_t slot_alignment = 0;
 
   explicit SpannedArrayType(BaseType ft, const ptr<MDSpanType>& s,
-                            const ValueList& strd, Storage m, size_t array_rank)
+                            const ValueList& strd, Storage m,
+                            const ValueList& ads, size_t slot_align = 0)
+      : ArrayType(ads), spty(std::make_shared<SpannedType>(ft, s, strd, m)),
+        slot_alignment(slot_align) {}
+
+  explicit SpannedArrayType(BaseType ft, const ptr<MDSpanType>& s,
+                            const ValueList& strd, Storage m, size_t array_rank,
+                            size_t slot_align = 0)
       : ArrayType(array_rank),
-        spty(std::make_shared<SpannedType>(ft, s, strd, m)) {}
+        spty(std::make_shared<SpannedType>(ft, s, strd, m)),
+        slot_alignment(slot_align) {}
 
   const ptr<Type> CloneImpl() const override {
     return std::make_shared<SpannedArrayType>(
         spty->ElementType(), cast<MDSpanType>(spty->s_type->Clone()),
-        spty->GetStrides(), spty->GetStorage(), ArrayType::Dimensions());
+        spty->GetStrides(), spty->GetStorage(), ArrayType::Dimensions(),
+        slot_alignment);
   }
 
   const ptr<Type> ArrayElementType() const override {
@@ -2792,7 +2800,7 @@ struct SpannedArrayType final : public ArrayType,
     else
       return std::make_shared<SpannedArrayType>(
           spty->e_type, spty->GetMDSpanType(), spty->GetStrides(),
-          spty->GetStorage(), arr);
+          spty->GetStorage(), arr, slot_alignment);
   }
   const ptr<Type> RemainderType(size_t remainder_count) override {
     auto arr = RemainderDimensions(remainder_count);
@@ -2803,14 +2811,36 @@ struct SpannedArrayType final : public ArrayType,
     else
       return std::make_shared<SpannedArrayType>(
           spty->e_type, spty->GetMDSpanType(), spty->GetStrides(),
-          spty->GetStorage(), arr);
+          spty->GetStorage(), arr, slot_alignment);
+  }
+
+  void SetSlotAlignment(size_t alignment) { slot_alignment = alignment; }
+  size_t SlotAlignment() const { return slot_alignment; }
+  bool HasAlignedSlots() const { return slot_alignment != 0; }
+  ValueItem PhysicalSlotStrideValue() const {
+    auto bytes = spty->ByteSizeValue();
+    if (!slot_alignment) return bytes;
+    return (((bytes + sbe::nu(slot_alignment - 1)) / sbe::nu(slot_alignment)) *
+            sbe::nu(slot_alignment))
+        ->Normalize();
+  }
+  size_t PhysicalSlotStrideBytes() const {
+    auto bytes = VIInt(PhysicalSlotStrideValue());
+    assert(bytes && "slot stride is not static");
+    return *bytes;
+  }
+  size_t PhysicalSlotStrideElements() const {
+    const size_t elem_bytes = SizeOf(spty->ElementType());
+    assert(PhysicalSlotStrideBytes() % elem_bytes == 0);
+    return PhysicalSlotStrideBytes() / elem_bytes;
   }
 
   size_t Dims() const override { return ArrayType::ArrayRank(); }
 
   bool operator==(const Type& ty) const override {
     if (auto t = dyn_cast<SpannedArrayType>(&ty))
-      return sbe::must_eq(t->ElemCount(), ElemCount());
+      return slot_alignment == t->slot_alignment &&
+             sbe::must_eq(t->ElemCount(), ElemCount());
     return false;
   }
 
@@ -2960,6 +2990,21 @@ inline std::string ElemCountExprOf(const Type& ty) {
   return {};
 }
 
+// Byte span of a whole declaration. Every slot of a spanned array occupies a
+// complete PhysicalSlotStrideValue(), which already folds in explicit slot
+// alignment padding. SizeExprOf reports a single slot, so it under-covers a
+// declaration, a host allocation, or an initialization whose byte size is
+// derived from it. Kept symbolic for runtime-shaped slot counts/strides.
+inline std::string TotalSizeExprOf(const Type& ty, bool ULL_suffix = false) {
+  auto aty = dyn_cast<SpannedArrayType>(&ty);
+  if (!aty) return SizeExprOf(ty, ULL_suffix);
+  auto total = (aty->PhysicalSlotStrideValue() * aty->ElemCount())->Normalize();
+  if (auto bytes = VIInt(total))
+    return std::to_string(static_cast<size_t>(*bytes)) +
+           (ULL_suffix ? "ULL" : "");
+  return "(" + total->ToString() + ")";
+}
+
 inline BaseType GetBaseType(const Type& ty) {
   if (isa<VoidType>(&ty))
     return BaseType::VOID;
@@ -3051,6 +3096,18 @@ inline int GetSingleWidth(const ptr<Type>& ty) {
     choreo_unreachable("can not get the single width for a " + PSTR(ty) +
                        " type.");
   return cast<BoundedType>(ty)->GetWidth();
+}
+
+// Compute the inclusive last index of a stepped range, i.e. the largest value
+// `lb + k * step` (k >= 0) that is strictly less than the exclusive `ub`.
+// Stepped loops store this inclusive upper bound in the iteration variable's
+// bounded type and are emitted with `iv <= ub`; dense (step == 1) ranges keep
+// the exclusive upper bound and are emitted with `iv < ub`.
+inline ValueItem StepAlignedUpperBound(const ValueItem& lb, const ValueItem& ub,
+                                       int step) {
+  if (step <= 1) return ub;
+  return (lb + ((ub - lb - sbe::nu(1)) / sbe::nu(step)) * sbe::nu(step))
+      ->Normalize();
 }
 
 // utility functions to generate types
@@ -3254,6 +3311,11 @@ inline ptr<BoundedIntegerType> MakeBoundedIntegerType(const ValueItem& ub) {
   return std::make_shared<BoundedIntegerType>(sbe::nu(0), ub);
 }
 
+inline ptr<BoundedIntegerType>
+MakeBoundedIntegerType(const ValueItem& lb, const ValueItem& ub, int step = 1) {
+  return std::make_shared<BoundedIntegerType>(lb, ub, step);
+}
+
 inline ptr<BoundedIntegerType> MakeUnknownBoundedIntegerType() {
   return std::make_shared<BoundedIntegerType>();
 }
@@ -3423,11 +3485,14 @@ inline ptr<FunctionType> MakeFunctionType(const ptr<Type> ot,
 // map default to global
 inline static ptr<Type> ShadowTypeStorage(const ptr<Type>& ty) {
   if (auto sty = dyn_cast<SpannedType>(ty)) {
-    if (auto at = dyn_cast<ArrayType>(ty))
-      return MakeStridedSpannedArrayType(sty->ElementType(), sty->GetShape(),
-                                         sty->GetStrides(), at->dims,
-                                         ProjectStorage(sty->GetStorage()));
-    else
+    if (auto at = dyn_cast<ArrayType>(ty)) {
+      auto result = MakeStridedSpannedArrayType(
+          sty->ElementType(), sty->GetShape(), sty->GetStrides(), at->dims,
+          ProjectStorage(sty->GetStorage()));
+      if (auto src = dyn_cast<SpannedArrayType>(ty))
+        result->SetSlotAlignment(src->SlotAlignment());
+      return result;
+    } else
       return MakeSpannedType(sty->ElementType(), sty->GetShape(),
                              sty->GetStrides(),
                              ProjectStorage(sty->GetStorage()));

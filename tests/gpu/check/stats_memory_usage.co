@@ -1,0 +1,20 @@
+// RUN: choreo -t cute -es -arch=sm_86 --stats %s -o /dev/null 2>&1 | FileCheck %s
+//
+// --stats reports peak compile-time memory usage per storage tier, together
+// with the tier capacity and the resulting occupancy rate. The rate keeps
+// fractional precision so small allocations do not round to a misleading 0%.
+// The arch is pinned because the tier capacities are target-arch dependent.
+//
+// CHECK: ... Memory Usage Statistics ...
+// local: 150 s16 = 300 B declared, 340 B capacity (sm_86 hard budget) => 88.2%.
+// CHECK: {{[ ]*}}88.2%  mem     - local peak: 300 B of 340 B limit
+// shared: 300 s32 = 1200 B, 100 KB capacity => 1.17%.
+// CHECK: {{[ ]*}}1.17%  mem     - shared peak: 1.17 KB of 100 KB limit
+
+__co__ void foo() {
+  parallel p by 8 {
+    local s16[150] lbuf;
+    shared s32[300] sbuf;
+    x = sbuf.at(0);
+  }
+}

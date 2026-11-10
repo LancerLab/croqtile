@@ -368,9 +368,9 @@ PYBIND11_MODULE(_core, m) {
            }),
            py::arg("value"));
 
-  // ---- LoopRange / ForeachBlock ----------------------------
+  // ---- RangeExpr / ForeachBlock ----------------------------
 
-  py::class_<A::LoopRange, A::Node, Ptr<A::LoopRange>>(m, "LoopRange");
+  py::class_<A::RangeExpr, A::Node, Ptr<A::RangeExpr>>(m, "RangeExpr");
 
   py::class_<A::ForeachBlock, A::Block, Ptr<A::ForeachBlock>>(m,
                                                               "ForeachBlock");
@@ -384,7 +384,7 @@ PYBIND11_MODULE(_core, m) {
           auto iv = A::Make<A::Identifier>(pyloc(), name);
           auto ub =
               std::const_pointer_cast<A::Expr>(A::MakeIntExpr(pyloc(), bound));
-          auto lr = A::Make<A::LoopRange>(pyloc(), iv, nullptr, ub, 1);
+          auto lr = A::Make<A::RangeExpr>(pyloc(), iv, nullptr, ub, 1);
           ranges->Append(lr);
         }
         return A::Make<A::ForeachBlock>(pyloc(), ranges, body);
@@ -400,7 +400,7 @@ PYBIND11_MODULE(_core, m) {
         for (auto& [name, bound_expr] : bindings) {
           auto iv = A::Make<A::Identifier>(pyloc(), name);
           auto ub = std::const_pointer_cast<A::Expr>(bound_expr);
-          auto lr = A::Make<A::LoopRange>(pyloc(), iv, nullptr, ub, 1);
+          auto lr = A::Make<A::RangeExpr>(pyloc(), iv, nullptr, ub, 1);
           ranges->Append(lr);
         }
         return A::Make<A::ForeachBlock>(pyloc(), ranges, body);
@@ -416,7 +416,7 @@ PYBIND11_MODULE(_core, m) {
         auto iv = A::Make<A::Identifier>(pyloc(), name);
         auto lb =
             std::const_pointer_cast<A::Expr>(A::MakeIntExpr(pyloc(), start));
-        auto lr = A::Make<A::LoopRange>(pyloc(), iv, lb, nullptr, 1);
+        auto lr = A::Make<A::RangeExpr>(pyloc(), iv, lb, nullptr, 1);
         ranges->Append(lr);
         return A::Make<A::ForeachBlock>(pyloc(), ranges, body);
       },

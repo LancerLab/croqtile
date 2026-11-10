@@ -221,8 +221,18 @@ bool HeteroCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (auto fb = dyn_cast<AST::ForeachBlock>(&n)) {
     const auto& ranges = fb->GetRangeNodes();
     for (int j = ranges->Count() - 1; j >= 0; --j) {
-      auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
-      auto cname = rng->GetIVName();
+      auto rng = cast<AST::RangeExpr>(ranges->ValueAt(j));
+
+      if (IsActualBoundedIntegerType(rng->GetIV()->GetType())) {
+        // Scalar canonicalized `foreach __iv_a = a(..)` or explicit local
+        // `foreach c = a(..)`: the prologue emitted the loop directly over
+        // the iteration variable, so close it here (no matcher reset).
+        DecrIndent();
+        IndStream() << "}\n";
+        continue;
+      }
+
+      auto cname = rng->GetRVName();
       auto ivs = within_map.at(InScopeName(cname));
       for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
         DecrIndent();

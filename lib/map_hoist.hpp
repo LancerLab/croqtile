@@ -52,7 +52,7 @@ struct MapHoist final : public VisitorWithSymTab {
       frame.parent = multi_nodes.empty() ? nullptr : multi_nodes.top();
       if (frame.parent) frame.index = frame.parent->GetIndex(fb);
       for (const auto& rng : fb->GetRanges())
-        frame.iv_names.insert(cast<AST::LoopRange>(rng)->GetIVName());
+        frame.iv_names.insert(cast<AST::RangeExpr>(rng)->GetIVName());
       loops.push_back(frame);
     }
     return true;

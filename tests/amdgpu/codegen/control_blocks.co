@@ -10,7 +10,7 @@ __co__ auto test_foreach(s32 [64] input) {
   return output;
 }
 // CHECK: #pragma unroll
-// CHECK-NEXT: for (__iv_q = 0; __iv_q < 64; ++__iv_q)
+// CHECK-NEXT: for (int __iv_q = 0; __iv_q < 64; ++__iv_q)
 
 // === if-else ===
 __co__ auto test_ifelse(s32 [64] input) {

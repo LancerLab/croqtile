@@ -40,6 +40,11 @@ private:
 
   std::unordered_set<std::string>
       with_syms; // symbol defined in with-in statement
+  // Vector types need their width before shape inference. Track only immutable
+  // integer constant bindings; never treat a runtime scalar as a lane count.
+  std::unordered_map<std::string, int64_t> integer_constants;
+  std::optional<int64_t> IntegerConstant(const ptr<AST::Node>&);
+  void RecordIntegerConstant(const std::string&, std::optional<int64_t>);
   std::unordered_map<std::string, std::string> vector_patterns;
   std::unordered_set<std::string> mma_fragment_symbols;
 
@@ -150,7 +155,7 @@ public:
   bool Visit(AST::Synchronize&) override;
   bool Visit(AST::Select&) override;
   bool Visit(AST::Return&) override;
-  bool Visit(AST::LoopRange&) override;
+  bool Visit(AST::RangeExpr&) override;
   bool Visit(AST::ForeachBlock&) override;
   bool Visit(AST::InThreadsBlock&) override;
   bool Visit(AST::WhileBlock&) override;

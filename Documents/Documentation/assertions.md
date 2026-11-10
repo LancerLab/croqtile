@@ -90,4 +90,15 @@ Beyond user-written `assert` calls, the compiler automatically generates asserti
 
 These follow the same hoisting and cost-level rules as user-written assertions.
 
+After placement and cost filtering, the classic compiler emits only the first
+enabled check for an equivalent predicate at the same emission site. The first
+check's diagnostic message and source location are retained. Checks in different
+branches, at different loop sites, or across assignments are not merged by this
+optimization. It does not merge checks across function calls or infer that a
+stronger bound makes a different predicate redundant.
+
+`--show-assess` retains the original assessment records and marks suppressed
+duplicates with `duplicate=yes`. The enabled-assertion statistics count only
+checks that will be emitted.
+
 *(Reference: `tests/parse/assert.co`, `tests/check/illegal_static_assert.co`)*

@@ -1,4 +1,4 @@
-// RUN: choreo -n -es -t cute -arch=sm_86 %s -o - 2>&1 | FileCheck %s
+// RUN: choreo -n -es -t cute -arch=sm_86 --max-local-mem-capacity=4096 %s -o - 2>&1 | FileCheck %s
 //
 // Test: Nested parallel blocks declaring shared buffers with the same name
 // produce distinct names in generated code (no C++ redefinition).

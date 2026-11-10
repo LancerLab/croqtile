@@ -123,7 +123,7 @@ struct ScopedMaskInfo {
   }
 };
 
-// Loop maps ForeachBlock(Normalized, only has one LoopRange)
+// Loop maps ForeachBlock(Normalized, only has one RangeExpr)
 struct Loop {
 private:
   std::string loop_name;

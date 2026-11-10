@@ -80,6 +80,7 @@ set(CORE_SOURCES
   loop_vectorize.cpp
   mem_reuse.cpp
   resource_allocator.cpp
+  dma_completion_analysis.cpp
   sync_recovery.cpp
   diversity_analysis.cpp
   scalar_evolution.cpp
@@ -98,6 +99,7 @@ set(CODEGEN_SOURCES
 
 set(CL_SOURCES
   command_line.cpp
+  static_check_info.cpp
 )
 
 set(PP_SOURCES
@@ -132,4 +134,6 @@ target_include_directories(pp PRIVATE ${WORK_DIR} ${CMAKE_SOURCE_DIR})
 
 target_compile_definitions(support PRIVATE
   __CHOREO_DEFAULT_TARGET__="${CHOREO_DEFAULT_TARGET}"
+  CHOREO_SDK_VERSION="${VERSION_FROM_FILE}"
+  CHOREO_GIT_REVISION="${CHOREO_GIT_REVISION}"
 )

@@ -86,7 +86,7 @@ public:
     for (auto item : within_map) {
       if (with_types.count(item.first) == 0) continue;
       auto ivs = item.second;
-      if (ivs[ivs.size() - 1] == iv_sym) {
+      if (ivs[ivs.size() - 1] == InScopeName(n.GetRV()->name)) {
         with_found = true;
         with_sym = item.first;
         with_ty = with_types[with_sym];
@@ -112,10 +112,11 @@ public:
     }
 
     auto iv_ty = cur_loop->GetIVType();
-
-    auto lb = dyn_cast<BoundedITupleType>(iv_ty)->GetLowerBounds();
-    auto ub = dyn_cast<BoundedITupleType>(iv_ty)->GetUpperBounds();
-    auto s = dyn_cast<BoundedITupleType>(iv_ty)->GetSteps();
+    assert(IsActualBoundedIntegerType(iv_ty));
+    auto bounded_iv_ty = cast<BoundedType>(iv_ty);
+    auto lb = bounded_iv_ty->GetLowerBounds();
+    auto ub = bounded_iv_ty->GetUpperBounds();
+    auto s = bounded_iv_ty->GetSteps();
     IntegerList widths(iv_ty->Dims(), cur_loop->GetVectorFactor());
     auto vty = MakeBoundedITupleType(lb, ub, s, widths);
     cur_loop->SetIVType(vty);
@@ -124,6 +125,11 @@ public:
       dbgs() << indent << "IV:   " << cur_loop->IVSym()
              << ", Type: " << PSTR(vty) << "\n";
     AssignSymVType(n.LOC(), cur_loop->IVSym(), vty);
+    for (const auto& range : n.GetRanges()) {
+      auto rng = cast<AST::RangeExpr>(range);
+      if (InScopeName(rng->GetRVName()) == cur_loop->IVSym())
+        AssignSymVType(n.LOC(), InScopeName(rng->GetIVName()), vty);
+    }
 
     return true;
   }
@@ -157,7 +163,10 @@ public:
       auto da_ty = n.GetType();
       auto ety = da_ty->GetBaseType();
       for (auto indice : n.GetIndices()) {
-        auto indice_ty = indice->GetType();
+        auto index_expr = indice;
+        if (auto int_index = dyn_cast<AST::IntIndex>(indice))
+          index_expr = int_index->Val();
+        auto indice_ty = index_expr->GetType();
         if (IsActualVectorType(indice_ty)) {
           auto ElemCount = ElementCount(indice_ty);
           auto da_vty = MakeVectorType(ety, ElemCount);
@@ -168,7 +177,7 @@ public:
             dbgs() << ", Type: " << PSTR(da_vty) << "\n";
           }
         }
-        auto indice_ds = indice->GetDiversityShape();
+        auto indice_ds = index_expr->GetDiversityShape();
         if (indice_ds.Stride(1)) {
           n.AddNote("VLDST"); // load/store
         } else if (indice_ds.Divergent() || indice_ds.Stride()) {

@@ -1,0 +1,22 @@
+// A `: block` annotation on a copy whose chunk index depends on a thread-level
+// parallel variable is a level mismatch: the address is per-lane data, so the
+// copy cannot be block level.
+//
+// RUN: not choreo -es -t cute -arch=sm_86 %s -o /dev/null 2>&1 | FileCheck %s
+
+__co__ auto foo(f32 [64, 64] input) {
+  f32 [input.span(0), input.span(1)] output;
+  parallel p by 4, q by 8 {
+    shared f32[input.span(0) / #p / #q, input.span(1)] l1_out {0.0f};
+    l1_a = dma.copy input.chunkat(p#q, _) => shared : block;
+    foreach {i} in [l1_out.span(0)] {
+      foreach {j} in [l1_out.span(1)] {
+        l1_out.at(i, j) = l1_a.data.at(i, j) * 2.0f;
+      }
+    }
+    dma.copy l1_out => output.chunkat(p#q, _);
+  }
+  return output;
+}
+
+// CHECK: error: indexing a thread-level parallel variable in a block-level DMA is risky

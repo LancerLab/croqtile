@@ -4,14 +4,49 @@
 #include "aux.hpp"
 #include "parallel_level.hpp"
 #include "preprocess.hpp"
+#include <cstddef>
+#include <iosfwd>
 #include <memory>
 #include <set>
+#include <string>
 
 namespace Choreo {
+
+namespace AST {
+struct Node;
+}
 
 enum class Storage;
 enum class BaseType;
 enum class ParallelLevel;
+
+enum class ExplicitVectorRole {
+  OrdinaryValue,
+  IndexValue,
+  LogicalAddressIndex,
+  AddressOffset,
+  DataValue,
+  Predicate,
+};
+
+struct ExplicitVectorTypeSupport {
+  bool legal = false;
+  bool materializable_as_one_vector = false;
+  bool is_partial = false;
+  size_t element_bytes = 0;
+  size_t logical_bytes = 0;
+  size_t physical_lanes = 0;
+  size_t registers = 0;
+  size_t max_offset_lanes = 0;
+  size_t offset_chunks = 0;
+  size_t payload_element_bytes = 0;
+  size_t payload_logical_bytes = 0;
+  size_t payload_physical_lanes = 0;
+  size_t payload_registers = 0;
+  std::string width_class;
+  std::string payload_width_class;
+  std::string reason;
+};
 enum class SwizMode;
 struct FenceKind; // (space, entity, order) fence requirement; see types.hpp
 struct FenceSelection;
@@ -30,12 +65,12 @@ enum class ChoreoFeature {
   DGMA,
   DSDMA,
   ASYNC_DMA,
+  LITE_DMA,
   NSVR,
   SLML,
   MGM,
   VECTORIZE,
   HDRPARSE,
-  LIBCALL,
   MMA_UKERNEL,
   BARRIER,
   FENCE,
@@ -55,12 +90,12 @@ inline static const std::string STR(ChoreoFeature cf) {
   case ChoreoFeature::DGMA: return "dgma";
   case ChoreoFeature::DSDMA: return "dsdma";
   case ChoreoFeature::ASYNC_DMA: return "async_dma";
+  case ChoreoFeature::LITE_DMA: return "lite_dma";
   case ChoreoFeature::NSVR: return "nsvr";
   case ChoreoFeature::SLML: return "slml";
   case ChoreoFeature::MGM: return "mgm";
   case ChoreoFeature::VECTORIZE: return "vectorize";
   case ChoreoFeature::HDRPARSE: return "hdrparse";
-  case ChoreoFeature::LIBCALL: return "libcall";
   case ChoreoFeature::MMA_UKERNEL: return "mma_ukernel";
   case ChoreoFeature::BARRIER: return "barrier";
   case ChoreoFeature::FENCE: return "fence";
@@ -87,14 +122,14 @@ inline static const std::string Description(ChoreoFeature cf) {
     return "Single DMA/TMA with Both Slice and DeSlice.";
   case ChoreoFeature::ASYNC_DMA:
     return "Hardware-accelerated async DMA (e.g. cp.async).";
+  case ChoreoFeature::LITE_DMA:
+    return "Low-overhead DMA emission without runtime future objects.";
   case ChoreoFeature::NSVR: return "No Scalar Value Return Support.";
   case ChoreoFeature::SLML: return "Allow User to Set Local Memory Limit.";
   case ChoreoFeature::MGM: return "Choreo to Manage Global Memory.";
   case ChoreoFeature::VECTORIZE: return "Choreo Scalar Code Vectorization.";
   case ChoreoFeature::HDRPARSE:
     return "Parse C++ Header Files Included by Choreo Source.";
-  case ChoreoFeature::LIBCALL:
-    return "Target Library (__lib_*) Builtin Support.";
   case ChoreoFeature::MMA_UKERNEL:
     return "Micro-kernel based MMA via target library calls.";
   case ChoreoFeature::BARRIER:
@@ -167,6 +202,14 @@ public:
   // Returns empty string if detection is not supported or fails.
   virtual ArchId ResolveNativeArch() const { return ""; }
 
+  // Whether lite-dma emission (raw scalar DMA context plus a raw event object
+  // instead of choreo::future objects) is enabled by default for the given
+  // architecture. Targets that offer lite-dma override this to select the
+  // default by architecture; architectures without lite-dma keep it disabled.
+  // The default is independent of build type so debug and release emit
+  // identical lowering.
+  virtual bool LiteDmaDefault(const ArchId& /*arch*/) const { return false; }
+
   // Return path to the host C++ compiler for this target.
   // Used by --lib multi-file driver to compile .cpp wrapper files.
   virtual std::string HostCXXCompiler() const { return "c++"; }
@@ -178,6 +221,12 @@ public:
 
 public:
   virtual size_t GetMemCapacity(const Storage&, const ArchId&) const = 0;
+  // Best-practice per-thread budget for `local`. Usage above this value (but
+  // at or below GetMemCapacity(LOCAL)) warns instead of erroring. Defaults to
+  // the hard capacity, i.e. no warning band, for targets that do not tune it.
+  virtual size_t GetLocalMemBudget(const ArchId& arch) const {
+    return GetMemCapacity(Storage::LOCAL, arch);
+  }
   virtual size_t GetMemAlignmentByte(const Storage&, const ArchId&) const = 0;
   virtual size_t GetMinGroupDim(const ArchId& arch) const {
     choreo_unreachable("unsupported target '" + Name() + "(" + arch + ")'.");
@@ -195,6 +244,10 @@ public:
   virtual size_t GetMaxThreadsPerBlock(const ArchId& /*arch*/) const {
     return 0;
   }
+  // Max resident threads per streaming multiprocessor for GPU targets.
+  // Returns 0 if not applicable. Used to derive per-thread budgets from
+  // per-SM resources (e.g. the `local` budget from the register file).
+  virtual size_t GetMaxThreadsPerSM(const ArchId& /*arch*/) const { return 0; }
   virtual size_t GetVectorLength(const ArchId& arch) const {
     choreo_unreachable("unsupported target '" + Name() + "(" + arch + ")'.");
     return 0;
@@ -210,9 +263,32 @@ public:
                                           size_t /*lane_count*/) const {
     return false;
   }
+  // Role-aware explicit-vector validation. The default preserves the legacy
+  // element-type/lane-count query; targets with dtype-dependent address
+  // materialization may override this richer interface.
+  virtual ExplicitVectorTypeSupport
+  GetExplicitVectorTypeSupport(const ArchId& arch, ExplicitVectorRole /*role*/,
+                               BaseType element_type, size_t lane_count,
+                               BaseType /*payload_element_type*/) const {
+    ExplicitVectorTypeSupport result;
+    result.legal = SupportsExplicitVectorType(arch, element_type, lane_count);
+    result.materializable_as_one_vector = result.legal;
+    result.reason = result.legal ? "supported" : "unsupported_vector_type";
+    return result;
+  }
   virtual std::string LowerAsmOperand(const std::string& varName) const {
     return varName;
   }
+  // Emit a target-specific machine-readable static-check report after the
+  // target source has been emitted. The default implementation lets the
+  // driver explicitly report unsupported analysis for other targets.
+  virtual bool EmitStaticCheckInfo(AST::Node&, std::ostream&) const {
+    return false;
+  }
+  virtual std::vector<std::string> ReportEnvironmentVariables() const {
+    return {};
+  }
+
   virtual bool IsArchSupported(const ArchId& arch) const {
     for (auto& ai : SupportedArchs())
       if (ai.id == arch) return true;
@@ -364,15 +440,63 @@ public:
   }
 
   // Library call support -- targets override to declare which __lib_* builtins
-  // they support and the expected argument counts for early sema validation.
-  // name is the full builtin name, e.g. "__lib_gemm".
-  virtual bool IsLibCallSupported(const std::string& /*name*/) const {
+  // they support on a given architecture, and the expected argument counts,
+  // for early sema validation.  name is the full builtin name, e.g.
+  // "__lib_gemm".
+  virtual bool IsLibCallSupported(const ArchId& /*arch*/,
+                                  const std::string& /*name*/) const {
     return false;
   }
   // Returns {min_args, max_args} for the given lib call.  {-1,-1} = unknown.
   virtual std::pair<int, int>
   LibCallArgRange(const std::string& /*name*/) const {
     return {-1, -1};
+  }
+  // Whether this lib call is a row reduction with a synchronous buffer
+  // contract: it reads its whole input, writes one element per reduced row and
+  // is complete when it returns. Analyses that would otherwise treat the call
+  // as opaque use this to record the real effects instead (in particular, a
+  // reduction legitimately leaves the tail of the destination untouched). The
+  // reduce family's membership is target-specific, so the target answers.
+  virtual bool IsSynchronousReduceLibCall(const std::string& /*name*/) const {
+    return false;
+  }
+  // Which directions of the `reduce_<op>(dst, src, dim)` statement the target
+  // lowers, as a 4-bit mask over {max, sum, min, prod} x {row (dim 1), column
+  // (dim 0)}. The default is zero: no direction, so a target that does not
+  // override this has no lowering and sema rejects the statement instead of
+  // letting it vanish from the generated kernel.
+  virtual unsigned ReduceStatementDirections(const ArchId& /*arch*/) const {
+    return 0;
+  }
+  // The direction bit for one statement. Bit 0 is max, 1 sum, 2 min, 3 prod;
+  // the high half is the column direction.
+  static unsigned ReduceStatementBit(const std::string& op_suffix, int dim) {
+    unsigned index = op_suffix == "max"    ? 0
+                     : op_suffix == "sum"  ? 1
+                     : op_suffix == "min"  ? 2
+                     : op_suffix == "prod" ? 3
+                                           : 4;
+    if (index == 4) return 0;
+    return 1u << (index + (dim == 0 ? 4 : 0));
+  }
+  // Arch gate for the elementwise ("arithmetic") builtins.  Some of them only
+  // have a device entry point from a later architecture on, so naming them for
+  // an older one cannot work and has to be rejected rather than lowered to a
+  // function the device headers never declare.  is_vector distinguishes the
+  // vector form of the call from the scalar one, since the two may be spelled
+  // with different device entry points and can therefore have different arch
+  // requirements.
+  //
+  // Note this is the mirror image of IsLibCallSupported: the set of
+  // arithmetic builtins is open-ended (each code generator maps the names it
+  // knows and passes the rest through), so a target declares only the names it
+  // actually gates and leaves every other name allowed by default.  Targets
+  // without arch-gated builtins keep the default.
+  virtual bool IsArithBuiltinSupported(const ArchId& /*arch*/,
+                                       const std::string& /*name*/,
+                                       bool /*is_vector*/) const {
+    return true;
   }
   // Whether this target enables target-library lowering by default.
   virtual bool DefaultUseTargetLib() const { return false; }
@@ -491,6 +615,12 @@ public:
   // targets preserve alias-analysis boundaries without changing the reuse
   // layout or dynamic-allocation path.
   virtual bool UseDistinctLocalAllocationRoots(const ArchId& /*arch*/) const {
+    return false;
+  }
+
+  // Runtime-shaped local span arrays with per-slot padding, using memory reuse.
+  virtual bool SupportsDynamicAlignedLocalArrays(const ArchId&,
+                                                 size_t /*alignment*/) const {
     return false;
   }
 

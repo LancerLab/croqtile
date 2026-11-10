@@ -1,0 +1,39 @@
+// REQUIRES: TARGET-CPU
+// RUN: choreo -gs %target %s | bash -s -- --execute | FileCheck %s
+
+#include <cmath>
+#include <limits>
+
+__co__ s32 index_assignment() {
+  s32 result = 0;
+  foreach t in [4] {
+    result = t - 1;
+  }
+  return result;
+}
+
+__co__ f32 negate_builtin(f32 x) { return -__exp(x); }
+__co__ f32 negate_expression(f32 x) { return -(x + 2.0f) * 3.0f; }
+__co__ f32 negate_zero(f32 x) { return -x; }
+__co__ f32 negative_zero_literal() { return -0.0f; }
+__co__ f32 small_float(f32 x) { return x * 1e-12f; }
+__co__ f32 subnormal_float(f32 x) { return x * 1.40129846e-45F; }
+__co__ f64 small_double(f64 x) { return x * 1.2345678901234567e-100; }
+__co__ f32 adjacent_minus() { return 1.0f-2.0f; }
+__co__ f32 positive_exponent(f32 x) { return x * 1.25E+3f; }
+
+int main() {
+  choreo::choreo_assert(index_assignment() == 2, "foreach scalar assignment");
+  choreo::choreo_assert(negate_builtin(0.0f) == -1.0f, "negate builtin");
+  choreo::choreo_assert(negate_expression(2.0f) == -12.0f, "unary precedence");
+  choreo::choreo_assert(std::signbit(negate_zero(0.0f)), "negate positive zero");
+  choreo::choreo_assert(!std::signbit(negate_zero(-0.0f)), "negate negative zero");
+  choreo::choreo_assert(std::signbit(negative_zero_literal()), "negative zero literal");
+  choreo::choreo_assert(small_float(1.0f) == 1e-12f, "small f32 precision");
+  choreo::choreo_assert(subnormal_float(1.0f) == std::numeric_limits<float>::denorm_min(), "subnormal f32");
+  choreo::choreo_assert(small_double(1.0) == 1.2345678901234567e-100, "small f64 precision");
+  choreo::choreo_assert(adjacent_minus() == -1.0f, "adjacent binary minus");
+  choreo::choreo_assert(positive_exponent(2.0f) == 2500.0f, "positive exponent");
+  std::cout << "DSL scalar expressions passed\n";
+}
+// CHECK: DSL scalar expressions passed

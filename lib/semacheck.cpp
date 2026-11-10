@@ -216,10 +216,116 @@ bool SemaChecker::ExpressionIsConstrained(const ValueItem& expr) const {
   return false;
 }
 
+static const char* ExplicitVectorRoleName(ExplicitVectorRole role) {
+  switch (role) {
+  case ExplicitVectorRole::OrdinaryValue: return "ordinary";
+  case ExplicitVectorRole::IndexValue: return "index";
+  case ExplicitVectorRole::LogicalAddressIndex: return "logical_address_index";
+  case ExplicitVectorRole::AddressOffset: return "address_offset";
+  case ExplicitVectorRole::DataValue: return "data";
+  case ExplicitVectorRole::Predicate: return "predicate";
+  }
+  return "unknown";
+}
+
+bool SemaChecker::CheckExplicitVectorType(
+    AST::Node& node, ExplicitVectorRole role, BaseType element_type,
+    size_t lane_count, BaseType payload_element_type,
+    ExplicitVectorTypeSupport* support_out) {
+  if (!CCtx().TargetSupportsExplicitVector() || lane_count == 0) return true;
+
+  auto support = CCtx().GetTarget().GetExplicitVectorTypeSupport(
+      CCtx().GetArch(), role, element_type, lane_count, payload_element_type);
+  if (support_out) *support_out = support;
+  node.AddNote("explicit_vector_role", ExplicitVectorRoleName(role));
+  node.AddNote("explicit_vector_legal", support.legal ? "true" : "false");
+  node.AddNote("explicit_vector_element_type", STR(element_type));
+  node.AddNote("explicit_vector_lanes", std::to_string(lane_count));
+  node.AddNote("explicit_vector_reason", support.reason);
+  if (support.legal) {
+    node.AddNote("explicit_vector_type_checked", "true");
+    if (!support.width_class.empty())
+      node.AddNote("explicit_vector_width_class", support.width_class);
+    node.AddNote("explicit_vector_logical_bytes",
+                 std::to_string(support.logical_bytes));
+    node.AddNote("explicit_vector_physical_lanes",
+                 std::to_string(support.physical_lanes));
+    node.AddNote("explicit_vector_registers",
+                 std::to_string(support.registers));
+    if (support.offset_chunks)
+      node.AddNote("explicit_vector_offset_chunks",
+                   std::to_string(support.offset_chunks));
+    if (role == ExplicitVectorRole::LogicalAddressIndex) {
+      node.AddNote("explicit_vector_index_materialization",
+                   support.materializable_as_one_vector ? "ordinary"
+                                                        : "chunked");
+    }
+    return true;
+  }
+
+  const auto target_name = CCtx().GetTarget().Name();
+  const auto arch = CCtx().GetArch();
+  std::string message;
+  switch (role) {
+  case ExplicitVectorRole::LogicalAddressIndex:
+    message = "logical vector address index with " +
+              std::to_string(lane_count) +
+              " lanes cannot be materialized for "
+              "payload type '" +
+              STR(payload_element_type) + "' on target '" + target_name +
+              "' (arch: " + arch + "): " + support.reason + ".";
+    break;
+  case ExplicitVectorRole::AddressOffset:
+    message =
+        "vector address offsets require a supported integer offset vector, "
+        "got vector<" +
+        STR(element_type) + "," + std::to_string(lane_count) + "> on target '" +
+        target_name + "' (arch: " + arch + "): " + support.reason + ".";
+    break;
+  case ExplicitVectorRole::DataValue:
+    message = "target '" + target_name + "' (arch: " + arch +
+              ") does not support vector<" + STR(element_type) + "," +
+              std::to_string(lane_count) +
+              "> as a data vector: " + support.reason + ".";
+    break;
+  case ExplicitVectorRole::Predicate:
+    message = "target '" + target_name + "' (arch: " + arch +
+              ") does not support predicate vector<bool," +
+              std::to_string(lane_count) + ">: " + support.reason + ".";
+    break;
+  case ExplicitVectorRole::IndexValue:
+  case ExplicitVectorRole::OrdinaryValue:
+    message = "vector<" + STR(element_type) + ", " +
+              std::to_string(lane_count) +
+              "> has no legal representation on "
+              "target '" +
+              target_name + "' (arch: " + arch + ").";
+    break;
+  }
+  if (role == ExplicitVectorRole::LogicalAddressIndex &&
+      !support.width_class.empty()) {
+    message += " (index_width_class=" + support.width_class +
+               ", offset_chunks=" + std::to_string(support.offset_chunks) + ")";
+  }
+  Error1(node.LOC(), message);
+  return false;
+}
+
+bool SemaChecker::IsLogicalAddressIndex(const ptr<AST::Node>& node) const {
+  if (!node || !isa<VectorType>(NodeType(*node))) return false;
+  if (isa<AST::VectorIndex>(node)) return true;
+  if (auto expr = dyn_cast<AST::Expr>(node)) {
+    if (auto ref = expr->GetReference(); ref && isa<AST::VectorIndex>(ref))
+      return true;
+  }
+  return node->HasNote("vector_pattern") &&
+         node->GetNote("vector_pattern") == "unit";
+}
+
 static int64_t GetForeachStaticExtent(const AST::ForeachBlock& fe) {
   auto& ranges = fe.GetRanges();
   if (ranges.empty()) return -1;
-  auto rng = dyn_cast<AST::LoopRange>(ranges.front());
+  auto rng = dyn_cast<AST::RangeExpr>(ranges.front());
   if (!rng || !rng->GetRV()) return -1;
   auto iv_ty = dyn_cast<BoundedType>(rng->GetRV()->GetType());
   if (!iv_ty) return -1;
@@ -235,12 +341,27 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
     live_async.clear();
     observed_async.clear();
     completed_async.clear();
+    data_future_bindings.clear();
+    waited_data_futures.clear();
+    data_future_scopes.clear();
+    next_data_future_id = 1;
     scope_pred_stack.clear();
     parallel_level_stack.clear();
+    pv_levels_.clear();
     cooperative_stack.clear();
     shared_tensor_producers.clear();
     async_dma_producers.clear();
   }
+  // Keep this source-order check conservative across control-flow joins. A
+  // duplicate inside a body is still diagnosed; state from an if/loop body is
+  // not assumed to reach code after the body.
+  if (isa<AST::PredBlock>(&n) || isa<AST::ForeachBlock>(&n) ||
+      isa<AST::WithBlock>(&n) || isa<AST::ApplyBlock>(&n))
+    data_future_scopes.push_back({data_future_bindings});
+  if (isa<AST::PredBlock>(&n) || isa<AST::ForeachBlock>(&n) ||
+      isa<AST::WithBlock>(&n) || isa<AST::ApplyBlock>(&n))
+    waited_data_futures.clear();
+
   if (auto block = dyn_cast<AST::PredBlock>(&n))
     scope_pred_stack.push_back(block->GetScopePredicate());
   else if (auto fe = dyn_cast<AST::ForeachBlock>(&n)) {
@@ -254,8 +375,26 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
                             std::to_string(extent) + ").");
     }
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
+    const bool owns_device_function = pb->IsOuter() || pb->IsDeviceEntry();
+    if (pb->HasTargetFunctionAttributes() && !owns_device_function)
+      Error1(pb->LOC(),
+             "[[g"
+             "cu::...]] function attributes require a parallel-by that "
+             "owns a generated device function.");
+
     parallel_level_stack.push_back(pb->GetLevel());
     cooperative_stack.push_back(pb->IsCooperative());
+
+    // The parallel variables carry their level (the scope they are declared
+    // in); indexing a variable at a given level is what makes a DMA
+    // thread-varying or block-uniform.
+    pv_levels_[InScopeName(pb->BPV()->name)] = pb->GetLevel();
+    pb->BPV()->SetLevel(pb->GetLevel());
+    for (auto id : pb->AllSubPVs()) {
+      pv_levels_[InScopeName(cast<AST::Identifier>(id)->name)] =
+          pb->GetLevel();
+      cast<AST::Identifier>(id)->SetLevel(pb->GetLevel());
+    }
 
     // Cooperative annotation is validated after normalization (PB
     // level has been fully inferred).  Warn when the level is not
@@ -285,6 +424,43 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
 void SemaChecker::RecordAsyncProducer(const std::string& name) {
   pending_async.insert(name);
   live_async.insert(name);
+}
+
+void SemaChecker::RecordDataFutureProducer(const std::string& name) {
+  data_future_bindings[name] = next_data_future_id++;
+}
+
+void SemaChecker::ObserveDataFuture(const std::string& name,
+                                    const location& loc) {
+  auto it = data_future_bindings.find(name);
+  if (it == data_future_bindings.end()) return;
+
+  const auto id = it->second;
+  if (id != 0 && waited_data_futures.count(id))
+    Error1(loc, "wait observes future '" + name + "' more than once.");
+  if (id != 0) waited_data_futures.insert(id);
+}
+
+void SemaChecker::RotateDataFutureBindings(const AST::Rotate& n) {
+  std::vector<std::string> names;
+  for (auto value : n.GetIds()) {
+    auto id = AST::GetIdentifier(*value);
+    if (!id) return;
+    names.push_back(InScopeName(id->name));
+  }
+  if (names.size() < 2) return;
+
+  std::vector<DataFutureId> ids;
+  ids.reserve(names.size());
+  for (const auto& name : names) {
+    auto it = data_future_bindings.find(name);
+    ids.push_back(it == data_future_bindings.end() ? 0 : it->second);
+  }
+
+  const auto first = ids.front();
+  for (size_t i = 1; i < ids.size(); ++i)
+    data_future_bindings[names[i - 1]] = ids[i];
+  data_future_bindings[names.back()] = first;
 }
 
 bool SemaChecker::ObserveAsyncFuture(const std::string& name,
@@ -350,6 +526,16 @@ bool SemaChecker::AfterVisitImpl(AST::Node& n) {
       Error1(n.LOC(), "some asyncs are not explicitly waited: " +
                           DelimitedString(pending_async) + ".");
   }
+
+  if (isa<AST::PredBlock>(&n) || isa<AST::ForeachBlock>(&n) ||
+      isa<AST::WithBlock>(&n) || isa<AST::ApplyBlock>(&n)) {
+    assert(!data_future_scopes.empty());
+    data_future_bindings = std::move(data_future_scopes.back().bindings);
+    // Do not carry wait facts through an unknown control-flow join.
+    waited_data_futures.clear();
+    data_future_scopes.pop_back();
+  }
+
   return true;
 }
 
@@ -358,6 +544,12 @@ bool SemaChecker::InMidVisitImpl(AST::Node& n) {
     if (block->HasElse()) {
       scope_pred_stack.pop_back();
       scope_pred_stack.push_back(block->GetElseScopePredicate());
+
+      // The else branch starts from the state at the if entry, not from the
+      // state accumulated while visiting the then branch.
+      assert(!data_future_scopes.empty());
+      data_future_bindings = data_future_scopes.back().bindings;
+      waited_data_futures.clear();
     }
   }
   return true;
@@ -373,6 +565,132 @@ bool SemaChecker::VisitNode(AST::FloatLiteral& n) {
   return true;
 }
 
+bool SemaChecker::VisitNode(AST::VectorIndex& n) {
+  if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+  n.AddNote("explicit_vector_index", "true");
+  n.AddNote("explicit_vector_index_element_type", STR(BaseType::S32));
+  n.AddNote("explicit_vector_index_lanes", std::to_string(n.LaneCount()));
+  n.AddNote("explicit_vector_index_pattern", "iota");
+  n.AddNote("explicit_vector_index_stride", "1");
+  n.AddNote("explicit_vector_index_lower_bound", "0");
+  n.AddNote("explicit_vector_index_upper_bound", std::to_string(n.LaneCount()));
+  // A direct memory coordinate may be a logical index whose dtype and
+  // chunking are selected by the payload at its VectorMemory use site.
+  return true;
+}
+
+bool SemaChecker::VisitNode(AST::VectorMemory& n) {
+  if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+
+  size_t lane_count = 0;
+  for (const auto& index : n.Address()->GetIndices()) {
+    if (auto vty = dyn_cast<VectorType>(NodeType(*index))) {
+      if (lane_count == 0) lane_count = vty->ElemCount();
+      if (lane_count != vty->ElemCount()) return false;
+    }
+  }
+  if (!lane_count) return true;
+
+  auto spanned = GetSpannedType(GetSymbolType(n.Address()->GetDataName()));
+  if (!spanned) return true;
+  const auto payload_element_type = spanned->ElementType();
+
+  // Validate the payload layout even when the source operand is scalar and is
+  // broadcast to all lanes. This keeps unsupported target vector widths out
+  // of code generation and gives the memory use a single payload fact.
+  ExplicitVectorTypeSupport payload_support;
+  bool ok = CheckExplicitVectorType(n, ExplicitVectorRole::DataValue,
+                                    payload_element_type, lane_count,
+                                    payload_element_type, &payload_support);
+
+  auto record_support = [&](const std::string& prefix, BaseType element_type,
+                            size_t lanes,
+                            const ExplicitVectorTypeSupport& support) {
+    const auto key = [&](const char* suffix) {
+      return "explicit_vector_" + prefix + "_" + suffix;
+    };
+    n.AddNote(key("element_type"), STR(element_type));
+    n.AddNote(key("lanes"), std::to_string(lanes));
+    n.AddNote(key("legal"), support.legal ? "true" : "false");
+    n.AddNote(key("materializable"),
+              support.materializable_as_one_vector ? "true" : "false");
+    n.AddNote(key("logical_bytes"), std::to_string(support.logical_bytes));
+    n.AddNote(key("physical_lanes"), std::to_string(support.physical_lanes));
+    n.AddNote(key("registers"), std::to_string(support.registers));
+    n.AddNote(key("width_class"), support.width_class);
+    n.AddNote(key("reason"), support.reason);
+    n.AddNote(key("offset_chunks"), std::to_string(support.offset_chunks));
+  };
+  record_support("payload", payload_element_type, lane_count, payload_support);
+
+  for (const auto& index : n.Address()->GetIndices()) {
+    auto vty = dyn_cast<VectorType>(NodeType(*index));
+    if (!vty) continue;
+    ExplicitVectorTypeSupport index_support;
+    const auto role = IsLogicalAddressIndex(index)
+                          ? ExplicitVectorRole::LogicalAddressIndex
+                          : ExplicitVectorRole::AddressOffset;
+    const bool index_ok =
+        CheckExplicitVectorType(*index, role, vty->ElemType(), vty->ElemCount(),
+                                payload_element_type, &index_support);
+    ok = index_ok && ok;
+    record_support("index", vty->ElemType(), vty->ElemCount(), index_support);
+    n.AddNote("explicit_vector_index_role", ExplicitVectorRoleName(role));
+    n.AddNote("explicit_vector_index_materialization",
+              index_support.materializable_as_one_vector ? "ordinary"
+                                                         : "chunked");
+  }
+
+  auto check_data = [&](const ptr<AST::Node>& value) {
+    if (!value) return true;
+    auto ty = NodeType(*value);
+    auto vty = dyn_cast<VectorType>(ty);
+    if (!vty) return true;
+    if (vty->ElemCount() != lane_count) return false;
+    ExplicitVectorTypeSupport value_support;
+    const bool value_ok = CheckExplicitVectorType(
+        *value, ExplicitVectorRole::DataValue, vty->ElemType(),
+        vty->ElemCount(), payload_element_type, &value_support);
+    // The payload fact describes the memory operation, while this fact
+    // describes the actual vector operand. Keep both available for the
+    // planner/report without adding a second diagnostic for one failure.
+    record_support("value", vty->ElemType(), vty->ElemCount(), value_support);
+    return value_ok;
+  };
+
+  if (n.Mask()) {
+    auto mask_ty = NodeType(*n.Mask());
+    if (auto mask_vty = dyn_cast<VectorType>(mask_ty)) {
+      ExplicitVectorTypeSupport mask_support;
+      const bool mask_ok = CheckExplicitVectorType(
+          *n.Mask(), ExplicitVectorRole::Predicate, mask_vty->ElemType(),
+          mask_vty->ElemCount(), payload_element_type, &mask_support);
+      ok = mask_ok && ok;
+      record_support("predicate", mask_vty->ElemType(), mask_vty->ElemCount(),
+                     mask_support);
+      n.AddNote("explicit_vector_predicate_kind", "vector");
+    } else {
+      n.AddNote("explicit_vector_predicate_kind", "scalar");
+      n.AddNote("explicit_vector_predicate_legal", "true");
+      n.AddNote("explicit_vector_predicate_lanes", std::to_string(lane_count));
+    }
+  } else {
+    n.AddNote("explicit_vector_predicate_kind", "none");
+    n.AddNote("explicit_vector_predicate_legal", "true");
+    n.AddNote("explicit_vector_predicate_lanes", std::to_string(lane_count));
+  }
+  if (n.IsLoad())
+    ok = check_data(n.Other()) && ok;
+  else
+    ok = check_data(n.Value()) && ok;
+
+  n.AddNote("explicit_vector_lanes", std::to_string(lane_count));
+  n.AddNote("explicit_vector_payload_element", STR(payload_element_type));
+  n.AddNote("explicit_vector_payload_bytes",
+            std::to_string(lane_count * SizeOf(payload_element_type)));
+  return ok;
+}
+
 bool SemaChecker::VisitNode(AST::BoolLiteral& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
   return true;
@@ -380,15 +698,13 @@ bool SemaChecker::VisitNode(AST::BoolLiteral& n) {
 
 bool SemaChecker::VisitNode(AST::Expr& n) {
   if (auto vty = dyn_cast<VectorType>(NodeType(n));
-      vty && CCtx().TargetSupportsExplicitVector() &&
-      !CCtx().GetTarget().SupportsExplicitVectorType(
-          CCtx().GetArch(), vty->ElemType(), vty->ElemCount())) {
-    Error1(n.LOC(), "vector<" + STR(vty->ElemType()) + ", " +
-                        std::to_string(vty->ElemCount()) +
-                        "> has no legal representation on target '" +
-                        CCtx().GetTarget().Name() +
-                        "' (arch: " + CCtx().GetArch() + ").");
-    return false;
+      vty && CCtx().TargetSupportsExplicitVector()) {
+    const bool direct_index =
+        n.GetReference() && isa<AST::VectorIndex>(n.GetReference());
+    if (!direct_index &&
+        !CheckExplicitVectorType(n, ExplicitVectorRole::OrdinaryValue,
+                                 vty->ElemType(), vty->ElemCount()))
+      return false;
   }
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
 
@@ -543,6 +859,21 @@ bool SemaChecker::VisitNode(AST::NamedTypeDecl& n) {
 
 bool SemaChecker::VisitNode(AST::NamedVariableDecl& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+  if (n.init_expr) {
+    if (auto vty = dyn_cast<VectorType>(NodeType(*n.init_expr));
+        vty && CCtx().TargetSupportsExplicitVector()) {
+      const bool direct_index =
+          isa<AST::VectorIndex>(n.init_expr) ||
+          (isa<AST::Expr>(n.init_expr) &&
+           cast<AST::Expr>(n.init_expr)->GetReference() &&
+           isa<AST::VectorIndex>(cast<AST::Expr>(n.init_expr)->GetReference()));
+      const auto role = direct_index ? ExplicitVectorRole::IndexValue
+                                     : ExplicitVectorRole::OrdinaryValue;
+      if (!CheckExplicitVectorType(*n.init_expr, role, vty->ElemType(),
+                                   vty->ElemCount()))
+        return false;
+    }
+  }
 
   auto ty = NodeType(n);
   auto s = GetShape(ty);
@@ -612,14 +943,39 @@ bool SemaChecker::VisitNode(AST::DataAccess& n) {
 
           if (isa<BoundedType>(nty)) {
             auto c = ExpressionIsConstrained(index_val);
-            if (IsValidValueItem(expr_bounds.ub) && !c)
+            // Decide between the loop-invariant bound-based check and the
+            // in-loop variable-based check:
+            //  - Not constrained (no scope predicate mentions the index): the
+            //    type-declared bound is exact, so emit the bound check
+            //    expr_bounds.ub < dim_bound (loop-invariant, hoistable).
+            //  - Constrained: prefer the variable-based check index <
+            //  dim_bound,
+            //    which interval analysis proves statically when the scope
+            //    predicate tightens a numeric bound (e.g. if (p < 4)).  When
+            //    interval analysis cannot decide it (a symbolic loop bound such
+            //    as foreach [0:N]), fall back to the bound-based check so the
+            //    loop-invariant bound is hoisted instead of a per-iteration
+            //    check on the loop variable.
+            bool use_bound_based = false;
+            if (IsValidValueItem(expr_bounds.ub)) {
+              if (!c) {
+                use_bound_based = true;
+              } else {
+                auto proven = TryProveWithIntervals(
+                    this, sbe::oc_lt(index_val, dim_bound)->Normalize(),
+                    ActiveScopePredicate());
+                use_bound_based = !proven.has_value();
+              }
+            }
+
+            if (use_bound_based) {
               CreateAssessment(
                   sbe::oc_lt(expr_bounds.ub, dim_bound)->Normalize(),
                   "The " + Ordinal(d + 1) + " index `" + idx_str +
                       "` of element access '" + data_str +
                       "' should be less than " + STR(dim_bound),
                   val_node->LOC(), class_node, UsageType::ElementAccess, &n);
-            else {
+            } else {
               CreateAssessment(sbe::oc_ge(index_val, sbe::nu(0))->Normalize(),
                                "The " + Ordinal(d + 1) + " index `" + idx_str +
                                    "` of element access '" + data_str +
@@ -657,6 +1013,21 @@ bool SemaChecker::VisitNode(AST::DataAccess& n) {
 
 bool SemaChecker::VisitNode(AST::Assignment& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
+  if (n.value) {
+    if (auto vty = dyn_cast<VectorType>(NodeType(*n.value));
+        vty && CCtx().TargetSupportsExplicitVector()) {
+      const bool direct_index =
+          isa<AST::VectorIndex>(n.value) ||
+          (isa<AST::Expr>(n.value) &&
+           cast<AST::Expr>(n.value)->GetReference() &&
+           isa<AST::VectorIndex>(cast<AST::Expr>(n.value)->GetReference()));
+      const auto role = direct_index ? ExplicitVectorRole::IndexValue
+                                     : ExplicitVectorRole::OrdinaryValue;
+      if (!CheckExplicitVectorType(*n.value, role, vty->ElemType(),
+                                   vty->ElemCount()))
+        return false;
+    }
+  }
   return false;
 
   if ((*NodeType(n) != *NodeType(*n.value))) {
@@ -982,7 +1353,81 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
       Error1(n.LOC(), "Expect a placeholder type but got '" + PSTR(ty) + "'.");
       return false;
     }
+    data_future_bindings[InScopeName(n.future)] = 0;
     return true;
+  }
+
+  // The level states who fulfils the copy: the `: <level>` annotation, or the
+  // enclosing parallel scope.  Set it for every DMA so codegen reads a single
+  // field; whether an address is per-lane is read off the parallel variables
+  // it indexes (never by walking the scope).
+  {
+    ParallelLevel enclosing = parallel_level_stack.empty()
+                                  ? ParallelLevel::NONE
+                                  : parallel_level_stack.back();
+    if (n.GetLevel() == ParallelLevel::NONE) n.SetLevel(enclosing);
+
+    auto is_thread_indexed = [this](AST::ChunkAt* ca) {
+      if (!ca) return false;
+      std::set<std::string> syms;
+      if (ca->indices) {
+        auto s = ReferredSymbols(ca->indices.get(), this);
+        syms.insert(s.begin(), s.end());
+      }
+      auto s = ReferredSymbols(ca, this);
+      syms.insert(s.begin(), s.end());
+      syms.erase(InScopeName(ca->RefSymbol()));
+      for (auto& sym : syms) {
+        auto it = pv_levels_.find(sym);
+        if (it != pv_levels_.end() && it->second == ParallelLevel::THREAD)
+          return true;
+      }
+      return false;
+    };
+
+    // The source of a DMA is always a chunkat; the destination is a chunkat or
+    // the inferred storage keyword (`=> shared`).
+    auto from_ca = cast<AST::ChunkAt>(n.from.get());
+    auto to_ca = cast<AST::ChunkAt>(n.to.get());
+    ParallelLevel lvl = n.GetLevel();
+
+    // (a) A block/group-level copy may not index a thread-level variable: the
+    // address is per-lane data, not block data.  Mixing the two is risky, so
+    // the system forbids it for safety.
+    if ((lvl == ParallelLevel::BLOCK || lvl == ParallelLevel::GROUP) &&
+        (is_thread_indexed(from_ca) || is_thread_indexed(to_ca)))
+      Error1(n.LOC(),
+             "indexing a thread-level parallel variable in a block-level DMA "
+             "is risky -- the address is per-lane data, not block data; the "
+             "current system forbids it for safety. Remove the `: block` "
+             "annotation or index at block level.");
+
+    // (b) A thread-level copy into shared storage must index the lane on the
+    // destination.  With a per-lane source an unindexed destination is a
+    // correctness bug (every lane writes the same location).  With a
+    // block-uniform source the repeated writes are idempotent, but every lane
+    // still issues the whole movement -- a severe performance defect -- so warn
+    // instead of rejecting.
+    if (lvl == ParallelLevel::THREAD) {
+      auto tty = GetSpannedType(NodeType(*n.to));
+      bool shared_dest =
+          tty && (tty->GetStorage() == Storage::SHARED ||
+                  tty->GetStorage() == Storage::GROUP_SHARED);
+      if (shared_dest && !is_thread_indexed(to_ca)) {
+        if (tty->GetStorage() == Storage::SHARED && is_thread_indexed(from_ca))
+          Error1(n.LOC(),
+                 "a thread-level DMA with a thread-indexed source must index "
+                 "the thread-level parallel variable on the destination (each "
+                 "lane writes its own part); declare the lane dimension or "
+                 "index it.");
+        else
+          Note(n.LOC(),
+               "a thread-level DMA into shared storage does not index the lane "
+               "on the destination, so every lane issues the whole copy. Index "
+               "the lane on the destination or annotate the copy `: block` if "
+               "the movement is block-uniform.");
+      }
+    }
   }
 
   // Check swizzle: only report error if swizzle is explicitly specified
@@ -1026,6 +1471,7 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
 
   if (!n.future.empty() && cast<FutureType>(ty)->IsAsync()) {
     RecordAsyncProducer(InScopeName(n.future));
+    RecordDataFutureProducer(InScopeName(n.future));
     async_dma_producers[InScopeName(n.future)] = &n;
   }
   if (!n.chain_from.empty()) waited_async.insert(InScopeName(n.chain_from));
@@ -1726,11 +2172,13 @@ bool SemaChecker::VisitNode(AST::Wait& n) {
         ObserveAsyncFuture(future_name, f->LOC(), "wait");
       else if (isa<FutureType>(fty)) {
         // Data-future symbols can participate in swap/rotation pipelines, so
-        // multiple static wait sites are valid. Remember a direct DMA wait to
-        // reject a later native event binding without applying the stricter
-        // single-observation rule used by operation futures.
-        if (async_dma_producers.count(future_name))
+        // multiple static wait sites may refer to different dynamic
+        // instances. The identity tracker diagnoses only a known duplicate;
+        // ambiguous control-flow cases remain conservative.
+        if (async_dma_producers.count(future_name)) {
+          ObserveDataFuture(future_name, f->LOC());
           observed_async.insert(future_name);
+        }
         waited_async.insert(future_name);
       } else {
         waited_async.insert(future_name);
@@ -1841,7 +2289,11 @@ bool SemaChecker::VisitNode(AST::Call& n) {
 
       for (size_t i = 1; i < n.arguments->Count(); ++i) {
         auto sty = NodeType(*n.arguments->ValueAt(i));
-        if (!sty->ApprxEqual(*pty))
+        const bool fmaf_vector_scalar_broadcast =
+            n.function->name == "__fmaf" && isa<VectorType>(pty) &&
+            isa<ScalarFloatType>(sty) &&
+            ScalarOrVectorElementType(pty) == sty->GetBaseType();
+        if (!sty->ApprxEqual(*pty) && !fmaf_vector_scalar_broadcast)
           Error1(n.LOC(),
                  "expect the " + std::to_string(i) +
                      "th argument to be the same type as the first one.");
@@ -1925,6 +2377,8 @@ bool SemaChecker::VisitNode(AST::Call& n) {
 }
 
 bool SemaChecker::VisitNode(AST::Rotate& n) {
+  RotateDataFutureBindings(n);
+
   size_t index = 0;
   for (auto s : n.ids->AllValues()) {
     if (auto id = AST::GetIdentifier(*s))

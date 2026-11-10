@@ -1,0 +1,19 @@
+// RUN: cocc -t cute -es -arch=sm_86 --stats %s 2>&1 | FileCheck %s
+//
+// Test cocc --stats memory reporting: the CoIR driver runs the memory-usage
+// pass over the pre-codegen AST, so the same per-tier table printed by
+// `choreo --stats` is available here. The arch is pinned because the tier
+// capacities are target-arch dependent.
+// local: 200 s8 = 200 B, 340 B capacity (sm_86 hard budget) => 58.8%.
+// CHECK: Memory Usage Statistics
+// CHECK: {{[ ]*}}58.8%  mem     - local peak: 200 B of 340 B limit
+// shared: 64 s32 = 256 B, 100 KB capacity => 0.25%.
+// CHECK: {{[ ]*}}0.25%  mem     - shared peak: 256 B of 100 KB limit
+
+__co__ void foo() {
+  parallel p by 8 {
+    local s8[200] lbuf;
+    shared s32[64] sbuf;
+    x = sbuf.at(0);
+  }
+}

@@ -29,8 +29,8 @@ __co__ void test_mma_load_span_as(
 // output after span_as: [128,128] chunked by [8,8] => block [16,16]
 // output offset = m*2048 + n*16
 // CHECK-LABEL: __global__{{.*}}test_mma_load_span_as
-// CHECK: load_matrix_sync(ma, ((blockIdx.x + __choreo_vgid_x) * 1024 + __iv_k__elem__0 * 16 + lhs), 64)
-// CHECK: load_matrix_sync(mb, ((blockIdx.y + __choreo_vgid_y) * 16 + __iv_k__elem__0 * 2048 + rhs), 128)
+// CHECK: load_matrix_sync(ma, ((blockIdx.x + __choreo_vgid_x) * 1024 + __iv_k * 16 + lhs), 64)
+// CHECK: load_matrix_sync(mb, ((blockIdx.y + __choreo_vgid_y) * 16 + __iv_k * 2048 + rhs), 128)
 // CHECK: store_matrix_sync(((blockIdx.x + __choreo_vgid_x) * 2048 + (blockIdx.y + __choreo_vgid_y) * 16 + output)
 
 // ---------------------------------------------------------------------------
@@ -156,5 +156,5 @@ __co__ void test_mma_load_span_as_reshape(
 // lhs.span_as([128,64]): 3D [4,32,64] -> 2D [128,64], same total size
 // offset = m*1024 + k*16
 // CHECK-LABEL: __global__{{.*}}test_mma_load_span_as_reshape
-// CHECK: load_matrix_sync(ma, ((blockIdx.x + __choreo_vgid_x) * 1024 + __iv_k__elem__0 * 16 + lhs), 64)
+// CHECK: load_matrix_sync(ma, ((blockIdx.x + __choreo_vgid_x) * 1024 + __iv_k * 16 + lhs), 64)
 // CHECK: store_matrix_sync(((blockIdx.x + __choreo_vgid_x) * 2048 + (blockIdx.y + __choreo_vgid_y) * 16 + output)

@@ -15,8 +15,8 @@ __co__ auto test_flat_s32(s32 [2, 4, 8] input) {
 
   parallel p by 1 : block
     parallel q by 32 : thread {
-      tile = dma.copy input.subspan(2, 4, 8) => shared;
-      dma.copy tile => output;
+      tile = dma.copy input.subspan(2, 4, 8) => shared : block;
+      dma.copy tile => output : block;
     }
 
   return output;
@@ -28,8 +28,8 @@ __co__ auto test_flat_f16(f16 [3, 8, 16] input) {
 
   parallel p by 1 : block
     parallel q by 32 : thread {
-      tile = dma.copy input.subspan(3, 8, 16) => shared;
-      dma.copy tile => output;
+      tile = dma.copy input.subspan(3, 8, 16) => shared : block;
+      dma.copy tile => output : block;
     }
 
   return output;
@@ -42,9 +42,9 @@ __co__ auto test_flat_async(s32 [2, 8, 32] input) {
   parallel p by 1 : block
     parallel q by 32 : thread {
       shared s32 [2, 8, 32] buf;
-      fut = dma.copy.async input.subspan(2, 8, 32) => buf.subspan(2, 8, 32);
+      fut = dma.copy.async input.subspan(2, 8, 32) => buf.subspan(2, 8, 32) : block;
       wait fut;
-      dma.copy buf.subspan(2, 8, 32) => output;
+      dma.copy buf.subspan(2, 8, 32) => output : block;
     }
 
   return output;
@@ -56,8 +56,8 @@ __co__ auto test_flat_large(s32 [4, 16, 32] input) {
 
   parallel p by 1 : block
     parallel q by 128 : thread {
-      tile = dma.copy input.subspan(4, 16, 32) => shared;
-      dma.copy tile => output;
+      tile = dma.copy input.subspan(4, 16, 32) => shared : block;
+      dma.copy tile => output : block;
     }
 
   return output;
@@ -69,8 +69,8 @@ __co__ auto test_flat_s8(s8 [2, 16, 64] input) {
 
   parallel p by 1 : block
     parallel q by 64 : thread {
-      tile = dma.copy input.subspan(2, 16, 64) => shared;
-      dma.copy tile => output;
+      tile = dma.copy input.subspan(2, 16, 64) => shared : block;
+      dma.copy tile => output : block;
     }
 
   return output;
@@ -86,8 +86,8 @@ __co__ auto test_batch_s32(s32 [M, N, K] input) {
 
   parallel p by 1 : block
     parallel q by 32 : thread {
-      tile = dma.copy input.subspan(M, N, K) => shared;
-      dma.copy tile => output;
+      tile = dma.copy input.subspan(M, N, K) => shared : block;
+      dma.copy tile => output : block;
     }
 
   return output;
@@ -99,8 +99,8 @@ __co__ auto test_batch_f16(f16 [M, N, K] input) {
 
   parallel p by 1 : block
     parallel q by 32 : thread {
-      tile = dma.copy input.subspan(M, N, K) => shared;
-      dma.copy tile => output;
+      tile = dma.copy input.subspan(M, N, K) => shared : block;
+      dma.copy tile => output : block;
     }
 
   return output;
@@ -113,9 +113,9 @@ __co__ auto test_batch_async(s32 [M, N, K] input) {
   parallel p by 1 : block
     parallel q by 32 : thread {
       shared s32 [M, N, K] buf;
-      fut = dma.copy.async input.subspan(M, N, K) => buf.subspan(M, N, K);
+      fut = dma.copy.async input.subspan(M, N, K) => buf.subspan(M, N, K) : block;
       wait fut;
-      dma.copy buf.subspan(M, N, K) => output;
+      dma.copy buf.subspan(M, N, K) => output : block;
     }
 
   return output;
@@ -132,8 +132,8 @@ __co__ auto test_mixed_flatten(s32 [M, 4, 8] input) {
 
   parallel p by 1 : block
     parallel q by 32 : thread {
-      tile = dma.copy input.subspan(M, 4, 8) => shared;
-      dma.copy tile => output;
+      tile = dma.copy input.subspan(M, 4, 8) => shared : block;
+      dma.copy tile => output : block;
     }
 
   return output;
@@ -145,8 +145,8 @@ __co__ auto test_mixed_flatten_f16(f16 [M, 8, 16] input) {
 
   parallel p by 1 : block
     parallel q by 32 : thread {
-      tile = dma.copy input.subspan(M, 8, 16) => shared;
-      dma.copy tile => output;
+      tile = dma.copy input.subspan(M, 8, 16) => shared : block;
+      dma.copy tile => output : block;
     }
 
   return output;
@@ -159,8 +159,8 @@ __co__ auto test_mixed_batch(s32 [2, N, K] input) {
 
   parallel p by 1 : block
     parallel q by 32 : thread {
-      tile = dma.copy input.subspan(2, N, K) => shared;
-      dma.copy tile => output;
+      tile = dma.copy input.subspan(2, N, K) => shared : block;
+      dma.copy tile => output : block;
     }
 
   return output;
@@ -173,8 +173,8 @@ __co__ auto test_mixed_batch_inner_static(s32 [M, N, 8] input) {
 
   parallel p by 1 : block
     parallel q by 32 : thread {
-      tile = dma.copy input.subspan(M, N, 8) => shared;
-      dma.copy tile => output;
+      tile = dma.copy input.subspan(M, N, 8) => shared : block;
+      dma.copy tile => output : block;
     }
 
   return output;

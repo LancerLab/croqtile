@@ -2,10 +2,14 @@
 #define __CHOREO_AST_HPP__
 
 #include <cmath>
+#include <cstdlib>
+#include <iomanip>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "context.hpp"
@@ -659,6 +663,36 @@ struct FloatLiteral : public Node, public TypeIDProvider<FloatLiteral> {
     return std::get<double>(value);
   }
 
+  // Keep readable fixed literals when they round-trip exactly. Small values
+  // and values needing more precision use scientific notation instead.
+  std::string SourceSTR() const {
+    return std::visit(
+        [](auto v) {
+          using T = decltype(v);
+          if (std::isinf(v))
+            return std::string(v < 0 ? "(-INFINITY)" : "INFINITY");
+          if (std::isnan(v)) return std::string("NAN");
+          std::ostringstream text;
+          text << std::fixed << v;
+          auto fixed = text.str();
+          T parsed;
+          if constexpr (std::is_same_v<T, float>)
+            parsed = std::strtof(fixed.c_str(), nullptr);
+          else
+            parsed = std::strtod(fixed.c_str(), nullptr);
+          if (parsed != v) {
+            text.str("");
+            text.clear();
+            text << std::scientific
+                 << std::setprecision(std::numeric_limits<T>::max_digits10 - 1)
+                 << v;
+          }
+          if constexpr (std::is_same_v<T, float>) text << 'f';
+          return text.str();
+        },
+        value);
+  }
+
   bool IsFloat32() const { return isa<F32Type>(GetType()); }
   bool IsFloat64() const { return isa<F64Type>(GetType()); }
 
@@ -768,6 +802,16 @@ public:
   const ptr<Node>& GetR() const { return value_r; }
   const ptr<Node>& GetL() const { return value_l; }
   const ptr<Expr>& GetC() const { return value_c; }
+  // The operand of a bound-access expression that carries the bound (the
+  // bounded-variable reference preserved by foreach canonicalization).
+  // Returns nullptr for non-bound-access expressions.
+  ptr<Node> GetBoundOperand() const {
+    switch (GetBoundOperandSide(op)) {
+    case BoundOperandSide::Left: return GetL();
+    case BoundOperandSide::Right: return GetR();
+    default: return nullptr;
+    }
+  }
   const Opcode& GetOp() const { return op; }
   Form GetForm() const { return t; }
   void SetForm(const Form& form) {
@@ -1272,6 +1316,8 @@ struct Identifier : public Node, public TypeIDProvider<Identifier> {
 
 struct DataAccess : public Node, public TypeIDProvider<DataAccess> {
   ptr<Identifier> data = nullptr;
+  // Optional indices selecting a span-array slot before applying `.at(...)`.
+  ptr<MultiValues> array_indices = nullptr;
   ptr<MultiValues> indices = nullptr;
   ptr<SCEV> scev = nullptr;
 
@@ -1280,8 +1326,9 @@ private:
 
 public:
   DataAccess(const location& l, const ptr<Identifier>& i,
-             const ptr<MultiValues>& m = nullptr, bool isd = false)
-      : Node(l), data(i), indices(m), is_decl(isd) {
+             const ptr<MultiValues>& m = nullptr, bool isd = false,
+             const ptr<MultiValues>& ai = nullptr)
+      : Node(l), data(i), array_indices(ai), indices(m), is_decl(isd) {
     assert(i != nullptr && "no data is specified.");
     if (m) assert((m->Count() > 0) && "requires at least one index.");
   }
@@ -1294,6 +1341,12 @@ public:
   ptr<SCEV> GetSCEV() const { return scev; }
 
   bool AccessElement() const { return indices != nullptr; }
+  bool AccessArrayElement() const { return array_indices != nullptr; }
+  const NodeList& GetArrayIndices() const {
+    if (!array_indices)
+      choreo_unreachable("unexpected null span-array indices.");
+    return array_indices->AllValues();
+  }
   void SetDecl(bool isd = true) { is_decl = isd; }
   bool IsDecl() const { return is_decl; }
 
@@ -1303,13 +1356,16 @@ public:
   }
 
   ptr<Node> CloneImpl() const override {
-    return Make<DataAccess>(LOC(), CloneP(data), CloneP(indices), is_decl);
+    return Make<DataAccess>(LOC(), CloneP(data), CloneP(indices), is_decl,
+                            CloneP(array_indices));
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
     (void)prefix;
     os << data->name;
+    if (array_indices)
+      for (auto e : GetArrayIndices()) os << "[" << PSTR(e) << "]";
     if (indices) {
       os << "[";
       int i = 0;
@@ -1331,22 +1387,38 @@ public:
 // `vec.index<N>`; N is a compile-time value and is not a runtime operand.
 struct VectorIndex : public Node, public TypeIDProvider<VectorIndex> {
 private:
-  size_t lane_count;
+  size_t lane_count = 0;
+  ptr<Expr> lane_count_expr;
 
 public:
   VectorIndex(const location& l, size_t n) : Node(l), lane_count(n) {
     assert(n > 0 && "vector lane count must be positive.");
   }
 
+  VectorIndex(const location& l, const ptr<Expr>& width)
+      : Node(l), lane_count_expr(width) {}
+
   size_t LaneCount() const { return lane_count; }
+  const ptr<Expr>& LaneCountExpr() const { return lane_count_expr; }
+  void SetLaneCount(size_t n) { lane_count = n; }
 
   ptr<Node> CloneImpl() const override {
+    if (lane_count_expr) {
+      auto copy = Make<VectorIndex>(LOC(), CloneP(lane_count_expr));
+      copy->SetLaneCount(lane_count);
+      return copy;
+    }
     return Make<VectorIndex>(LOC(), lane_count);
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
-    os << prefix << "VEC.INDEX<" << lane_count << ">";
+    os << prefix << "VEC.INDEX<";
+    if (lane_count)
+      os << lane_count;
+    else
+      os << PSTR(lane_count_expr);
+    os << ">";
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
   }
 
@@ -2011,6 +2083,7 @@ private:
   std::string device_target_name;
   ptr<MultiValues> launch_bounds_args = nullptr;
   ptr<Expr> maxnreg_arg = nullptr;
+  std::vector<std::string> target_function_attributes;
   bool cooperative = false;
 
 public:
@@ -2135,6 +2208,19 @@ public:
   const ptr<Expr>& GetMaxnregArg() const { return maxnreg_arg; }
   void SetMaxnregArg(const ptr<Expr>& arg) { maxnreg_arg = arg; }
 
+  bool HasTargetFunctionAttributes() const {
+    return !target_function_attributes.empty();
+  }
+  const std::vector<std::string>& GetTargetFunctionAttributes() const {
+    return target_function_attributes;
+  }
+  void AddTargetFunctionAttribute(const std::string& attribute) {
+    for (const auto& current : target_function_attributes)
+      if (current == attribute) return;
+    target_function_attributes.push_back(attribute);
+  }
+  void ClearTargetFunctionAttributes() { target_function_attributes.clear(); }
+
   bool IsCooperative() const { return cooperative; }
   void SetCooperative(bool c = true) { cooperative = c; }
 
@@ -2152,13 +2238,16 @@ public:
     if (HasDeviceTarget()) pb->SetDeviceTargetName(DeviceTargetName());
     if (HasLaunchBounds()) pb->SetLaunchBoundsArgs(CloneP(launch_bounds_args));
     if (HasMaxnreg()) pb->SetMaxnregArg(CloneP(maxnreg_arg));
+    for (const auto& attribute : target_function_attributes)
+      pb->AddTargetFunctionAttribute(attribute);
     pb->SetCooperative(IsCooperative());
     return pb;
   }
 
   void InlinePrint(std::ostream& os, const std::string& prefix = {},
                    bool with_type = false) const override {
-    bool has_attr = HasLaunchBounds() || HasMaxnreg();
+    bool has_attr =
+        HasLaunchBounds() || HasMaxnreg() || HasTargetFunctionAttributes();
     if (HasLaunchBounds()) {
       os << prefix << "[[launch_bounds(";
       launch_bounds_args->InlinePrint(os, "", with_type);
@@ -2168,6 +2257,11 @@ public:
       os << (HasLaunchBounds() ? "" : prefix) << "[[maxnreg(";
       maxnreg_arg->InlinePrint(os, "", with_type);
       os << ")]] ";
+    }
+    bool prefixed_attribute = HasLaunchBounds() || HasMaxnreg();
+    for (const auto& attribute : target_function_attributes) {
+      os << (prefixed_attribute ? "" : prefix) << "[[" << attribute << "]] ";
+      prefixed_attribute = true;
     }
     os << (has_attr ? "" : prefix) << "parallel";
     if (stream_expr) {
@@ -3661,12 +3755,18 @@ struct FragTransfer : public Node, public TypeIDProvider<FragTransfer> {
   __UDT_TYPE_INFO__(Node, FragTransfer)
 };
 
-// frag.reduce_max src, dst, dim;
-// frag.reduce_sum src, dst, dim;
-// Row-wise (dim=1) reduction of a 2D fragment into a 1D fragment.
-// frag.all_reduce_sum value;
+// reduce_max src, dst, dim;
+// reduce_sum src, dst, dim;
+// Row-wise (dim=1) reduction of a 2D source into a 1D destination.
+// all_reduce_sum value;
 // Cross-owner reduction and broadcast of a replicated 1D fragment.
-enum class FragReduceOp { MAX, SUM, ALL_REDUCE_SUM };
+//
+// The same node carries both layers: the fragment targets reduce `frag`
+// values, while a buffer target accepts a plain span (and an MMA accumulator)
+// and turns the statement into the buffer-reduction lowering, so
+// `reduce_*(...)` is the source-level spelling of
+// `__lib_reduce_*(dst, src, count, width, width)`.
+enum class FragReduceOp { MAX, SUM, MIN, PROD, ALL_REDUCE_SUM };
 
 struct FragReduce : public Node, public TypeIDProvider<FragReduce> {
   FragReduceOp op;
@@ -3682,9 +3782,24 @@ struct FragReduce : public Node, public TypeIDProvider<FragReduce> {
     switch (op) {
     case FragReduceOp::MAX: return "frag.reduce_max";
     case FragReduceOp::SUM: return "frag.reduce_sum";
+    case FragReduceOp::MIN: return "frag.reduce_min";
+    case FragReduceOp::PROD: return "frag.reduce_prod";
     case FragReduceOp::ALL_REDUCE_SUM: return "frag.all_reduce_sum";
     }
     return "frag.reduce_?";
+  }
+
+  // The source-level spelling of the operation, which is also the suffix the
+  // buffer lowering uses for both the library entry point and its fallback.
+  const char* OpSuffix() const {
+    switch (op) {
+    case FragReduceOp::MAX: return "max";
+    case FragReduceOp::SUM: return "sum";
+    case FragReduceOp::MIN: return "min";
+    case FragReduceOp::PROD: return "prod";
+    case FragReduceOp::ALL_REDUCE_SUM: return "sum";
+    }
+    return "";
   }
 
   ptr<Node> CloneImpl() const override {
@@ -4006,7 +4121,7 @@ struct CompletionWait : public Node, public TypeIDProvider<CompletionWait> {
   __UDT_TYPE_INFO__(Node, CompletionWait)
 };
 
-struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
+struct RangeExpr : public Node, public TypeIDProvider<RangeExpr> {
   // rv: the range-source variable (a within-declared bounded variable whose
   // bounds define this range). Not directly visible inside the foreach body.
   ptr<Identifier> rv;
@@ -4023,13 +4138,13 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   int step = GetInvalidStep();
   ValueItem scope_predicate = GetInvalidValueItem();
 
-  LoopRange(const location& l, const ptr<Identifier>& i)
+  RangeExpr(const location& l, const ptr<Identifier>& i)
       : Node(l), rv(i), iv(nullptr) {} // the cmpt_bounds are yet to be inferred
-  LoopRange(const location& l, const ptr<Identifier>& i, const ptr<Node>& lb,
+  RangeExpr(const location& l, const ptr<Identifier>& i, const ptr<Node>& lb,
             const ptr<Node>& ub, int s = 1)
       : Node(l), rv(i), iv(nullptr), lb_mutator(lb), ub_mutator(ub), step(s) {}
   // Constructor for explicit local name: foreach local=source(lb:ub[:step])
-  LoopRange(const location& l, const ptr<Identifier>& local,
+  RangeExpr(const location& l, const ptr<Identifier>& local,
             const ptr<Identifier>& source, const ptr<Node>& lb,
             const ptr<Node>& ub, int s = 1)
       : Node(l), rv(source), iv(local), lb_mutator(lb), ub_mutator(ub),
@@ -4053,7 +4168,7 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   ptr<Node> CloneImpl() const override {
     auto cloned_rv = (!rv) ? nullptr : CloneP(rv);
     auto cloned_iv = (!iv) ? nullptr : CloneP(iv);
-    auto copied = Make<LoopRange>(LOC(), cloned_rv, CloneP(lb_mutator),
+    auto copied = Make<RangeExpr>(LOC(), cloned_rv, CloneP(lb_mutator),
                                   CloneP(ub_mutator), step);
     copied->iv = cloned_iv;
     copied->scope_predicate = scope_predicate;
@@ -4082,7 +4197,7 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   const ValueItem GetScopePredicate() const { return scope_predicate; }
   void accept(Visitor&) override;
 
-  __UDT_TYPE_INFO__(Node, LoopRange)
+  __UDT_TYPE_INFO__(Node, RangeExpr)
 };
 
 ptr<Call> GetCall(const ptr<Node>& n);
@@ -4107,7 +4222,7 @@ struct ForeachBlock : public Block, public TypeIDProvider<ForeachBlock> {
   const ValueItem GetScopePredicate() const override {
     auto pred = sbe::bl(true);
     for (auto rng : ranges->AllValues())
-      pred = sbe::bl_and(cast<LoopRange>(rng)->GetScopePredicate(), pred);
+      pred = sbe::bl_and(cast<RangeExpr>(rng)->GetScopePredicate(), pred);
     return pred;
   }
 
@@ -4120,6 +4235,7 @@ struct ForeachBlock : public Block, public TypeIDProvider<ForeachBlock> {
     auto copied =
         Make<ForeachBlock>(LOC(), CloneP(ranges), CloneP(suffixs), stmts);
     copied->loop = loop;
+    CloneBlockStateTo(*copied);
     return copied;
   }
 
@@ -4147,8 +4263,16 @@ struct ForeachBlock : public Block, public TypeIDProvider<ForeachBlock> {
 
   ptr<Identifier> GetRV() const {
     if (ranges->Count() == 1) {
-      auto range = dyn_cast<AST::LoopRange>(ranges->ValueAt(0));
+      auto range = dyn_cast<AST::RangeExpr>(ranges->ValueAt(0));
       return range->GetRV();
+    }
+    return nullptr;
+  }
+
+  ptr<Identifier> GetIV() const {
+    if (ranges->Count() == 1) {
+      auto range = dyn_cast<AST::RangeExpr>(ranges->ValueAt(0));
+      return range->GetIV();
     }
     return nullptr;
   }
@@ -4861,6 +4985,9 @@ inline bool FragIsArrayElem(const ptr<AST::Expr>& e) {
 }
 
 inline const std::string FragName(const ptr<AST::Expr>& e) {
+  // `mma.store __to<T>(frag), dst` wraps the fragment operand in an explicit
+  // cast. The fragment identity is the value the cast reads.
+  if (isa<AST::CastExpr>(e)) return FragName(cast<AST::Expr>(e->GetR()));
   if (auto id = e->GetSymbol()) return id->name;
   if (auto ref = e->GetReference())
     if (auto ca = dyn_cast<AST::ChunkAt>(ref)) return ca->RefSymbol();

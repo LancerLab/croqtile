@@ -1,0 +1,20 @@
+// RUN: choreo -t cute -es -arch=sm_86 --stats %s -o /dev/null 2>&1 | FileCheck %s
+//
+// local/shared buffers whose extent is an input parameter are runtime-managed
+// by memory reuse, so their occupancy is reported as runtime-decided rather
+// than as a compile-time percentage. The arch is pinned because the tier
+// capacities are target-arch dependent.
+// CHECK: ... Memory Usage Statistics ...
+// local: 340 B capacity (sm_86 hard budget).
+// CHECK: runtime  mem     - local peak: decided at runtime (limit 340 B)
+// shared: 100 KB capacity.
+// CHECK: runtime  mem     - shared peak: decided at runtime (limit 100 KB)
+
+__co__ void foo(int n, int m) {
+  parallel p by 8 {
+    local s32[n] lbuf;
+    shared s32[m] sbuf;
+    lbuf.at(0) = p;
+    sbuf.at(0) = p;
+  }
+}

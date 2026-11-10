@@ -1,0 +1,29 @@
+// RUN: co2ir -t cc %s | FileCheck %s --check-prefix=IR
+// RUN: cocc -t cc -gs %s | sed 's@/tmp/cocc_cc_@build/cocc_cc_@' | bash -s -- --execute | FileCheck %s
+
+__co__ void foreach_scalar_assignment(s32[2] output) {
+  parallel by 1 : thread {
+    s32 last = 5;
+    s32 total = 0;
+    foreach t in [4] {
+      last = t - 1;
+      total = total + last;
+    }
+    output.at(0) = last;
+    output.at(1) = total;
+  }
+}
+
+int main() {
+  auto output = choreo::make_spandata<choreo::s32>(2);
+  foreach_scalar_assignment(output.view());
+  choreo::choreo_assert(output[0] == 2 && output[1] == 2,
+                        "foreach index must retain scalar type");
+  std::cout << "PASS: foreach scalar assignment\n";
+}
+// CHECK: PASS: foreach scalar assignment
+
+// IR: coir.foreach
+// IR-SAME: iter_args
+// IR: arith.index_cast {{.*}} : index to i32
+// IR: coir.yield {{.*}} : i32, i32

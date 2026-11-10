@@ -188,12 +188,20 @@ bool MemAnalyzer::Visit(AST::NamedVariableDecl& n) {
     auto sto = sty->GetStorage();
     buf_sto.emplace(sname, sto);
     if (!sty->RuntimeShaped()) {
-      auto total_size = sty->ByteSizeValue() * elem_count;
+      ValueItem total_size;
+      if (auto saty = dyn_cast<SpannedArrayType>(ty);
+          saty && saty->HasAlignedSlots()) {
+        total_size = saty->PhysicalSlotStrideValue() * elem_count;
+      } else {
+        total_size = sty->ByteSizeValue() * elem_count;
+      }
       buf_size.emplace(sname, total_size);
       VST_DEBUG(dbgs() << "\tstatic  size:  " << total_size << "\n");
     } else {
       sto_have_dyn[cur_dev_fname][AllocPoolOf(sto)] = true;
       auto size_expr = sty->ByteSizeValue();
+      if (auto saty = dyn_cast<SpannedArrayType>(ty))
+        size_expr = saty->PhysicalSlotStrideValue();
       if (n.IsArray()) size_expr = size_expr * elem_count;
       buf_size.emplace(sname, size_expr);
       VST_DEBUG(dbgs() << "\tdynamic  size: " << size_expr << "\n";);
@@ -218,6 +226,28 @@ bool MemReuse::BeforeVisitImpl(AST::Node& n) {
     parallel_level++;
     if (pb->IsDeviceEntry()) {
       cur_dev_fname = SSTab().ScopeName();
+      // Only the size_t->int overflow (see Size_t2Int) needs an early
+      // diagnostic; ordinary oversize allocations are reported by the memory
+      // usage checks, per target.
+      auto check_capacity = [&](size_t size, Storage sto) -> bool {
+        if (size <= (size_t)std::numeric_limits<int>::max()) return true;
+        const size_t cap = CCtx().GetMemCapacity(sto);
+        Error1(n.LOC(), __internal__::GetStringFrom(sto) +
+                            " memory OUT OF BOUND!\n\tIn the scope " +
+                            SSTab().ScopeName() + ", a " +
+                            __internal__::GetStringFrom(sto) +
+                            " allocation of " + std::to_string(size) +
+                            " bytes exceeds the limit of " +
+                            std::to_string(cap) + " bytes.");
+        return false;
+      };
+      bool capacity_ok =
+          check_capacity(DFCtx().shared_spm_size, Storage::SHARED);
+      capacity_ok =
+          check_capacity(DFCtx().local_spm_size, Storage::LOCAL) && capacity_ok;
+      for (size_t root_size : DFCtx().local_root_sizes)
+        capacity_ok = check_capacity(root_size, Storage::LOCAL) && capacity_ok;
+      if (!capacity_ok) return true;
       if (DFCtx().shared_spm_size != 0) {
         size_t shared_alignment =
             AlignmentForDevFunc(Storage::SHARED, cur_dev_fname);
@@ -442,6 +472,20 @@ void MemReuse::AnalyzeMemOffset() {
     ProtoType(df_name, ctx,
               (df_name_idx.count(df_name) ? df_name_idx.at(df_name) : ""));
   }
+  RecordRuntimeDecidedTiers();
+}
+
+void MemReuse::RecordRuntimeDecidedTiers() {
+  auto& decided = CCtx().GetMemUsageStats().runtime_decided;
+  for (const auto& [df_name, dyn_flags] : ma.sto_have_dyn)
+    for (const auto& [sto, is_dyn] : dyn_flags)
+      if (is_dyn && ShouldReuseStorage(sto, df_name)) {
+        decided.insert(sto);
+        CCtx()
+            .GetMemUsageStats()
+            .runtime_decided_functions[GetFuncNameFromScopedName(df_name)]
+            .insert(sto);
+      }
 }
 
 void MemReuse::ProtoType(const std::string& df_name, DevFuncMemReuseCtx& ctx,

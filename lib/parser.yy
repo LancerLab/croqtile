@@ -66,6 +66,7 @@ namespace Choreo { namespace AST { struct MultiValues; struct Expr; } }
 struct PBAttributes {
   std::shared_ptr<Choreo::AST::MultiValues> launch_bounds;
   std::shared_ptr<Choreo::AST::Expr> maxnreg;
+  std::vector<std::string> target_function_attributes;
 };
 
 } // %code requires
@@ -84,6 +85,7 @@ struct PBAttributes {
 #include <memory>
 #include "ast.hpp"
 #include "choreo_template.hpp"
+#include "static_check_info.hpp"
 #include "symtab.hpp"
 #include "scanner.hpp"
 
@@ -214,7 +216,7 @@ extern int yylex();
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
 %token <Choreo::BaseType> BIN1 U1 U2 S2 U4 S4 U6 S6 U8 S8 U16 S16  U32 S32 U64 S64 BOOL VOID INT
 // builtin operations
-%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST EVICT_FIRST EVICT_LAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC BARRIER FENCE CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG
+%token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST EVICT_FIRST EVICT_LAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC BARRIER FENCE CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG TARGET_NO_MEM_ALIAS_IN_VLDST_TAR TARGET_LOOP_ITERATOR_LESS_THAN_1024 TARGET_ENABLE_SOFTWARE_PIPELINER TARGET_ENABLE_BC_RESOLVER
 %token <std::string> MAP REMAP
 %token DLBRAKT
 %token ACQ REL ACQ_REL SEQ_CST
@@ -229,6 +231,7 @@ extern int yylex();
 %token <std::string> LIB_CALL
 %token <std::string> FRAG
 %token <std::string> APPLY REDUCE_MAX_STMT REDUCE_SUM_STMT ALL_REDUCE_SUM_STMT COPY_STMT
+%token <std::string> REDUCE_MIN_STMT REDUCE_PROD_STMT
 %token <std::string> ASM ASM_VOLATILE ASM_GOTO
 %token <std::string> INTRINSIC_PREFIX
 %token <std::string> INTRINSIC_NAMESPACE
@@ -258,11 +261,11 @@ extern int yylex();
 %nterm <AST::ptr<AST::Call>> call_stmt
 %nterm <PBAttributes> pb_attribute
 %nterm <AST::DMAAsync> tdma_async
-%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block apply_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt buffer_map_stmt mma_stmt frag_stmt vec_load_assignment vec_store_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt asm_stmt intrinsic_decl range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
+%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block apply_block simple_val signed_simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt buffer_map_stmt mma_stmt frag_stmt vec_load_assignment vec_store_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt asm_stmt intrinsic_decl range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls named_fragment_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims step_list opt_step_list opt_stride_list at_list opt_at_list opt_from_list
 %nterm <std::pair<AST::ptr<AST::MultiValues>, AST::ptr<AST::MultiValues>>> shape_stride
-%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr vec_index_expr vec_load_expr ituple_derivation internal_sizeof_expr sizeof_expr frag_expr mma_exec_operand_expr opt_stream_bind
+%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr vec_index_expr vec_load_expr ituple_derivation internal_sizeof_expr sizeof_expr frag_expr mma_exec_operand_expr opt_stream_bind vector_width_expr
 %nterm <AST::ptr<AST::AttributeExpr>> suffix_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type mdspan_as_type
 %nterm <AST::ptr<AST::DataAccess>> data_element
@@ -671,18 +674,24 @@ fundamental_type
     ;
 
 simple_val
-    : integer_value { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
+    : NUM { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | U32_LITERAL { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | S64_LITERAL { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | U64_LITERAL { $$ = AST::Make<AST::IntLiteral>(@1, $1); }
     | bool_value { $$ = AST::Make<AST::BoolLiteral>(@1, $1); }
     | FPVAL  { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
-    | MINUS FPVAL  { $$ = AST::Make<AST::FloatLiteral>(@1, -$2); }
     | DFPVAL { $$ = AST::Make<AST::FloatLiteral>(@1, $1); }
-    | MINUS DFPVAL { $$ = AST::Make<AST::FloatLiteral>(@1, -$2); }
     | cstrings { $$ = AST::Make<AST::StringLiteral>(@1, $1); }
     | IDENTIFIER { $$ = AST::Make<AST::Identifier>(@1, $1); }
     | IDENTIFIER FNSPAN { $$ = AST::Make<AST::Identifier>(@1, $1 + $2); }
+    ;
+
+// DMA pad values are scalar leaves rather than general s_expr operands.
+signed_simple_val
+    : simple_val { $$ = $1; }
+    | MINUS NUM { $$ = AST::Make<AST::IntLiteral>(@1, -$2); }
+    | MINUS FPVAL { $$ = AST::Make<AST::FloatLiteral>(@1, -$2); }
+    | MINUS DFPVAL { $$ = AST::Make<AST::FloatLiteral>(@1, -$2); }
     ;
 
 int_or_id
@@ -905,6 +914,25 @@ pb_attribute
         $$ = PBAttributes{};
         $$.maxnreg = $4;
       }
+    | DLBRAKT TARGET_NO_MEM_ALIAS_IN_VLDST_TAR RBRAKT RBRAKT {
+        $$ = PBAttributes{};
+        $$.target_function_attributes.push_back(
+            "g" "cu::no_mem_alias_in_vldst_tar");
+      }
+    | DLBRAKT TARGET_LOOP_ITERATOR_LESS_THAN_1024 RBRAKT RBRAKT {
+        $$ = PBAttributes{};
+        $$.target_function_attributes.push_back(
+            "g" "cu::loop_iterator_less_than_1024");
+      }
+    | DLBRAKT TARGET_ENABLE_SOFTWARE_PIPELINER RBRAKT RBRAKT {
+        $$ = PBAttributes{};
+        $$.target_function_attributes.push_back(
+            "g" "cu::enable_software_pipeliner");
+      }
+    | DLBRAKT TARGET_ENABLE_BC_RESOLVER RBRAKT RBRAKT {
+        $$ = PBAttributes{};
+        $$.target_function_attributes.push_back("g" "cu::enable_bc_resolver");
+      }
     | pb_attribute DLBRAKT LAUNCHBOUNDS LPAREN g_value_list RPAREN RBRAKT RBRAKT {
         $$ = $1;
         $$.launch_bounds = $5;
@@ -912,6 +940,25 @@ pb_attribute
     | pb_attribute DLBRAKT MAXNREG LPAREN s_expr RPAREN RBRAKT RBRAKT {
         $$ = $1;
         $$.maxnreg = $5;
+      }
+    | pb_attribute DLBRAKT TARGET_NO_MEM_ALIAS_IN_VLDST_TAR RBRAKT RBRAKT {
+        $$ = $1;
+        $$.target_function_attributes.push_back(
+            "g" "cu::no_mem_alias_in_vldst_tar");
+      }
+    | pb_attribute DLBRAKT TARGET_LOOP_ITERATOR_LESS_THAN_1024 RBRAKT RBRAKT {
+        $$ = $1;
+        $$.target_function_attributes.push_back(
+            "g" "cu::loop_iterator_less_than_1024");
+      }
+    | pb_attribute DLBRAKT TARGET_ENABLE_SOFTWARE_PIPELINER RBRAKT RBRAKT {
+        $$ = $1;
+        $$.target_function_attributes.push_back(
+            "g" "cu::enable_software_pipeliner");
+      }
+    | pb_attribute DLBRAKT TARGET_ENABLE_BC_RESOLVER RBRAKT RBRAKT {
+        $$ = $1;
+        $$.target_function_attributes.push_back("g" "cu::enable_bc_resolver");
       }
     ;
 
@@ -929,6 +976,8 @@ paraby_block
         pb->stmts = $7;
         if ($1.launch_bounds) $6->SetLaunchBoundsArgs($1.launch_bounds);
         if ($1.maxnreg) $6->SetMaxnregArg($1.maxnreg);
+        for (const auto& attribute : $1.target_function_attributes)
+          $6->AddTargetFunctionAttribute(attribute);
         $$ = $6;
       }
     | PARA sync_type opt_stream_bind {
@@ -1074,6 +1123,12 @@ multi_decls
             YYERROR;
           }
           decl->AddNote("alignment", std::to_string($1));
+          if (auto aty = dyn_cast<SpannedArrayType>(decl->GetType()))
+            aty->SetSlotAlignment(static_cast<size_t>($1));
+          if (decl->type) {
+            if (auto aty = dyn_cast<SpannedArrayType>(decl->type->GetType()))
+              aty->SetSlotAlignment(static_cast<size_t>($1));
+          }
         }
         $2->SetLOC(@1);
         $$ = $2;
@@ -1663,6 +1718,25 @@ s_expr
     | s_expr UBSTAR s_expr { $$ = AST::Make<AST::Expr>(@1, "#*", $1, $3); }
     | s_expr UBSLASH s_expr { $$ = AST::Make<AST::Expr>(@1, "#/", $1, $3); }
     | s_expr UBPECET s_expr { $$ = AST::Make<AST::Expr>(@1, "#%", $1, $3); }
+    | MINUS s_expr %prec NOT {
+        if (auto fp = $2->GetFloat()) {
+          auto literal = std::visit([&](auto value) {
+            return AST::Make<AST::FloatLiteral>(@1, -value);
+          }, fp->value);
+          $$ = AST::Make<AST::Expr>(@1, literal);
+        } else if (auto integer = $2->GetInt()) {
+          auto literal = std::visit([&](auto value) -> AST::ptr<AST::IntLiteral> {
+            using T = decltype(value);
+            if constexpr (std::is_signed_v<T>)
+              if (value == std::numeric_limits<T>::min()) return nullptr;
+            return AST::Make<AST::IntLiteral>(@1, static_cast<T>(-value));
+          }, integer->value);
+          $$ = literal ? AST::Make<AST::Expr>(@1, literal)
+                       : AST::Make<AST::Expr>(@1, "-", $2);
+        } else {
+          $$ = AST::Make<AST::Expr>(@1, "-", $2);
+        }
+      }
     | NOT s_expr { $$ = AST::Make<AST::Expr>(@1, "!", $2); }
     | TILDE s_expr { $$ = AST::Make<AST::Expr>(@1, "~", $2); }
     | LPAREN s_expr RPAREN {
@@ -1853,10 +1927,10 @@ within_block
             assert(wi->with_matchers != nullptr);
             for (auto wm : wi->with_matchers->AllValues()) {
               auto id = cast<AST::Identifier>(wm);
-              mn->Append(AST::Make<AST::LoopRange>(id->LOC(), id));
+              mn->Append(AST::Make<AST::RangeExpr>(id->LOC(), id));
             }
           } else
-            mn->Append(AST::Make<AST::LoopRange>(wi->LOC(), wi->with));
+            mn->Append(AST::Make<AST::RangeExpr>(wi->LOC(), wi->with));
         }
         auto fe = AST::Make<AST::ForeachBlock>(@1, mn, $3);
         $$->stmts = AST::Make<AST::MultiNodes>(@3);
@@ -1873,10 +1947,10 @@ within_block
             assert(wi->with_matchers != nullptr);
             for (auto wm : wi->with_matchers->AllValues()) {
               auto id = cast<AST::Identifier>(wm);
-              mv->Append(AST::Make<AST::LoopRange>(id->LOC(), id));
+              mv->Append(AST::Make<AST::RangeExpr>(id->LOC(), id));
             }
           } else
-            mv->Append(AST::Make<AST::LoopRange>(wi->LOC(), wi->with));
+            mv->Append(AST::Make<AST::RangeExpr>(wi->LOC(), wi->with));
         }
         auto fe = AST::Make<AST::ForeachBlock>(@1, mv, $4, $5);
         $$->stmts = AST::Make<AST::MultiNodes>(@5);
@@ -2023,30 +2097,30 @@ bound_expr
 range_expr
     /* explicit local name: foreach c=b, foreach c=b(lb:ub), foreach c=b(lb:ub:step) */
     : IDENTIFIER ASSIGN IDENTIFIER {
-        $$ = AST::Make<AST::LoopRange>(@1,
+        $$ = AST::Make<AST::RangeExpr>(@1,
                AST::Make<AST::Identifier>(@1, $1),
                AST::Make<AST::Identifier>(@3, $3),
                nullptr, nullptr);
       }
     | IDENTIFIER ASSIGN IDENTIFIER LPAREN bound_expr COL bound_expr RPAREN {
-        $$ = AST::Make<AST::LoopRange>(@1,
+        $$ = AST::Make<AST::RangeExpr>(@1,
                AST::Make<AST::Identifier>(@1, $1),
                AST::Make<AST::Identifier>(@3, $3),
                $5, $7);
       }
     | IDENTIFIER ASSIGN IDENTIFIER LPAREN bound_expr COL bound_expr COL index_or_none RPAREN {
-        $$ = AST::Make<AST::LoopRange>(@1,
+        $$ = AST::Make<AST::RangeExpr>(@1,
                AST::Make<AST::Identifier>(@1, $1),
                AST::Make<AST::Identifier>(@3, $3),
                $5, $7, $9);
       }
     /* existing forms (sugar: iv == range_var) */
-    | IDENTIFIER { $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1)); }
+    | IDENTIFIER { $$ = AST::Make<AST::RangeExpr>(@1, AST::Make<AST::Identifier>(@1, $1)); }
     | IDENTIFIER LPAREN bound_expr COL bound_expr RPAREN {
-        $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1), $3, $5);
+        $$ = AST::Make<AST::RangeExpr>(@1, AST::Make<AST::Identifier>(@1, $1), $3, $5);
       }
     | IDENTIFIER LPAREN bound_expr COL bound_expr COL index_or_none RPAREN {
-        $$ = AST::Make<AST::LoopRange>(@1, AST::Make<AST::Identifier>(@1, $1), $3, $5, $7);
+        $$ = AST::Make<AST::RangeExpr>(@1, AST::Make<AST::Identifier>(@1, $1), $3, $5, $7);
       }
     ;
 
@@ -2111,7 +2185,7 @@ tdma_async
     ;
 
 dma_stmt
-    : IDENTIFIER ASSIGN tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select {
+    : IDENTIFIER ASSIGN tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select note_pl {
         if ($4 == ".load" && !$3)
           Parser::error(@4, "'.load' is a TMA-only operation.");
         if ($7.l2_cache_hint != TMAL2CacheHint::NONE &&
@@ -2119,9 +2193,11 @@ dma_stmt
           Parser::error(
               @4, "TMA L2 eviction modifiers are only valid on 'tma.load'.");
         symtab.AddSymbol($1, MakeDummyFutureType($6.Async()));
-        $$ = AST::Make<AST::DMA>(@3, $4, $1, $8, $10, $6, $7, $3, $5);
+        auto d = AST::Make<AST::DMA>(@3, $4, $1, $8, $10, $6, $7, $3, $5);
+        if ($11.level != ParallelLevel::NONE) d->SetLevel($11.level);
+        $$ = d;
       }
-    | IDENTIFIER ASSIGN tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
+    | IDENTIFIER ASSIGN tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER note_pl {
         if ($4 == ".load" && !$3)
           Parser::error(@4, "'.load' is a TMA-only operation.");
         if ($7.l2_cache_hint != TMAL2CacheHint::NONE &&
@@ -2129,25 +2205,31 @@ dma_stmt
           Parser::error(
               @4, "TMA L2 eviction modifiers are only valid on 'tma.load'.");
         symtab.AddSymbol($1, MakeDummyFutureType($6.Async()));
-        $$ = AST::Make<AST::DMA>(@3, $4, $1, $12, $8, $10, $6, $7, $3, $5);
+        auto d = AST::Make<AST::DMA>(@3, $4, $1, $12, $8, $10, $6, $7, $3, $5);
+        if ($13.level != ParallelLevel::NONE) d->SetLevel($13.level);
+        $$ = d;
       }
-    | tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select {
+    | tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select note_pl {
         if ($2 == ".load" && !$1)
           Parser::error(@2, "'.load' is a TMA-only operation.");
         if ($5.l2_cache_hint != TMAL2CacheHint::NONE &&
             (!$1 || $2 != ".load"))
           Parser::error(
               @2, "TMA L2 eviction modifiers are only valid on 'tma.load'.");
-        $$ = AST::Make<AST::DMA>(@1, $2, "", $6, $8, $4, $5, $1, $3);
+        auto d = AST::Make<AST::DMA>(@1, $2, "", $6, $8, $4, $5, $1, $3);
+        if ($9.level != ParallelLevel::NONE) d->SetLevel($9.level);
+        $$ = d;
       }
-    | tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER {
+    | tdma dma_operation dma_config tdma_async dma_attrib chunkat_expr TRANS chunkat_or_storage_or_select CHAIN IDENTIFIER note_pl {
         if ($2 == ".load" && !$1)
           Parser::error(@2, "'.load' is a TMA-only operation.");
         if ($5.l2_cache_hint != TMAL2CacheHint::NONE &&
             (!$1 || $2 != ".load"))
           Parser::error(
               @2, "TMA L2 eviction modifiers are only valid on 'tma.load'.");
-        $$ = AST::Make<AST::DMA>(@1, $2, "", $10, $6, $8, $4, $5, $1, $3);
+        auto d = AST::Make<AST::DMA>(@1, $2, "", $10, $6, $8, $4, $5, $1, $3);
+        if ($11.level != ParallelLevel::NONE) d->SetLevel($11.level);
+        $$ = d;
       }
     | IDENTIFIER ASSIGN tdma NONE {
         symtab.AddSymbol($1, MakePlaceHolderFutureType());
@@ -2176,7 +2258,7 @@ dma_operation
     ;
 
 dma_config
-    : LT LBRACE value_list RBRACE COMMA LBRACE value_list RBRACE COMMA LBRACE value_list RBRACE COMMA simple_val GT {
+    : LT LBRACE value_list RBRACE COMMA LBRACE value_list RBRACE COMMA LBRACE value_list RBRACE COMMA signed_simple_val GT {
         auto pc = AST::Make<PadConfig>();
         $3->SetDelimiter(", ");
         pc->pad_low = $3;
@@ -2482,6 +2564,16 @@ mma_stmt
         auto op = AST::Make<AST::MMAOperation>($4, $6, false, $8, nullptr);
         $$ = AST::Make<AST::MMA>(@1, op);
       }
+    | MMA STORE TOCAST LT fundamental_type GT LPAREN frag_expr RPAREN COMMA chunkat_expr {
+        // Explicit spelling of the store-boundary conversion. The type must
+        // match the destination element type; it does not request a second
+        // conversion (checked in early semantics).
+        auto ce = AST::Make<AST::CastExpr>(@3, $8);
+        ce->SetTo($5);
+        ce->SetExplicit(true);
+        auto op = AST::Make<AST::MMAOperation>(ce, $11);
+        $$ = AST::Make<AST::MMA>(@1, op);
+      }
     | MMA SCALE frag_expr COMMA chunkat_expr COMMA s_expr {
       auto op = AST::Make<AST::MMAOperation>($3, $5, $7);
       $$ = AST::Make<AST::MMA>(@1, op);
@@ -2534,6 +2626,12 @@ frag_stmt
     | REDUCE_SUM_STMT LPAREN frag_expr COMMA frag_expr COMMA integer_value RPAREN {
         $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::SUM, $5, $3, $7);
       }
+    | REDUCE_MIN_STMT LPAREN frag_expr COMMA frag_expr COMMA integer_value RPAREN {
+        $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::MIN, $5, $3, $7);
+      }
+    | REDUCE_PROD_STMT LPAREN frag_expr COMMA frag_expr COMMA integer_value RPAREN {
+        $$ = AST::Make<AST::FragReduce>(@1, AST::FragReduceOp::PROD, $5, $3, $7);
+      }
     | ALL_REDUCE_SUM_STMT LPAREN frag_expr RPAREN {
         $$ = AST::Make<AST::FragReduce>(
             @1, AST::FragReduceOp::ALL_REDUCE_SUM, $3, $3, -1);
@@ -2543,15 +2641,27 @@ frag_stmt
       }
     ;
 
+// Keep '>' out of the width expression grammar so it closes vec.index.
+vector_width_expr
+    : NUM { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::IntLiteral>(@1, $1)); }
+    | IDENTIFIER { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::Identifier>(@1, $1)); }
+    | const_sizeof { $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::IntLiteral>(@1, $1)); }
+    | vector_width_expr PLUS vector_width_expr { $$ = AST::Make<AST::Expr>(@1, "+", $1, $3); }
+    | vector_width_expr MINUS vector_width_expr { $$ = AST::Make<AST::Expr>(@1, "-", $1, $3); }
+    | vector_width_expr STAR vector_width_expr { $$ = AST::Make<AST::Expr>(@1, "*", $1, $3); }
+    | vector_width_expr SLASH vector_width_expr { $$ = AST::Make<AST::Expr>(@1, "/", $1, $3); }
+    | vector_width_expr PECET vector_width_expr { $$ = AST::Make<AST::Expr>(@1, "%", $1, $3); }
+    | MINUS vector_width_expr %prec NOT { $$ = AST::Make<AST::Expr>(@1, "-", $2); }
+    | LPAREN vector_width_expr RPAREN { $$ = $2; }
+    ;
+
 vec_index_expr
-    : VEC INDEX LT num_expr GT {
-        if ($4->Val() <= 0) {
-          error(@4,
-                "vector lane count must be a positive compile-time integer");
+    : VEC INDEX LT vector_width_expr GT {
+        if (auto literal = AST::GetIntLiteral($4); literal && literal->Val() <= 0) {
+          error(@4, "vector lane count must be a positive compile-time integer");
           YYERROR;
         }
-        auto index = AST::Make<AST::VectorIndex>(@1, $4->Val());
-        $$ = AST::Make<AST::Expr>(@1, index);
+        $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::VectorIndex>(@1, $4));
       }
     ;
 
@@ -2594,7 +2704,11 @@ vec_store_stmt
 
 
 data_element
-    : IDENTIFIER AT LPAREN data_indices RPAREN {
+    : subscript_like_expr AT LPAREN data_indices RPAREN {
+        auto ide = ElementMultiValues($1);
+        $$ = AST::Make<AST::DataAccess>(@1, ide.first, $4, false, ide.second);
+      }
+    | IDENTIFIER AT LPAREN data_indices RPAREN {
         $$ = AST::Make<AST::DataAccess>(@1, AST::Make<AST::Identifier>(@1, $1), $4);
       }
     | IDENTIFIER FNDATA AT LPAREN data_indices RPAREN {
@@ -3227,6 +3341,8 @@ inline const ptr<AST::MultiValues> UBoundAll(const ptr<AST::MultiValues>& mv, bo
 
 // Bison expects us to provide implementation - otherwise linker complains
 void Parser::error(const location &loc , const std::string &message) {
+  RecordStaticCheckError(loc.begin.get_filename(), loc.begin.get_line(),
+                        loc.begin.get_column(), message);
   errs() << loc << ": ";
   errs() << ((should_use_colors()) ? color_red : "") << "error: "
          << ((should_use_colors()) ? color_reset : "");

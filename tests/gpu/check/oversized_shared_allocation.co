@@ -1,0 +1,13 @@
+// An on-chip allocation larger than the target capacity must be reported as
+// an out-of-bound diagnostic, not abort in the size-to-int conversion.
+//
+// RUN: not choreo -es -t cute -arch=sm_86 %s -o /dev/null 2>&1 | FileCheck %s
+
+__co__ void oversized_shared() {
+  parallel p by 1 {
+    shared s8[3000000000] buf;
+    buf.at(0) = 1;
+  }
+}
+
+// CHECK: shared memory OUT OF BOUND!

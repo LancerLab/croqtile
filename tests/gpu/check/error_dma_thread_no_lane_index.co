@@ -1,0 +1,16 @@
+// RUN: not choreo -es -t cute -arch=sm_86 %s -o /dev/null 2>&1 | FileCheck %s
+//
+// A thread-level copy into shared must write a lane-indexed destination.
+// The implicit `=> shared` form would make every lane write the same location;
+// the per-lane layout is stated in the source, never inferred.
+
+__co__ auto foo(f32 [64, 64] input) {
+  f32 [input.span(0), input.span(1)] output;
+  parallel p by 4, q by 8 {
+    l1_a = dma.copy input.chunkat(p#q, _) => shared : thread;
+    dma.copy l1_a => output.chunkat(p#q, _);
+  }
+  return output;
+}
+
+// CHECK: error: a thread-level DMA with a thread-indexed source must index the thread-level parallel variable on the destination

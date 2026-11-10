@@ -111,6 +111,11 @@ public:
 private:
   bool hasTMA = false;
   bool hasDMA = false;
+  // Mirrors the native emitter's `bdim_level`: the innermost *enforced* group
+  // level currently in scope (GROUP or GROUPx4), used to derive the virtual
+  // thread index. Stays THREAD when no group is enforced, meaning a THREAD
+  // parallel spans the whole block and its index is the raw threadIdx.x.
+  coir::ParallelLevel bdimLevel = coir::ParallelLevel::THREAD;
   DenseSet<Value> mmaAccumulators;
   DenseMap<Value, std::string> mmaFragRoles;
   DenseMap<Value, std::string> mmaFragLayouts;
@@ -2046,13 +2051,18 @@ private:
     auto& body = op.getBody();
     auto args = body.getArguments();
 
-    os() << getIndent() << "// parallel level=" << stringifyParallelLevel(level)
-         << " bounds=[";
+    os() << getIndent() << "// parallel level="
+         << stringifyParallelLevel(level) << " bounds=[";
     for (unsigned i = 0; i < bounds.size(); ++i) {
       if (i > 0) os() << ", ";
       os() << bounds[i];
     }
     os() << "]\n";
+
+    os() << getIndent() << "{\n";
+    incIndent();
+
+    auto savedBdimLevel = bdimLevel;
 
     if (level == ParallelLevel::BLOCK) {
       for (unsigned i = 0; i < args.size(); ++i) {
@@ -2060,24 +2070,54 @@ private:
         valueNames[args[i]] = dim;
       }
     } else if (level == ParallelLevel::THREAD) {
-      for (unsigned i = 0; i < args.size(); ++i) {
-        std::string dim = i == 0 ? "threadIdx.x" : "threadIdx.y";
-        valueNames[args[i]] = dim;
-      }
+      // The virtual thread index is a lane within the innermost *enforced*
+      // group currently in scope: % 128 under an enforced group-4, % 32 under
+      // an enforced group, and the full block-wide thread index when no group
+      // is enforced (the thread parallel then spans the whole block).
+      int laneMask = (bdimLevel == ParallelLevel::GROUPx4)   ? 128
+                     : (bdimLevel == ParallelLevel::GROUP)   ? 32
+                                                             : 0;
+      os() << getIndent()
+           << "[[maybe_unused]] auto __choreo_vtid_x = threadIdx.x";
+      if (laneMask) os() << " % " << laneMask;
+      os() << ";\n";
+      for (unsigned i = 0; i < args.size(); ++i)
+        valueNames[args[i]] = "__choreo_vtid_x";
     } else if (level == ParallelLevel::GROUP ||
                level == ParallelLevel::GROUPx4) {
+      // Only an *enforced* group narrows the thread index to a warp lane.
+      auto enforced =
+          op->getAttrOfType<mlir::BoolAttr>("coir.enforced");
+      if (enforced && enforced.getValue()) bdimLevel = level;
       int warpScale = (level == ParallelLevel::GROUPx4) ? 4 : 1;
-      std::string warpId =
-          "(threadIdx.x / " + std::to_string(32 * warpScale) + ")";
+      int warpSize = 32 * warpScale;
+      std::string gidName = (level == ParallelLevel::GROUPx4)
+                                ? "__choreo_vg4id"
+                                : "__choreo_vgid";
+
       if (args.size() == 1) {
-        valueNames[args[0]] = warpId;
+        os() << getIndent() << "[[maybe_unused]] auto " << gidName
+             << "_x = threadIdx.x / " << warpSize << ";\n";
+        valueNames[args[0]] = gidName + "_x";
       } else {
+        // Multi-dim decomposition: row-major flattening of
+        // (base / (product of trailing bounds)) % bound.
+        os() << getIndent() << "[[maybe_unused]] auto " << gidName
+             << " = threadIdx.x / " << warpSize << ";\n";
         for (unsigned i = 0; i < args.size(); ++i) {
           int64_t divisor = 1;
-          for (unsigned j = i + 1; j < args.size(); ++j) divisor *= bounds[j];
-          std::string expr = "(" + warpId + " / " + std::to_string(divisor) +
-                             " % " + std::to_string(bounds[i]) + ")";
-          valueNames[args[i]] = expr;
+          for (unsigned j = i + 1; j < args.size(); ++j)
+            divisor *= bounds[j];
+          std::string varName =
+              gidName + "_" + static_cast<char>('x' + i);
+          os() << getIndent() << "[[maybe_unused]] auto " << varName
+               << " = " << gidName;
+          if (divisor == 1) {
+            os() << " % " << bounds[i] << ";\n";
+          } else {
+            os() << " / " << divisor << " % " << bounds[i] << ";\n";
+          }
+          valueNames[args[i]] = varName;
         }
       }
     } else {
@@ -2085,11 +2125,12 @@ private:
         valueNames[args[i]] = getName(args[i]);
     }
 
-    os() << getIndent() << "{\n";
-    incIndent();
-    for (auto& bodyOp : body.front().getOperations()) emitOp(&bodyOp);
+    for (auto &bodyOp : body.front().getOperations())
+      emitOp(&bodyOp);
     decIndent();
     os() << getIndent() << "}\n";
+
+    bdimLevel = savedBdimLevel;
   }
 
   bool isCTMMAExec(MMAExecOp exec) {

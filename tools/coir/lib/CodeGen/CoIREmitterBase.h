@@ -107,7 +107,7 @@ protected:
   // -- Element access name hook --
   // Returns the C++ name used for tensor element (vld/st) accesses. Targets
   // with explicit memory mapping (buffer.map/remap) override this to redirect
-  // element accesses to the L3-mapped alias while DTE/mdspan consumers keep
+  // element accesses to the L3-mapped alias while DMA/mdspan consumers keep
   // using the raw pointer.
   virtual std::string getElemAccessName(mlir::Value tensor) {
     return getName(tensor);

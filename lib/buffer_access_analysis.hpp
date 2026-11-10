@@ -21,8 +21,8 @@ namespace Choreo {
 struct BufferAccessAnalyzer : public VisitorWithSymTab {
   using VarSet = std::set<std::string>;
 
-  BufferAccessAnalyzer()
-      : VisitorWithSymTab("bufferaccess"),
+  explicit BufferAccessAnalyzer(bool report_mode = false)
+      : VisitorWithSymTab("bufferaccess"), report_mode_(report_mode),
         tracker_([this](const std::string& n) { return InScopeNameForRef(n); },
                  [this](const std::string& n) { return InScopeName(n); }) {
     auto_declare_symbols = true;
@@ -40,12 +40,14 @@ struct BufferAccessAnalyzer : public VisitorWithSymTab {
   bool Visit(AST::DMA& n) override;
   bool Visit(AST::BufferMap& n) override;
   bool Visit(AST::MMA& n) override;
+  bool Visit(AST::FragReduce& n) override;
   bool Visit(AST::Call& n) override;
   bool Visit(AST::Rotate& n) override;
 
 private:
   using DMABufInfo = AccessTracker::DMABufInfo;
 
+  bool report_mode_;
   AccessTracker tracker_;
   std::vector<BufferAccessEvent> events_;
   std::unordered_map<std::string, AST::Node*> future_producers_;

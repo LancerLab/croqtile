@@ -1421,8 +1421,19 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
     } else {
       const auto& ranges = fb->GetRangeNodes();
       for (int j = ranges->Count() - 1; j >= 0; --j) {
-        auto rng = cast<AST::LoopRange>(ranges->ValueAt(j));
-        auto cname = rng->GetIVName();
+        auto rng = cast<AST::RangeExpr>(ranges->ValueAt(j));
+
+        if (IsActualBoundedIntegerType(rng->GetIV()->GetType())) {
+          // Scalar canonicalized `foreach __iv_a = a(..)` or explicit local
+          // `foreach c = a(..)`: the prologue emitted the loop directly over
+          // the iteration variable, so close it here (no matcher reset).
+          DecrIndent();
+          IndStream() << "} // " << UnScopedName(InScopeName(rng->GetIVName()))
+                      << "\n";
+          continue;
+        }
+
+        auto cname = rng->GetRVName();
         auto ivs = within_map.at(InScopeName(cname));
         for (auto iv_itr = ivs.rbegin(); iv_itr != ivs.rend(); ++iv_itr) {
           DecrIndent();
@@ -4181,12 +4192,21 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     // in the destination (transposed) coordinate space, so we must NOT
     // re-permute the shape here -- that would double-transpose it.
     //
-    // When batch_dims is set the outer tensors are unused -- the batch loop
-    // creates its own sub-tensors with per-iteration pointer offsets.
+    // When batch_dims is set the outer tensors are normally unused (the batch
+    // loop creates offset sub-tensors), except for `.pad`, which keeps the
+    // outer destination tensor and folds the batch strides into its strides.
     std::string f_mds_name, t_mds_name;
-    if (dma_plan->batch_dims.empty() && !dma_plan->dyn_box) {
-      // Skip outer tensor decls when batch_dims or dyn_box is set -- those
-      // paths create their own sub-tensors with per-iteration offsets.
+    std::string t_mds_stride_str = ValueSTR(t_stride, false, true);
+    if (n.operation == ".pad" && !dma_plan->batch_dims.empty()) {
+      std::ostringstream oss;
+      for (auto& bd : dma_plan->batch_dims)
+        oss << ValueSTR(bd.to_stride) << ", ";
+      oss << t_mds_stride_str;
+      t_mds_stride_str = oss.str();
+    }
+    const bool emit_outer_tensors =
+        dma_plan->batch_dims.empty() || n.operation == ".pad";
+    if (emit_outer_tensors && !dma_plan->dyn_box) {
       const auto f_mds = GenTensorDecl(
           RemoveSuffix(f_buf_name, ".data()"), f_buf.second,
           f_sty->GetStorage(), f_sty->ElementType(), f_mds_shape, false,
@@ -4194,8 +4214,8 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       const auto t_mds =
           GenTensorDecl(RemoveSuffix(t_buf_name, ".data()"), t_buf.second,
                         t_sty->GetStorage(), t_sty->ElementType(), t_mds_shape,
-                        false, t_mds_offset, ValueSTR(t_stride, false, true),
-                        {}, use_wgmma_layout_t, swizzle_mode);
+                        false, t_mds_offset, t_mds_stride_str, {},
+                        use_wgmma_layout_t, swizzle_mode);
       f_mds_name = f_mds.first;
       t_mds_name = t_mds.first;
       ds << f_mds.second;
@@ -4221,15 +4241,37 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       bool to_or_from_shared = dma_plan->direction == DMADirection::G2S ||
                                dma_plan->direction == DMADirection::S2G ||
                                dma_plan->direction == DMADirection::S2S;
-      if (to_or_from_shared) {
-        ds << d_indent << "if (__CHOREO_BLOCK_SINGLE__) {\n";
+      // The copy's level was resolved in sema (annotation or enclosing
+      // scope): block/group scope copies run once; a thread scope copy runs
+      // per lane. This applies regardless of the copy direction.
+      ParallelLevel lvl = n.GetLevel();
+      std::string guard;
+      switch (lvl) {
+      case ParallelLevel::BLOCK:
+        guard = "if (__CHOREO_BLOCK_SINGLE__) ";
+        break;
+      case ParallelLevel::GROUP:
+      case ParallelLevel::GROUPx4:
+        guard = "if (__CHOREO_GROUP_SINGLE__) ";
+        break;
+      default:
+        break; // THREAD: every lane copies its own slice.
+      }
+      if (!guard.empty()) {
+        ds << d_indent << guard << "{\n";
         ds << d_indent << "  choreo::naive_copy(" << src << ", " << dst
            << ");\n";
         ds << d_indent << "}\n";
-        ds << d_indent << "__syncthreads();\n";
       } else {
         ds << d_indent << "choreo::naive_copy(" << src << ", " << dst << ");\n";
       }
+      // A barrier is needed when the copy touches shared memory (the data must
+      // become visible across threads) or when it was guarded to run on a
+      // subset of threads (block/group level): the other threads must wait
+      // before consuming the result. It stays outside the guard so every
+      // thread reaches it.
+      if (to_or_from_shared || !guard.empty())
+        ds << d_indent << "__syncthreads();\n";
     };
 
     auto emit_tiled_copy = [&](const TiledCopyParams& params,
@@ -4313,6 +4355,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     // the full padded tensor.  For .copy/.transp, it is t_mds directly.
     std::string copy_src = f_mds_name;
     std::string copy_dst = t_mds_name;
+    std::string pad_offset_expr;
     if (n.operation == ".pad") {
       static int pad_cnt = 0;
       auto pad_config = cast<PadConfig>(n.GetConfig());
@@ -4341,6 +4384,7 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       ds << d_indent << "auto " << pad_offset << " = " << t_mds_name
          << ".layout()("
          << "cute::make_coord(" << pcmvSTR(pad_config->pad_low) << "));\n";
+      pad_offset_expr = pad_offset;
 
       auto f_data_shape = dma_plan->IsTiledDMA() ? dma_plan->GetBoxOfFrom()
                                                  : dma_plan->from_ca_shape;
@@ -4370,6 +4414,12 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
 
       std::string f_off = f_mds_offset;
       std::string t_off = t_mds_offset;
+      // For `.pad`, the destination is the padded interior, so the batch
+      // sub-tensor starts at the pad offset rather than the buffer base.
+      if (!pad_offset_expr.empty())
+        t_off = (t_off.empty() || t_off == "0")
+                    ? pad_offset_expr
+                    : "(" + t_off + ") + " + pad_offset_expr;
       for (auto& bd : dma_plan->batch_dims) {
         auto bv = "__batch_i" + std::to_string(batch_cnt++);
         ds << d_indent << "for (int " << bv << " = 0; " << bv << " < "
@@ -8525,8 +8575,9 @@ bool CuteCodeGen::Visit(AST::Call& n) {
           print_format += "]";
           print_args += args + ", ";
         } else if (isa<BoundedIntegerType>(type)) {
-          choreo_unreachable("All the BoundedIntegerType vars should have been "
-                             "normed to BoundedITupleType vars.");
+          print_format += "%lld";
+          print_args +=
+              "static_cast<long long>(" + ExprSTR(arg, IsHost()) + "), ";
         } else if (auto bit = dyn_cast<BoundedITupleType>(type)) {
           print_format += "{";
           for (size_t i = 0; i < bit->Dims(); ++i) {
@@ -8594,6 +8645,28 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
     ssm.MapDeviceSymbol(InScopeName(n.with->name), "__iv_" + n.with->name);
 
   assert(n.with_matchers && "expected matchers exist.");
+
+  // A single-matcher `with` source is scalar: the foreach emits the loop
+  // directly, so the source and its matcher must resolve to the same
+  // canonical iteration variable. Synthetic matchers (`with a in [N]`) are
+  // named `<a>__elem__N` and the body references the source `<a>`, so the IV
+  // is `__iv_<a>`. Explicit matchers (`with a = {x}`) are referenced by their
+  // own name, so the IV is `__iv_<x>`.
+  if (n.with && n.GetMatchers().size() == 1 &&
+      IsActualBoundedIntegerType(
+          cast<AST::Identifier>(n.GetMatchers()[0])->GetType())) {
+    auto m1 = cast<AST::Identifier>(n.GetMatchers()[0]);
+    const std::string elem_prefix = n.with->name + "__elem__";
+    const std::string iv_suffix =
+        m1->name.compare(0, elem_prefix.size(), elem_prefix) == 0
+            ? n.with->name
+            : m1->name;
+    ssm.RemapDeviceSymbol(InScopeName(m1->name), "__iv_" + iv_suffix);
+    ssm.RemapHostSymbol(InScopeName(m1->name), "__iv_" + iv_suffix);
+    ssm.RemapDeviceSymbol(InScopeName(n.with->name), "__iv_" + iv_suffix);
+    ssm.RemapHostSymbol(InScopeName(n.with->name), "__iv_" + iv_suffix);
+    return true;
+  }
 
   for (auto& v : n.GetMatchers()) {
     auto id = cast<AST::Identifier>(v);
@@ -8668,12 +8741,6 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
     os << "}};\n";
     os << Indent() << "auto " << n.with->name << " = __iv_" << n.with->name
        << ";\n";
-  }
-
-  if (n.with && (n.GetMatchers().size() == 1)) {
-    auto m1 = cast<AST::Identifier>(n.GetMatchers()[0]);
-    ssm.RemapDeviceSymbol(InScopeName(n.with->name), "__iv_" + m1->name);
-    ssm.RemapHostSymbol(InScopeName(n.with->name), "__iv_" + m1->name);
   }
 
   return true;
@@ -8764,7 +8831,7 @@ AutomapStrategy CuteCodeGen::AnalyzeAutomap(const AST::ForeachBlock& n) {
   std::vector<std::string> iv_names;
   iv_names.reserve(num_ranges);
   for (size_t ri = 0; ri < num_ranges; ++ri) {
-    auto rng = cast<AST::LoopRange>(ranges->ValueAt(ri));
+    auto rng = cast<AST::RangeExpr>(ranges->ValueAt(ri));
     iv_names.push_back(InScopeName(rng->GetIVName()));
   }
 
@@ -8913,21 +8980,42 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
 
   std::vector<std::string> loop_refs;
   for (auto& rn : n.GetRanges()) {
-    auto rng = cast<AST::LoopRange>(rn);
-    auto cname = rng->GetIVName();
+    auto rng = cast<AST::RangeExpr>(rn);
+    auto cname = rng->GetRVName();
     loop_refs.push_back(cname);
     loop_refs.push_back(std::string("__iv_") + cname);
+    if (IsActualBoundedIntegerType(rng->GetIV()->GetType())) {
+      // Scalar canonicalized `foreach __iv_a = a(..)` or explicit local
+      // `foreach c = a(..)`: the loop is emitted directly over the iteration
+      // variable, so remap its scoped name to the plain loop-variable name.
+      assert(rng->iv && "foreach range must carry a canonical iteration "
+                        "variable after normalization.");
+      auto iv_scoped = InScopeName(rng->GetIVName());
+      auto iv_name = UnScopedName(iv_scoped);
+      ssm.RemapDeviceSymbol(iv_scoped, iv_name);
+      ssm.RemapHostSymbol(iv_scoped, iv_name);
+      loop_refs.push_back(SSMName(iv_scoped, false));
+      continue;
+    }
     for (auto iv_name : within_map.at(InScopeName(cname)))
       loop_refs.push_back(SSMName(iv_name, false));
   }
 
   if (!IsHost() && !n.GetRanges().empty()) {
-    auto rng0 = cast<AST::LoopRange>(n.GetRanges()[0]);
-    auto ivs0 = within_map.at(InScopeName(rng0->GetIVName()));
-    if (!ivs0.empty())
-      foreach_iv_stack_.push_back(SSMName(ivs0.front(), false));
-    else
-      foreach_iv_stack_.push_back("__iv_" + rng0->GetIVName());
+    auto rng0 = cast<AST::RangeExpr>(n.GetRanges()[0]);
+    bool pushed_direct = false;
+    if (IsActualBoundedIntegerType(rng0->GetIV()->GetType())) {
+      auto iv0_scoped = InScopeName(rng0->GetIVName());
+      foreach_iv_stack_.push_back(SSMName(iv0_scoped, false));
+      pushed_direct = true;
+    }
+    if (!pushed_direct) {
+      auto ivs0 = within_map.at(InScopeName(rng0->GetRVName()));
+      if (!ivs0.empty())
+        foreach_iv_stack_.push_back(SSMName(ivs0.front(), false));
+      else
+        foreach_iv_stack_.push_back("__iv_" + rng0->GetRVName());
+    }
   }
 
   if (!IsHost() && n.GetBody()) {
@@ -9209,19 +9297,19 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
           std::string tid_expr = ResolveAutomapThreadExpr(automap_attr);
           size_t num_ranges = ranges->Count();
           if (num_ranges == 1) {
-            auto rng = cast<AST::LoopRange>(ranges->ValueAt(0));
-            for (auto iv_name : within_map.at(InScopeName(rng->GetIVName())))
+            auto rng = cast<AST::RangeExpr>(ranges->ValueAt(0));
+            for (auto iv_name : within_map.at(InScopeName(rng->GetRVName())))
               ds << d_indent << ssm.DeviceName(iv_name) << " = "
                  << primary_layout->LogicalRowFromReg(reg_loop_var_, tid_expr)
                  << ";\n";
           } else if (num_ranges == 2) {
-            auto rng0 = cast<AST::LoopRange>(ranges->ValueAt(0));
-            auto rng1 = cast<AST::LoopRange>(ranges->ValueAt(1));
-            for (auto iv_name : within_map.at(InScopeName(rng0->GetIVName())))
+            auto rng0 = cast<AST::RangeExpr>(ranges->ValueAt(0));
+            auto rng1 = cast<AST::RangeExpr>(ranges->ValueAt(1));
+            for (auto iv_name : within_map.at(InScopeName(rng0->GetRVName())))
               ds << d_indent << ssm.DeviceName(iv_name) << " = "
                  << primary_layout->LogicalRowFromReg(reg_loop_var_, tid_expr)
                  << ";\n";
-            for (auto iv_name : within_map.at(InScopeName(rng1->GetIVName())))
+            for (auto iv_name : within_map.at(InScopeName(rng1->GetRVName())))
               ds << d_indent << ssm.DeviceName(iv_name) << " = "
                  << primary_layout->LogicalColFromReg(reg_loop_var_, tid_expr)
                  << ";\n";
@@ -9235,7 +9323,7 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
       std::vector<std::string> bound_exprs;
       bound_exprs.reserve(ranges->Count());
       for (size_t ri = 0; ri < ranges->Count(); ++ri) {
-        auto rng = cast<AST::LoopRange>(ranges->ValueAt(ri));
+        auto rng = cast<AST::RangeExpr>(ranges->ValueAt(ri));
         auto iv_ty = GetSymbolType(rng->GetIVName());
         auto bit = cast<BoundedType>(iv_ty);
         std::string bound = UnScopedExpr(ValueSTR(bit->GetUpperBound()));
@@ -9263,8 +9351,8 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
         }
       }
       for (size_t ri = 0; ri < ranges->Count(); ++ri) {
-        auto rng = cast<AST::LoopRange>(ranges->ValueAt(ri));
-        for (auto iv_name : within_map.at(InScopeName(rng->GetIVName())))
+        auto rng = cast<AST::RangeExpr>(ranges->ValueAt(ri));
+        for (auto iv_name : within_map.at(InScopeName(rng->GetRVName())))
           ds << d_indent << ssm.DeviceName(iv_name) << " = "
              << iv_value_exprs[ri] << ";\n";
       }
@@ -9272,8 +9360,29 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
   } else {
     {
       for (auto& rn : n.GetRanges()) {
-        auto rng = cast<AST::LoopRange>(rn);
-        auto cname = rng->GetIVName();
+        auto rng = cast<AST::RangeExpr>(rn);
+
+        if (IsActualBoundedIntegerType(rng->GetIV()->GetType())) {
+          auto iv_scoped = InScopeName(rng->GetIVName());
+          // Scalar canonicalized / explicit IV: emit the loop directly over
+          // the iteration variable; its bounded type has (lb, ub, step).
+          assert(rng->iv && "foreach range must carry a canonical iteration "
+                            "variable after normalization.");
+          auto iv_bty = cast<BoundedType>(rng->GetIV()->GetType());
+          auto iv_name = UnScopedName(iv_scoped);
+          auto lb = UnScopedExpr(ValueSTR(iv_bty->GetLowerBound()));
+          auto ub = UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()));
+          auto step = iv_bty->GetStep();
+          IndStream() << "for (int " << iv_name << " = " << lb << "; "
+                      << iv_name << (step != 1 ? " <= " : " < ") << ub << "; "
+                      << (step != 1 ? (iv_name + " += " + std::to_string(step))
+                                    : ("++" + iv_name))
+                      << ") {\n";
+          IncrIndent();
+          continue;
+        }
+
+        auto cname = rng->GetRVName();
         for (auto iv_name : within_map.at(InScopeName(cname))) {
           auto iv_ty = GetSymbolType(UnScopedName(iv_name));
           assert(IsActualBoundedIntegerType(iv_ty));
@@ -11209,7 +11318,8 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
     }
     if (frag_apply_iv_map_.count(id->name)) {
       oss << frag_apply_iv_map_.at(id->name);
-    } else if (within_map.count(InScopeNameForRef(id->name)) && !is_host) {
+    } else if (within_map.count(InScopeNameForRef(id->name)) && !is_host &&
+               within_map.at(InScopeNameForRef(id->name)).size() > 1) {
       size_t i = 0;
       for (auto iv_name : within_map.at(InScopeNameForRef(id->name)))
         oss << ((i++ == 0) ? "" : ", ")
@@ -11222,27 +11332,7 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
   } else if (auto il = dyn_cast<AST::IntLiteral>(e)) {
     oss << il->ValAsString();
   } else if (auto fl = dyn_cast<AST::FloatLiteral>(e)) {
-    std::ostringstream fp_val;
-    if (fl->IsFloat32()) {
-      auto v = fl->Val_f32();
-      if (std::isinf(v))
-        fp_val << (v < 0 ? "(-INFINITY)" : "INFINITY");
-      else if (std::isnan(v))
-        fp_val << "NAN";
-      else
-        fp_val << std::fixed << v << "f";
-    } else if (fl->IsFloat64()) {
-      auto v = fl->Val_f64();
-      if (std::isinf(v))
-        fp_val << (v < 0 ? "(-INFINITY)" : "INFINITY");
-      else if (std::isnan(v))
-        fp_val << "NAN";
-      else
-        fp_val << std::fixed << v;
-    } else {
-      choreo_unreachable("unsupported float literal.");
-    }
-    oss << fp_val.str();
+    oss << fl->SourceSTR();
   } else if (auto sl = dyn_cast<AST::StringLiteral>(e)) {
     oss << sl->EscapedVal();
   } else if (auto b = dyn_cast<AST::BoolLiteral>(e)) {
@@ -11295,7 +11385,8 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
             if (auto id = AST::GetIdentifier(item)) {
               if (frag_apply_iv_map_.count(id->name)) {
                 AppendLinear(sbe::sym(frag_apply_iv_map_.at(id->name)));
-              } else if (within_map.count(InScopeNameForRef(id->name))) {
+              } else if (within_map.count(InScopeNameForRef(id->name)) &&
+                         within_map.at(InScopeNameForRef(id->name)).size() > 1) {
                 auto ivs = within_map.at(InScopeNameForRef(id->name));
                 for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
                   AppendLinear(sbe::sym(*iv_itr));
@@ -11346,7 +11437,8 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
             if (auto id = AST::GetIdentifier(item)) {
               if (frag_apply_iv_map_.count(id->name)) {
                 AppendOffset(sbe::sym(frag_apply_iv_map_.at(id->name)));
-              } else if (within_map.count(InScopeNameForRef(id->name))) {
+              } else if (within_map.count(InScopeNameForRef(id->name)) &&
+                         within_map.at(InScopeNameForRef(id->name)).size() > 1) {
                 auto ivs = within_map.at(InScopeNameForRef(id->name));
                 for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
                   AppendOffset(sbe::sym(*iv_itr));
@@ -11386,7 +11478,8 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           if (auto id = AST::GetIdentifier(item)) {
             if (frag_apply_iv_map_.count(id->name)) {
               AppendLinear(sbe::sym(frag_apply_iv_map_.at(id->name)));
-            } else if (within_map.count(InScopeNameForRef(id->name))) {
+            } else if (within_map.count(InScopeNameForRef(id->name)) &&
+                       within_map.at(InScopeNameForRef(id->name)).size() > 1) {
               auto ivs = within_map.at(InScopeNameForRef(id->name));
               for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
                 AppendLinear(sbe::sym(*iv_itr));
@@ -11437,7 +11530,8 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
           if (auto id = AST::GetIdentifier(item)) {
             if (frag_apply_iv_map_.count(id->name)) {
               AppendOffset(sbe::sym(frag_apply_iv_map_.at(id->name)));
-            } else if (within_map.count(InScopeNameForRef(id->name))) {
+            } else if (within_map.count(InScopeNameForRef(id->name)) &&
+                       within_map.at(InScopeNameForRef(id->name)).size() > 1) {
               auto ivs = within_map.at(InScopeNameForRef(id->name));
               for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
                 AppendOffset(sbe::sym(*iv_itr));

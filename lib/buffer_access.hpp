@@ -44,6 +44,9 @@ struct BufferAccessEvent {
   AccessEntity entity = AccessEntity::THREADS;
   ParallelLevel level = ParallelLevel::NONE; // enclosing parallel level
   size_t order = 0;                          // global program order
+  bool allocation = false;
+  bool initializes_whole_buffer = false;
+  bool opaque_effect = false;
 };
 
 // The buffer access log produced by BufferAccessAnalyzer and consumed by

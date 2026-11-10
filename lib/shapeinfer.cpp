@@ -339,6 +339,18 @@ bool ShapeInference::Visit(AST::Expr& n) {
 
   if (n.IsReference()) SetNodeType(n, NodeType(*n.GetReference()));
   auto nty = NodeType(n);
+  if (n.op == Op::ElemOf) {
+    if (auto sty = dyn_cast<SpannedType>(nty);
+        sty && sty->GetShape().IsValid()) {
+      auto sign = m_sn();
+      for (auto dim : sty->GetShape().Value())
+        sign->Append(vn.ValueItemToSignature(dim, true));
+      cur_mdspan_vn = GetOrGenValNum(sign);
+      ast_vn.Update(&n, cur_mdspan_vn, VNKind::VNK_MDSPAN);
+      cur_vn.Invalidate();
+      return true;
+    }
+  }
   cur_vn = GenValNo(n);
 
   auto ShouldOpt = [](const ValueList& vl) -> bool {
@@ -618,11 +630,35 @@ bool ShapeInference::Visit(AST::NamedVariableDecl& n) {
     if (cur_mdspan_vn.IsValid()) {
       SymbolAliasNum(SSTab().ScopedName(name + ".span"), cur_mdspan_vn);
       auto mds_value = GenShape(cur_mdspan_vn);
-      if (n.IsArray())
-        nty =
+      if (n.IsArray()) {
+        auto array_ty =
             MakeDenseSpannedArrayType(n.type->base_type, mds_value,
                                       MakeValueList(n.ArrayDimensions()), sto);
-      else
+        if (n.HasNote("alignment")) {
+          array_ty->SetSlotAlignment(
+              static_cast<size_t>(std::stoull(n.GetNote("alignment"))));
+          bool static_shape = mds_value.IsValid();
+          bool static_slots = true;
+          if (static_shape) {
+            for (auto dim : mds_value.Value())
+              static_shape &= VIInt(dim).has_value();
+          }
+          for (auto dim : array_ty->Dimensions())
+            static_slots &= VIInt(dim).has_value();
+          bool dynamic_local =
+              sto == Storage::LOCAL && CCtx().MemReuse() &&
+              CCtx().GetTarget().SupportsDynamicAlignedLocalArrays(
+                  CCtx().GetArch(), array_ty->SlotAlignment());
+          if (!static_slots)
+            Error1(n.LOC(), "explicitly aligned arrays of spans require "
+                            "static array dimensions.");
+          else if (!static_shape && !dynamic_local)
+            Error1(n.LOC(),
+                   "dynamic aligned span arrays require local storage, "
+                   "memory reuse, and target support.");
+        }
+        nty = array_ty;
+      } else
         nty = MakeDenseSpannedType(n.type->base_type, mds_value, sto);
     } else if (cur_vn.IsValid()) {
       SymbolAliasNum(SSTab().ScopedName(name), cur_vn);
@@ -1089,6 +1125,11 @@ bool ShapeInference::Visit(AST::WithIn& n) {
   }
 
   if (n.with) {
+    // set the node type first so the symbol is defined with the accurate
+    // bounded-ituple type (used by RangeExpr source-type derivation).
+    Shape s = GenShape(mds_sign);
+    SetNodeType(*n.with, MakeBoundedITupleType(s));
+
     // generate symbolic node valno
     DefineASymbol(n.with->name, n.with->GetType());
     assert(!ast_vn.Hit(n.with.get(), VNKind::VNK_VALUE) &&
@@ -1106,8 +1147,6 @@ bool ShapeInference::Visit(AST::WithIn& n) {
 
     // upper-bound valnos
     SymbolAliasNum(SSTab().ScopedName("@" + n.with->name), cur_mdspan_vn);
-    Shape s = GenShape(mds_sign);
-    SetNodeType(*n.with, MakeBoundedITupleType(s));
     DefineASymbol("@" + n.with->name, MakeMDSpanType(s));
   }
 
@@ -1352,9 +1391,17 @@ bool ShapeInference::Visit(AST::MMA& n) {
       if (auto ref = expr->GetReference();
           ref && HasValNo(*ref, VNKind::VNK_MDSPAN))
         return GetValNo(*ref, VNKind::VNK_MDSPAN);
-      if (auto elemof = dyn_cast<AST::Expr>(expr.get());
-          elemof && elemof->op == Op::ElemOf) {
-        if (auto base = AST::GetArrayBaseSymbol(*elemof)) {
+      if (expr->op == Op::ElemOf) {
+        if (auto sty = GetSpannedType(NodeType(*expr))) {
+          auto shape = sty->GetShape();
+          if (shape.IsValid()) {
+            auto sign = m_sn();
+            for (auto dim : shape.Value())
+              sign->Append(vn.ValueItemToSignature(dim, true));
+            return GetOrGenValNum(sign);
+          }
+        }
+        if (auto base = AST::GetArrayBaseSymbol(*expr)) {
           auto base_span = SSTab().InScopeName(base->name + ".span");
           if (vn.HasValidValueNumberOfSymbol(base_span))
             return GetValNum(base_span);
@@ -2073,21 +2120,36 @@ bool ShapeInference::Visit(AST::Select& n) {
   if (auto sty = dyn_cast<SpannedType>(NodeType(n))) {
     auto s0 = cast<AST::Expr>(n.expr_list->ValueAt(0));
     auto s0ty = NodeType(*s0);
-    if (s0ty && s0ty->HasSufficientInfo()) {
-      SetNodeType(n, ProjectSelectStorage(s0ty));
-    } else {
-      cur_mdspan_vn = GetOnlyValueNumber(*n.expr_list, VNKind::VNK_MDSPAN);
-      // handle dataof expr (TODO: any better idea?)
-      if (!cur_mdspan_vn.IsValid()) {
-        Error1(n.LOC(), "Failed to decide the type of Select." + STR(n) +
-                            ", type0: " + PSTR(s0ty));
+    if (s0->op == Op::ElemOf) {
+      auto base = AST::GetArrayBaseSymbol(*s0);
+      auto selected = GetSpannedType(GetSymbolType(base->name));
+      if (!selected || !selected->GetShape().IsValid()) {
+        Error1(n.LOC(), "Failed to preserve the selected span shape.");
         return false;
       }
-      auto nty = ProjectSelectStorage(NodeType(*n.expr_list->ValueAt(0)));
-      SetNodeType(n, nty);
+      SetNodeType(n, ProjectSelectStorage(selected));
+      auto sign = m_sn();
+      for (auto dim : selected->GetShape().Value())
+        sign->Append(vn.ValueItemToSignature(dim, true));
+      cur_mdspan_vn = GetOrGenValNum(sign);
+      ast_vn.Update(&n, cur_mdspan_vn, VNKind::VNK_MDSPAN);
+    } else {
+      if (s0ty && s0ty->HasSufficientInfo()) {
+        SetNodeType(n, ProjectSelectStorage(s0ty));
+      } else {
+        cur_mdspan_vn = GetOnlyValueNumber(*n.expr_list, VNKind::VNK_MDSPAN);
+        // handle dataof expr (TODO: any better idea?)
+        if (!cur_mdspan_vn.IsValid()) {
+          Error1(n.LOC(), "Failed to decide the type of Select." + STR(n) +
+                              ", type0: " + PSTR(s0ty));
+          return false;
+        }
+        auto nty = ProjectSelectStorage(NodeType(*n.expr_list->ValueAt(0)));
+        SetNodeType(n, nty);
+      }
+      ast_vn.Copy(s0.get(), &n, VNKind::VNK_MDSPAN);
+      cur_mdspan_vn = GetValNo(n, VNKind::VNK_MDSPAN);
     }
-    ast_vn.Copy(s0.get(), &n, VNKind::VNK_MDSPAN);
-    cur_mdspan_vn = GetValNo(n, VNKind::VNK_MDSPAN);
     cur_vn.Invalidate(); // used for variable def
   } else if (GeneralFutureType(NodeType(n))) {
     cur_vn.Invalidate();
@@ -2125,10 +2187,126 @@ bool ShapeInference::Visit(AST::Return& n) {
   return true;
 }
 
-bool ShapeInference::Visit(AST::LoopRange& n) {
+bool ShapeInference::Visit(AST::RangeExpr& n) {
   TraceEachVisit(n);
 
   if (cannot_proceed) return true;
+
+  // Derive the iteration variable's bounded type from the range source.
+  // Canonicalization guarantees every range owns a distinct iteration
+  // variable (a generated `__iv_<source>` for the sugar form, or the
+  // user-written local name for the explicit form), so the type is always
+  // inferred here. The iteration variable mirrors the source's bounded type
+  // (a BoundedITupleType for foreach range sources); the `lb:ub:step`
+  // mutation stays applied by type inference (BuildRangePredicate) and
+  // codegen.
+  if (auto src_ty = GetSymbolType(n.GetRVName())) {
+    if (isa<BoundedType>(src_ty)) {
+      // The iteration variable is a scalar loop variable: a 1-dim bounded
+      // ituple (e.g. a `with` matcher `x : {int}->[3]`) collapses to a scalar
+      // BoundedIntegerType carrying the source's lb/ub/step. The `lb:ub:step`
+      // mutation is applied later by type inference (Visit(RangeExpr)).
+      // Multi-dim sources keep their ituple type (expanded by LoopNorm).
+      ptr<Type> iv_ty;
+      if (auto ity = dyn_cast<BoundedITupleType>(src_ty)) {
+        if (ity->Dims() == 1)
+          iv_ty = MakeBoundedIntegerType(
+              ity->GetLowerBound(), ity->GetUpperBound(),
+              IsValidStep(ity->GetStep()) ? ity->GetStep() : 1);
+        else
+          iv_ty = src_ty->Clone();
+      } else {
+        iv_ty = src_ty->Clone();
+      }
+
+      SetNodeType(*n.GetIV(), iv_ty);
+      if (SSTab().IsDeclared(n.GetIVName()))
+        UpdateSymbolType(n.GetIVName(), iv_ty);
+      else
+        DefineASymbol(n.GetIVName(), iv_ty);
+
+      // Associate a value number with the iteration-variable symbol so body
+      // references resolve during value numbering.
+      auto sname = SSTab().ScopedName(n.GetIVName());
+      auto vv = GetOrGenValNum(sname);
+      ast_vn.Update(n.GetIV().get(), vv, VNKind::VNK_VALUE);
+
+      // Create (or reuse) the iteration variable's own upper-bound alias
+      // (`@<iv>`) and value number. The ub valno is generated on demand via
+      // GetOrGenValNum from the IV's step-adjusted upper bound (mirroring the
+      // `lb:ub:step` mutation type inference applies), so a bare bounded
+      // reference to the IV resolves its own ub instead of the source's.
+      // Multi-dim sources keep their ituple type and still mirror the source's
+      // `@<source>` alias (whose ValueList valno cannot be synthesized from a
+      // single upper bound).
+      if (IsActualBoundedIntegerType(iv_ty)) {
+        auto iv_bty = cast<BoundedType>(iv_ty);
+        auto lb_vi = iv_bty->GetLowerBound();
+        auto ub_vi = iv_bty->GetUpperBound();
+        if (auto lb_expr = dyn_cast<AST::Expr>(n.lb_mutator))
+          if (lb_expr->Opts().HasVal())
+            lb_vi = lb_vi + lb_expr->Opts().GetVal();
+        if (auto ub_expr = dyn_cast<AST::Expr>(n.ub_mutator))
+          if (ub_expr->Opts().HasVal())
+            ub_vi = ub_vi + ub_expr->Opts().GetVal();
+        auto step =
+            IsValidStep(n.step)
+                ? n.step
+                : (IsValidStep(iv_bty->GetStep()) ? iv_bty->GetStep() : 1);
+        auto ub_valno = GetOrGenValNum(vn.ValueItemToSignature(
+            StepAlignedUpperBound(lb_vi, ub_vi, step), true));
+        auto ub_name = SSTab().NameInScopeOrNull("@" + n.GetIVName());
+        if (!ub_name) {
+          DefineASymbol("@" + n.GetIVName(), MakeIntegerType());
+          ub_name = SSTab().NameInScopeOrNull("@" + n.GetIVName());
+          assert(ub_name && "expected bounded alias symbol to be defined.");
+        }
+        SymbolAliasNum(*ub_name, ub_valno);
+        ast_vn.Update(n.GetIV().get(), ub_valno, VNKind::VNK_UBOUND);
+      } else if (auto src_ub = SSTab().NameInScopeOrNull("@" + n.GetRVName())) {
+        auto ub_valno = GetValNum(*src_ub);
+        ast_vn.Update(n.GetIV().get(), ub_valno, VNKind::VNK_UBOUND);
+        auto src_ub_ty = GetSymbolType("@" + n.GetRVName());
+        if (!src_ub_ty) src_ub_ty = MakeIntegerType();
+        DefineASymbol("@" + n.GetIVName(), src_ub_ty);
+        SymbolAliasNum(SSTab().ScopedName("@" + n.GetIVName()), ub_valno);
+      }
+    }
+  }
+
+  // Validate the effective iteration step and report a degenerate iteration
+  // space. A zero step has no useful semantics -- the induction variable never
+  // advances, so the lowered loop (`iv += 0`) does not terminate -- and is
+  // rejected, matching the step>0 requirement of every other language. An
+  // empty range (a zero-trip loop) is well-formed and occasionally intended
+  // (for instance a fully clipped tail), so it is only warned about.
+  if (auto src_ty = GetSymbolType(n.GetRVName())) {
+    if (IsActualBoundedIntegerType(src_ty)) {
+      auto addend = [](const ptr<AST::Node>& m) -> ValueItem {
+        if (auto e = dyn_cast<AST::Expr>(m))
+          if (e->Opts().HasVal()) return e->Opts().GetVal();
+        return sbe::nu(0);
+      };
+      auto src_step = GetSingleStep(src_ty);
+      int step =
+          IsValidStep(n.step) ? n.step : (IsValidStep(src_step) ? src_step : 1);
+      if (step == 0) {
+        Error1(n.LOC(),
+               "invalid step 0 in the iteration space; the loop variable never "
+               "advances, so the loop would not terminate. Use a step of at "
+               "least 1.");
+        return false;
+      }
+      if (auto span =
+              VIInt(GetSingleUpperBound(src_ty) + addend(n.ub_mutator) -
+                    addend(n.lb_mutator))) {
+        if (*span <= 0)
+          Warning(n.LOC(),
+                  "empty iteration space; the range is empty so the loop body "
+                  "never executes. This is legal but usually unintended.");
+      }
+    }
+  }
 
   return true;
 }
@@ -2139,7 +2317,7 @@ bool ShapeInference::Visit(AST::ForeachBlock& n) {
   gen_values = true; // allow generate values for statements
 
   for (auto r : n.GetRanges()) {
-    auto rng = cast<AST::LoopRange>(r);
+    auto rng = cast<AST::RangeExpr>(r);
     auto valno = GetValNo(*rng->GetRV(), VNKind::VNK_UBOUND);
     auto vl = vn.GenValueListFromValueNumber(valno);
     if (IsValidValueList(vl) && !IsComputable(vl))

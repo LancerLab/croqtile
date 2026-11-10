@@ -18,6 +18,47 @@ future = dma-op src-expr => dst-expr;
 | `=>` | Data flow direction |
 | `dst-expr` | Destination data expression or storage keyword |
 
+## Execution Level
+
+A DMA that moves data to or from `shared` runs at the level of the parallel
+scope it is written in:
+
+- inside a block scope (above any thread-level `parallel`) it is a **block**
+  copy, fulfilled once by the block;
+- inside a thread-level `parallel` it is a **thread** copy, fulfilled as one
+  part per lane.
+
+The level only states who fulfils the copy; how the target implements that
+(all lanes cooperating, a single lane, or a subset) is the target's concern.
+Override the default with a trailing level annotation:
+
+```choreo
+parallel p by 8, q by 128 {
+  smem = dma.copy.async i0.chunkat(p, _) => shared : block;  // block-uniform chunk
+  wait smem;
+  // ...
+}
+```
+
+`: block` / `: group` / `: thread` name the level. A block-level copy may not
+index a thread-level parallel variable (its address is per-lane data).
+
+When each lane stages its own part of a shared buffer, the layout is **stated in
+the source** -- the buffer's leading extent carries the lane count and the
+destination is lane-indexed. The compiler never invents that layout:
+
+```choreo
+parallel p by 8, q by 128 {
+  shared f32 [#q * M, N] tile;
+  dma.copy input.chunkat(p#q, _) => tile.chunkat(q, _) : thread;
+  // each lane owns rows [q*M, (q+1)*M) of `tile`
+}
+```
+
+A thread-level copy with a thread-indexed source must therefore index the lane
+on the destination; writing an unindexed `shared` buffer would make every lane
+write the same location.
+
 ## Synchronous vs Asynchronous
 
 The `.async` suffix makes a DMA operation non-blocking:

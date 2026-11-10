@@ -309,7 +309,7 @@ if (PrefixedWith(func_name, "__lib_")) {
 | Unary   | `(dst, src, num)` | `__lib_relu`, `__lib_abs`, `__lib_sigmoid` |
 | Binary  | `(dst, lhs, rhs, num)` | `__lib_add`, `__lib_mul`, `__lib_max` |
 | GEMM    | `(out, A, B, K, N)` or `(out, A, B, bias, K, N)` | `__lib_gemm` |
-| Reduce  | `(dst, src, num, rdim, nred)` | `__lib_reduce_sum` |
+| Reduce  | `(dst, src, num, rdim, nred)` | `__lib_reduce_sum`, `__lib_reduce_max`, `__lib_reduce_min`, `__lib_reduce_prod`, `__lib_reduce_mean` |
 
 Following these conventions ensures portability across targets.
 

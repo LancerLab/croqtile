@@ -110,6 +110,7 @@ void DataAccess::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
   data->accept(v);
+  if (array_indices) array_indices->accept(v);
   if (indices) indices->accept(v);
 
   v.Visit(*this);
@@ -119,6 +120,7 @@ void DataAccess::accept(Choreo::Visitor& v) {
 
 void VectorIndex::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
+  if (lane_count_expr) lane_count_expr->accept(v);
   v.Visit(*this);
   v.AfterVisit(*this);
 }
@@ -439,7 +441,7 @@ void CompletionWait::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
-void LoopRange::accept(Choreo::Visitor& v) {
+void RangeExpr::accept(Choreo::Visitor& v) {
   if (lb_mutator) lb_mutator->accept(v);
   if (ub_mutator) ub_mutator->accept(v);
   if (rv) rv->accept(v);

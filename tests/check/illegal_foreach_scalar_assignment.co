@@ -1,0 +1,22 @@
+// RUN: not choreo -t cc -sa=SEMA %s 2>&1 | FileCheck %s
+
+__co__ void multidimensional_index() {
+  s32 x = 0;
+  foreach t in [2, 3] {
+    x = t;
+  }
+}
+// CHECK: error: `x' of type "mutable s32" can not be re-assigned
+
+__co__ void tuple_assignment() {
+  s32 x = 0;
+  x = {1, 2};
+}
+// CHECK: error: `x' of type "mutable s32" can not be re-assigned
+
+__co__ void immutable_assignment() {
+  int x = 0;
+  foreach t in [4] { x = t; }
+  x = 1;
+}
+// CHECK: error: only mutables can be re-assigned (x).

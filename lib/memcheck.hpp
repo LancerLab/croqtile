@@ -1,6 +1,7 @@
 #ifndef __CHOREO_MEMORY_USAGE_CHECK_HPP__
 #define __CHOREO_MEMORY_USAGE_CHECK_HPP__
 
+#include <algorithm>
 #include <iomanip>
 #include <numeric>
 
@@ -34,11 +35,22 @@ private:
   CtMemUsageMap ct_tot_mem_usage;
   // Only the maximum ct memory usage is recorded
   CtMemUsageMap ct_max_mem_usage;
+  CtMemUsageMap function_max_mem_usage;
+  std::set<Storage> function_runtime_extents;
 
   std::stack<RtMemUsageMap> rt_mem_usage_list;
   // only runtime usages are recorded
   RtMemUsageMap rt_tot_mem_usage;
   std::vector<RtMemUsageCheckInfo> rt_mem_usage_check_list;
+
+  struct RtAliasCapacityCheck {
+    std::string alias_bytes;
+    std::string backing_bytes;
+    location loc;
+    std::string alias_name;
+    std::string backing_name;
+  };
+  std::vector<RtAliasCapacityCheck> rt_alias_capacity_check_list;
 
   // Joint shared<group>+SHARED budget check for aliased-pool targets. Captures
   // the compile-time/runtime usage totals for both storages at each
@@ -54,9 +66,143 @@ private:
 
   CtMemUsageMap mem_usage_limit;
   std::unordered_set<Storage> tocheck_storage;
+  std::unordered_set<std::string> host_visible_symbols;
+  std::unordered_set<std::string> reassigned_values;
+  std::unordered_map<std::string, ValueItem> host_value_bindings;
+
+  std::optional<ValueItem>
+  ResolveHostValue(const ValueItem& value,
+                   std::unordered_set<std::string>& resolving,
+                   std::string& unresolved, unsigned depth = 0) {
+    if (!IsValidValueItem(value) || depth > 64) return std::nullopt;
+    if (VIIsNil(value) || VIIsInt(value) || VIIsBool(value)) return value;
+    if (auto name = VISym(value)) {
+      if (host_visible_symbols.count(*name)) return value;
+      if (resolving.count(*name)) {
+        unresolved = *name;
+        return std::nullopt;
+      }
+      ValueItem replacement = GetInvalidValueItem();
+      if (host_value_bindings.count(*name))
+        replacement = host_value_bindings.at(*name);
+      else if (FCtx(fname).HasSymbolValues(*name)) {
+        const auto& values = FCtx(fname).GetSymbolValues(*name);
+        if (values.HasVal()) replacement = values.GetVal();
+      }
+      if (!IsValidValueItem(replacement) || sbe::ceq(value, replacement)) {
+        unresolved = *name;
+        return std::nullopt;
+      }
+      resolving.insert(*name);
+      auto resolved =
+          ResolveHostValue(replacement, resolving, unresolved, depth + 1);
+      resolving.erase(*name);
+      return resolved;
+    }
+    if (auto op = VIUop(value)) {
+      auto operand =
+          ResolveHostValue(op->GetOperand(), resolving, unresolved, depth + 1);
+      if (!operand) return std::nullopt;
+      return sbe::uop(op->GetOpCode(), *operand)->Normalize();
+    }
+    if (auto op = VIBop(value)) {
+      auto left =
+          ResolveHostValue(op->GetLeft(), resolving, unresolved, depth + 1);
+      if (!left) return std::nullopt;
+      auto right =
+          ResolveHostValue(op->GetRight(), resolving, unresolved, depth + 1);
+      if (!right) return std::nullopt;
+      return sbe::bop(op->GetOpCode(), *left, *right)->Normalize();
+    }
+    if (auto op = VITop(value)) {
+      auto pred =
+          ResolveHostValue(op->GetPred(), resolving, unresolved, depth + 1);
+      if (!pred) return std::nullopt;
+      auto left =
+          ResolveHostValue(op->GetLeft(), resolving, unresolved, depth + 1);
+      if (!left) return std::nullopt;
+      auto right =
+          ResolveHostValue(op->GetRight(), resolving, unresolved, depth + 1);
+      if (!right) return std::nullopt;
+      return sbe::sel(*pred, *left, *right)->Normalize();
+    }
+    return std::nullopt;
+  }
+
+  std::optional<std::string> HostByteSizeExpression(const SpannedType& sty,
+                                                    const location& loc) {
+    if (!sty.RuntimeShaped()) return sty.ByteSizeExpression(true);
+
+    std::unordered_set<std::string> resolving;
+    std::string unresolved;
+    auto element_count =
+        ResolveHostValue(sty.ElementCountValue(), resolving, unresolved);
+    if (!element_count) {
+      Error1(loc, "runtime memory extent depends on device-only identifier `" +
+                      UnScopedName(unresolved) +
+                      "'; host-side memory checks require kernel parameters "
+                      "or expressions derived from them.");
+      return std::nullopt;
+    }
+    return "(" + (*element_count)->ToString("ULL") + ") * " +
+           std::to_string(SizeOf(sty.ElementType()));
+  }
+
+  // Byte span of a whole declaration. A spanned array owns one slot per array
+  // element, and an explicitly aligned one rounds every slot up to
+  // PhysicalSlotStrideValue() - the stride the slot addressing walks. A
+  // per-slot ByteSize() therefore under-covers both the declared storage and
+  // any extent derived from it.
+  std::optional<std::string> HostDeclByteSizeExpression(const ptr<Type>& ty,
+                                                        const location& loc) {
+    if (!ty) return std::nullopt;
+    auto sty = dyn_cast<SpannedType>(ty);
+    if (!sty) return std::nullopt;
+    auto slot_bytes = HostByteSizeExpression(*sty, loc);
+    if (!slot_bytes) return std::nullopt;
+
+    auto aty = dyn_cast<SpannedArrayType>(ty);
+    if (!aty) return slot_bytes;
+    // Round on the host-resolved bytes rather than using
+    // PhysicalSlotStrideValue(): the latter keeps device-side symbols, which a
+    // host-side check cannot evaluate.
+    std::string per_slot = *slot_bytes;
+    if (aty->HasAlignedSlots()) {
+      const size_t alignment = aty->SlotAlignment();
+      per_slot = "((" + per_slot + " + " + std::to_string(alignment - 1) +
+                 ") / " + std::to_string(alignment) + ") * " +
+                 std::to_string(alignment);
+    }
+    auto slots = VIInt(aty->ElemCount());
+    if (!slots) return std::nullopt;
+    return std::to_string(static_cast<size_t>(*slots)) + " * (" + per_slot +
+           ")";
+  }
 
 private:
   bool BeforeVisitImpl(AST::Node& n) override {
+    if (isa<AST::ChoreoFunction>(&n)) {
+      function_max_mem_usage.clear();
+      function_runtime_extents.clear();
+    }
+    if (isa<AST::Program>(&n)) {
+      struct ReassignedValues : VisitorWithSymTab {
+        std::unordered_set<std::string>& values;
+        ReassignedValues(std::unordered_set<std::string>& values)
+            : VisitorWithSymTab("memcheck-reassignments"), values(values) {}
+        bool BeforeVisitImpl(AST::Node&) override { return true; }
+        bool AfterVisitImpl(AST::Node&) override { return true; }
+        bool Visit(AST::Assignment& assignment) override {
+          if (!assignment.AssignToDataElement() && !assignment.IsDecl())
+            values.insert(InScopeName(assignment.GetName()));
+          return true;
+        }
+      } collector(reassigned_values);
+      reassigned_values.clear();
+      host_value_bindings.clear();
+      collector.SSTab().UpdateGlobal(SymTab());
+      collector.RunOnProgram(n);
+    }
     if (isa<AST::ChoreoFunction>(&n) || isa<AST::ParallelBy>(&n) ||
         isa<AST::WithBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
       // generate the map of current ast node that corresponding to the scope
@@ -86,6 +232,9 @@ private:
                        << "Total compile-time mem used before leaving scope "
                        << SSTab().ScopeName() << "\n"
                        << GetMemUsageMapDetail(ct_tot_mem_usage));
+      // Publish the per-tier peak for --stats reporting. This must happen
+      // before RestoreMemUsage(), which pops the live runtime-usage map.
+      if (isa<AST::ChoreoFunction>(&n)) CaptureMemUsageStats();
       RestoreMemUsage();
     }
 
@@ -101,6 +250,43 @@ private:
       AppendRuntimeCheck(cf->name);
     }
     return true;
+  }
+
+  /// Fold the running compile-time peak and the live runtime-evaluated usage
+  /// into the per-storage --stats summary.
+  void CaptureMemUsageStats() {
+    auto& stats = CCtx().GetMemUsageStats();
+    // Only report tiers the target actually budgets. ct_max_mem_usage and
+    // rt_tot_mem_usage can hold untracked tiers (e.g. GLOBAL bytes from
+    // function parameters); skip those and never insert into mem_usage_limit
+    // here.
+    auto tracked_tier = [&](Storage sto) -> MemUsageStats::Tier* {
+      auto limit = mem_usage_limit.find(sto);
+      if (limit == mem_usage_limit.end()) return nullptr;
+      auto& tier = stats.tiers[sto];
+      tier.limit_bytes = limit->second;
+      return &tier;
+    };
+    for (const auto& [sto, usage] : ct_max_mem_usage)
+      if (auto* tier = tracked_tier(sto))
+        tier->peak_bytes = std::max(tier->peak_bytes, usage);
+    for (const auto& [sto, usages] : rt_tot_mem_usage) {
+      if (usages.empty()) continue;
+      if (auto* tier = tracked_tier(sto)) tier->has_runtime_extent = true;
+    }
+    for (const auto& [sto, limit] : mem_usage_limit) {
+      auto& tier = stats.functions[CurrentFunctionName()][sto];
+      tier.limit_bytes = limit;
+      tier.peak_bytes = function_max_mem_usage[sto];
+      tier.has_runtime_extent =
+          function_runtime_extents.count(sto) ||
+          stats.runtime_decided_functions[CurrentFunctionName()].count(sto);
+    }
+    // Tiers whose allocations are runtime-managed by memory reuse (size
+    // decided by input parameters) are runtime-decided even though the reuse
+    // pool itself is presented to this pass as a fixed-size scratchpad.
+    for (Storage sto : stats.runtime_decided)
+      if (auto* tier = tracked_tier(sto)) tier->has_runtime_extent = true;
   }
 
   void TraceEachVisit(AST::Node& n, std::string sup = "") {
@@ -144,6 +330,24 @@ private:
                        " target, the local memory limits can be set via "
                        "`--max-local-mem-capacity` option.";
         Error1(n.LOC(), error_msg);
+      } else if (sto == Storage::LOCAL) {
+        // Warn-only band between the best-practice budget and the hard cap.
+        const size_t budget = CCtx().GetLocalMemBudget();
+        if (budget < mem_usage_limit[sto] && ct_tot_mem_usage[sto] > budget) {
+          std::ostringstream oss;
+          for (const auto& inst_set : ct_mem_alloc_inst_sets)
+            if (inst_set.count(sto))
+              for (const auto& inst : inst_set.at(sto)) oss << "\n\t\t" << inst;
+          Warning(n.LOC(),
+                  "local memory usage " +
+                      std::to_string(ct_tot_mem_usage[sto]) +
+                      " bytes exceeds the recommended per-thread budget " +
+                      std::to_string(budget) +
+                      " bytes; this may spill to global memory and reduce "
+                      "performance. The hard limit is " +
+                      std::to_string(mem_usage_limit[sto]) +
+                      " bytes. With variables:" + oss.str());
+        }
       }
     }
 
@@ -181,8 +385,13 @@ private:
 
   // Update the maximum ct memory usage for each storage level
   void UpdateCtMaxMemUsage() {
-    for (const auto& [sto, usage] : ct_tot_mem_usage)
+    for (const auto& [sto, usage] : ct_tot_mem_usage) {
       if (ct_max_mem_usage[sto] < usage) ct_max_mem_usage[sto] = usage;
+      function_max_mem_usage[sto] =
+          std::max(function_max_mem_usage[sto], usage);
+    }
+    for (const auto& [sto, usage] : rt_tot_mem_usage)
+      if (!usage.empty()) function_runtime_extents.insert(sto);
   }
 
   // Return the detail memory usage of the given map
@@ -258,6 +467,17 @@ private:
   }
 
   void AppendRuntimeCheck(const std::string& fname) {
+    for (const auto& check : rt_alias_capacity_check_list) {
+      auto message = "span_as alias `" + check.alias_name +
+                     "' exceeds backing buffer `" + check.backing_name + "'";
+      FCtx(fname).AppendRtCheck({check.alias_bytes,
+                                 "<=",
+                                 check.backing_bytes,
+                                 check.loc,
+                                 message,
+                                 {}});
+    }
+
     for (const auto& [useds, loc, limit, sto] : rt_mem_usage_check_list) {
       std::string lhs, op, rhs, message;
 
@@ -304,6 +524,7 @@ private:
       FCtx(fname).AppendRtCheck({lhs, op, rhs, jc.loc, message, {}});
     }
 
+    rt_alias_capacity_check_list.clear();
     rt_mem_usage_check_list.clear();
     rt_joint_mem_usage_check_list.clear();
   }
@@ -335,6 +556,13 @@ public:
 
   bool Visit(AST::NamedVariableDecl& n) override {
     TraceEachVisit(n);
+    // Preserve immutable-in-practice scalar initializers so runtime memory
+    // extents can be expressed in terms of host-visible inputs.
+    auto scoped_name = InScopeName(n.name_str);
+    if (auto expr = dyn_cast<AST::Expr>(n.init_expr);
+        expr && expr->Opts().HasVal() && !reassigned_values.count(scoped_name))
+      host_value_bindings[scoped_name] = expr->Opts().GetVal();
+
     // mem alloc could happen here
     auto sym_ty = GetSymbolType(n.name_str);
     auto sty = dyn_cast<SpannedType>(sym_ty);
@@ -347,7 +575,28 @@ public:
     if (n.HasNote("offset")) {
       VST_DEBUG({
         dbgs() << "[MemUsage] The mem space of buffer " << n.name_str
-               << " reuses the space of self-defined SPM!\n";
+               << " aliases existing storage and is not a new allocation.\n";
+      });
+      return true;
+    }
+    if (n.HasNote("ref")) {
+      if (auto sa = dyn_cast<AST::SpanAs>(AST::Ref(n.init_expr))) {
+        auto backing_ty = GetSymbolType(sa->id->name);
+        auto backing = GetSpannedType(backing_ty);
+        if (backing_ty && backing &&
+            (sty->RuntimeShaped() || backing->RuntimeShaped())) {
+          auto alias_bytes = HostDeclByteSizeExpression(sym_ty, n.LOC());
+          if (!alias_bytes) return true;
+          auto backing_bytes = HostDeclByteSizeExpression(backing_ty, n.LOC());
+          if (!backing_bytes) return true;
+          rt_alias_capacity_check_list.push_back({*alias_bytes, *backing_bytes,
+                                                  n.LOC(), n.name_str,
+                                                  sa->id->name});
+        }
+      }
+      VST_DEBUG({
+        dbgs() << "[MemUsage] The mem space of buffer " << n.name_str
+               << " aliases existing storage and is not a new allocation.\n";
       });
       return true;
     }
@@ -355,11 +604,12 @@ public:
     if (auto aty = dyn_cast<ArrayType>(sym_ty))
       array_dim_product = *VIInt(aty->ElemCount());
     if (sty->RuntimeShaped()) {
-      // runtime usage
-      std::string byte_size = sty->ByteSizeExpression(true);
-      if (array_dim_product != 1)
-        byte_size =
-            std::to_string(array_dim_product) + " * (" + byte_size + ")";
+      // Runtime memory-limit checks are emitted in the host launcher. Resolve
+      // immutable extent bindings to host-visible inputs, and reject extents
+      // that fundamentally depend on a device-only value.
+      auto host_byte_size = HostDeclByteSizeExpression(sym_ty, n.LOC());
+      if (!host_byte_size) return true;
+      std::string byte_size = *host_byte_size;
       VST_DEBUG(dbgs() << "[MemUsage] " << __internal__::GetStringFrom(sto)
                        << " `" << SSTab().ScopedName(n.name_str) << "` need "
                        << sty->ByteSizeExpression(false) << " bytes.\n");
@@ -378,8 +628,12 @@ public:
              SumUpCtRtUsage(Storage::SHARED), n.LOC(), pool.replicas_per_pool,
              pool.pool_bytes});
     } else {
-      // compile time usage
-      auto size = sty->ByteSize() * array_dim_product;
+      // compile time usage. PhysicalSlotStrideBytes() folds in the per-slot
+      // padding of an explicitly aligned array.
+      auto slot_array = dyn_cast<SpannedArrayType>(sym_ty);
+      auto slot_bytes =
+          slot_array ? slot_array->PhysicalSlotStrideBytes() : sty->ByteSize();
+      auto size = slot_bytes * array_dim_product;
       VST_DEBUG(dbgs() << "[MemUsage] " << __internal__::GetStringFrom(sto)
                        << " `" << SSTab().ScopedName(n.name_str) << "` need "
                        << size << " bytes" << SizeForHuman(size) << ".\n");
@@ -391,8 +645,27 @@ public:
 
     return true;
   }
+  bool Visit(AST::Assignment& n) override {
+    TraceEachVisit(n);
+    auto expr = dyn_cast<AST::Expr>(n.value);
+    if (!n.AssignToDataElement() && n.IsDecl() && expr &&
+        expr->Opts().HasVal()) {
+      auto scoped_name = InScopeName(n.GetName());
+      if (!reassigned_values.count(scoped_name))
+        host_value_bindings[scoped_name] = expr->Opts().GetVal();
+    }
+    return true;
+  }
   bool Visit(AST::FunctionDecl& n) override {
     TraceEachVisit(n);
+    host_visible_symbols.clear();
+    for (const auto& p : n.params->values) {
+      if (p->HasSymbol())
+        host_visible_symbols.insert("::" + n.name + "::" + p->sym->name);
+      if (auto pty = GetSpannedType(p->GetType()))
+        for (const auto& symbol : pty->GetShape().GetDynamicSymbols())
+          if (auto name = VISym(symbol)) host_visible_symbols.insert(*name);
+    }
     // special handling
     // Because AST::FunctionDecl.accept doesn't call BeforeVisit)
     ct_mem_usage_list.push(CtMemUsageMap{});

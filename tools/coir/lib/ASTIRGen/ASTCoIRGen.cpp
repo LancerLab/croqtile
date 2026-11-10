@@ -1086,6 +1086,15 @@ bool ASTCoIRGen::Visit(AST::ParallelBy& pb) {
       /*stream=*/nullptr, /*is_async=*/nullptr,
       /*cooperative=*/pb.IsCooperative() ? builder.getBoolAttr(true) : nullptr);
 
+  // The AST distinguishes *enforced* parallel levels (written explicitly by
+  // the user, e.g. `parallel by N : group`) from the non-enforced levels that
+  // normalization inserts to fill the hierarchy (e.g. a placeholder GROUP
+  // above a bare `parallel by M` thread parallel).  Codegen needs this to
+  // decide the virtual thread index: an enforced group is a real warp and the
+  // thread index is a lane within it, while a non-enforced group means the
+  // thread parallel spans the whole block.  Preserve the flag on the op.
+  parallelOp->setAttr("coir.enforced", builder.getBoolAttr(pb.IsEnforced()));
+
   // Dynamic bounds are stored as the kDynamic sentinel in the dense bounds
   // attribute, which codegen must not emit as a literal.  Record the source
   // expression of each dynamic bound (aligned with `bounds`, empty for
@@ -1366,7 +1375,7 @@ bool hasEarlyExit(AST::Node* node) {
 }
 } // namespace
 
-int64_t ASTCoIRGen::resolveRangeBound(AST::LoopRange* lr) {
+int64_t ASTCoIRGen::resolveRangeBound(AST::RangeExpr* lr) {
   // Keep unresolved bounds (e.g. `foreach y in X`) distinct from concrete 1.
   int64_t bound = mlir::ShapedType::kDynamic;
   if (lr->ub_mutator) {
@@ -1394,7 +1403,7 @@ int64_t ASTCoIRGen::resolveRangeBound(AST::LoopRange* lr) {
   return bound;
 }
 
-mlir::Value ASTCoIRGen::resolveRangeUBValue(AST::LoopRange* lr, int64_t bound) {
+mlir::Value ASTCoIRGen::resolveRangeUBValue(AST::RangeExpr* lr, int64_t bound) {
   auto loc = Loc(*lr);
   mlir::Value ubValue;
 
@@ -1541,10 +1550,10 @@ bool ASTCoIRGen::Visit(AST::ForeachBlock& fb) {
   auto indexType = mlir::IndexType::get(&IRContext());
 
   // Collect all range bounds for multi-dim foreach.
-  llvm::SmallVector<std::pair<AST::LoopRange*, int64_t>> rangeBounds;
+  llvm::SmallVector<std::pair<AST::RangeExpr*, int64_t>> rangeBounds;
   if (fb.ranges && !fb.ranges->values.empty()) {
     for (auto& rng : fb.ranges->values) {
-      if (auto* lr = dyn_cast<AST::LoopRange>(rng.get())) {
+      if (auto* lr = dyn_cast<AST::RangeExpr>(rng.get())) {
         int64_t bound = resolveRangeBound(lr);
         // For multi-dim span, also check GetUpperBounds per dimension
         if (bound <= 1 && rangeBounds.empty()) {
@@ -2556,6 +2565,14 @@ bool ASTCoIRGen::Visit(AST::Assignment& asgn) {
   if (!asgn.AssignToDataElement()) {
     auto rhs = EmitExpr(*asgn.value);
     if (rhs) {
+      // A one-dimensional foreach coordinate is an MLIR index, while an
+      // existing scalar variable retains its declared integer type.
+      if (!asgn.IsDecl() && mlir::isa<mlir::IndexType>(rhs.getType())) {
+        auto previous = LookupValue(asgn.GetName());
+        if (previous && mlir::isa<mlir::IntegerType>(previous.getType()))
+          rhs = builder.create<mlir::arith::IndexCastOp>(
+              Loc(asgn), previous.getType(), rhs);
+      }
       if (asgn.IsDecl())
         MapValue(asgn.GetName(), rhs);
       else
@@ -2639,6 +2656,13 @@ bool ASTCoIRGen::Visit(AST::NamedVariableDecl& nvd) {
 
   auto symType = GetSymbolType(nvd.GetName());
   if (!symType) return true;
+
+  if (auto array = dyn_cast<SpannedArrayType>(symType);
+      array && array->HasAlignedSlots() && array->spty->RuntimeShaped()) {
+    Error1(nvd.LOC(), "dynamic aligned span arrays require the classic choreo "
+                      "compiler; CoIR does not yet represent padded slots.");
+    return true;
+  }
 
   if (auto select = dyn_cast<AST::Select>(nvd.init_expr)) {
     auto val = EmitSelect(*select);
@@ -3575,6 +3599,19 @@ bool ASTCoIRGen::Visit(AST::DMA& dma) {
     emitFenceKinds(dma.GetNote("dma_fence_producer"), loc);
 
   mlir::Value token = nullptr;
+  auto attachDmaSourceAttrs = [&](mlir::Operation *op) {
+    // CoIR is serialized through a temporary MLIR file by cocc.  The regular
+    // MLIR location is consequently the generated file/line, not the source
+    // .co location needed by runtime DMA diagnostics.  Keep the frontend
+    // location as explicit attributes so target emitters can preserve it
+    // across CoIR optimization and lowering.
+    op->setAttr("coir.source_line",
+                builder.getI64IntegerAttr(dma.LOC().begin.line));
+    op->setAttr("coir.source_column",
+                builder.getI64IntegerAttr(dma.LOC().begin.column));
+    if (isAsync) op->setAttr("coir.source_async", builder.getUnitAttr());
+  };
+
   if (dma.IsTMA()) {
     mlir::IntegerAttr swizAttr;
     auto swizMode = dma.GetSwizzleMode();
@@ -3591,11 +3628,13 @@ bool ASTCoIRGen::Visit(AST::DMA& dma) {
     auto tmaCopy = builder.create<coir::TmaCopyOp>(
         loc, coir::AsyncTokenType::get(&IRContext()), srcVal, dstVal, swizAttr,
         dma.IsOOBZeroFill() ? builder.getUnitAttr() : mlir::UnitAttr());
+    attachDmaSourceAttrs(tmaCopy.getOperation());
     token = tmaCopy.getToken();
   } else {
     auto dmaCopy = builder.create<coir::DmaCopyOp>(
         loc, coir::AsyncTokenType::get(&IRContext()), srcVal, dstVal, kindAttr,
         padLowAttr, padHighAttr, padValueAttr, transpPermAttr);
+    attachDmaSourceAttrs(dmaCopy.getOperation());
     token = dmaCopy.getToken();
   }
 

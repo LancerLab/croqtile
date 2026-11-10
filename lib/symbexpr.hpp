@@ -719,6 +719,17 @@ public:
   Operand Fold() const override {
     // handle comparison
     if (IsCompare(op)) {
+      // Boolean equality is logical; booleans have no arithmetic.
+      auto lf = left->Fold();
+      auto rf = right->Fold();
+      if (auto lb = dyn_cast<BooleanValue>(lf))
+        if (auto rb = dyn_cast<BooleanValue>(rf)) {
+          switch (op) {
+          case OpCode::EQ: return bl(lb->Value() == rb->Value());
+          case OpCode::NE: return bl(lb->Value() != rb->Value());
+          default: break;
+          }
+        }
       if (auto nu = dyn_cast<NumericValue>((left - right)->Normalize())) {
         switch (op) {
         case OpCode::GT:
@@ -1495,20 +1506,32 @@ inline bool cne(const Operand& vi1, const Operand& vi2) {
 inline bool must_eq(const Operand& vi1, const Operand& vi2) {
   return ceq(vi1, vi2);
 }
+// Boolean operands have no arithmetic, so these probes compare them logically
+// when both sides fold to a boolean; numeric operands keep the (a - b) == 0
+// probe.
 // may be equal
 inline bool may_eq(const Operand& vi1, const Operand& vi2) {
+  auto lb = vi1->Normalize();
+  auto rb = vi2->Normalize();
+  if (lb->IsBoolean() && rb->IsBoolean()) return *lb == *rb;
   auto res = (vi1 - vi2)->Normalize();
   if (auto n = dyn_cast<NumericValue>(res)) return n->Value() == 0;
   return res->IsSymbolic();
 }
 // must not equal
 inline bool must_ne(const Operand& vi1, const Operand& vi2) {
+  auto lb = vi1->Normalize();
+  auto rb = vi2->Normalize();
+  if (lb->IsBoolean() && rb->IsBoolean()) return !(*lb == *rb);
   auto res = (vi1 - vi2)->Normalize();
   if (auto n = dyn_cast<NumericValue>(res)) return n->Value() != 0;
   return false;
 }
 // may not equal
 inline bool may_ne(const Operand& vi1, const Operand& vi2) {
+  auto lb = vi1->Normalize();
+  auto rb = vi2->Normalize();
+  if (lb->IsBoolean() && rb->IsBoolean()) return !(*lb == *rb);
   auto res = (vi1 - vi2)->Normalize();
   if (auto n = dyn_cast<NumericValue>(res)) return n->Value() != 0;
   return true;

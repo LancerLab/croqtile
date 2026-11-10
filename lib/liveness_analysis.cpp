@@ -43,7 +43,7 @@ using namespace Choreo;
 //   4. Update kNumStmtTypes below
 // The runtime assert in HasStmt() will fire if the count is wrong.
 // ==========================================================================
-static constexpr size_t kNumStmtTypes = 21;
+static constexpr size_t kNumStmtTypes = 22;
 static_assert(kNumStmtTypes == LivenessAnalyzer::NumVisitOverrides(),
               "HasStmt type count and Visit override count are out of sync. "
               "When adding a new statement node type, update both HasStmt() "
@@ -71,7 +71,7 @@ inline bool LivenessAnalyzer::IsRef(const AST::Node& n) {
 
 bool LivenessAnalyzer::HasStmt(const AST::Node& n) const {
   // Each type here must have a Visit() override and DumpStmtBriefly() case.
-  // Count must match kNumStmtTypes (currently 18).
+  // Count must match kNumStmtTypes.
   bool is_stmt = isa<AST::NamedTypeDecl>(&n) ||     // 1
                  isa<AST::NamedVariableDecl>(&n) || // 2
                  isa<AST::Assignment>(&n) ||        // 3
@@ -92,7 +92,8 @@ bool LivenessAnalyzer::HasStmt(const AST::Node& n) const {
                  isa<AST::InThreadsBlock>(&n) ||    // 18
                  isa<AST::IfElseBlock>(&n) ||       // 19
                  isa<AST::ChoreoFunction>(&n) ||    // 20
-                 isa<AST::AsmStmt>(&n);             // 21
+                 isa<AST::AsmStmt>(&n) ||           // 21
+                 isa<AST::FragReduce>(&n);          // 22
   return is_stmt;
 }
 
@@ -831,12 +832,63 @@ LivenessAnalyzer::ResourceRanges(ResourceClass rc) const {
   return result;
 }
 
-bool LivenessAnalyzer::IsPoolFuture(const std::string& fut) const {
+bool LivenessAnalyzer::IsNamedContextFuture(const std::string& fut) const {
   // `.any` placeholder futures carry no src/dst, so their storage can only be
   // resolved once the placeholder is matched to a real DMA. Conservatively
-  // treat them as pool futures so existing behavior is preserved.
+  // treat them as named-context futures so existing behavior is preserved.
   if (dma_any_futures.count(fut)) return true;
-  return pool_futures.count(fut) > 0;
+  return named_context_futures.count(fut) > 0;
+}
+
+LivenessAnalyzer::RegionLiveness
+LivenessAnalyzer::GetRegionLiveness(const AST::Node* region) const {
+  RegionLiveness result;
+  auto start = stmt2id.find(region);
+  if (start == stmt2id.end()) return result;
+
+  VarSet definitions;
+  const size_t begin = start->second;
+  size_t end = preorder_stmts.size();
+  const ScopeEnd* region_end = nullptr;
+  for (size_t i = begin + 1; i < preorder_stmts.size(); ++i) {
+    auto scope_end = dyn_cast<ScopeEnd>(preorder_stmts[i]);
+    if (scope_end && scope_end->scope_start == region) {
+      end = i;
+      region_end = scope_end;
+      break;
+    }
+  }
+
+  for (size_t i = begin; i < end; ++i) {
+    const auto* stmt = preorder_stmts[i];
+    if (isa<ScopeEnd>(stmt)) continue;
+    auto found = stmt_linfo.find(stmt);
+    if (found == stmt_linfo.end()) continue;
+    for (const auto& use : found->second.use)
+      if (!definitions.count(use) && !found->second.def.count(use))
+        result.live_in.insert(use);
+    SetUnionInPlace(definitions, found->second.def);
+    if (auto assignment = dyn_cast<AST::Assignment>(stmt)) {
+      if (!assignment->IsDecl() && !assignment->AssignToDataElement()) {
+        for (const auto& use : found->second.use) {
+          if (UnScopedName(use) == assignment->GetName()) {
+            definitions.insert(use);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if (region_end) {
+    auto end_info = stmt_linfo.find(region_end);
+    if (end_info != stmt_linfo.end()) {
+      for (const auto& definition : definitions)
+        if (end_info->second.live_out.count(definition))
+          result.live_out.insert(definition);
+    }
+  }
+  return result;
 }
 
 void LivenessAnalyzer::DumpLivenessResults(
@@ -1134,6 +1186,8 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
   } else if (const auto ret = dyn_cast<AST::Return>(&n)) {
     os << "return";
     if (ret->value) os << " " << PSTR(ret->value);
+  } else if (const auto fr = dyn_cast<AST::FragReduce>(&n)) {
+    os << STR(*fr);
   } else if (const auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     os << "parallel ";
     os << pb->BPV()->name << " = {";
@@ -1166,7 +1220,7 @@ void LivenessAnalyzer::DumpStmtBriefly(const Stmt& n, std::ostream& os,
     os << "foreach ";
     for (size_t i = 0; i < fb->ranges->Count(); ++i) {
       if (i > 0) os << ", ";
-      auto lr = cast<AST::LoopRange>(fb->ranges->values[i]);
+      auto lr = cast<AST::RangeExpr>(fb->ranges->values[i]);
       os << lr->GetRV()->name << "(";
       os << (lr->lb_mutator ? PSTR(lr->lb_mutator) : "") << ":";
       os << (lr->ub_mutator ? PSTR(lr->ub_mutator) : "") << ":";
@@ -1918,14 +1972,14 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
     tracker_.AddFut2Buffers(n.future, DMABufInfo{n.FromSymbol(), n.ToSymbol()});
 
     // Classify the future for DMA resource allocation.  A future whose DMA
-    // touches only non-SHARED storage is a candidate for a pooled completion
-    // slot; SHARED-storage futures are routed through per-DMA CDTE contexts
-    // and must not consume a pool slot.  This mirrors the storage half of the
-    // codegen `use_pool = use_dte_pool && sto != Storage::SHARED` condition;
-    // the target-specific `use_dte_pool` switch is applied at the codegen
-    // consumption site, not here, because the core liveness analysis is
-    // target-agnostic.  A side may be a plain buffer, a future `.data`
-    // expression (resolved via FutureType), or an inferred `local`
+    // touches only non-SHARED storage is a candidate for a reusable named
+    // completion slot; SHARED-storage futures are routed through per-DMA
+    // contexts and must not consume a named slot.  This mirrors the storage
+    // half of the codegen named-emission condition (named emission applies
+    // only to non-SHARED storage); the target's named-emission flag is applied
+    // at the codegen consumption site, not here, because the core liveness
+    // analysis is target-agnostic.  A side may be a plain buffer, a future
+    // `.data` expression (resolved via FutureType), or an inferred `local`
     // destination (an AST::Memory node), so resolve each side's storage
     // through its type exactly like the codegen.
     auto StorageOf = [&](const ptr<AST::Node>& node) -> Storage {
@@ -1939,7 +1993,8 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
     Storage f_sto = StorageOf(n.from);
     Storage t_sto = StorageOf(n.to);
     Storage dma_sto = f_sto < t_sto ? f_sto : t_sto;
-    if (dma_sto != Storage::SHARED) pool_futures.insert(InScopeName(n.future));
+    if (dma_sto != Storage::SHARED)
+      named_context_futures.insert(InScopeName(n.future));
   }
 
   // An async DMA carrying an event (dma.copy.async<ev> ...) (re)arms the
@@ -2023,6 +2078,19 @@ bool LivenessAnalyzer::Visit(AST::MMA& n) {
   } break;
   default: break;
   }
+  return true;
+}
+
+bool LivenessAnalyzer::Visit(AST::FragReduce& n) {
+  TraceEachVisit(n);
+  // A reduction reads its source and writes its destination. The write is a
+  // USE, not a DEF: the destination buffer's live range starts at its own
+  // declaration, and a reduce statement that does not keep the source alive
+  // would let a later allocation reuse the source's storage while the
+  // reduction still reads it.
+  stmt_linfo[current_stmt].buffer_related = true;
+  AddUse(current_stmt, n.SrcName());
+  if (!n.IsAllReduce()) AddUse(current_stmt, n.DstName());
   return true;
 }
 
@@ -2258,16 +2326,17 @@ bool LivenessAnalyzer::Visit(AST::Return& n) {
 bool LivenessAnalyzer::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
   for (const auto& item : n.GetRanges()) {
-    auto range = cast<AST::LoopRange>(item);
+    auto range = cast<AST::RangeExpr>(item);
     // Although the range var is reset to zero, still treat it as a use.
     AddUse(current_stmt, range->GetRVName());
+    AddDef(current_stmt, range->GetIVName());
     for (const auto& offset : {range->lb_mutator, range->ub_mutator}) {
       if (!offset) continue;
       if (auto id = AST::GetIdentifier(*offset))
         AddUse(current_stmt, id->name);
       else
         choreo_unreachable(
-            "expecting the bound offset in LoopRange is an Identifier.");
+            "expecting the bound offset in RangeExpr is an Identifier.");
     }
   }
   return true;

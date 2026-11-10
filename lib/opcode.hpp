@@ -271,6 +271,39 @@ inline constexpr bool IsUBArith(const Opcode& op) {
   }
 }
 
+// A bound-access expression reads (or mutates) the bound of a bounded
+// variable. During foreach canonicalization the bound operand must keep the
+// range-source name (it refers to the bound, not the iteration variable)
+// while every other operand is rewritten as a plain value. `BoundOperandSide`
+// records which operand is the bound; `None` for non-bound-access expressions.
+//
+// The side is NOT derivable from the unary/binary form alone:
+//   - `getith(<name>, idx)` / `<name>(idx)`: bound on the left, index on the
+//     right (`<name>(-1)` is `ubound(<name>) - 1`).
+//   - `ubound(<name>)` / `#<name>`: unary, bound is the single (right) operand.
+//   - `<name> # <rhs>` (`#` is `L * ubound(R) + R`): neither operand is a
+//     bound reference - both `L` and `R` are plain values, and `R`'s bound is
+//     read from its type later, so nothing is kept (None).
+//   - `<name> #+ <rhs>` / `<name> #- ...`: bound-mutators; the bounded variable
+//     (whose bound is adjusted) sits on the left and its value is returned.
+enum class BoundOperandSide : uint8_t { None, Left, Right };
+
+inline constexpr BoundOperandSide GetBoundOperandSide(const Opcode& op) {
+  switch (op.GetKind()) {
+  case Op::GetIth: // <name>(idx): bound (L), index (R)
+  case Op::UBoundAdd: // <name> #+ <rhs>: bound/value (L), delta (R)
+  case Op::UBoundSub:
+  case Op::UBoundScale:
+  case Op::UBoundDiv:
+  case Op::UBoundMod:
+  case Op::UBoundAddInternal:
+  case Op::UBoundSubInternal: return BoundOperandSide::Left;
+  case Op::GetUBound: // ubound(<name>) / #<name>: bound (R)
+    return BoundOperandSide::Right;
+  default: return BoundOperandSide::None;
+  }
+}
+
 inline std::ostream& operator<<(std::ostream& os, const Opcode& op) {
   os << op.ToString();
   return os;

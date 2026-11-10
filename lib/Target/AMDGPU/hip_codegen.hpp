@@ -69,7 +69,7 @@ public:
   bool Visit(AST::Memory&) override { return true; }
   bool Visit(AST::ChunkAt&) override { return true; }
   bool Visit(AST::Select&) override { return true; }
-  bool Visit(AST::LoopRange&) override { return true; }
+  bool Visit(AST::RangeExpr&) override { return true; }
   bool Visit(AST::Program&) override { return true; }
 
   bool Visit(AST::ParamList&) override;

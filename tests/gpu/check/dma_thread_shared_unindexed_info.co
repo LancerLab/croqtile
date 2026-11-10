@@ -1,0 +1,17 @@
+// RUN: choreo -es -t cute %s -o /dev/null 2>&1 | FileCheck %s
+//
+// A thread-level copy into shared storage with a block-uniform source is not a
+// correctness bug (every lane writes the same bytes), but every lane issues the
+// whole movement.  Report it as info, not a warning/error; the fix
+// is to index the lane on the destination or annotate the copy `: block`.
+
+__co__ auto foo(f32 [64, 64] input) {
+  f32 [input.span(0), input.span(1)] output;
+  parallel p by 4, q by 8 {
+    l1_a = dma.copy input => shared;
+    dma.copy l1_a => output;
+  }
+  return output;
+}
+
+// CHECK: info: a thread-level DMA into shared storage does not index the lane on the destination

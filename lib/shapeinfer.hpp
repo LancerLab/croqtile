@@ -341,7 +341,7 @@ public:
   bool Visit(AST::Synchronize& n) override;
   bool Visit(AST::Select& n) override;
   bool Visit(AST::Return& n) override;
-  bool Visit(AST::LoopRange& n) override;
+  bool Visit(AST::RangeExpr& n) override;
   bool Visit(AST::ForeachBlock& n) override;
   bool Visit(AST::InThreadsBlock& n) override;
   bool Visit(AST::IfElseBlock& n) override;
