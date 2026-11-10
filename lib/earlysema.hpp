@@ -40,6 +40,8 @@ private:
 
   std::unordered_set<std::string>
       with_syms; // symbol defined in with-in statement
+  std::unordered_map<std::string, std::string> vector_patterns;
+  std::unordered_set<std::string> mma_fragment_symbols;
 
   // Intrinsic passthrough: prefixes registered via __pragma_croq_intrinsic
   // are stored in CCtx() and checked via CCtx().MatchIntrinsicPrefix().
@@ -120,6 +122,8 @@ public:
   bool Visit(AST::NamedVariableDecl&) override;
   bool Visit(AST::IntTuple&) override;
   bool Visit(AST::DataAccess&) override;
+  bool Visit(AST::VectorIndex&) override;
+  bool Visit(AST::VectorMemory&) override;
   bool Visit(AST::Assignment&) override;
   bool Visit(AST::IntIndex&) override;
   bool Visit(AST::DataType&) override;

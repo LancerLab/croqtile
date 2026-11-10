@@ -54,6 +54,9 @@ Any function prefixed with `__co__` is a **Croqtile function**. The compiler tra
 __co__ auto foo(f32 [M, K] input) { ... }
 ```
 
+`__co__` functions may also be primary function templates or full
+specializations. See [Choreo Function Templates](function-templates.md).
+
 ### `__cok__` -- Separated Device Code Block
 
 For targets that use the *separate source compilation model* (e.g., OpenCL-style), device code must be wrapped in a `__cok__` block. The compiler extracts this block into a separate compilation unit.
@@ -79,6 +82,47 @@ __co_device__ void layernorm(f32 [N] input, f32 [N] output) {
   // scalar loops over elements
 }
 ```
+
+## Namespaces
+
+Host and device code outside `__co__` functions passes through unchanged, so a
+`namespace` block you write around a Croqtile function is preserved around the
+generated code. The host wrapper is emitted in place at the `__co__`
+declaration, so it lives in that surrounding namespace:
+
+```choreo
+namespace abc {
+__co__ void foo(f32 [64, 32] a) { ... }
+} // namespace abc
+```
+
+generates a host wrapper `abc::foo` (and a device kernel `abc::__choreo_device_foo`
+by default).
+
+The `--device-namespace=NS` option wraps the auto-generated `__global__` kernel
+in an **additional nested** namespace, while leaving the host wrapper in place:
+
+```choreo
+namespace abc {
+__co__ void foo(f32 [64, 32] a) { ... }
+} // namespace abc
+```
+
+```text
+namespace abc {
+  namespace ccc { __global__ void __choreo_device_foo(...) {...} }
+  void foo(...) { ... ccc::__choreo_device_foo<<<...>>>; }
+}
+```
+
+With no surrounding namespace, the kernel lands directly in `NS`. The
+host-side launch is qualified relative to the host wrapper's scope, so host and
+device stay resolvable.
+
+Only the auto-generated kernel is wrapped. User-authored raw device code
+(`__device__`, `__co_device__`, or `__cok__` blocks) passes through verbatim and
+keeps whatever namespace you wrote around it -- `--device-namespace` does not
+move it.
 
 ## Compilation Pipeline
 

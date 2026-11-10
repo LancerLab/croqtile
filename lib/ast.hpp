@@ -47,6 +47,8 @@ struct DataType;
 struct MultiNodes;
 struct CompilerDirective;
 struct Node;
+struct VectorIndex;
+struct VectorMemory;
 
 using NodeList = std::vector<ptr<Node>>;
 
@@ -958,8 +960,8 @@ public:
 
 struct CastExpr : public Expr, public TypeIDProvider<CastExpr> {
 private:
-  BaseType from;
-  BaseType to;
+  BaseType from = BaseType::UNKNOWN;
+  BaseType to = BaseType::UNKNOWN;
   size_t element_count = 1;
   bool is_explicit = false;
   std::string foreign_type;
@@ -993,6 +995,7 @@ public:
     auto n = Make<CastExpr>(LOC(), CloneP(GetR()));
     n->from = from;
     n->to = to;
+    n->element_count = element_count;
     n->is_explicit = is_explicit;
     n->foreign_type = foreign_type;
     return n;
@@ -1322,6 +1325,107 @@ public:
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, DataAccess)
+};
+
+// A logical lane index [0, 1, ..., lane_count - 1]. The source spelling is
+// `vec.index<N>`; N is a compile-time value and is not a runtime operand.
+struct VectorIndex : public Node, public TypeIDProvider<VectorIndex> {
+private:
+  size_t lane_count;
+
+public:
+  VectorIndex(const location& l, size_t n) : Node(l), lane_count(n) {
+    assert(n > 0 && "vector lane count must be positive.");
+  }
+
+  size_t LaneCount() const { return lane_count; }
+
+  ptr<Node> CloneImpl() const override {
+    return Make<VectorIndex>(LOC(), lane_count);
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    os << prefix << "VEC.INDEX<" << lane_count << ">";
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, VectorIndex)
+};
+
+// Explicit synchronous vector memory access. The address remains a ranked
+// DataAccess so existing shape and symbol machinery can inspect it, while the
+// parent node owns the read/write and mask semantics.
+struct VectorMemory : public Node, public TypeIDProvider<VectorMemory> {
+public:
+  enum class Kind { Load, Store };
+
+private:
+  Kind kind;
+  ptr<DataAccess> address;
+  ptr<Node> value = nullptr;
+  ptr<Expr> mask = nullptr;
+  ptr<Expr> other = nullptr;
+
+public:
+  VectorMemory(const location& l, Kind k, const ptr<DataAccess>& a,
+               const ptr<Node>& v = nullptr, const ptr<Expr>& m = nullptr,
+               const ptr<Expr>& o = nullptr)
+      : Node(l), kind(k), address(a), value(v), mask(m), other(o) {
+    assert(address && address->AccessElement() &&
+           "vector memory requires an element address.");
+    if (kind == Kind::Load) {
+      assert(!value && "vector load cannot have a store value.");
+      assert((!mask && !other) || (mask && other));
+    } else {
+      assert(value && "vector store requires a value.");
+      assert(!other && "vector store cannot have a load fallback value.");
+    }
+  }
+
+  bool IsLoad() const { return kind == Kind::Load; }
+  bool IsStore() const { return kind == Kind::Store; }
+  Kind GetKind() const { return kind; }
+  const ptr<DataAccess>& Address() const { return address; }
+  const ptr<Node>& Value() const { return value; }
+  const ptr<Expr>& Mask() const { return mask; }
+  const ptr<Expr>& Other() const { return other; }
+  void SetValue(const ptr<Node>& v) { value = v; }
+  void SetOther(const ptr<Expr>& o) { other = o; }
+  bool IsMasked() const { return mask != nullptr; }
+
+  ptr<Node> CloneImpl() const override {
+    return Make<VectorMemory>(LOC(), kind, CloneP(address), CloneP(value),
+                              CloneP(mask), CloneP(other));
+  }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool with_type = false) const override {
+    if (IsStore())
+      os << "\n" << prefix << "`- VEC.STORE ";
+    else
+      os << prefix << "VEC.LOAD ";
+    address->Print(os, "", with_type);
+    if (IsStore()) {
+      os << ", ";
+      value->Print(os, "", with_type);
+    }
+    if (mask) {
+      os << ", ";
+      mask->Print(os, "", with_type);
+    }
+    if (other) {
+      os << ", ";
+      other->Print(os, "", with_type);
+    }
+    if (with_type) os << "<{" << PSTR(GetType()) << "}>";
+  }
+
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, VectorMemory)
 };
 
 struct Assignment : public Node, public TypeIDProvider<Assignment> {
@@ -2485,16 +2589,18 @@ struct View : public SpannedOperation, public TypeIDProvider<View> {
 
 struct Reshape : public SpannedOperation, public TypeIDProvider<Reshape> {
   ptr<MultiValues> newspan = nullptr; // new shape
-  Reshape(const location& l, const ptr<MultiValues>& s)
-      : SpannedOperation(l), newspan(s) {
+  bool from_squeeze = false;
+  Reshape(const location& l, const ptr<MultiValues>& s, bool sqz = false)
+      : SpannedOperation(l), newspan(s), from_squeeze(sqz) {
     if (s == nullptr) choreo_unreachable("must provide the sub-span.");
   }
   const ptr<MultiValues> GetNewSpan() const { return newspan; }
+  bool IsSqueeze() const { return from_squeeze; }
   const NodeList ReferredNodes() const override {
     return MakeNodeList(newspan);
   }
   const ptr<SpannedOperation> CloneImpl() const override {
-    return Make<Reshape>(LOC(), CloneP(newspan));
+    return Make<Reshape>(LOC(), CloneP(newspan), from_squeeze);
   }
 
   void accept(Visitor& v) override;
@@ -3003,6 +3109,7 @@ public:
     ptr<Expr> scale_b;
     std::vector<int> issue_order;
     ptr<Expr> future;
+    bool buffer_form = false;
   };
   struct StoreInfo {
     ptr<Expr> buffer;
@@ -3235,6 +3342,15 @@ public:
     std::get<2>(info).future = future;
   }
 
+  bool IsBufferForm() const {
+    return tag == Exec && std::get<2>(info).buffer_form;
+  }
+
+  void SetBufferForm(bool value = true) {
+    if (tag != Exec) choreo_unreachable("not a mma exec operation.");
+    std::get<2>(info).buffer_form = value;
+  }
+
   ptr<ChunkAt> ScaleA() const {
     if (tag == Exec) {
       auto e_info = std::get<2>(info);
@@ -3334,6 +3450,7 @@ public:
       }
       copied->SetIssueOrder(e_info.issue_order);
       if (e_info.future) copied->SetExecFuture(CloneP(e_info.future));
+      copied->SetBufferForm(e_info.buffer_form);
       return copied;
     }
     case Store: {
@@ -3818,23 +3935,25 @@ struct Barrier : public Node, public TypeIDProvider<Barrier> {
 struct Fence : public Node, public TypeIDProvider<Fence> {
   ParallelLevel visibility;
   Storage memory;
-  // Which engine path the fence publishes to: THREADS = plain threadfence
-  // (current behavior); DMA/TMA = publish generic-proxy writes to the async
-  // engine path (fence.proxy.async). MARA sync-recovery insertion sets this.
+  // Which engine path the fence publishes to: THREADS = plain threadfence;
+  // DMA/TMA = publish generic-proxy writes to the async engine path
+  // (fence.proxy.async). MARA sync-recovery insertion sets this.
   FenceEntity entity = FenceEntity::THREADS;
+  FenceOrder order = FenceOrder::ACQ_REL;
 
   Fence(const location& loc, ParallelLevel v, Storage m = Storage::NONE,
+        FenceOrder o = FenceOrder::ACQ_REL,
         FenceEntity e = FenceEntity::THREADS)
-      : Node(loc), visibility(v), memory(m), entity(e) {}
+      : Node(loc), visibility(v), memory(m), entity(e), order(o) {}
 
   ptr<Node> CloneImpl() const override {
-    auto f = Make<Fence>(LOC(), visibility, memory, entity);
-    return f;
+    return Make<Fence>(LOC(), visibility, memory, order, entity);
   }
 
   ParallelLevel GetVisibility() const { return visibility; }
   Storage GetMemory() const { return memory; }
   FenceEntity GetEntity() const { return entity; }
+  FenceOrder GetOrder() const { return order; }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool = false) const override {
@@ -3843,6 +3962,7 @@ struct Fence : public Node, public TypeIDProvider<Fence> {
        << "Fence: " << STR(visibility);
     if (memory != Storage::NONE) os << "<" << STR(memory) << ">";
     if (entity != FenceEntity::THREADS) os << " [" << STR(entity) << "]";
+    os << " " << STR(order);
   }
   void accept(Visitor&) override;
 
@@ -3893,9 +4013,13 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   // iv: the iteration variable visible inside the foreach body.
   // Only set when the parser saw an explicit local name: foreach local=source.
   ptr<Identifier> iv;
+  // lb_mutator/ub_mutator: the bound mutators written in the source slice
+  // syntax `a(lb:ub:step)`, not the resolved range bounds. The actual bounds
+  // are derived during type/shape inference by applying these mutators to the
+  // range source variable's own bounds.
   // both will be normalized to Expr which ref to anon_x
-  ptr<Node> lbound = nullptr;
-  ptr<Node> ubound = nullptr;
+  ptr<Node> lb_mutator = nullptr;
+  ptr<Node> ub_mutator = nullptr;
   int step = GetInvalidStep();
   ValueItem scope_predicate = GetInvalidValueItem();
 
@@ -3903,12 +4027,13 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
       : Node(l), rv(i), iv(nullptr) {} // the cmpt_bounds are yet to be inferred
   LoopRange(const location& l, const ptr<Identifier>& i, const ptr<Node>& lb,
             const ptr<Node>& ub, int s = 1)
-      : Node(l), rv(i), iv(nullptr), lbound(lb), ubound(ub), step(s) {}
+      : Node(l), rv(i), iv(nullptr), lb_mutator(lb), ub_mutator(ub), step(s) {}
   // Constructor for explicit local name: foreach local=source(lb:ub[:step])
   LoopRange(const location& l, const ptr<Identifier>& local,
             const ptr<Identifier>& source, const ptr<Node>& lb,
             const ptr<Node>& ub, int s = 1)
-      : Node(l), rv(source), iv(local), lbound(lb), ubound(ub), step(s) {}
+      : Node(l), rv(source), iv(local), lb_mutator(lb), ub_mutator(ub),
+        step(s) {}
 
   // Range source variable (the within-declared bounded variable).
   const std::string GetRVName() const { return rv->name; }
@@ -3922,14 +4047,14 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
   bool HasExplicitIV() const { return iv && iv.get() != rv.get(); }
 
   bool BoundIsMutated() const {
-    return (lbound != nullptr) || (ubound != nullptr);
+    return (lb_mutator != nullptr) || (ub_mutator != nullptr);
   }
 
   ptr<Node> CloneImpl() const override {
     auto cloned_rv = (!rv) ? nullptr : CloneP(rv);
     auto cloned_iv = (!iv) ? nullptr : CloneP(iv);
-    auto copied =
-        Make<LoopRange>(LOC(), cloned_rv, CloneP(lbound), CloneP(ubound), step);
+    auto copied = Make<LoopRange>(LOC(), cloned_rv, CloneP(lb_mutator),
+                                  CloneP(ub_mutator), step);
     copied->iv = cloned_iv;
     copied->scope_predicate = scope_predicate;
     return copied;
@@ -3942,11 +4067,11 @@ struct LoopRange : public Node, public TypeIDProvider<LoopRange> {
     os << "\n" << prefix << "`- Iteration variables: " << GetIVName();
     if (HasExplicitIV()) os << " (source: " << GetRVName() << ")";
 
-    if (!lbound && !ubound && !IsValidStep(step)) return;
+    if (!lb_mutator && !ub_mutator && !IsValidStep(step)) return;
 
     os << "\n" << prefix << "`- Loop Control: (";
-    os << (lbound ? PSTR(lbound) : std::string("?")) << ":";
-    os << (ubound ? PSTR(ubound) : std::string("?")) << ":";
+    os << (lb_mutator ? PSTR(lb_mutator) : std::string("?")) << ":";
+    os << (ub_mutator ? PSTR(ub_mutator) : std::string("?")) << ":";
     os << (IsValidStep(step) ? std::to_string(step) : std::string("?")) << ")";
     if (IsValidValueItem(scope_predicate))
       os << "\n"

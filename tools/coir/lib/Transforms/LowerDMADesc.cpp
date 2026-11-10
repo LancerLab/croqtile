@@ -11,11 +11,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Dialect/CoIR/Passes.h"
+#include "Dialect/CoIR/CoIRAttrs.h"
 #include "Dialect/CoIR/CoIRDialect.h"
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
-#include "Dialect/CoIR/CoIRAttrs.h"
+#include "Dialect/CoIR/Passes.h"
+#include "Dialect/CoIR/TileOffset.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/PatternMatch.h"
@@ -50,16 +51,12 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
   using OpRewritePattern<CopyOpTy>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(CopyOpTy op,
-                                PatternRewriter &rewriter) const override {
-    auto srcType =
-        llvm::dyn_cast<coir::TensorType>(op.getSource().getType());
-    auto dstType =
-        llvm::dyn_cast<coir::TensorType>(op.getDest().getType());
-    if (!srcType || !dstType)
-      return failure();
+                                PatternRewriter& rewriter) const override {
+    auto srcType = llvm::dyn_cast<coir::TensorType>(op.getSource().getType());
+    auto dstType = llvm::dyn_cast<coir::TensorType>(op.getDest().getType());
+    if (!srcType || !dstType) return failure();
 
-    if (!isGlobalSharedCopy(srcType, dstType))
-      return failure();
+    if (!isGlobalSharedCopy(srcType, dstType)) return failure();
 
     // Extract base tensors and tile offsets.
     // Convention: TensorTileOp indices = [offsets..., dynDimVals...]
@@ -70,28 +67,74 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
     llvm::SmallVector<Value> srcOffsets;
     llvm::SmallVector<Value> dstOffsets;
 
+    // Materialize a tensor's per-dim extent as an index SSA value. Anchor
+    // tiles (result shape `1x1x...`) carry only the chunk index, so the
+    // element offset must be scaled by the DMA counterpart's actual per-dim
+    // chunk extent (e.g. `K/2` for a dynamic `i0.span / #idx` chunk).
+    auto materializeDimExtent = [&](Value tensor, unsigned dim) -> Value {
+      while (auto t = tensor.getDefiningOp<TensorTileOp>())
+        tensor = t.getSource();
+      auto tty = llvm::cast<coir::TensorType>(tensor.getType());
+      if (!tty.isDynamicDim(dim))
+        return rewriter.create<mlir::arith::ConstantIndexOp>(
+            op.getLoc(), tty.getShape()[dim]);
+      auto resolve = [&](mlir::OperandRange dynDims) -> Value {
+        unsigned dynIdx = 0;
+        for (unsigned i = 0; i < tty.getShape().size(); ++i) {
+          if (!tty.isDynamicDim(i)) continue;
+          if (i == dim) return dynDims[dynIdx];
+          ++dynIdx;
+        }
+        llvm_unreachable("dynamic dim not found in operands");
+      };
+      if (auto alloc = tensor.getDefiningOp<TensorAllocOp>())
+        return resolve(alloc.getDynamicDims());
+      if (auto bind = tensor.getDefiningOp<TensorBindDimsOp>())
+        return resolve(bind.getDynamicDims());
+      return nullptr;
+    };
+
+    // Scale a tile index to an element offset. Tiles with a static chunk size
+    // (>1) scale by that size; anchor tiles (size 1) scale by the counterpart's
+    // dim extent, which may be dynamic.
+    auto scaleTileIndex = [&](Value idx, int64_t tileDim, Value counterpart,
+                              unsigned i) -> Value {
+      if (tileDim > 1) {
+        auto tileSize =
+            rewriter.create<mlir::arith::ConstantIndexOp>(op.getLoc(), tileDim);
+        return rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, tileSize);
+      }
+      // Anchor tile (dim <= 1): scale by the counterpart's per-dim extent,
+      // which may be dynamic. effectiveChunkSize encodes the static rule; a
+      // non-constant extent is resolved as a runtime index value.
+      auto cTy = llvm::dyn_cast<coir::TensorType>(counterpart.getType());
+      if (!cTy || i >= cTy.getShape().size()) return idx;
+      Value extent = materializeDimExtent(counterpart, i);
+      if (!extent) return idx;
+      if (auto c = extent.getDefiningOp<mlir::arith::ConstantIndexOp>()) {
+        if (effectiveChunkSize(tileDim, c.value()) == 1) return idx;
+      }
+      return rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, extent);
+    };
+
     if (auto tileOp = srcBase.template getDefiningOp<TensorTileOp>()) {
       srcBase = tileOp.getSource();
       auto tileTy = llvm::cast<coir::TensorType>(tileOp.getResult().getType());
       unsigned rank = tileTy.getRank();
       auto tileShape = tileTy.getShape();
       auto allIdx = tileOp.getIndices();
-      bool elementOffset =
-          tileOp->hasAttr("coir.element_offset");
+      bool elementOffset = isElementOffsetTile(tileOp);
       for (unsigned i = 0; i < std::min((unsigned)allIdx.size(), rank); ++i) {
         Value idx = allIdx[i];
-        // Element-offset tiles (chained subspan/modspan) carry the offset
+        // Element-offset tiles (chained subspan/modspan/view) carry the offset
         // already multiplied by the strides, so pass through unchanged.
         if (elementOffset) {
           srcOffsets.push_back(idx);
           continue;
         }
         // Multiply tile index by tile size to get the per-dim offset.
-        if (i < tileShape.size() && tileShape[i] > 1) {
-          auto tileSize = rewriter.create<mlir::arith::ConstantIndexOp>(
-              op.getLoc(), tileShape[i]);
-          idx = rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, tileSize);
-        }
+        if (i < tileShape.size())
+          idx = scaleTileIndex(idx, tileShape[i], op.getDest(), i);
         srcOffsets.push_back(idx);
       }
     }
@@ -101,19 +144,15 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
       unsigned rank = tileTy.getRank();
       auto tileShape = tileTy.getShape();
       auto allIdx = tileOp.getIndices();
-      bool elementOffset =
-          tileOp->hasAttr("coir.element_offset");
+      bool elementOffset = isElementOffsetTile(tileOp);
       for (unsigned i = 0; i < std::min((unsigned)allIdx.size(), rank); ++i) {
         Value idx = allIdx[i];
         if (elementOffset) {
           dstOffsets.push_back(idx);
           continue;
         }
-        if (i < tileShape.size() && tileShape[i] > 1) {
-          auto tileSize = rewriter.create<mlir::arith::ConstantIndexOp>(
-              op.getLoc(), tileShape[i]);
-          idx = rewriter.create<mlir::arith::MulIOp>(op.getLoc(), idx, tileSize);
-        }
+        if (i < tileShape.size())
+          idx = scaleTileIndex(idx, tileShape[i], op.getSource(), i);
         dstOffsets.push_back(idx);
       }
     }
@@ -131,12 +170,11 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
 
     // Determine kind: tile offsets imply Slice (sub-region access).
     // TmaCopyOp has no kind attribute - derive entirely from structure.
-    // DmaCopyOp carries a kind attr (default Copy) - override to Slice when tiled.
+    // DmaCopyOp carries a kind attr (default Copy) - override to Slice when
+    // tiled.
     auto kind = coir::DMAKind::Copy;
-    if constexpr (!isTMA)
-      kind = op.getKind();
-    if (hasOffsets && kind == coir::DMAKind::Copy)
-      kind = coir::DMAKind::Slice;
+    if constexpr (!isTMA) kind = op.getKind();
+    if (hasOffsets && kind == coir::DMAKind::Copy) kind = coir::DMAKind::Slice;
     auto kindAttr = coir::DMAKindAttr::get(rewriter.getContext(), kind);
 
     mlir::IntegerAttr swizAttr;
@@ -144,8 +182,7 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
     if constexpr (isTMA) {
       if (auto sb = op.getSwizzleBytes())
         swizAttr = rewriter.getI64IntegerAttr(*sb);
-      if (op.getZfill())
-        zfillAttr = rewriter.getUnitAttr();
+      if (op.getZfill()) zfillAttr = rewriter.getUnitAttr();
     }
     auto constDesc = rewriter.create<DMAConstDescOp>(
         loc, descType, srcBase, dstBase, kindAttr,
@@ -156,43 +193,43 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
         op.getSource().template getDefiningOp<TensorTileOp>() != nullptr;
     bool hasDstTile =
         op.getDest().template getDefiningOp<TensorTileOp>() != nullptr;
-    if (hasSrcTile)
-      constDesc->setAttr("src_tiled", rewriter.getUnitAttr());
-    if (hasDstTile)
-      constDesc->setAttr("dst_tiled", rewriter.getUnitAttr());
-    // Store tile shape for slice_deslice emission (the actual data transfer size).
+    if (hasSrcTile) constDesc->setAttr("src_tiled", rewriter.getUnitAttr());
+    if (hasDstTile) constDesc->setAttr("dst_tiled", rewriter.getUnitAttr());
+    // Store tile shape for slice_deslice emission (the actual data transfer
+    // size).
     if (hasSrcTile || hasDstTile) {
       auto tileOp = hasSrcTile
-          ? op.getSource().template getDefiningOp<TensorTileOp>()
-          : op.getDest().template getDefiningOp<TensorTileOp>();
-      auto tileShape = llvm::cast<coir::TensorType>(tileOp.getResult().getType()).getShape();
+                        ? op.getSource().template getDefiningOp<TensorTileOp>()
+                        : op.getDest().template getDefiningOp<TensorTileOp>();
+      auto tileShape =
+          llvm::cast<coir::TensorType>(tileOp.getResult().getType()).getShape();
       llvm::SmallVector<int64_t> shapeVec(tileShape.begin(), tileShape.end());
       constDesc->setAttr("tile_shape", rewriter.getDenseI64ArrayAttr(shapeVec));
     }
 
     // Forward pad/transpose attributes from the original DmaCopyOp.
     if constexpr (!isTMA) {
-      for (const char *attrName :
+      for (const char* attrName :
            {"pad_low", "pad_high", "pad_value", "transpose_perm"}) {
         if (auto attr = op->getAttr(attrName))
           constDesc->setAttr(attrName, attr);
       }
     }
-    auto prefetch = rewriter.create<DMADescPrefetchOp>(
-        loc, descRtType, constDesc.getOut());
+    auto prefetch =
+        rewriter.create<DMADescPrefetchOp>(loc, descRtType, constDesc.getOut());
 
     Value invokeDesc;
     if (hasOffsets) {
       // Chain: prefetch -> [src_runtime_desc] -> [dst_runtime_desc] -> invoke
       Value chain = prefetch.getOut();
       if (!srcOffsets.empty()) {
-        auto srcRt = rewriter.create<DMADescRuntimeOp>(
-            loc, descRtType, chain, srcOffsets);
+        auto srcRt = rewriter.create<DMADescRuntimeOp>(loc, descRtType, chain,
+                                                       srcOffsets);
         chain = srcRt.getOut();
       }
       if (!dstOffsets.empty()) {
-        auto dstRt = rewriter.create<DMADescRuntimeOp>(
-            loc, descRtType, chain, dstOffsets);
+        auto dstRt = rewriter.create<DMADescRuntimeOp>(loc, descRtType, chain,
+                                                       dstOffsets);
         dstRt->setAttr("dst_offsets", rewriter.getUnitAttr());
         chain = dstRt.getOut();
       }
@@ -204,18 +241,14 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
     llvm::SmallVector<Value> dynDims;
     llvm::SmallVector<int64_t> copyShapeVec;
     if (hasOffsets) {
-      auto srcTy =
-          llvm::dyn_cast<coir::TensorType>(op.getSource().getType());
-      auto dstTy =
-          llvm::dyn_cast<coir::TensorType>(op.getDest().getType());
+      auto srcTy = llvm::dyn_cast<coir::TensorType>(op.getSource().getType());
+      auto dstTy = llvm::dyn_cast<coir::TensorType>(op.getDest().getType());
       if (srcTy && dstTy &&
           (srcTy.hasDynamicShape() || dstTy.hasDynamicShape())) {
         // Use the tile shape (the more constrained type from the tiled
         // operand). For loads, source is tiled; for stores, dest is tiled.
-        auto srcTileOp =
-            op.getSource().template getDefiningOp<TensorTileOp>();
-        auto dstTileOp =
-            op.getDest().template getDefiningOp<TensorTileOp>();
+        auto srcTileOp = op.getSource().template getDefiningOp<TensorTileOp>();
+        auto dstTileOp = op.getDest().template getDefiningOp<TensorTileOp>();
         llvm::ArrayRef<int64_t> shapeRef;
         TensorTileOp activeTileOp = nullptr;
         if (srcTileOp) {
@@ -225,8 +258,8 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
           shapeRef = dstTy.getShape();
           activeTileOp = dstTileOp;
         } else {
-          shapeRef = srcTy.hasDynamicShape() ? srcTy.getShape()
-                                              : dstTy.getShape();
+          shapeRef =
+              srcTy.hasDynamicShape() ? srcTy.getShape() : dstTy.getShape();
         }
         copyShapeVec.assign(shapeRef.begin(), shapeRef.end());
         unsigned numDyn = 0;
@@ -259,15 +292,11 @@ struct DecomposeCopy : public OpRewritePattern<CopyOpTy> {
     else
       rewriter.create<WaitOp>(loc, invoke.getDone());
 
-    auto srcTileOp =
-        op.getSource().template getDefiningOp<TensorTileOp>();
-    auto dstTileOp =
-        op.getDest().template getDefiningOp<TensorTileOp>();
+    auto srcTileOp = op.getSource().template getDefiningOp<TensorTileOp>();
+    auto dstTileOp = op.getDest().template getDefiningOp<TensorTileOp>();
     rewriter.eraseOp(op);
-    if (srcTileOp && srcTileOp->use_empty())
-      rewriter.eraseOp(srcTileOp);
-    if (dstTileOp && dstTileOp->use_empty())
-      rewriter.eraseOp(dstTileOp);
+    if (srcTileOp && srcTileOp->use_empty()) rewriter.eraseOp(srcTileOp);
+    if (dstTileOp && dstTileOp->use_empty()) rewriter.eraseOp(dstTileOp);
 
     return success();
   }
@@ -280,19 +309,17 @@ struct LowerDMADescPass
   void runOnOperation() override {
     // Gate: require target DMA/TMA capability.
     auto module = dyn_cast<ModuleOp>(getOperation());
-    if (!module)
-      module = getOperation()->getParentOfType<ModuleOp>();
+    if (!module) module = getOperation()->getParentOfType<ModuleOp>();
     if (module) {
       auto hasDMA = module->getAttrOfType<BoolAttr>("coir.has_dma");
       auto hasTMA = module->getAttrOfType<BoolAttr>("coir.has_tma");
       bool active = (!hasDMA && !hasTMA) || // standalone test
                     (hasDMA && hasDMA.getValue()) ||
                     (hasTMA && hasTMA.getValue());
-      if (!active)
-        return;
+      if (!active) return;
     }
 
-    auto *ctx = &getContext();
+    auto* ctx = &getContext();
     RewritePatternSet patterns(ctx);
     patterns.add<DecomposeCopy<DmaCopyOp>>(ctx);
     patterns.add<DecomposeCopy<TmaCopyOp>>(ctx);

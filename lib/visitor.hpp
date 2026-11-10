@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 #include "ast.hpp"
+#include "choreo_template.hpp"
 #include "colors.hpp"
 #include "infra_utils.hpp"
 #include "loc.hpp"
@@ -76,6 +77,8 @@ struct Visitor {
   virtual bool Visit(AST::NamedVariableDecl&) = 0;
   virtual bool Visit(AST::IntTuple&) = 0;
   virtual bool Visit(AST::DataAccess&) = 0;
+  virtual bool Visit(AST::VectorIndex&) = 0;
+  virtual bool Visit(AST::VectorMemory&) = 0;
   virtual bool Visit(AST::Assignment&) = 0;
   virtual bool Visit(AST::IntIndex&) = 0;
   virtual bool Visit(AST::DataType&) = 0;
@@ -246,6 +249,10 @@ public:
 
   virtual const std::string& GetName() { return name; }
   const std::string& GetNameConst() const { return name; }
+  virtual const std::string& CurrentFunctionName() const {
+    static const std::string empty;
+    return empty;
+  }
 
   virtual void CollectNames(std::vector<std::string>& names) const {
     names.push_back(name);
@@ -342,7 +349,8 @@ protected:
       int col = CCtx().MapExpandedColToOriginal(l.begin.line, l.begin.column);
       errs() << "  ";
       for (int i = 1; i < col; ++i) errs() << " ";
-      errs() << "^" << "\n";
+      errs() << "^"
+             << "\n";
     }
   }
 
@@ -377,6 +385,13 @@ public:
   // short-hand: emit error with the error count incremented by 1
   void Error1(const location& loc, const std::string& message) const {
     Error(loc, message);
+    if (auto* instance = FindChoreoTemplateInstance(CurrentFunctionName())) {
+      Note(location(instance->filename,
+                    static_cast<int>(instance->request_line),
+                    static_cast<int>(instance->request_column)),
+           "in instantiation of Choreo template '" + instance->display_name +
+               "' requested here");
+    }
     error_count++;
   }
 
@@ -568,7 +583,7 @@ public:
     return Visitor::AfterVisit(n);
   }
 
-  const std::string& CurrentFunctionName() const { return fname; }
+  const std::string& CurrentFunctionName() const override { return fname; }
 
 public:
   VisitorWithScope(const std::string& n,
@@ -617,6 +632,8 @@ public:
   bool Visit(AST::NamedVariableDecl&) override { return true; }
   bool Visit(AST::IntTuple&) override { return true; }
   bool Visit(AST::DataAccess&) override { return true; }
+  bool Visit(AST::VectorIndex&) override { return true; }
+  bool Visit(AST::VectorMemory&) override { return true; }
   bool Visit(AST::Assignment&) override { return true; }
   bool Visit(AST::IntIndex&) override { return true; }
   bool Visit(AST::DataType&) override { return true; }
@@ -816,6 +833,14 @@ public:
     TraceEachVisit(n);
     return VisitNode(n);
   }
+  bool Visit(AST::VectorIndex& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
+  bool Visit(AST::VectorMemory& n) final {
+    TraceEachVisit(n);
+    return VisitNode(n);
+  }
   bool Visit(AST::Assignment& n) final {
     TraceEachVisit(n);
     return VisitNode(n);
@@ -984,6 +1009,8 @@ public:
   virtual bool VisitNode(AST::NamedVariableDecl&) { return true; }
   virtual bool VisitNode(AST::IntTuple&) { return true; }
   virtual bool VisitNode(AST::DataAccess&) { return true; }
+  virtual bool VisitNode(AST::VectorIndex&) { return true; }
+  virtual bool VisitNode(AST::VectorMemory&) { return true; }
   virtual bool VisitNode(AST::Assignment&) { return true; }
   virtual bool VisitNode(AST::IntIndex&) { return true; }
   virtual bool VisitNode(AST::DataType&) { return true; }
@@ -1123,6 +1150,8 @@ private:
   bool Visit(AST::NamedVariableDecl&) final { return true; }
   bool Visit(AST::IntTuple&) final { return true; }
   bool Visit(AST::DataAccess&) final { return true; }
+  bool Visit(AST::VectorIndex&) final { return true; }
+  bool Visit(AST::VectorMemory&) final { return true; }
   bool Visit(AST::Assignment&) final { return true; }
   bool Visit(AST::IntIndex&) final { return true; }
   bool Visit(AST::DataType&) final { return true; }
@@ -1217,6 +1246,16 @@ ReferredSymbols(AST::Node* n, const VisitorWithScope* v = nullptr) {
     res.insert(rd.begin(), rd.end());
     auto ri = ReferredSymbols(da->indices.get(), v);
     res.insert(ri.begin(), ri.end());
+  } else if (isa<AST::VectorIndex>(n)) {
+    return res;
+  } else if (auto vm = dyn_cast<AST::VectorMemory>(n)) {
+    for (auto* operand : {static_cast<AST::Node*>(vm->Address().get()),
+                          static_cast<AST::Node*>(vm->Value().get()),
+                          static_cast<AST::Node*>(vm->Mask().get()),
+                          static_cast<AST::Node*>(vm->Other().get())}) {
+      auto refs = ReferredSymbols(operand, v);
+      res.insert(refs.begin(), refs.end());
+    }
   } else if (auto ii = dyn_cast<AST::IntIndex>(n)) {
     auto rv = ReferredSymbols(ii->Val().get(), v);
     res.insert(rv.begin(), rv.end());

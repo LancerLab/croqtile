@@ -5,10 +5,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Dialect/CoIR/Passes.h"
 #include "Dialect/CoIR/CoIRDialect.h"
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
+#include "Dialect/CoIR/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -32,19 +32,15 @@ struct LowerElementCopy : public OpRewritePattern<ElementCopyOp> {
   using OpRewritePattern::OpRewritePattern;
 
   LogicalResult matchAndRewrite(ElementCopyOp op,
-                                PatternRewriter &rewriter) const override {
-    if (op->hasAttr("lowered"))
-      return failure();
+                                PatternRewriter& rewriter) const override {
+    if (op->hasAttr("lowered")) return failure();
 
     auto srcType = llvm::dyn_cast<coir::TensorType>(op.getSource().getType());
-    if (!srcType)
-      return failure();
+    if (!srcType) return failure();
 
     int64_t totalElems = 1;
-    for (auto d : srcType.getShape())
-      totalElems *= d;
-    op->setAttr("total_elements",
-                rewriter.getI64IntegerAttr(totalElems));
+    for (auto d : srcType.getShape()) totalElems *= d;
+    op->setAttr("total_elements", rewriter.getI64IntegerAttr(totalElems));
     op->setAttr("lowered", rewriter.getUnitAttr());
     return success();
   }
@@ -56,17 +52,14 @@ struct LowerDmaCopy : public OpRewritePattern<DmaCopyOp> {
   using OpRewritePattern::OpRewritePattern;
 
   LogicalResult matchAndRewrite(DmaCopyOp op,
-                                PatternRewriter &rewriter) const override {
-    if (op->hasAttr("lowered"))
-      return failure();
+                                PatternRewriter& rewriter) const override {
+    if (op->hasAttr("lowered")) return failure();
 
     auto srcType = llvm::dyn_cast<coir::TensorType>(op.getSource().getType());
-    if (!srcType)
-      return failure();
+    if (!srcType) return failure();
 
     int64_t totalBytes = 1;
-    for (auto d : srcType.getShape())
-      totalBytes *= d;
+    for (auto d : srcType.getShape()) totalBytes *= d;
     unsigned elemBits = srcType.getElementType().getIntOrFloatBitWidth();
     totalBytes = totalBytes * elemBits / 8;
 
@@ -83,17 +76,14 @@ struct LowerTmaCopy : public OpRewritePattern<TmaCopyOp> {
   using OpRewritePattern::OpRewritePattern;
 
   LogicalResult matchAndRewrite(TmaCopyOp op,
-                                PatternRewriter &rewriter) const override {
-    if (op->hasAttr("lowered"))
-      return failure();
+                                PatternRewriter& rewriter) const override {
+    if (op->hasAttr("lowered")) return failure();
 
     auto srcType = llvm::dyn_cast<coir::TensorType>(op.getSource().getType());
-    if (!srcType)
-      return failure();
+    if (!srcType) return failure();
 
     int64_t totalBytes = 1;
-    for (auto d : srcType.getShape())
-      totalBytes *= d;
+    for (auto d : srcType.getShape()) totalBytes *= d;
     unsigned elemBits = srcType.getElementType().getIntOrFloatBitWidth();
     totalBytes = totalBytes * elemBits / 8;
 
@@ -108,7 +98,7 @@ struct LowerCopyPass : public ::coir::impl::LowerCopyBase<LowerCopyPass> {
   using LowerCopyBase::LowerCopyBase;
 
   void runOnOperation() override {
-    auto *ctx = &getContext();
+    auto* ctx = &getContext();
     RewritePatternSet patterns(ctx);
     patterns.add<LowerElementCopy>(ctx);
     patterns.add<LowerDmaCopy>(ctx);

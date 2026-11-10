@@ -14,6 +14,7 @@ static ptr<Type> PreserveDeclaredMutability(const ptr<Type>& inferred,
     return pty;
   }
   if (IsActualBoundedIntegerType(inferred)) return MakeIntegerType(true);
+  if (isa<VectorType>(inferred)) return MutateType(inferred);
 
   return inferred;
 }
@@ -128,6 +129,11 @@ bool ShapeInference::BeforeVisitImpl(AST::Node& n) {
     gen_values = false;
   } else if (isa<AST::Parameter>(&n)) {
     allow_named_dim = true;
+  } else if (isa<AST::NamedVariableDecl>(&n)) {
+    // Only this declaration's type and initializer may supply its value
+    // numbers. In particular, an uninitialized scalar must not inherit the
+    // final expression visited in a preceding statement or branch.
+    InvalidateVisitorValNOs();
   } else if (isa<AST::MultiNodes>(&n))
     InvalidateVisitorValNOs();
 
@@ -712,6 +718,10 @@ bool ShapeInference::Visit(AST::Assignment& n) {
     cur_mdspan_vn = GetValNo(*n.value, VNKind::VNK_VALUE);
     SymbolAliasNum(SSTab().ScopedName(name), cur_mdspan_vn);
     return true;
+  } else if (isa<VectorType>(nty)) {
+    // Explicit vectors are runtime values. They deliberately have no scalar
+    // value number, but the symbol still needs to be visible to later passes.
+    return true;
   } else if (auto sty = dyn_cast<ScalarType>(nty); sty && sty->IsMutable()) {
     // we need to generate a valno for mutable names
     cur_vn = GetOrGenValNum(s_sn(SSTab().ScopedName(name)));
@@ -1269,8 +1279,8 @@ bool ShapeInference::Visit(AST::BufferMap& n) {
 
     auto size_vn = GetValNo(*n.size);
     auto size_shape = GenShape(size_vn);
-    auto map_sty = MakeDenseSpannedType(source_sty->ElementType(), size_shape,
-                                        n.storage);
+    auto map_sty =
+        MakeDenseSpannedType(source_sty->ElementType(), size_shape, n.storage);
     SetNodeType(n, map_sty);
 
     auto s = GenShape(source_vn);
@@ -1590,7 +1600,7 @@ bool ShapeInference::Visit(AST::ChunkAt& n) {
       cur_strd = new_strd;
       auto bshape = GenShape(vn.MakePluralSign(cur_vns));
 
-      auto reshape = AST::Make<AST::SOP::Reshape>(op->LOC(), mv);
+      auto reshape = AST::Make<AST::SOP::Reshape>(op->LOC(), mv, true);
       reshape->SetBlockShape(bshape);
       reshape->SetBlockStrides(cur_strd);
       n.ReplaceOperation(op_idx, reshape);
@@ -2299,6 +2309,7 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
   // if (isa<AST::ChunkAt>(n)) return false;
   if (isa<AST::StringLiteral>(n)) return false;
   if (isa<AST::DataAccess>(n)) return false;
+  if (isa<AST::VectorIndex>(n) || isa<AST::VectorMemory>(n)) return false;
   if (auto call = dyn_cast<AST::Call>(n)) {
     if (!(call->IsExpr() && call->IsArith() && call->arguments &&
           call->arguments->Count() == 2 &&
@@ -2321,6 +2332,7 @@ bool ShapeInference::CanBeValueNumbered(AST::Node* n) const {
   if (isa<StringType>(nty)) return false;
   if (isa<VoidType>(nty)) return false;
   if (isa<StreamType>(nty)) return false;
+  if (isa<VectorType>(nty)) return false;
 
   if (auto e = dyn_cast<AST::Expr>(n)) {
     if (e->op == Op::ElemOf) return false;

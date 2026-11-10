@@ -1,0 +1,12 @@
+// RUN: not choreo -t cc -es %s 2>&1 | FileCheck %s
+
+template <int N>
+__co__ void malformed_instance(s32 [1] data) {
+  data.at(0) = ;
+}
+
+template __co__ malformed_instance<4>;
+
+// CHECK: {{.*}}function_template_syntax_diagnostic.co:5.16: error: syntax error
+// CHECK: {{.*}}function_template_syntax_diagnostic.co:8.1: info: in instantiation of Choreo template 'malformed_instance<4>' requested here
+// CHECK-NOT: Assertion failed

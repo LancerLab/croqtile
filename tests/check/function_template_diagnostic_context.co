@@ -1,0 +1,17 @@
+// RUN: not choreo -t cc -es %s 2>&1 | FileCheck %s
+
+template <int N>
+__co__ void invalid_instance(s32 [1] data) {
+  if constexpr (N == 4) {
+    data.at(0) = N;
+  } else {
+    data.at(0) = 0;
+  }
+  data.at(0) = missing_symbol + N;
+}
+
+template __co__ invalid_instance<4>;
+
+// CHECK: {{.*}}function_template_diagnostic_context.co:10.16: error: symbol `missing_symbol' is used before declaration.
+// CHECK: {{.*}}function_template_diagnostic_context.co:13.1: info: in instantiation of Choreo template 'invalid_instance<4>' requested here
+// CHECK-NOT: Assertion failed

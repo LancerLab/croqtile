@@ -1,7 +1,7 @@
 // lib/CoIRTypes.cpp
 #include "Dialect/CoIR/CoIRTypes.h"
-#include "Dialect/CoIR/CoIRDialect.h"
 #include "Dialect/CoIR/CoIRAttrs.h"
+#include "Dialect/CoIR/CoIRDialect.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/DialectImplementation.h"
@@ -12,22 +12,19 @@ using namespace mlir;
 //===----------------------------------------------------------------------===//
 // Helper: parse shape like "128x64x" or "?x128x" (consumes trailing 'x')
 //===----------------------------------------------------------------------===//
-static ParseResult parseShape(AsmParser &parser,
-                              llvm::SmallVectorImpl<int64_t> &shape) {
+static ParseResult parseShape(AsmParser& parser,
+                              llvm::SmallVectorImpl<int64_t>& shape) {
   while (true) {
     if (succeeded(parser.parseOptionalQuestion())) {
       shape.push_back(mlir::ShapedType::kDynamic);
-      if (failed(parser.parseXInDimensionList()))
-        return failure();
+      if (failed(parser.parseXInDimensionList())) return failure();
       continue;
     }
     int64_t dim;
     auto res = parser.parseOptionalInteger(dim);
-    if (!res.has_value() || failed(*res))
-      break;
+    if (!res.has_value() || failed(*res)) break;
     shape.push_back(dim);
-    if (failed(parser.parseXInDimensionList()))
-      return failure();
+    if (failed(parser.parseXInDimensionList())) return failure();
   }
   return success();
 }
@@ -37,8 +34,7 @@ static ParseResult parseShape(AsmParser &parser,
 //===----------------------------------------------------------------------===//
 
 static int32_t parseMemorySpaceKeyword(llvm::StringRef msStr) {
-  if (msStr == "default")
-    return -1;
+  if (msStr == "default") return -1;
   if (msStr == "global")
     return static_cast<int32_t>(coir::TensorMemorySpace::Global);
   if (msStr == "shared")
@@ -50,82 +46,57 @@ static int32_t parseMemorySpaceKeyword(llvm::StringRef msStr) {
   return -2; // invalid
 }
 
-mlir::Type coir::TensorType::parse(mlir::AsmParser &parser) {
-  if (parser.parseLess())
-    return {};
+mlir::Type coir::TensorType::parse(mlir::AsmParser& parser) {
+  if (parser.parseLess()) return {};
 
   llvm::SmallVector<int64_t> shape;
-  if (failed(parseShape(parser, shape)))
-    return {};
+  if (failed(parseShape(parser, shape))) return {};
 
   mlir::Type elemType;
-  if (parser.parseType(elemType))
-    return {};
+  if (parser.parseType(elemType)) return {};
 
   int32_t memSpace = -1;
+  bool isUnsigned = false;
   llvm::SmallVector<int64_t> strides;
 
-  if (succeeded(parser.parseOptionalComma())) {
+  // Optional comma-separated suffixes: memspace keyword, "unsigned", and
+  // "strides: [...]" (in any order).
+  while (succeeded(parser.parseOptionalComma())) {
     llvm::StringRef kw;
-    if (parser.parseKeyword(&kw))
-      return {};
+    if (parser.parseKeyword(&kw)) return {};
 
-    if (kw == "strides") {
-      // strides without memspace: parse ": [...]"
-      if (parser.parseColon() || parser.parseLSquare())
-        return {};
+    if (kw == "unsigned") {
+      isUnsigned = true;
+    } else if (kw == "strides") {
+      if (parser.parseColon() || parser.parseLSquare()) return {};
       int64_t s;
       auto res = parser.parseOptionalInteger(s);
       if (res.has_value() && succeeded(*res)) {
         strides.push_back(s);
         while (succeeded(parser.parseOptionalComma())) {
-          if (parser.parseInteger(s))
-            return {};
+          if (parser.parseInteger(s)) return {};
           strides.push_back(s);
         }
       }
-      if (parser.parseRSquare())
-        return {};
+      if (parser.parseRSquare()) return {};
     } else {
       int32_t ms = parseMemorySpaceKeyword(kw);
       if (ms == -2) {
         parser.emitError(parser.getCurrentLocation(),
-                         "unknown memory space: " + kw);
+                         "unknown tensor suffix: " + kw);
         return {};
       }
       memSpace = ms;
-
-      // Check for optional strides after memspace
-      if (succeeded(parser.parseOptionalComma())) {
-        llvm::StringRef stKw;
-        if (parser.parseKeyword(&stKw) || stKw != "strides")
-          return {};
-        if (parser.parseColon() || parser.parseLSquare())
-          return {};
-        int64_t s;
-        auto res2 = parser.parseOptionalInteger(s);
-        if (res2.has_value() && succeeded(*res2)) {
-          strides.push_back(s);
-          while (succeeded(parser.parseOptionalComma())) {
-            if (parser.parseInteger(s))
-              return {};
-            strides.push_back(s);
-          }
-        }
-        if (parser.parseRSquare())
-          return {};
-      }
     }
   }
 
-  if (parser.parseGreater())
-    return {};
+  if (parser.parseGreater()) return {};
 
   return coir::TensorType::get(parser.getContext(), elemType, shape, memSpace,
-                               strides);
+                               isUnsigned, strides);
 }
 
-void coir::TensorType::print(mlir::AsmPrinter &printer) const {
+void coir::TensorType::print(mlir::AsmPrinter& printer) const {
   printer << "<";
   for (auto dim : getShape()) {
     if (mlir::ShapedType::isDynamic(dim))
@@ -140,12 +111,13 @@ void coir::TensorType::print(mlir::AsmPrinter &printer) const {
     printer << "default";
   } else {
     switch (static_cast<coir::TensorMemorySpace>(ms)) {
-    case coir::TensorMemorySpace::Global:   printer << "global";   break;
-    case coir::TensorMemorySpace::Shared:   printer << "shared";   break;
-    case coir::TensorMemorySpace::Local:    printer << "local";    break;
+    case coir::TensorMemorySpace::Global: printer << "global"; break;
+    case coir::TensorMemorySpace::Shared: printer << "shared"; break;
+    case coir::TensorMemorySpace::Local: printer << "local"; break;
     case coir::TensorMemorySpace::Register: printer << "register"; break;
     }
   }
+  if (getIsUnsigned()) printer << ", unsigned";
   auto stridesArr = getStrides();
   if (!stridesArr.empty()) {
     printer << ", strides: [";
@@ -161,8 +133,7 @@ bool coir::TensorType::isDenseContiguous() const {
   auto shapeArr = getShape();
   int64_t expected = 1;
   for (int i = (int)shapeArr.size() - 1; i >= 0; --i) {
-    if (mlir::ShapedType::isDynamic(shapeArr[i]))
-      return false;
+    if (mlir::ShapedType::isDynamic(shapeArr[i])) return false;
     if (stridesArr[i] != expected) return false;
     expected *= shapeArr[i];
   }
@@ -173,28 +144,23 @@ bool coir::TensorType::isDenseContiguous() const {
 // coir::MMAFragType custom parser/printer
 //===----------------------------------------------------------------------===//
 
-mlir::Type coir::MMAFragType::parse(mlir::AsmParser &parser) {
-  if (parser.parseLess())
-    return {};
+mlir::Type coir::MMAFragType::parse(mlir::AsmParser& parser) {
+  if (parser.parseLess()) return {};
 
   llvm::SmallVector<int64_t> shape;
-  if (failed(parseShape(parser, shape)))
-    return {};
+  if (failed(parseShape(parser, shape))) return {};
 
   mlir::Type elemType;
-  if (parser.parseType(elemType))
-    return {};
+  if (parser.parseType(elemType)) return {};
 
-  if (parser.parseGreater())
-    return {};
+  if (parser.parseGreater()) return {};
 
   return coir::MMAFragType::get(parser.getContext(), elemType, shape);
 }
 
-void coir::MMAFragType::print(mlir::AsmPrinter &printer) const {
+void coir::MMAFragType::print(mlir::AsmPrinter& printer) const {
   printer << "<";
-  for (auto dim : getShape())
-    printer << dim << "x";
+  for (auto dim : getShape()) printer << dim << "x";
   printer << getElementType();
   printer << ">";
 }
@@ -217,5 +183,5 @@ void coir::CoIRDialect::registerTypes() {
   addTypes<
 #define GET_TYPEDEF_LIST
 #include "CoIR/CoIRTypes.cpp.inc"
-  >();
+      >();
 }

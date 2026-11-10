@@ -9,6 +9,7 @@
 #include "gpu_target.hpp"
 #include "memcheck.hpp"
 #include "pipeline.hpp"
+#include "resource_allocator.hpp"
 #include "sys_utils.hpp"
 #include "target_registry.hpp"
 #include "types.hpp"
@@ -79,6 +80,8 @@ public:
     p.AddStage<DMAPlan>();
     p.AddStage<MemUsageCheck>();
     p.AddStage<AssertSite>();
+    p.AddStageIf<DmaResourceAllocation>(
+        [] { return dma_alloc_mode || EventAllocEnabled(); });
     p.AddStage<Cute::CuteCodeGen>();
     return true;
   }

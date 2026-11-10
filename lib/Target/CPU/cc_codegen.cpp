@@ -977,12 +977,12 @@ bool CCCodeGen::Visit(AST::ForeachBlock& n) {
       auto mapped = ssm.HostName(iv_name);
       if (vectorizable) IndStream() << "#pragma omp simd\n";
       IndStream() << "for (" << mapped << " = "
-                  << (rng->lbound ? ("(" + ExprSTR(rng->lbound) + ")")
-                                  : std::string("0"))
+                  << (rng->lb_mutator ? ("(" + ExprSTR(rng->lb_mutator) + ")")
+                                      : std::string("0"))
                   << "; " << mapped << " < "
                   << UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()))
-                  << (rng->ubound ? (" + " + ExprSTR(rng->ubound))
-                                  : std::string(""))
+                  << (rng->ub_mutator ? (" + " + ExprSTR(rng->ub_mutator))
+                                      : std::string(""))
                   << "; ++" << mapped << ") {\n";
       IncrIndent();
     }
@@ -1119,9 +1119,7 @@ bool CCCodeGen::Visit(AST::DMA& n) {
   return true;
 }
 
-bool CCCodeGen::Visit(AST::BufferMap&) {
-  return true;
-}
+bool CCCodeGen::Visit(AST::BufferMap&) { return true; }
 
 bool CCCodeGen::Visit(AST::MMA& n) {
   TraceEachVisit(n);
@@ -1339,8 +1337,7 @@ bool CCCodeGen::Visit(AST::AsmStmt& n) {
       t.op = op;
       t.tempName = symtab.GetAnonName();
       t.isOutput = isOutput;
-      t.isReadWrite =
-          !op->constraint.empty() && op->constraint[0] == '+';
+      t.isReadWrite = !op->constraint.empty() && op->constraint[0] == '+';
       tempOps.push_back(t);
     }
   };
@@ -1349,13 +1346,12 @@ bool CCCodeGen::Visit(AST::AsmStmt& n) {
   for (auto& op : n.inputOperands) CollectTemps(op, false);
 
   // Emit compiler barrier before volatile asm
-  if (n.isVolatile)
-    IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
+  if (n.isVolatile) IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
 
   // Emit temp variable declarations with copy-in from the expression.
   for (auto& t : tempOps) {
-    IndStream() << "auto " << t.tempName << " = "
-                << ExprSTR(t.op->expression) << ";\n";
+    IndStream() << "auto " << t.tempName << " = " << ExprSTR(t.op->expression)
+                << ";\n";
   }
 
   // Helper: get the C variable name to use for an operand.
@@ -1384,8 +1380,7 @@ bool CCCodeGen::Visit(AST::AsmStmt& n) {
         first = false;
         if (!op->symbolicName.empty())
           IndStream() << "[" << op->symbolicName << "] ";
-        IndStream() << "\"" << op->constraint << "\"("
-                    << OpName(op) << ")";
+        IndStream() << "\"" << op->constraint << "\"(" << OpName(op) << ")";
       }
     }
   }
@@ -1401,8 +1396,7 @@ bool CCCodeGen::Visit(AST::AsmStmt& n) {
         first = false;
         if (!op->symbolicName.empty())
           IndStream() << "[" << op->symbolicName << "] ";
-        IndStream() << "\"" << op->constraint << "\"("
-                    << OpName(op) << ")";
+        IndStream() << "\"" << op->constraint << "\"(" << OpName(op) << ")";
       }
     }
   }
@@ -1423,14 +1417,12 @@ bool CCCodeGen::Visit(AST::AsmStmt& n) {
   // Write back temps for output and read-write operands.
   for (auto& t : tempOps) {
     if (t.isOutput) {
-      IndStream() << ExprSTR(t.op->expression) << " = "
-                  << t.tempName << ";\n";
+      IndStream() << ExprSTR(t.op->expression) << " = " << t.tempName << ";\n";
     }
   }
 
   // Emit compiler barrier after volatile asm
-  if (n.isVolatile)
-    IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
+  if (n.isVolatile) IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
 
   return true;
 }
@@ -1492,8 +1484,21 @@ bool CCCodeGen::Visit(AST::Barrier& n) {
 
 bool CCCodeGen::Visit(AST::Fence& n) {
   TraceEachVisit(n);
-  // Emit a full sequential-consistency fence for all CPU fence scopes.
-  IndStream() << "std::atomic_thread_fence(std::memory_order_seq_cst);\n";
+  // The order axis selects the fence strength: release publishes the
+  // writer's stores, acquire orders the reader's loads, acq_rel is the full
+  // bidirectional barrier, and seq_cst (the target default) is the
+  // sequentially-consistent fence.
+  const char* order = "seq_cst";
+  switch (n.GetOrder()) {
+  case FenceOrder::RELEASE: order = "release"; break;
+  case FenceOrder::ACQUIRE: order = "acquire"; break;
+  case FenceOrder::ACQ_REL: order = "acq_rel"; break;
+  case FenceOrder::SEQ_CST: order = "seq_cst"; break;
+  default:
+    choreo_unreachable("unsupported fence order: " + STR(n.GetOrder()) + ".");
+  }
+  IndStream() << "std::atomic_thread_fence(std::memory_order_" << order
+              << ");\n";
   return true;
 }
 
@@ -1661,8 +1666,13 @@ bool CCCodeGen::Visit(AST::NamedVariableDecl& n) {
     auto size = UnScopedExpr(SizeExprOf(*sty, true));
     if (sty->GetStorage() == Storage::LOCAL ||
         sty->GetStorage() == Storage::SHARED) {
-      os << indent << "alignas(64) " << elem_ty << " " << sym << "["
-         << UnScopedExpr(ValueSTR(sty->GetShape().ElementCountValue()))
+      size_t alignment = 64;
+      if (n.HasNote("alignment"))
+        alignment =
+            std::max(alignment,
+                     static_cast<size_t>(std::stoull(n.GetNote("alignment"))));
+      os << indent << "alignas(" << alignment << ") " << elem_ty << " " << sym
+         << "[" << UnScopedExpr(ValueSTR(sty->GetShape().ElementCountValue()))
          << "];\n";
     } else {
       os << indent << elem_ty << "* " << sym << " = static_cast<" << elem_ty

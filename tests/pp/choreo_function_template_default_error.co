@@ -1,0 +1,8 @@
+// RUN: not copp %s -o - 2>&1 | FileCheck %s
+
+template <typename T = unsupported_scalar>
+__co__ void bad_default(T value) {}
+
+// CHECK: {{.*}}choreo_function_template_default_error.co:3.1: error: unsupported Choreo type template argument 'unsupported_scalar'
+// CHECK-NEXT: template <typename T = unsupported_scalar>
+// CHECK-NEXT: ^

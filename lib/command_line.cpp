@@ -1,5 +1,6 @@
 #include "command_line.hpp"
 #include "context.hpp"
+#include <cstdlib>
 #include <fstream>
 #include <sys/stat.h>
 
@@ -26,6 +27,11 @@ Option<std::string>
     api_mode(OptionKind::User, "--api", "-api", "cffi",
              "Select API mode for generated code (cffi|sglang).",
              "--api=<mode>", true);
+Option<std::string> device_namespace(
+    OptionKind::User, "--device-namespace", "", "",
+    "Wrap generated device kernels in <namespace>. An empty value (default) "
+    "emits kernels in the global namespace.",
+    "--device-namespace=<namespace>", true);
 
 Option<std::string>
     debug_file_dir(OptionKind::User, "-ddir", "", "./build/",
@@ -110,10 +116,14 @@ Option<bool> insert_dma_fences(
     "Insert memory fences between DMA producer and consumer sites "
     "(default: true). Disable with --insert-dma-fences=false.");
 
+Option<bool> dump_fence_insertion(
+    OptionKind::User, "--dump-fence-insertion", "", false,
+    "Print the DMA fence annotations computed by FenceInsertion.");
+
 Option<bool>
     print_features(OptionKind::User, "--print-features", "", false,
-                   "Print the supported features for the selected target "
-                   "and exit. One feature per line (upper-cased).");
+                   "Print the supported language and target features and "
+                   "exit. One feature per line (upper-cased).");
 Option<bool> verbose(OptionKind::User, "--verbose", "-v", false,
                      "Display the programs invoked by the compiler.");
 Option<bool> inhibit_warning(OptionKind::User, "-w", "", false,
@@ -261,6 +271,9 @@ Option<size_t> max_local_mem_capacity(
     OptionKind::Hidden, "--max-local-mem-capacity", "-fmax-local", 0,
     "Set the max local memory capacity (in bytes) per thread. 0 means use "
     "default value.");
+Option<bool> allow_local(OptionKind::User, "--allow-local", "", false,
+                         "Allow `local` (per-thread private stack) storage on "
+                         "targets that reject it by default.");
 Option<size_t> shared_mem_alignment(OptionKind::Hidden,
                                     "--shared-mem-alignment", "-fsmem-align",
                                     true,
@@ -345,13 +358,15 @@ bool CommandLine::Parse(int argc, char** argv) {
       CCtx().SetOptimizationLevel(level);
     } else if (arg.substr(0, 2) == "-j" && arg.size() > 2) {
       // GCC-style -jN: parse concatenated job count
-      try {
-        parallel_jobs = (size_t)std::stoul(arg.substr(2));
-      } catch (...) {
+      const std::string job_str = arg.substr(2);
+      char* end = nullptr;
+      unsigned long val = std::strtoul(job_str.c_str(), &end, 10);
+      if (end == job_str.c_str() || *end != '\0') {
         std::cerr << "Invalid job count: " << arg << ".\n";
         ret_code = 1;
         return false;
       }
+      parallel_jobs = (size_t)val;
     } else if (!r.Parse(argc, argv, i)) {
       if (!r.Message().empty()) errs() << r.Message() << "\n";
       exit(r.ReturnCode());
@@ -379,6 +394,7 @@ bool CommandLine::Parse(int argc, char** argv) {
     auto& tgt = CCtx().GetTarget();
     auto arch_id =
         arch.GetValue().empty() ? tgt.DefaultArch() : ToLower(arch.GetValue());
+    std::cout << "FUNCTION_TEMPLATES\n";
     for (auto& ft : tgt.SupportedFeatures(arch_id))
       std::cout << ToUpper(ft.name) << "\n";
     exit(0);
@@ -488,6 +504,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetDMADiagnosis(diag_dma.GetValue());
   CCtx().SetLoopNorm(loop_norm.GetValue());
   CCtx().SetMaxLocalMemCapacityPerThread(max_local_mem_capacity.GetValue());
+  CCtx().SetAllowLocal(allow_local.GetValue());
   CCtx().SetSharedMemAlignment(shared_mem_alignment.GetValue());
   if (use_target_lib.WasExplicitlySet())
     CCtx().SetUseTargetLib(use_target_lib.GetValue());
@@ -541,6 +558,7 @@ bool CommandLine::Parse(int argc, char** argv) {
   CCtx().SetFastCompile(fast_compile.GetValue());
   CCtx().SetUseFastMath(use_fast_math.GetValue());
   CCtx().SetDebugFileDir(debug_file_dir.GetValue());
+  CCtx().SetDeviceNamespace(device_namespace.GetValue());
 
   if (!trace_visit.GetValue().empty())
     setenv("CHOREO_TRACE_VISITOR", ToUpper(trace_visit.GetValue()).c_str(), 1);

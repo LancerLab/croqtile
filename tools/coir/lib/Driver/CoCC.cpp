@@ -5,9 +5,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "ast.hpp"
 #include "ASTCoIRGen.hpp"
 #include "assess.hpp"
+#include "ast.hpp"
 #include "aux.hpp"
 #include "choreo_api.hpp"
 #include "codegen.hpp"
@@ -17,10 +17,10 @@
 #include "options.hpp"
 #include "pipeline.hpp"
 
-#include "Dialect/CoIR/Passes.h"
 #include "Dialect/CoIR/CoIRDialect.h"
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
+#include "Dialect/CoIR/Passes.h"
 
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -36,10 +36,10 @@
 #include <iostream>
 #include <sstream>
 
-#include "choreo_header.inc"
-#include "choreo_types_header.inc"
-#include "choreo_types_cute_header.inc"
 #include "choreo_cute_header.inc"
+#include "choreo_header.inc"
+#include "choreo_types_cute_header.inc"
+#include "choreo_types_header.inc"
 
 using namespace Choreo;
 
@@ -53,8 +53,7 @@ static Option<bool> emit_coir(OptionKind::User, "-emit-coir", "", false,
 static Option<bool> no_opt(OptionKind::User, "--no-opt", "", false,
                            "Skip CoIR optimization passes.");
 static Option<bool> compile_binary(OptionKind::User, "--compile-binary", "-cb",
-                                   false,
-                                   "Compile to executable binary.");
+                                   false, "Compile to executable binary.");
 
 namespace {
 
@@ -62,8 +61,8 @@ bool ShouldEmitSource() { return emit_source || generate_script; }
 bool ShouldGenerateBinary() { return compile_binary; }
 bool ShouldGenerateAssembly() { return false; /* TODO */ }
 
-void SetupScriptContext(const std::string &input_file) {
-  auto &sctx = CoIR::ScriptContext::Get();
+void SetupScriptContext(const std::string& input_file) {
+  auto& sctx = CoIR::ScriptContext::Get();
   sctx.types_header = __choreo_types_header_as_string;
   sctx.runtime_header = __choreo_header_as_string;
   // Resolve to absolute path so that relative inputs (e.g. "foo.co")
@@ -93,7 +92,7 @@ void SetupScriptContext(const std::string &input_file) {
     sctx.arch_override.clear();
 
   // CUDA home for in-memory compilation.
-  const char *env = std::getenv("CUDA_HOME");
+  const char* env = std::getenv("CUDA_HOME");
   if (env)
     sctx.cuda_home = env;
   else
@@ -103,13 +102,12 @@ void SetupScriptContext(const std::string &input_file) {
 /// Extract -mcoir / -mcoir= tokens from argv and forward them to the
 /// LLVM/MLIR cl::opt registry (like clang's -mllvm).  Returns the
 /// filtered argc/argv for Choreo's CommandLine parser, or {0, {}} on error.
-std::pair<int, std::vector<char *>>
-ProcessCoIROptions(int argc, char *argv[]) {
+std::pair<int, std::vector<char*>> ProcessCoIROptions(int argc, char* argv[]) {
   coir::registerCoIRPasses();
   mlir::registerPassManagerCLOptions();
 
   std::vector<std::string> coir_args;
-  std::vector<char *> filtered;
+  std::vector<char*> filtered;
   filtered.push_back(argv[0]);
 
   for (int i = 1; i < argc; ++i) {
@@ -128,9 +126,9 @@ ProcessCoIROptions(int argc, char *argv[]) {
   }
 
   if (!coir_args.empty()) {
-    std::vector<const char *> fwd;
+    std::vector<const char*> fwd;
     fwd.push_back("cocc (CoIR option parsing)");
-    for (auto &a : coir_args) fwd.push_back(a.c_str());
+    for (auto& a : coir_args) fwd.push_back(a.c_str());
     llvm::cl::ParseCommandLineOptions(fwd.size(), fwd.data(),
                                       "CoIR/MLIR options via -mcoir\n");
   }
@@ -174,7 +172,9 @@ void CollectSemaStats() {
         case UsageType::ShapeCompatibility: stats.shape_compat_runtime++; break;
         case UsageType::ElementAccess: stats.elem_access_runtime++; break;
         case UsageType::LoopBound: stats.loop_bound_runtime++; break;
-        case UsageType::HardwareConstraint: stats.hw_constraint_runtime++; break;
+        case UsageType::HardwareConstraint:
+          stats.hw_constraint_runtime++;
+          break;
         }
       }
     }
@@ -185,7 +185,7 @@ void CollectSemaStats() {
 /// coir.dim_checks attributes on KernelOps.  Each check becomes a host-side
 /// runtime_check with ShapeCompatibility / ENTRY classification.
 void CollectDimCheckStats(mlir::ModuleOp module) {
-  auto &stats = CCtx().GetAssessmentStats();
+  auto& stats = CCtx().GetAssessmentStats();
   module->walk([&](coir::KernelOp kernel) {
     auto attr = kernel->getAttrOfType<mlir::ArrayAttr>("coir.dim_checks");
     if (!attr) return;
@@ -200,14 +200,14 @@ void CollectDimCheckStats(mlir::ModuleOp module) {
 
 } // namespace
 
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
   auto [filt_argc, filt_argv] = ProcessCoIROptions(argc, argv);
   if (filt_argc == 0) return 1;
 
   CommandLine cl;
   if (!cl.Parse(filt_argc, filt_argv.data())) return cl.ReturnCode();
 
-  auto &reg = OptionRegistry::GetInstance();
+  auto& reg = OptionRegistry::GetInstance();
   std::string input_file = reg.GetInputFileName();
 
   if (!emit_source && !generate_script && !emit_coir && !dump_ast &&
@@ -252,14 +252,14 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  auto &session = CoIR::IRSession::Get();
+  auto& session = CoIR::IRSession::Get();
 
   // Count cross-parameter dimension consistency checks emitted as
   // coir.dim_checks on KernelOps during IR generation.
   CollectDimCheckStats(session.Module());
   int coirThreshold = static_cast<int>(CCtx().RuntimeCheckCostThreshold());
-  CoIR::Pipeline pipeline(session.Module(), session.Context(),
-                           coirThreshold, CCtx().PrintStats());
+  CoIR::Pipeline pipeline(session.Module(), session.Context(), coirThreshold,
+                          CCtx().PrintStats());
 
   // --- Emit IR early exit ---
   if (emit_coir) {
@@ -294,10 +294,8 @@ int main(int argc, char *argv[]) {
     auto& target = CCtx().GetTarget();
     auto arch = CCtx().GetArch();
     CoIR::StampTargetOnModule(session.Module(), CCtx().TargetName(), arch,
-                              target.MMATargetName(arch),
-                              target.HasTMA(arch),
-                              target.HasDMA(arch),
-                              target.HasBufferMap(arch));
+                              target.MMATargetName(arch), target.HasTMA(arch),
+                              target.HasDMA(arch), target.HasBufferMap(arch));
   }
 
   // --- Safety instrumentation (always runs) ---
@@ -325,10 +323,10 @@ int main(int argc, char *argv[]) {
   if (ShouldEmitSource()) {
     bool is_script = generate_script;
     if (is_script) SetupScriptContext(input_file);
-    std::string out_path =
-        output.WasExplicitlySet() ? output.GetValue() : "";
+    std::string out_path = output.WasExplicitlySet() ? output.GetValue() : "";
     std::string arch = CCtx().GetArch();
-    result = pipeline.EmitSource(CCtx().TargetName(), is_script, out_path, arch);
+    result =
+        pipeline.EmitSource(CCtx().TargetName(), is_script, out_path, arch);
   } else if (ShouldGenerateBinary()) {
     SetupScriptContext(input_file);
     std::string out_path =
@@ -343,8 +341,7 @@ int main(int argc, char *argv[]) {
 
   // --- Stats reporting ---
   // CollectAssertStats already wrote directly into CCtx().GetAssessmentStats().
-  if (CCtx().PrintStats())
-    PrintAssessmentStats(CCtx().GetAssessmentStats());
+  if (CCtx().PrintStats()) PrintAssessmentStats(CCtx().GetAssessmentStats());
 
   return result;
 }

@@ -21,14 +21,13 @@ namespace coir {
 namespace gpu {
 
 int compileToExecutable(mlir::ModuleOp module, llvm::StringRef arch,
-                        llvm::StringRef outputPath,
-                        const char *typesHeader, const char *runtimeHeader,
-                        llvm::StringRef cudaHome);
+                        llvm::StringRef outputPath, const char* typesHeader,
+                        const char* runtimeHeader, llvm::StringRef cudaHome);
 
-void embedPTXInHostModule(llvm::Module &hostMod, llvm::StringRef ptxString,
+void embedPTXInHostModule(llvm::Module& hostMod, llvm::StringRef ptxString,
                           llvm::StringRef globalName);
 
-bool emitHostObjectFile(llvm::Module &hostMod, llvm::StringRef outputPath);
+bool emitHostObjectFile(llvm::Module& hostMod, llvm::StringRef outputPath);
 
 bool linkHostExecutable(llvm::StringRef objectPath,
                         llvm::StringRef executablePath,

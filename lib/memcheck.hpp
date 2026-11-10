@@ -40,6 +40,18 @@ private:
   RtMemUsageMap rt_tot_mem_usage;
   std::vector<RtMemUsageCheckInfo> rt_mem_usage_check_list;
 
+  // Joint shared<group>+SHARED budget check for aliased-pool targets. Captures
+  // the compile-time/runtime usage totals for both storages at each
+  // runtime-shaped allocation so the joint limit can be enforced at runtime.
+  struct JointRtMemUsageCheck {
+    std::vector<std::string> group_shared_useds;
+    std::vector<std::string> shared_useds;
+    location loc;
+    size_t replicas_per_pool;
+    size_t pool_bytes;
+  };
+  std::vector<JointRtMemUsageCheck> rt_joint_mem_usage_check_list;
+
   CtMemUsageMap mem_usage_limit;
   std::unordered_set<Storage> tocheck_storage;
 
@@ -51,6 +63,16 @@ private:
       ct_mem_usage_list.push(CtMemUsageMap{});
       rt_mem_usage_list.push(RtMemUsageMap{});
       ct_mem_alloc_inst_sets.push_back(/*empty map*/ {});
+    }
+    // Target lowering may introduce fixed-size scratch arrays that have no
+    // source declaration. They live in the enclosing lexical storage scope.
+    if (n.HasNote("codegen_local_bytes")) {
+      auto size = std::stoull(n.GetNote("codegen_local_bytes"));
+      ct_mem_usage_list.top()[Storage::LOCAL] += size;
+      ct_tot_mem_usage[Storage::LOCAL] += size;
+      std::ostringstream allocation;
+      allocation << "target scratch at " << n.LOC();
+      ct_mem_alloc_inst_sets.back()[Storage::LOCAL].push_back(allocation.str());
     }
     return true;
   }
@@ -124,6 +146,37 @@ private:
         Error1(n.LOC(), error_msg);
       }
     }
+
+    // Joint shared<group>+SHARED budget for targets where the on-chip
+    // scratchpad is shared between the per-GROUP `shared<group>` tier and the
+    // block-level SHARED (DSM) tier. See Target::GetSharedScratchpadPool.
+    const auto pool = CCtx().GetSharedScratchpadPool();
+    if (pool.aliased) {
+      const size_t group_shared_total =
+          ct_tot_mem_usage[Storage::GROUP_SHARED] * pool.replicas_per_pool;
+      const size_t shared_total = ct_tot_mem_usage[Storage::SHARED];
+      if (group_shared_total + shared_total > pool.pool_bytes) {
+        std::ostringstream oss;
+        for (const auto& inst_set : ct_mem_alloc_inst_sets)
+          for (Storage sto : {Storage::GROUP_SHARED, Storage::SHARED})
+            if (inst_set.count(sto))
+              for (const auto& inst : inst_set.at(sto)) oss << "\n\t\t" << inst;
+        std::string error_msg =
+            "shared<group>+SHARED memory OUT OF BOUND!\n\t"
+            "In the scope " +
+            SSTab().ScopeName() +
+            ", shared<group> and SHARED memory share one "
+            "on-chip pool:\n\t"
+            "shared<group> (per-group) * " +
+            std::to_string(pool.replicas_per_pool) +
+            " groups + SHARED:\n\tUsed: " + std::to_string(group_shared_total) +
+            " + " + std::to_string(shared_total) + " = " +
+            std::to_string(group_shared_total + shared_total) +
+            " bytes, Limit: " + std::to_string(pool.pool_bytes) +
+            " bytes. With variables:" + oss.str();
+        Error1(n.LOC(), error_msg);
+      }
+    }
   }
 
   // Update the maximum ct memory usage for each storage level
@@ -173,6 +226,26 @@ private:
     return res;
   }
 
+  // Build a "(ct + rt0 * rt1 + ...)" arithmetic string from the usage entries
+  // produced by SumUpCtRtUsage. An entry is a compile-time integer when it
+  // has no ':' delimiter, otherwise it is a runtime expression whose factors
+  // are joined by '*'.
+  std::string BuildUsageSum(const std::vector<std::string>& usages) {
+    std::string sum;
+    bool first = true;
+    for (const auto& used : usages) {
+      if (used.find(":") == std::string::npos) {
+        sum += (first ? "" : " + ") + used;
+      } else {
+        auto operands = SplitStringByDelimiter(used, "*");
+        sum += (first ? "" : " + ");
+        sum += DelimitedString(operands, "*");
+      }
+      first = false;
+    }
+    return sum;
+  }
+
   // display memory occupancy as an integer percentage
   std::string GetCtMemOccupancyRate(Storage sto) {
     std::ostringstream oss;
@@ -215,16 +288,38 @@ private:
       }
       FCtx(fname).AppendRtCheck({lhs, op, rhs, loc, message, {}});
     }
+
+    // Joint shared<group>+SHARED budget for aliased-pool targets:
+    //     group_shared * replicas_per_pool + shared <= pool_bytes
+    for (const auto& jc : rt_joint_mem_usage_check_list) {
+      std::string lhs = "(size_t)(((" + BuildUsageSum(jc.group_shared_useds) +
+                        ") * " + std::to_string(jc.replicas_per_pool) + " + (" +
+                        BuildUsageSum(jc.shared_useds) + "))";
+      std::string op = "<=";
+      std::string rhs = "(size_t)" + std::to_string(jc.pool_bytes);
+      std::string message =
+          "total shared<group>+SHARED memory (shared pool) usage "
+          "(compile time and runtime) should not exceed " +
+          std::to_string(jc.pool_bytes) + " bytes";
+      FCtx(fname).AppendRtCheck({lhs, op, rhs, jc.loc, message, {}});
+    }
+
     rt_mem_usage_check_list.clear();
+    rt_joint_mem_usage_check_list.clear();
   }
 
 public:
   MemUsageCheck() : VisitorWithSymTab("muchk") {
-    // Don not manage global memory cap when target requires
-    if (!CCtx().HasFeature(ChoreoFeature::MGM))
-      tocheck_storage = {Storage::LOCAL, Storage::SHARED};
-    else
-      tocheck_storage = {Storage::LOCAL, Storage::SHARED, Storage::GLOBAL};
+    // SHARED is always budgeted; LOCAL and shared<group> are added only when
+    // the target exposes those tiers.
+    tocheck_storage = {Storage::SHARED};
+    if (CCtx().GetTarget().IsLocalStorageSupported(CCtx().GetArch()))
+      tocheck_storage.insert(Storage::LOCAL);
+    if (CCtx().GetTarget().IsGroupSharedStorageSupported(CCtx().GetArch()))
+      tocheck_storage.insert(Storage::GROUP_SHARED);
+    // Do not manage global memory cap when the target manages it itself.
+    if (CCtx().HasFeature(ChoreoFeature::MGM))
+      tocheck_storage.insert(Storage::GLOBAL);
     // initialize with ct_tot_mem_usage
     for (const auto& sto : tocheck_storage) {
       ct_tot_mem_usage[sto] = 0;
@@ -273,6 +368,15 @@ public:
       if (mem_usage_limit.count(sto))
         rt_mem_usage_check_list.push_back(std::make_tuple(
             SumUpCtRtUsage(sto), n.LOC(), mem_usage_limit.at(sto), sto));
+      // Snapshot the joint shared<group>+SHARED budget for aliased-pool
+      // targets so it is enforced at runtime too.
+      const auto pool = CCtx().GetSharedScratchpadPool();
+      if ((sto == Storage::GROUP_SHARED || sto == Storage::SHARED) &&
+          pool.aliased)
+        rt_joint_mem_usage_check_list.push_back(
+            {SumUpCtRtUsage(Storage::GROUP_SHARED),
+             SumUpCtRtUsage(Storage::SHARED), n.LOC(), pool.replicas_per_pool,
+             pool.pool_bytes});
     } else {
       // compile time usage
       auto size = sty->ByteSize() * array_dim_product;

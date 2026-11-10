@@ -25,6 +25,7 @@ extern Choreo::Option<bool> verbose;
 extern Choreo::Option<std::string> target_options;
 extern Choreo::Option<bool> use_hetero_tileflow;
 extern Choreo::Option<bool> insert_dma_fences;
+extern Choreo::Option<bool> dump_fence_insertion;
 
 namespace Choreo {
 
@@ -82,6 +83,10 @@ inline const std::string LevelPred(ParallelLevel pl = ParallelLevel::BLOCK,
 inline const std::string BufferInitPred(Storage s) {
   switch (s) {
   case Storage::SHARED: return LevelPred(ParallelLevel::BLOCK);
+  case Storage::GROUP_SHARED:
+    assert(TargetHasLevel(ParallelLevel::GROUP) &&
+           "shared<group> requires a GROUP parallel level.");
+    return LevelPred(ParallelLevel::GROUP);
   case Storage::LOCAL:
     if (TargetHasLevel(ParallelLevel::GROUP))
       return LevelPred(ParallelLevel::GROUP);
@@ -95,6 +100,7 @@ inline const std::string BufferInitPred(Storage s) {
 inline const char* EmitSync(Storage s) {
   switch (s) {
   case Storage::SHARED: return "__syncthreads()";
+  case Storage::GROUP_SHARED:
   case Storage::LOCAL: return "__syncsubthreads()";
   default:
     choreo_unreachable("unsupported storage location for the synchronization.");
@@ -155,7 +161,8 @@ public:
     dbgs()
         << "==================== Host Map Information ====================\n";
     dbgs() << std::setw(30) << std::left << "Symbol" << std::setw(50)
-           << std::left << " -> Host Name" << "\n";
+           << std::left << " -> Host Name"
+           << "\n";
     dbgs()
         << "--------------------------------------------------------------\n";
 
@@ -174,7 +181,8 @@ public:
     dbgs()
         << "==================== Device Map Information ====================\n";
     dbgs() << std::setw(30) << std::left << "Symbol" << std::setw(50)
-           << std::left << " -> Device Name" << "\n";
+           << std::left << " -> Device Name"
+           << "\n";
     dbgs()
         << "----------------------------------------------------------------\n";
 

@@ -1,0 +1,9 @@
+// RUN: not choreo -t cc -es %s -o - 2>&1 | FileCheck %s
+
+__co__ void invalid_alignment() {
+  parallel by 1 : block {
+    alignas(3) local u8[16] buffer;
+  }
+}
+
+// CHECK: error: alignas argument must be a positive power of two

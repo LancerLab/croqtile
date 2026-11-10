@@ -111,6 +111,30 @@ def LowerDMADesc : Pass<"coir-lower-dma-desc"> {
   ];
 }
 
+def FenceElision : Pass<"coir-fence-elision"> {
+  let summary = "Drop fences made redundant by stronger available fences";
+  let description = [{
+    Drops a coir.fence that is made redundant by an earlier fence that
+    subsumes it under the four-axis lattice (space, entity, order, scope):
+    seq_cst >= acq_rel >= {release, acquire}, entity `all` subsumes a
+    specific agent, and a coarser scope subsumes a finer one; the space axis
+    currently requires equality. Availability is a forward must-analysis over
+    each region's block CFG: writes kill guarantees with a release component,
+    reads kill guarantees with an acquire component, fences and effect-free
+    ops are transparent, and ops without effect information kill everything.
+    The pre-op state propagates into nested non-loop regions; loop bodies
+    start from an empty state (the pre-loop state does not hold on later
+    iterations).
+
+    Runs unconditionally in the lowering pipeline (even at -O0), because
+    fences lower to hardware barrier instructions; they are correctness
+    annotations, not optional optimizations.
+  }];
+
+  let constructor = "::coir::createFenceElisionPass()";
+  let dependentDialects = ["::coir::CoIRDialect"];
+}
+
 def PlanDMACopy : Pass<"coir-plan-dma-copy"> {
   let summary = "Plan cooperative tiled copy strategy for DMA invoke ops";
   let description = [{

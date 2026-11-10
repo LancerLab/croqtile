@@ -1,10 +1,10 @@
 // lib/CoIRDialect.cpp
 #include "Dialect/CoIR/CoIRDialect.h"
+#include "Dialect/CoIR/CoIRAttrs.h"
 #include "Dialect/CoIR/CoIROps.h"
 #include "Dialect/CoIR/CoIRTypes.h"
-#include "Dialect/CoIR/CoIRAttrs.h"
-#include "mlir/IR/DialectImplementation.h"
 #include "mlir/Dialect/Async/IR/Async.h"
+#include "mlir/IR/DialectImplementation.h"
 #include "llvm/ADT/TypeSwitch.h"
 
 #pragma GCC diagnostic push
@@ -29,11 +29,11 @@ void CoIRDialect::initialize() {
   addOperations<
 #define GET_OP_LIST
 #include "CoIR/CoIROps.cpp.inc"
-  >();
+      >();
   addAttributes<
 #define GET_ATTRDEF_LIST
 #include "CoIR/CoIRAttrs.cpp.inc"
-  >();
+      >();
 
   getContext()->loadDialect<mlir::async::AsyncDialect>();
 }

@@ -83,6 +83,7 @@ struct PBAttributes {
 #include <cstring>
 #include <memory>
 #include "ast.hpp"
+#include "choreo_template.hpp"
 #include "symtab.hpp"
 #include "scanner.hpp"
 
@@ -207,7 +208,7 @@ extern int yylex();
 %token <std::string> IDENTIFIER ATTR_CO DEVICE_EXPR
 %token <std::string> CONST STATIC EXTERN INLINE ATTR_ID ATTRIBUTE SIGNED UNSIGNED TYPENAME DEVICE_TEMPLATE
 // type related
-%token <std::string> MDSPAN ITUPLE EVENT MUTABLE STREAM REMOVED_STAGE
+%token <std::string> MDSPAN ITUPLE EVENT MUTABLE STREAM REMOVED_STAGE ALIGNAS
 %token <Choreo::Storage> STORAGE
 %token <Choreo::ParallelLevel> PBLEVEL
 %token <Choreo::BaseType> F64 TF32 F32 F16 BF16 F8_E4M3 F8_E5M2 F8_UE4M3 F8_UE8M0 F6_E2M3 F6_E3M2 F4_E2M1
@@ -216,6 +217,9 @@ extern int yylex();
 %token <std::string> DMA TMA COPY PAD TRANSPOSE NONE ASYNC FNSPAN FNDATA FNMDATA FNSPANAS VIEW FROM CHUNKAT CHUNK SUBSPAN MODSPAN SQZ ZFILL PROMOTE MULTICAST EVICT_FIRST EVICT_LAST STEP STRIDE AT WAIT CALL AUTO SELECT SWAP ROTATE SYNC BARRIER FENCE CHUNKINBOUND ASSERT TRIGGER PRINT PRINTLN SWIZZLE SPARSE SPLPAREN LAUNCHBOUNDS MAXNREG
 %token <std::string> MAP REMAP
 %token DLBRAKT
+%token ACQ REL ACQ_REL SEQ_CST
+// explicit vector operations
+%token <std::string> VEC INDEX
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN SCALE MASK
 %token <std::string> UNROLL
@@ -254,11 +258,11 @@ extern int yylex();
 %nterm <AST::ptr<AST::Call>> call_stmt
 %nterm <PBAttributes> pb_attribute
 %nterm <AST::DMAAsync> tdma_async
-%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block apply_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt buffer_map_stmt mma_stmt frag_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt asm_stmt intrinsic_decl range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
+%nterm <AST::ptr<AST::Node>> any_code device_code foreach_block apply_block simple_val template_val int_or_id device_passable declaration statement assignment dma_stmt buffer_map_stmt mma_stmt frag_stmt vec_load_assignment vec_store_stmt wait_stmt trigger_stmt swap_stmt break_stmt continue_stmt yield_stmt asm_stmt intrinsic_decl range_expr param_mdspan_val chunkat_or_storage_or_select returnable span_init_val
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls named_fragment_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims step_list opt_step_list opt_stride_list at_list opt_at_list opt_from_list
 %nterm <std::pair<AST::ptr<AST::MultiValues>, AST::ptr<AST::MultiValues>>> shape_stride
-%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr ituple_derivation internal_sizeof_expr sizeof_expr frag_expr mma_exec_operand_expr opt_stream_bind
+%nterm <AST::ptr<AST::Expr>> s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr vec_index_expr vec_load_expr ituple_derivation internal_sizeof_expr sizeof_expr frag_expr mma_exec_operand_expr opt_stream_bind
 %nterm <AST::ptr<AST::AttributeExpr>> suffix_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type mdspan_as_type
 %nterm <AST::ptr<AST::DataAccess>> data_element
@@ -280,13 +284,16 @@ extern int yylex();
 %nterm <AST::ptr<AST::Synchronize>> sync_stmt
 %nterm <AST::ptr<AST::Barrier>> barrier_stmt
 %nterm <AST::ptr<AST::Fence>> fence_stmt
+%nterm <Choreo::FenceOrder> fence_order_opt
+%nterm <Choreo::ParallelLevel> fence_scope fence_scope_opt
 %nterm <std::vector<ptr<AST::SpannedOperation>>> spanned_ops
 %nterm <ptr<AST::SpannedOperation>> spanned_op
 %nterm <AST::ptr<AST::ChunkAt>> chunkat_expr subdata_expr
 %nterm <AST::ptr<AST::Select>> select_expr
 %nterm <AST::MMAOperation::ExecMethod> mma_exec_method
 %nterm <std::vector<int>> mma_issue_order mma_schedule_attribute
-%nterm <Choreo::Storage> param_storage
+%nterm <Choreo::Storage> param_storage scoped_storage
+%nterm <int64_t> alignment_spec
 %nterm <PLAnnotation> note_pl
 
 // resolving the ambiguity of dangling ELSE
@@ -384,6 +391,7 @@ device_nested_type
     : IDENTIFIER LT device_nested_type_list GT {
         auto type_str = $1 + "<" + $3->GetTypeStr() + ">";
         $3->SetTypeStr(type_str);
+        $3->SetPlainName(type_str);
         $3->SetDataType(BaseType::UNKNOWN);
         $$ = $3;
       }
@@ -406,7 +414,9 @@ device_nested_type_list
 device_complex_type
     :  device_complex_type DCOLS device_nested_type  {
         auto type_str = $1->GetTypeStr() + "::" + $3->GetTypeStr();
+        auto plain_name = $1->PlainName() + "::" + $3->PlainName();
         $1->SetTypeStr(type_str);
+        $1->SetPlainName(plain_name);
         $1->SetDataType(BaseType::UNKNOWN);
         $$ = $1;
       }
@@ -704,12 +714,29 @@ parameter_list
       }
     ;
 
+scoped_storage
+    : STORAGE { $$ = $1; }
+    | STORAGE LT PBLEVEL GT {
+        if ($1 == Storage::SHARED && $3 == ParallelLevel::GROUP)
+          $$ = Storage::GROUP_SHARED;
+        else {
+          Parser::error(@3,
+              "only 'shared<group>' is a valid scoped storage; use bare "
+              "'local'/'shared'/'global' for other scopes.");
+          $$ = $1;
+        }
+      }
+    ;
+
 param_storage
-    : STORAGE {
+    : scoped_storage {
         if ($1 == Storage::SHARED)
           Parser::error(@1, "the shared data can not be used as a parameter.");
         else if ($1 == Storage::LOCAL)
           Parser::error(@1, "the local data can not be used as a parameter.");
+        else if ($1 == Storage::GROUP_SHARED)
+          Parser::error(@1,
+              "the shared<group> data can not be used as a parameter.");
         else
           $$ = $1;
       }
@@ -769,6 +796,8 @@ statement
       }
     | mma_stmt     SEMCOL        { $$ = $1; }
     | frag_stmt    SEMCOL        { $$ = $1; }
+    | vec_load_assignment SEMCOL { $$ = $1; }
+    | vec_store_stmt SEMCOL      { $$ = $1; }
     | wait_stmt    SEMCOL        { $$ = $1; }
     | trigger_stmt SEMCOL        { $$ = $1; }
     | call_stmt    SEMCOL        { $$ = $1; }
@@ -818,12 +847,31 @@ barrier_stmt
     ;
 
 fence_stmt
-    : SYNC DOT FENCE COL PBLEVEL {
-        $$ = AST::Make<AST::Fence>(@1, $5);
+    : SYNC DOT FENCE fence_order_opt LT STORAGE GT fence_scope_opt {
+        auto level = ($8 == ParallelLevel::NONE) ? DefaultLevelForStorage($6)
+                                                 : $8;
+        $$ = AST::Make<AST::Fence>(@1, level, $6, $4);
       }
-    | SYNC DOT FENCE COL PBLEVEL LT STORAGE GT {
-        $$ = AST::Make<AST::Fence>(@1, $5, $7);
+    | SYNC DOT FENCE fence_order_opt fence_scope {
+        $$ = AST::Make<AST::Fence>(@1, $5, Storage::NONE, $4);
       }
+    ;
+
+fence_order_opt
+    : ACQ     { $$ = FenceOrder::ACQUIRE; }
+    | REL     { $$ = FenceOrder::RELEASE; }
+    | ACQ_REL { $$ = FenceOrder::ACQ_REL; }
+    | SEQ_CST { $$ = FenceOrder::SEQ_CST; }
+    | %empty  { $$ = FenceOrder::DEFAULT; }
+    ;
+
+fence_scope
+    : COL PBLEVEL { $$ = $2; }
+    ;
+
+fence_scope_opt
+    : fence_scope { $$ = $1; }
+    | %empty      { $$ = ParallelLevel::NONE; }
     ;
 
 return_stmt
@@ -1017,9 +1065,33 @@ declaration
 
 multi_decls
     : named_spanned_decls { $$ = $1; }
+    | alignment_spec named_spanned_decls {
+        for (auto item : $2->AllSubs()) {
+          auto decl = cast<AST::NamedVariableDecl>(item);
+          auto storage = decl->GetMemory()->Get();
+          if (storage != Storage::LOCAL && storage != Storage::SHARED) {
+            error(@1, "alignas is supported only for local or shared buffers");
+            YYERROR;
+          }
+          decl->AddNote("alignment", std::to_string($1));
+        }
+        $2->SetLOC(@1);
+        $$ = $2;
+      }
     | named_fragment_decls { $$ = $1; }
     | named_scalar_decls  { $$ = $1; }
     | named_event_decls   { $$ = $1; }
+    ;
+
+alignment_spec
+    : ALIGNAS LPAREN num_expr RPAREN {
+        int64_t alignment = static_cast<int64_t>($3->Val());
+        if (alignment <= 0 || (alignment & (alignment - 1)) != 0) {
+          error(@3, "alignas argument must be a positive power of two");
+          YYERROR;
+        }
+        $$ = alignment;
+      }
     ;
 
 named_scalar_decls
@@ -1058,7 +1130,7 @@ named_scalar_decls
         }
         $$ = $2;
       }
-    | STORAGE named_scalar_decls {
+    | scoped_storage named_scalar_decls {
         for (auto sub : $2->AllSubs()) {
           auto decl = cast<AST::NamedVariableDecl>(sub);
           decl->SetMemory(AST::Make<AST::Memory>(@1, $1));
@@ -1177,7 +1249,7 @@ named_fragment_decls
     ;
 
 named_spanned_decls
-    : STORAGE mdspan_as_type spanned_decls {
+    : scoped_storage mdspan_as_type spanned_decls {
         auto mem = AST::Make<AST::Memory>(@1, $1);
         for (auto item : $3->AllSubs()) {
           auto decl = cast<AST::NamedVariableDecl>(item);
@@ -1460,7 +1532,7 @@ note_pl
 
 storage_qual
     : %empty { $$ = AST::Make<AST::Memory>(loc); }
-    | STORAGE { $$ = AST::Make<AST::Memory>(@1, $1); }
+    | scoped_storage { $$ = AST::Make<AST::Memory>(@1, $1); }
     ;
 
 arith_operation
@@ -1626,6 +1698,7 @@ s_expr
     | s_expr NE s_expr { $$ = AST::Make<AST::Expr>(@1, "!=", $1, $3); }
     | s_expr LE s_expr { $$ = AST::Make<AST::Expr>(@1, "<=", $1, $3); }
     | s_expr GE s_expr { $$ = AST::Make<AST::Expr>(@1, ">=", $1, $3); }
+    | vec_index_expr   { $$ = $1; }
     | simple_val       { $$ = AST::Make<AST::Expr>(@1, $1); }
     | ituple_list      { $$ = AST::Make<AST::Expr>(@1, $1); }
     | mdspan_list      { $$ = AST::Make<AST::Expr>(@1, $1); }
@@ -2162,7 +2235,7 @@ sync_type
 
 chunkat_or_storage_or_select
     : { ignore_fndata = true; } chunkat_expr { $$ = $2; ignore_fndata = false; }
-    | STORAGE { $$ = AST::Make<AST::Memory>(@1, $1); }
+    | scoped_storage { $$ = AST::Make<AST::Memory>(@1, $1); }
     | select_expr  { $$ = $1; }
     ;
 
@@ -2467,6 +2540,55 @@ frag_stmt
       }
     | COPY_STMT LPAREN frag_expr COMMA frag_expr RPAREN {
         $$ = AST::Make<AST::FragTransfer>(@1, AST::FragTransferKind::COPY, $3, $5);
+      }
+    ;
+
+vec_index_expr
+    : VEC INDEX LT num_expr GT {
+        if ($4->Val() <= 0) {
+          error(@4,
+                "vector lane count must be a positive compile-time integer");
+          YYERROR;
+        }
+        auto index = AST::Make<AST::VectorIndex>(@1, $4->Val());
+        $$ = AST::Make<AST::Expr>(@1, index);
+      }
+    ;
+
+vec_load_expr
+    : VEC LOAD data_element {
+        auto load = AST::Make<AST::VectorMemory>(
+            @1, AST::VectorMemory::Kind::Load, $3);
+        $$ = AST::Make<AST::Expr>(@1, load);
+      }
+    | VEC LOAD data_element COMMA s_expr COMMA s_expr {
+        auto load = AST::Make<AST::VectorMemory>(
+            @1, AST::VectorMemory::Kind::Load, $3, nullptr, $5, $7);
+        $$ = AST::Make<AST::Expr>(@1, load);
+      }
+    ;
+
+vec_load_assignment
+    : IDENTIFIER ASSIGN vec_load_expr {
+        if (!symtab.Exists($1)) {
+          symtab.AddSymbol($1, MakeUnknownType());
+          $$ = AST::Make<AST::NamedVariableDecl>(
+              @1, $1, AST::Make<AST::DataType>(@1, BaseType::UNKNOWN),
+              nullptr, $3);
+        } else {
+          $$ = AST::Make<AST::Assignment>(@2, $1, $3);
+        }
+      }
+    ;
+
+vec_store_stmt
+    : VEC STORE data_element COMMA s_expr {
+        $$ = AST::Make<AST::VectorMemory>(
+            @1, AST::VectorMemory::Kind::Store, $3, $5);
+      }
+    | VEC STORE data_element COMMA s_expr COMMA s_expr {
+        $$ = AST::Make<AST::VectorMemory>(
+            @1, AST::VectorMemory::Kind::Store, $3, $5, $7);
       }
     ;
 
@@ -3110,16 +3232,26 @@ void Parser::error(const location &loc , const std::string &message) {
          << ((should_use_colors()) ? color_reset : "");
   errs() << message << "\n";
 
-  if (!CCtx().ShowSourceLocation()) return;
+  if (CCtx().ShowSourceLocation()) {
+    std::string error_line = CCtx().GetSourceLine(loc.begin.line);
+    if (!error_line.empty()) {
+      errs() << "  " << error_line << "\n";
 
-  std::string error_line = CCtx().GetSourceLine(loc.begin.line);
-  if (!error_line.empty()) {
-    errs() << "  " << error_line << "\n";
+      int col = CCtx().MapExpandedColToOriginal(loc.begin.line,
+                                                loc.begin.column);
+      errs() << "  ";
+      for (int i = 1; i < col; ++i) errs() << " ";
+      errs() << "^" << "\n";
+    }
+  }
 
-    int col = CCtx().MapExpandedColToOriginal(loc.begin.line, loc.begin.column);
-    errs() << "  ";
-    for (int i = 1; i < col; ++i) errs() << " ";
-    errs() << "^" << "\n";
+  if (auto* instance = FindActiveChoreoTemplateInstance(
+          loc.begin.filename, static_cast<size_t>(loc.begin.line))) {
+    Choreo::info(location(instance->filename,
+                          static_cast<int>(instance->request_line),
+                          static_cast<int>(instance->request_column)),
+                 "in instantiation of Choreo template '" +
+                     instance->display_name + "' requested here");
   }
 
   pctx.recordError();

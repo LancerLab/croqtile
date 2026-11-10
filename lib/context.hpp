@@ -4,6 +4,7 @@
 // shared global context for a compilation process
 
 #include "assess.hpp"
+#include "buffer_access.hpp"
 #include "fragment_layout.hpp"
 #include "io.hpp"
 #include "loc.hpp"
@@ -96,6 +97,8 @@ struct DMABufferInfo {
   std::string buffer; // buffer name, if explicitly named
   DMABufferKind from_kind = DOK_UNKNOWN;
   DMABufferKind to_kind = DOK_UNKNOWN;
+  Storage from_sto = Storage::DEFAULT; // source buffer storage tier
+  Storage to_sto = Storage::DEFAULT;   // destination buffer storage tier
 };
 
 // per-function(name) future-buffer info
@@ -496,9 +499,10 @@ class SymbolTable;
 class CompilationContext {
 private:
   std::map<std::string, FunctionContext> function_contexts;
-  AssessmentStats assessment_stats; // accumulated across all functions
-  VectorizerStats vectorizer_stats; // accumulated across all functions
-  MemReuseStats mem_reuse_stats;    // accumulated across all functions
+  AssessmentStats assessment_stats;  // accumulated across all functions
+  VectorizerStats vectorizer_stats;  // accumulated across all functions
+  MemReuseStats mem_reuse_stats;     // accumulated across all functions
+  BufferAccessLog buffer_access_log; // buffer access log from analysis
   std::unique_ptr<Target> compile_target = nullptr;
   std::map<std::string, std::unique_ptr<Target>> device_targets;
   std::vector<ArchId> archs;
@@ -548,6 +552,8 @@ private:
   bool vectorize = false;         // enable loop vectorization
   size_t max_local_mem_capacity =
       0; // max local memory capacity per thread (0: use default)
+  bool allow_local = false; // allow `local` (per-thread private stack) on
+                            // targets that reject it by default
   size_t shared_mem_alignment = 0; // alignment of shared memory set by user
   bool inhibit_warning = false;    // Inhibit all warning messages.
   bool warning_as_error = false;   // Make all warnings into errors.
@@ -570,6 +576,7 @@ private:
                                // and named DMAs to prevent resource exhaustion.
   std::string debug_file_dir;  // directory for compiler debug artifacts
   std::string api_mode = "cffi"; // API mode for generated code
+  std::string device_namespace;  // namespace wrapping generated device kernels
   DebugLinePathMode debug_line_path_mode = DebugLinePathMode::WorkspaceRelative;
 
 private:
@@ -765,6 +772,14 @@ public:
     return GetTarget().GetMaxBufferMapBytes(GetArch());
   }
 
+  Target::SharedScratchpadPool GetSharedScratchpadPool() const {
+    return GetTarget().GetSharedScratchpadPool(GetArch());
+  }
+
+  size_t GetMaxGroupDim() const {
+    return GetTarget().GetMaxGroupDim(GetArch());
+  }
+
   size_t GetMaxThreadsPerBlock() const {
     return GetTarget().GetMaxThreadsPerBlock(GetArch());
   }
@@ -811,6 +826,7 @@ public:
   bool NoMapHoist() const { return no_map_hoist; }
   bool Vectorize() const { return vectorize; }
   size_t MaxLocalMemCapacity() const { return max_local_mem_capacity; }
+  bool AllowLocal() const { return allow_local; }
   size_t SharedMemAlignment() const { return shared_mem_alignment; }
   bool InhibitWarning() const { return inhibit_warning; }
   bool WarningAsError() const { return warning_as_error; }
@@ -823,6 +839,10 @@ public:
   VectorizerStats& GetVectorizerStats() { return vectorizer_stats; }
   const MemReuseStats& GetMemReuseStats() const { return mem_reuse_stats; }
   MemReuseStats& GetMemReuseStats() { return mem_reuse_stats; }
+  const BufferAccessLog& GetBufferAccessLog() const {
+    return buffer_access_log;
+  }
+  BufferAccessLog& GetBufferAccessLog() { return buffer_access_log; }
   AssertionCost RuntimeCheckCostThreshold() const { return rtc_cost_threshold; }
   bool DisableRuntimeCheck() const {
     return rtc_cost_threshold == AssertionCost::NONE;
@@ -839,6 +859,8 @@ public:
   void SetDebugFileDir(const std::string& dir) { debug_file_dir = dir; }
   const std::string& GetApiMode() const { return api_mode; }
   void SetApiMode(const std::string& mode) { api_mode = mode; }
+  const std::string& GetDeviceNamespace() const { return device_namespace; }
+  void SetDeviceNamespace(const std::string& ns) { device_namespace = ns; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }
@@ -875,6 +897,7 @@ public:
   void SetMaxLocalMemCapacityPerThread(size_t sz) {
     max_local_mem_capacity = sz;
   }
+  void SetAllowLocal(bool value) { allow_local = value; }
   void SetDeviceOnly(bool value) { device_only = value; }
   void SetFastCompile(bool value) { fast_compile = value; }
   void SetUseFastMath(bool value) { use_fast_math = value; }
@@ -971,6 +994,9 @@ public:
   }
   bool TargetSupportVectorize() const {
     return HasFeature(ChoreoFeature::VECTORIZE, GetArch());
+  }
+  bool TargetSupportsExplicitVector() const {
+    return GetTarget().SupportsExplicitVector(GetArch());
   }
   bool TargetSupportAsyncDMA() const {
     return HasFeature(ChoreoFeature::ASYNC_DMA, GetArch());

@@ -379,6 +379,17 @@ bool SemaChecker::VisitNode(AST::BoolLiteral& n) {
 }
 
 bool SemaChecker::VisitNode(AST::Expr& n) {
+  if (auto vty = dyn_cast<VectorType>(NodeType(n));
+      vty && CCtx().TargetSupportsExplicitVector() &&
+      !CCtx().GetTarget().SupportsExplicitVectorType(
+          CCtx().GetArch(), vty->ElemType(), vty->ElemCount())) {
+    Error1(n.LOC(), "vector<" + STR(vty->ElemType()) + ", " +
+                        std::to_string(vty->ElemCount()) +
+                        "> has no legal representation on target '" +
+                        CCtx().GetTarget().Name() +
+                        "' (arch: " + CCtx().GetArch() + ").");
+    return false;
+  }
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
 
   if (input_deps.Contains(n.GetR()))
@@ -837,6 +848,26 @@ bool SemaChecker::VisitNode(AST::Fence& n) {
     return false;
   }
 
+  // Resolve an unspecified order to the target default: seq_cst on targets
+  // with a sequentially-consistent standalone fence, acq_rel otherwise.
+  if (n.order == FenceOrder::DEFAULT) {
+    n.order = (CCtx().HasTarget() &&
+               CCtx().GetTarget().SupportsSeqCstFence(CCtx().GetArch()))
+                  ? FenceOrder::SEQ_CST
+                  : FenceOrder::ACQ_REL;
+  }
+
+  // Reject an explicit seq_cst fence on a target with no sequential fence.
+  if (n.order == FenceOrder::SEQ_CST && CCtx().HasTarget() &&
+      !CCtx().GetTarget().SupportsSeqCstFence(CCtx().GetArch())) {
+    Error1(n.LOC(), "sync.fence.seq_cst is not supported by target '" +
+                        CCtx().GetTarget().Name() + "' on arch '" +
+                        CCtx().GetArch() +
+                        "'; the target has no sequentially-consistent "
+                        "standalone fence.");
+    return false;
+  }
+
   // Validate fence visibility is appropriate for the enclosing parallel level
   if (!parallel_level_stack.empty()) {
     auto enc_level = parallel_level_stack.back();
@@ -848,6 +879,20 @@ bool SemaChecker::VisitNode(AST::Fence& n) {
               " inside a parallel : " + STR(enc_level) +
               " scope; the fence scope exceeds the enclosing parallel level.");
     }
+  }
+
+  // Note when a directional (release/acquire) order collapses to the full
+  // acq_rel fence because the target has no release-only / acquire-only
+  // standalone fence instruction.
+  if ((n.order == FenceOrder::RELEASE || n.order == FenceOrder::ACQUIRE) &&
+      CCtx().HasTarget() &&
+      !CCtx().GetTarget().SupportsDirectionalFence(CCtx().GetArch())) {
+    Note(n.LOC(),
+         std::string("sync.fence.") +
+             (n.GetOrder() == FenceOrder::RELEASE ? "rel" : "acq") +
+             " on target '" + CCtx().GetTarget().Name() +
+             "' emits a full acq_rel fence; the target has no directional "
+             "(release-only / acquire-only) standalone fence.");
   }
 
   return true;
@@ -1081,74 +1126,30 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
       }
     }
   } else if (!(cast<SpannedType>(fty)->LogicalEqual(*tty))) {
-    // check: to-buffer size must be larger or equal than from
-    auto asrt = sbe::bop(OpCode::LE, f_shape.ElementCountValue(),
-                         t_shape.ElementCountValue())
-                    ->Normalize();
-    assert(IsValidValueItem(asrt));
-
-    auto message = "DMA to-buffer is too small (" +
-                   STR(f_shape.ElementCountValue()) + " > " +
-                   STR(t_shape.ElementCountValue()) + ")";
-    CreateAssessment(asrt, message, n.LOC(), n.from,
-                     UsageType::ShapeCompatibility, &n);
-
-    bool emit_error = true;
-    std::string msg;
-    if (f_shape != t_shape && f_shape.IsValid() && t_shape.IsValid()) {
-      // ignore the symbolic value inconsistance
-      for (size_t i = 0; i < f_shape.Rank(); ++i) {
-        auto& fv = f_shape.ValueAt(i);
-        auto& tv = t_shape.ValueAt(i);
-        if (!IsValueItemEqual(fv, tv)) {
-          if (tv->IsSymbolic() || fv->IsSymbolic()) {
-            emit_error = false;
-            msg += " 'from[" + std::to_string(i) + "](" + STR(fv) +
-                   ")' v.s. 'to[" + std::to_string(i) + "](" + STR(tv) + ")";
-            continue;
-          } else {
-            emit_error = true;
-            break;
-          }
-        }
-      }
-    }
-    auto f_sp_ty = cast<SpannedType>(fty);
-    auto t_sp_ty = cast<SpannedType>(tty);
-    bool supported_conditional_dma = false;
-    if (f_shape.Rank() == 2 && t_shape.Rank() == 2 && f_shape.IsValid() &&
-        t_shape.IsValid() && VIIsInt(f_shape.ValueAt(1)) &&
-        VIIsInt(t_shape.ValueAt(1)) &&
-        *VIInt(f_shape.ValueAt(1)) == *VIInt(t_shape.ValueAt(1))) {
-      auto f_sto = f_sp_ty->GetStorage();
-      auto t_sto = t_sp_ty->GetStorage();
-      supported_conditional_dma =
-          ((f_sto == Storage::GLOBAL || f_sto == Storage::DEFAULT) &&
-           t_sto == Storage::SHARED) ||
-          (f_sto == Storage::SHARED &&
-           (t_sto == Storage::GLOBAL || t_sto == Storage::DEFAULT));
-    }
-
-    bool smaller_source_dma = false;
-    if (supported_conditional_dma && sfty->e_type == stty->e_type &&
-        f_shape.SameRankAs(t_shape)) {
-      smaller_source_dma = true;
-      for (size_t i = 0; i < f_shape.Rank(); ++i) {
-        auto dim_le =
-            sbe::bop(OpCode::LE, f_shape.ValueAt(i), t_shape.ValueAt(i))
-                ->Normalize();
-        assert(IsValidValueItem(dim_le));
-        auto dim_le_bool = VIBool(dim_le);
-        if (!dim_le_bool || !dim_le_bool.value()) {
-          smaller_source_dma = false;
-          break;
-        }
-      }
-    }
-
-    if (emit_error && !smaller_source_dma) {
+    if (sfty->e_type != stty->e_type || !f_shape.SameRankAs(t_shape) ||
+        !f_shape.IsValid() || !t_shape.IsValid()) {
       Error1(n.LOC(), "Type inconsistent between DMA 'from'(" + PSTR(fty) +
                           ") and 'to'(" + PSTR(tty) + ").");
+    } else {
+      for (size_t i = 0; i < f_shape.Rank(); ++i) {
+        const auto& src_dim = f_shape.ValueAt(i);
+        const auto& dst_dim = t_shape.ValueAt(i);
+        auto nonnegative =
+            sbe::bop(OpCode::GE, src_dim, sbe::nu(0))->Normalize();
+        auto fits = sbe::bop(OpCode::LE, src_dim, dst_dim)->Normalize();
+        assert(IsValidValueItem(nonnegative));
+        assert(IsValidValueItem(fits));
+
+        auto dim_name = Ordinal(i + 1) + " DMA source dimension";
+        CreateAssessment(nonnegative,
+                         dim_name + " must be nonnegative (" + STR(src_dim) +
+                             " < 0)",
+                         n.LOC(), n.from, UsageType::ShapeCompatibility, &n);
+        CreateAssessment(fits,
+                         dim_name + " exceeds the destination (" +
+                             STR(src_dim) + " > " + STR(dst_dim) + ")",
+                         n.LOC(), n.from, UsageType::ShapeCompatibility, &n);
+      }
     }
   }
 
@@ -1161,6 +1162,11 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
 
     for (auto& op : ca->AllOperations()) {
       if (auto rop = dyn_cast<AST::SOP::Reshape>(op)) {
+        if (rop->IsSqueeze()) {
+          s = op->GetBlockShape();
+          strd = op->GetBlockStrides();
+          continue;
+        }
         switch (IsContiguous(s, strd)) {
         case Modality::NOT:
           Warning(rop->LOC(),
@@ -1232,12 +1238,10 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
 }
 
 bool SemaChecker::VisitNode(AST::BufferMap& n) {
-  if (!n.source)
-    return true;
+  if (!n.source) return true;
 
   auto srcTy = GetSpannedType(NodeType(*n.source));
-  if (!srcTy)
-    return true; // earlysema already reported the error
+  if (!srcTy) return true; // earlysema already reported the error
 
   auto dense = srcTy->IsDense();
   if (dense == Modality::NOT) {

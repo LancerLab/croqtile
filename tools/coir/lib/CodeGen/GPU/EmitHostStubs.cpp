@@ -51,9 +51,7 @@ struct KernelInfo {
 /// Return the choreo:: qualified C++ type for a choreo element type name.
 /// Since the generated stubs include choreo_types.h, choreo::s32 etc. resolve
 /// to the same fundamental types (int, float, ...) without a separate mapping.
-std::string elemTypeToCpp(llvm::StringRef et) {
-  return "choreo::" + et.str();
-}
+std::string elemTypeToCpp(llvm::StringRef et) { return "choreo::" + et.str(); }
 
 /// Build the choreo::spanned_view<choreo::ET, N> parameter type string.
 std::string viewType(llvm::StringRef et, int64_t dims) {
@@ -83,16 +81,12 @@ std::vector<KernelInfo> collectKernels(ModuleOp module) {
     for (size_t i = 0; i < n; ++i) {
       KernelParamInfo pi;
       pi.name = mlir::cast<StringAttr>(namesAttr[i]).getValue().str();
-      pi.attr = attrsAttr
-                    ? mlir::cast<IntegerAttr>(attrsAttr[i]).getInt()
-                    : 0;
+      pi.attr = attrsAttr ? mlir::cast<IntegerAttr>(attrsAttr[i]).getInt() : 0;
       pi.pass_by_ref =
           refsAttr ? mlir::cast<BoolAttr>(refsAttr[i]).getValue() : false;
       pi.host_elem_type =
-          elemAttr ? mlir::cast<StringAttr>(elemAttr[i]).getValue().str()
-                   : "";
-      pi.dims =
-          dimsAttr ? mlir::cast<IntegerAttr>(dimsAttr[i]).getInt() : 0;
+          elemAttr ? mlir::cast<StringAttr>(elemAttr[i]).getValue().str() : "";
+      pi.dims = dimsAttr ? mlir::cast<IntegerAttr>(dimsAttr[i]).getInt() : 0;
       ki.params.push_back(std::move(pi));
     }
 
@@ -147,7 +141,7 @@ std::vector<KernelInfo> collectKernels(ModuleOp module) {
   return kernels;
 }
 
-void emitStaticHelper(std::ostringstream &os) {
+void emitStaticHelper(std::ostringstream& os) {
   os << "// --- CUDA Driver API helper (emitted once) ---\n";
   os << "#include <cuda.h>\n";
   os << "#include <cstdlib>\n";
@@ -174,7 +168,8 @@ void emitStaticHelper(std::ostringstream &os) {
   os << "  }\n";
   os << "  err = cuDevicePrimaryCtxRetain(&__ctx, dev);\n";
   os << "  if (err != CUDA_SUCCESS) {\n";
-  os << "    std::cerr << \"cuDevicePrimaryCtxRetain failed: \" << err << std::endl;\n";
+  os << "    std::cerr << \"cuDevicePrimaryCtxRetain failed: \" << err << "
+        "std::endl;\n";
   os << "    std::exit(1);\n";
   os << "  }\n";
   os << "  err = cuCtxSetCurrent(__ctx);\n";
@@ -202,9 +197,8 @@ void emitStaticHelper(std::ostringstream &os) {
   os << "} // namespace __coir_rt\n\n";
 }
 
-void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
-  bool has_tensor_ret =
-      !ki.ret_elem_type.empty() && ki.ret_dims > 0;
+void emitKernelStub(std::ostringstream& os, const KernelInfo& ki) {
+  bool has_tensor_ret = !ki.ret_elem_type.empty() && ki.ret_dims > 0;
 
   // Return type.
   if (has_tensor_ret)
@@ -215,7 +209,7 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
   // Function name + params.
   os << " " << ki.name << "(";
   for (size_t i = 0; i < ki.params.size(); ++i) {
-    auto &p = ki.params[i];
+    auto& p = ki.params[i];
     if (i > 0) os << ", ";
     if (!p.host_elem_type.empty() && p.dims > 0)
       os << viewType(p.host_elem_type, p.dims) << " " << p.name;
@@ -232,21 +226,20 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
 
   // Shadow host params to device memory.
   for (size_t i = 0; i < ki.params.size(); ++i) {
-    auto &p = ki.params[i];
-    if (p.host_elem_type.empty() || p.dims == 0)
-      continue;
+    auto& p = ki.params[i];
+    if (p.host_elem_type.empty() || p.dims == 0) continue;
     std::string cppType = elemTypeToCpp(p.host_elem_type);
     std::string devSym = p.name + "__dev";
     if (p.attr == GLOBAL_INPUT) {
-      os << "  " << cppType << "* " << devSym << " = const_cast<"
-         << cppType << "*>(" << p.name << ".data());\n";
+      os << "  " << cppType << "* " << devSym << " = const_cast<" << cppType
+         << "*>(" << p.name << ".data());\n";
     } else {
       os << "  " << cppType << "* " << devSym << " = nullptr;\n";
-      os << "  cuMemAlloc((CUdeviceptr*)&" << devSym << ", "
-         << p.name << ".element_count() * sizeof(" << cppType << "));\n";
-      os << "  cuMemcpyHtoD((CUdeviceptr)" << devSym << ", "
-         << p.name << ".data(), " << p.name << ".element_count() * sizeof("
-         << cppType << "));\n";
+      os << "  cuMemAlloc((CUdeviceptr*)&" << devSym << ", " << p.name
+         << ".element_count() * sizeof(" << cppType << "));\n";
+      os << "  cuMemcpyHtoD((CUdeviceptr)" << devSym << ", " << p.name
+         << ".data(), " << p.name << ".element_count() * sizeof(" << cppType
+         << "));\n";
     }
   }
 
@@ -259,7 +252,7 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
       for (auto d : ki.ret_shape) total *= d;
       sizeExpr = std::to_string(total);
     } else {
-      for (auto &p : ki.params) {
+      for (auto& p : ki.params) {
         if (!p.host_elem_type.empty() && p.dims > 0) {
           sizeExpr = p.name + ".element_count()";
           break;
@@ -268,8 +261,8 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
     }
     if (sizeExpr.empty()) sizeExpr = "1";
     os << "  " << retCpp << "* __out_dev = nullptr;\n";
-    os << "  cuMemAlloc((CUdeviceptr*)&__out_dev, " << sizeExpr
-       << " * sizeof(" << retCpp << "));\n\n";
+    os << "  cuMemAlloc((CUdeviceptr*)&__out_dev, " << sizeExpr << " * sizeof("
+       << retCpp << "));\n\n";
   }
 
   // Build kernel args array.  The GPU kernel expects raw pointers + memref
@@ -282,20 +275,20 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
 
   // Count args.
   int argIdx = 0;
-  for (auto &p : ki.params) {
+  for (auto& p : ki.params) {
     if (!p.host_elem_type.empty() && p.dims > 0)
-      argIdx += 2 + 1 + p.dims + p.dims; // base, aligned, offset, sizes, strides
+      argIdx +=
+          2 + 1 + p.dims + p.dims; // base, aligned, offset, sizes, strides
     else
       argIdx += 1;
   }
-  if (has_tensor_ret)
-    argIdx += 2 + 1 + ki.ret_dims + ki.ret_dims;
+  if (has_tensor_ret) argIdx += 2 + 1 + ki.ret_dims + ki.ret_dims;
 
   os << "  void* __args[" << argIdx << "];\n";
 
   // Populate args.
   int idx = 0;
-  for (auto &p : ki.params) {
+  for (auto& p : ki.params) {
     if (!p.host_elem_type.empty() && p.dims > 0) {
       std::string devSym = p.name + "__dev";
       os << "  static " << elemTypeToCpp(p.host_elem_type) << "* __pa_"
@@ -309,10 +302,9 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
       os << "  __args[" << idx << "] = &__off_" << p.name << ";\n";
       idx++;
       for (int64_t d = 0; d < p.dims; ++d) {
-        os << "  static int64_t __sz_" << p.name << "_" << d << " = "
-           << p.name << ".shape()[" << d << "];\n";
-        os << "  __args[" << idx << "] = &__sz_" << p.name << "_" << d
-           << ";\n";
+        os << "  static int64_t __sz_" << p.name << "_" << d << " = " << p.name
+           << ".shape()[" << d << "];\n";
+        os << "  __args[" << idx << "] = &__sz_" << p.name << "_" << d << ";\n";
         idx++;
       }
       for (int64_t d = 0; d < p.dims; ++d) {
@@ -327,8 +319,7 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
           }
         }
         os << ";\n";
-        os << "  __args[" << idx << "] = &__st_" << p.name << "_" << d
-           << ";\n";
+        os << "  __args[" << idx << "] = &__st_" << p.name << "_" << d << ";\n";
         idx++;
       }
     } else {
@@ -339,8 +330,7 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
   }
 
   if (has_tensor_ret) {
-    os << "  static " << elemTypeToCpp(ki.ret_elem_type)
-       << "* __pa_out;\n";
+    os << "  static " << elemTypeToCpp(ki.ret_elem_type) << "* __pa_out;\n";
     os << "  __pa_out = __out_dev;\n";
     os << "  __args[" << idx << "] = &__pa_out;\n";
     idx++;
@@ -351,8 +341,8 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
     idx++;
     for (int64_t d = 0; d < ki.ret_dims; ++d) {
       if (d < (int64_t)ki.ret_shape.size())
-        os << "  static int64_t __sz_out_" << d << " = "
-           << ki.ret_shape[d] << ";\n";
+        os << "  static int64_t __sz_out_" << d << " = " << ki.ret_shape[d]
+           << ";\n";
       else
         os << "  static int64_t __sz_out_" << d << " = 1;\n";
       os << "  __args[" << idx << "] = &__sz_out_" << d << ";\n";
@@ -391,7 +381,8 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
     os << "      0, nullptr, __args, nullptr);\n";
   }
   os << "  if (__launch_err != CUDA_SUCCESS) {\n";
-  os << "    std::cerr << \"" << (ki.isCooperative ? "cuLaunchCooperativeKernel" : "cuLaunchKernel")
+  os << "    std::cerr << \""
+     << (ki.isCooperative ? "cuLaunchCooperativeKernel" : "cuLaunchKernel")
      << " failed: \" << __launch_err"
      << " << std::endl;\n";
   os << "    std::exit(1);\n";
@@ -399,15 +390,14 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
   os << "  cuCtxSynchronize();\n\n";
 
   // Copy-back for pass-by-ref params.
-  for (auto &p : ki.params) {
+  for (auto& p : ki.params) {
     if (p.host_elem_type.empty() || p.dims == 0) continue;
     if (p.attr == GLOBAL_INPUT) continue;
     if (p.pass_by_ref) {
       std::string cppType = elemTypeToCpp(p.host_elem_type);
-      os << "  cuMemcpyDtoH(const_cast<" << cppType << "*>("
-         << p.name << ".data()), (CUdeviceptr)" << p.name
-         << "__dev, " << p.name << ".element_count() * sizeof(" << cppType
-         << "));\n";
+      os << "  cuMemcpyDtoH(const_cast<" << cppType << "*>(" << p.name
+         << ".data()), (CUdeviceptr)" << p.name << "__dev, " << p.name
+         << ".element_count() * sizeof(" << cppType << "));\n";
     }
   }
 
@@ -420,7 +410,7 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
       for (auto d : ki.ret_shape) total *= d;
       totalExpr = std::to_string(total);
     } else {
-      for (auto &p : ki.params) {
+      for (auto& p : ki.params) {
         if (!p.host_elem_type.empty() && p.dims > 0) {
           totalExpr = p.name + ".element_count()";
           break;
@@ -429,8 +419,8 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
     }
     if (totalExpr.empty()) totalExpr = "1";
 
-    os << "  auto __result = choreo::make_spandata<choreo::"
-       << ki.ret_elem_type << ">(";
+    os << "  auto __result = choreo::make_spandata<choreo::" << ki.ret_elem_type
+       << ">(";
     if (!ki.ret_shape.empty()) {
       for (int64_t d = 0; d < (int64_t)ki.ret_shape.size(); ++d) {
         if (d > 0) os << ", ";
@@ -445,16 +435,14 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
   }
 
   // Free shadow device buffers.
-  for (auto &p : ki.params) {
+  for (auto& p : ki.params) {
     if (p.host_elem_type.empty() || p.dims == 0) continue;
     if (p.attr == GLOBAL_INPUT) continue;
     os << "  cuMemFree((CUdeviceptr)" << p.name << "__dev);\n";
   }
-  if (has_tensor_ret)
-    os << "  cuMemFree((CUdeviceptr)__out_dev);\n";
+  if (has_tensor_ret) os << "  cuMemFree((CUdeviceptr)__out_dev);\n";
 
-  if (has_tensor_ret)
-    os << "  return __result;\n";
+  if (has_tensor_ret) os << "  return __result;\n";
 
   os << "}\n\n";
 }
@@ -463,15 +451,13 @@ void emitKernelStub(std::ostringstream &os, const KernelInfo &ki) {
 
 std::string coir::gpu::emitHostStubs(ModuleOp module) {
   auto kernels = collectKernels(module);
-  if (kernels.empty())
-    return "";
+  if (kernels.empty()) return "";
 
   std::ostringstream os;
   os << "// --- Host entry stubs generated by CoIR ---\n\n";
   emitStaticHelper(os);
 
-  for (auto &ki : kernels)
-    emitKernelStub(os, ki);
+  for (auto& ki : kernels) emitKernelStub(os, ki);
 
   return os.str();
 }

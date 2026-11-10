@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <numeric>
@@ -19,6 +20,7 @@
 #include "codegen.hpp"
 #include "dma_plan.hpp"
 #include "operator_info.hpp"
+#include "resource_allocator.hpp"
 
 // __CHOREO_CUDA_DIR__ and __CHOREO_CUTE_DIR__ are set by CMake when
 // ENABLE_CUDA / ENABLE_CUTE are ON.  Code below uses #ifdef guards
@@ -1215,7 +1217,7 @@ bool CuteCodeGen::BeforeVisitImpl(AST::Node& n) {
 
           // Emit each row-only statement directly.
           for (auto* stmt : row_only_stmts) {
-            if (auto asgn = dynamic_cast<AST::Assignment*>(stmt)) {
+            if (auto asgn = dyn_cast<AST::Assignment>(stmt)) {
               if (asgn->AssignToDataElement()) {
                 auto lhs = ExprSTR(asgn->da, false);
                 auto rhs = ExprSTR(asgn->value, false);
@@ -1354,7 +1356,9 @@ bool CuteCodeGen::AfterVisitImpl(AST::Node& n) {
   } else if (isa<AST::ChoreoFunction>(&n)) {
     PLDCheck();
     ssm.LeaveScope();
-    code_segments.back() += ds.str() + hs.str();
+    code_segments.back() +=
+        WrapDeviceCodeInNamespace(ds.str(), CCtx().GetDeviceNamespace()) +
+        hs.str();
     ds.str(""); // reset the streams
     hs.str("");
     return_stream.str("");
@@ -1943,9 +1947,23 @@ bool CuteCodeGen::TryConfigureNamedEvent(const std::string& name, bool is_array,
       !is_warp_aligned(*triggers) || !is_warp_aligned(*waiters))
     return false;
 
+  // Liveness-driven slot assignment: the event's colored slot (precomputed by
+  // DmaResourcePlan) indexes the available named-barrier pool, replacing the
+  // greedy front/pop.  Non-interfering events share a slot (and thus a
+  // barrier); when the slot index exceeds the available pool, fall back to
+  // the scalar mbarrier lowering below.  With -fevent-alloc=off the plan
+  // is skipped and the monotonic slot (named_event_lowerings_.size()) is used.
+  size_t slot = named_event_lowerings_.size();
+  if (EventAllocEnabled()) {
+    if (const auto* plan = DmaResourcePlan::Lookup(SSTab().ScopeName())) {
+      auto it = plan->event_slots.find(InScopeName(name));
+      if (it != plan->event_slots.end()) slot = it->second;
+    }
+  }
+  if (slot >= available_named_barrier_ids_.size()) return false;
+
   NamedEventLowering lowering;
-  lowering.barrier_id = available_named_barrier_ids_.front();
-  available_named_barrier_ids_.pop_front();
+  lowering.barrier_id = available_named_barrier_ids_[slot];
   lowering.trigger_threads = trigger_threads;
   lowering.wait_threads = wait_threads;
   lowering.total_threads = trigger_threads + wait_threads;
@@ -2154,9 +2172,7 @@ void CuteCodeGen::emitPrepackedV2TileLoadSnippet(
     const std::string& tileAddr, const std::string& rowStride,
     const std::string& tileOffset) {
   int sval = 0, log2s = 0;
-  try {
-    sval = std::stoi(rowStride);
-  } catch (...) {}
+  sval = static_cast<int>(std::strtol(rowStride.c_str(), nullptr, 10));
   bool pow2 = sval > 0 && (sval & (sval - 1)) == 0;
   if (pow2) {
     int t = sval;
@@ -2219,9 +2235,7 @@ void CuteCodeGen::emitFp8PrepackedV2TileLoadSnippet(
     const std::string& tileAddr, const std::string& rowStride,
     const std::string& /*colStride*/) {
   int sval = 0, log2s = 0;
-  try {
-    sval = std::stoi(rowStride);
-  } catch (...) {}
+  sval = static_cast<int>(std::strtol(rowStride.c_str(), nullptr, 10));
   bool pow2 = sval > 0 && (sval & (sval - 1)) == 0;
   if (pow2) {
     int t = sval;
@@ -2695,13 +2709,17 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
             "error: shared/local buffer cannot be Choreo output.");
 
       auto type_modifiers = (sto == Storage::SHARED ? "__shared__ " : "");
+      std::string alignment_specifier;
+      if (n.HasNote("alignment"))
+        alignment_specifier = "alignas(" + n.GetNote("alignment") + ") ";
 
       if (!CCtx().MemReuse()) {
         if (n.HasNote("ref"))
           Error1(
               n.LOC(),
               "buffer reference is enabled only when memory reuse is enabled.");
-        ds << d_indent << type_modifiers << bts << " " << sym;
+        ds << d_indent << type_modifiers << alignment_specifier << bts << " "
+           << sym;
         for (const auto& dim : GetArrayDimensions(nty))
           ds << "[" << ValueSTR(dim) << "]";
         ds << "[" << UnScopedExpr(ElemCountExprOf(*sty)) << "];\n";
@@ -2750,8 +2768,8 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
           for (const auto& dim : GetArrayDimensions(nty))
             total_elem_expr =
                 "(" + ValueSTR(dim) + ")*(" + total_elem_expr + ")";
-          ds << d_indent << type_modifiers << bts << " " << sym << "["
-             << total_elem_expr << "];\n";
+          ds << d_indent << type_modifiers << alignment_specifier << bts << " "
+             << sym << "[" << total_elem_expr << "];\n";
         }
       }
     };
@@ -3549,6 +3567,18 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
   // only do the whole codegen when accessing the outer parallel-by
   if (emit_launch) {
     tma_future_count = 0;
+    tma_future_slots_.clear();
+    // Liveness-driven FUTURE coloring (DmaResourcePlan) assigns each pooled
+    // future a slot in [0, future_slot_count).  Cache the colored slot map for
+    // the current device function and start the monotonic fallback counter
+    // past those slots so uncolored futures (e.g. direct TMA futures that
+    // liveness routes outside the pool) never collide with a colored one.
+    if (dma_alloc_mode) {
+      if (const auto* plan = DmaResourcePlan::Lookup(SSTab().ScopeName())) {
+        tma_future_count = static_cast<int>(plan->future_slot_count);
+        tma_future_slots_ = plan->future_slots;
+      }
+    }
     set_cuda_func_attribute_max_dynamic_shared_memory_size = false; // reset
     auto required_shared_align = [&]() -> size_t {
       size_t alignment = CCtx().GetMemoryAlignmentByte(Storage::SHARED);
@@ -3624,7 +3654,8 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
     - the sum <= the capacity of arch
     */
     auto EmitCudaFuncAttributeMaxDynamicSharedMemorySize = [&]() -> void {
-      hs << h_indent << "cudaFuncSetAttribute(" << device_fn
+      hs << h_indent << "cudaFuncSetAttribute("
+         << QualifyDeviceFn(device_fn, CCtx().GetDeviceNamespace())
          << ", cudaFuncAttributeMaxDynamicSharedMemorySize, "
          << ValueSTR(shared_spm_size) << " + (" << required_shared_align
          << " - 1));\n";
@@ -3719,13 +3750,15 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
       }
       hs << "};\n";
       hs << h_indent << "choreo::abend_true(cudaLaunchCooperativeKernel("
-         << "(const void*)" << device_fn << ", __" << fname << "_gdims"
-         << parallel_idx << ", __" << fname << "_bdims" << parallel_idx
-         << ", __" << fname << "_coop_args, " << smem_str << ", " << stream_str
-         << "));\n";
+         << "(const void*)"
+         << QualifyDeviceFn(device_fn, CCtx().GetDeviceNamespace()) << ", __"
+         << fname << "_gdims" << parallel_idx << ", __" << fname << "_bdims"
+         << parallel_idx << ", __" << fname << "_coop_args, " << smem_str
+         << ", " << stream_str << "));\n";
     } else {
-      hs << h_indent << device_fn << "<<<__" << fname << "_gdims"
-         << parallel_idx << ", __" << fname << "_bdims" << parallel_idx;
+      hs << h_indent << QualifyDeviceFn(device_fn, CCtx().GetDeviceNamespace())
+         << "<<<__" << fname << "_gdims" << parallel_idx << ", __" << fname
+         << "_bdims" << parallel_idx;
 
       bool explicit_smem = false;
       if (!sbe::ceq(shared_spm_size, sbe::nu(0))) {
@@ -3891,17 +3924,26 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (!IsHost() && !n.future.empty()) {
       std::string buf_name =
           const_cast<FutureBufferInfo&>(FBInfo())[InScopeName(n.future)].buffer;
+      size_t tma_slot = static_cast<size_t>(tma_future_count);
+      bool tma_slot_colored = false;
+      if (n.IsTMA() && dma_alloc_mode) {
+        auto it = tma_future_slots_.find(InScopeName(n.future));
+        if (it != tma_future_slots_.end()) {
+          tma_slot = it->second;
+          tma_slot_colored = true;
+        }
+      }
       auto cp_atom_name =
-          GetCopyAtomName(n.IsTMA(), n.IsTMA() ? tma_future_count : dma_count_);
+          GetCopyAtomName(n.IsTMA(), n.IsTMA() ? tma_slot : dma_count_);
       if (!claimed_futs.count(InScopeName(n.future))) {
         claimed_futs.emplace(InScopeName(n.future), cp_atom_name);
         ssm.MapDeviceSymbol(InScopeName(n.future), n.future);
         ssm.MapDeviceSymbol(InScopeName(n.future) + ".data",
                             n.future + ".data()");
         future_count_++;
-        if (n.IsTMA())
-          ++tma_future_count;
-        else
+        if (n.IsTMA()) {
+          if (!tma_slot_colored) ++tma_future_count;
+        } else
           ++dma_count_;
         std::string buf_expr;
         if (ssm.HasDeviceName(buf_name))
@@ -3963,8 +4005,17 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     if (is_tma && !future_only && IsWarpSpecActive()) return "";
     auto future_name = n.future;
 
+    size_t tma_slot = static_cast<size_t>(tma_future_count);
+    bool tma_slot_colored = false;
+    if (is_tma && dma_alloc_mode && !future_name.empty()) {
+      auto it = tma_future_slots_.find(InScopeName(future_name));
+      if (it != tma_future_slots_.end()) {
+        tma_slot = it->second;
+        tma_slot_colored = true;
+      }
+    }
     auto cp_atom_name =
-        GetCopyAtomName(is_tma, (is_tma ? tma_future_count : dma_count_));
+        GetCopyAtomName(is_tma, (is_tma ? tma_slot : dma_count_));
     if (future_name.empty()) {
       future_name = "__choreo_anon_fut__" + std::to_string(future_count_);
     } else {
@@ -3978,9 +4029,9 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
     }
 
     future_count_++;
-    if (is_tma)
-      ++tma_future_count;
-    else
+    if (is_tma) {
+      if (!tma_slot_colored) ++tma_future_count;
+    } else
       ++dma_count_;
 
     ds << d_indent << "future " << future_name;
@@ -4685,9 +4736,11 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       bool is_multicast_tma = n.IsMulticast() && n.IsTMA();
       bool emit_tma_single_guard =
           !ScopeAlreadySingleThreadForLevel(tma_sync_level);
-      if (!warpspec_only)
-        assert(emit_tma_single_guard &&
-               "non-warpspec tma copy must be single-threaded");
+      // A non-warpspec TMA copy must be issued by a single thread.  That is
+      // satisfied either because the enclosing scope is already single-
+      // threaded (e.g. an elected lane `inthreads (t == C)` selects exactly
+      // one thread, so no guard is needed) or because the single-thread guard
+      // is emitted below.  Both cases leave the TMA single-threaded.
 
       std::string tma_issue_prefix = emit_tma_single_guard ? "  " : "";
 
@@ -7500,21 +7553,38 @@ bool CuteCodeGen::Visit(AST::Fence& n) {
   }
 
   // GPU fences always cover shared+global; visibility distinguishes the scope.
+  //
+  // The order axis selects between the two standalone fence forms CUDA
+  // offers: .acq_rel (the full barrier, emitted as __threadfence*()) and
+  // .sc (seq_cst, emitted as fence.sc.*). There is no release-only or
+  // acquire-only standalone fence, so release/acquire collapse to the full
+  // acq_rel __threadfence*() barrier (the semantic checker notes this).
+  bool cta_scope = false;
   switch (n.GetVisibility()) {
   case ParallelLevel::THREAD:
   case ParallelLevel::GROUP:
   case ParallelLevel::GROUPx4:
     // Fence within CTA: shared + global memory.
-    ds << d_indent << "__threadfence_block();\n";
+    cta_scope = true;
     break;
   case ParallelLevel::BLOCK:
   case ParallelLevel::DEVICE:
     // Fence device-wide: global memory.
-    ds << d_indent << "__threadfence();\n";
+    cta_scope = false;
     break;
   default:
     choreo_unreachable(
         "unsupported fence visibility: " + STR(n.GetVisibility()) + ".");
+  }
+
+  if (n.GetOrder() == FenceOrder::SEQ_CST) {
+    // Sequentially-consistent fence: PTX fence.sc at the CTA or GPU scope.
+    ds << d_indent << "asm volatile(\"fence.sc." << (cta_scope ? "cta" : "gpu")
+       << ";\" ::: \"memory\");\n";
+  } else {
+    // Full (acq_rel) fence, covering release / acquire / acq_rel.
+    ds << d_indent
+       << (cta_scope ? "__threadfence_block();\n" : "__threadfence();\n");
   }
 
   return true;
@@ -9214,12 +9284,13 @@ bool CuteCodeGen::Visit(AST::ForeachBlock& n) {
                   ? ub_it->second
                   : UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()));
           IndStream() << "for (" << SSMName(iv_name, IsHost()) << " = "
-                      << (rng->lbound
-                              ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
+                      << (rng->lb_mutator
+                              ? ("(" + ExprSTR(rng->lb_mutator, IsHost()) + ")")
                               : "0")
                       << "; " << SSMName(iv_name, IsHost()) << " < " << ub_expr
-                      << (rng->ubound ? (" + " + ExprSTR(rng->ubound, IsHost()))
-                                      : "")
+                      << (rng->ub_mutator
+                              ? (" + " + ExprSTR(rng->ub_mutator, IsHost()))
+                              : "")
                       << "; ++" << SSMName(iv_name, IsHost()) << ") {\n";
           IncrIndent();
         }

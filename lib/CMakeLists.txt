@@ -57,13 +57,18 @@ add_custom_target(
 set(PARSER_SOURCES
   ${CMAKE_BINARY_DIR}/parser.tab.cc
   ${CMAKE_BINARY_DIR}/scanner.yy.cc
+  # choreo_api.cpp hosts CompilerAPI::Parse, which drives the bison parser.
+  choreo_api.cpp
 )
 
 set(CORE_SOURCES
+  access_tracking.cpp
   assess.cpp
   assert_site.cpp
   ast.cpp
+  buffer_access_analysis.cpp
   earlysema.cpp
+  fence_insertion.cpp
   semacheck.cpp
   shapeinfer.cpp
   symtab.cpp
@@ -74,6 +79,7 @@ set(CORE_SOURCES
   liveness_analysis.cpp
   loop_vectorize.cpp
   mem_reuse.cpp
+  resource_allocator.cpp
   sync_recovery.cpp
   diversity_analysis.cpp
   scalar_evolution.cpp
@@ -95,6 +101,7 @@ set(CL_SOURCES
 )
 
 set(PP_SOURCES
+  choreo_template.cpp
   preprocess.cpp
 )
 

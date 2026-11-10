@@ -38,12 +38,16 @@ bool EarlySemantics::BeforeVisitImpl(AST::Node& n) {
     explicit_pl = false;
     inthreads_levels.clear();
     inthreads_levels.push_back(0);
+    vector_patterns.clear();
+    mma_fragment_symbols.clear();
   } else if (auto pb = dyn_cast<AST::ParallelBy>(&n)) {
     if (pl_depth == 0) pb->SetOuter(true);
     pl_depth++;
     pl_depths.push_back(pl_depth);
     inthreads_levels.push_back(0);
     assert(inthreads_levels.size() == (unsigned)pl_depth + 1);
+    if (pb->GetLevel() != ParallelLevel::NONE)
+      explicit_pl_stk.push(pb->GetLevel());
     if (pb->HasLaunchBounds()) {
       auto& lb_args = pb->GetLaunchBoundsArgs();
       for (size_t i = 0; i < lb_args->Count(); ++i) {
@@ -120,7 +124,8 @@ bool EarlySemantics::AfterVisitImpl(AST::Node& n) {
     assert(pl_depth > 0);
     assert(inthreads_levels.size() == (unsigned)pl_depth + 1);
     inthreads_levels.pop_back();
-    if (n.GetLevel() != ParallelLevel::NONE) explicit_pl_stk.pop();
+    if (n.GetLevel() != ParallelLevel::NONE && !explicit_pl_stk.empty())
+      explicit_pl_stk.pop();
     pl_depth--;
     if (pl_depth == 0) explicit_pl = false;
   } else if (isa<AST::InThreadsBlock>(&n)) {
@@ -221,6 +226,98 @@ bool EarlySemantics::Visit(AST::Expr& n) {
     return true;
   }
 
+  auto set_vector_result = [&](const VectorInferenceResult& result,
+                               const ptr<Type>& lhs_ty = nullptr,
+                               const ptr<Type>& rhs_ty = nullptr) {
+    if (!result.Applies()) return false;
+    if (!result.type) {
+      Error1(n.LOC(), "in operation \"" + n.op + "\": " + result.error);
+      SetNodeType(n, MakeUnknownType());
+      return true;
+    }
+    SetNodeType(n, result.type);
+    if (lhs_ty && !isa<VectorType>(lhs_ty))
+      n.GetL()->AddNote("broadcast", std::to_string(result.type->ElemCount()));
+    if (rhs_ty && !isa<VectorType>(rhs_ty))
+      n.GetR()->AddNote("broadcast", std::to_string(result.type->ElemCount()));
+    auto lhs_pattern = n.GetL() && n.GetL()->HasNote("vector_pattern")
+                           ? n.GetL()->GetNote("vector_pattern")
+                           : "";
+    auto rhs_pattern = n.GetR() && n.GetR()->HasNote("vector_pattern")
+                           ? n.GetR()->GetNote("vector_pattern")
+                           : "";
+    bool lhs_vector = lhs_ty && isa<VectorType>(lhs_ty);
+    bool rhs_vector = rhs_ty && isa<VectorType>(rhs_ty);
+    if ((n.op == Op::Add && ((lhs_pattern == "unit" && !rhs_vector) ||
+                             (rhs_pattern == "unit" && !lhs_vector))) ||
+        (n.op == Op::Sub && lhs_pattern == "unit" && !rhs_vector))
+      n.AddNote("vector_pattern", "unit");
+    else
+      n.AddNote("vector_pattern", "unknown");
+    return true;
+  };
+
+  if (n.IsBinary()) {
+    auto lhs_ty = NodeType(*n.GetL());
+    auto rhs_ty = NodeType(*n.GetR());
+    if (n.IsCompare()) {
+      auto result = InferNumericVectorType(lhs_ty, rhs_ty, true);
+      if (set_vector_result(result, lhs_ty, rhs_ty))
+        return result.type != nullptr;
+    } else if (n.op == Op::Add || n.op == Op::Sub || n.op == Op::Mul ||
+               n.op == Op::Div || n.op == Op::Mod || n.op == Op::CeilDiv ||
+               n.op == "<<" || n.op == ">>") {
+      auto result = InferNumericVectorType(lhs_ty, rhs_ty);
+      if (set_vector_result(result, lhs_ty, rhs_ty))
+        return result.type != nullptr;
+    } else if (n.op == "&" || n.op == "|") {
+      auto lhs_elem = ScalarOrVectorElementType(lhs_ty);
+      auto rhs_elem = ScalarOrVectorElementType(rhs_ty);
+      auto result = (lhs_elem == BaseType::BOOL || rhs_elem == BaseType::BOOL)
+                        ? InferBooleanVectorType(lhs_ty, rhs_ty)
+                        : InferNumericVectorType(lhs_ty, rhs_ty);
+      if (set_vector_result(result, lhs_ty, rhs_ty))
+        return result.type != nullptr;
+    } else if ((n.op == "&&" || n.op == "||") &&
+               (isa<VectorType>(lhs_ty) || isa<VectorType>(rhs_ty))) {
+      Error1(n.LOC(), "operators '&&' and '||' keep scalar short-circuit "
+                      "semantics; use '&' and '|' for vector masks.");
+      SetNodeType(n, MakeUnknownType());
+      return false;
+    }
+  } else if (n.IsUnary()) {
+    auto rhs_ty = NodeType(*n.GetR());
+    if (auto rhs_vty = dyn_cast<VectorType>(rhs_ty)) {
+      if (n.op == "!" && rhs_vty->ElemType() == BaseType::BOOL) {
+        SetNodeType(n, MakeVectorType(BaseType::BOOL, rhs_vty->ElemCount()));
+        return true;
+      }
+      if (n.op == "~" && IsIntegerType(rhs_vty->ElemType())) {
+        SetNodeType(n,
+                    MakeVectorType(rhs_vty->ElemType(), rhs_vty->ElemCount()));
+        return true;
+      }
+    }
+  } else if (n.IsTernary() && n.op == "?") {
+    auto result = InferVectorSelectType(
+        NodeType(*n.GetC()), NodeType(*n.GetL()), NodeType(*n.GetR()));
+    if (result.Applies()) {
+      if (!result.type) {
+        Error1(n.LOC(), "in operation \"?\": " + result.error);
+        SetNodeType(n, MakeUnknownType());
+        return false;
+      }
+      SetNodeType(n, result.type);
+      if (!isa<VectorType>(NodeType(*n.GetL())))
+        n.GetL()->AddNote("broadcast",
+                          std::to_string(result.type->ElemCount()));
+      if (!isa<VectorType>(NodeType(*n.GetR())))
+        n.GetR()->AddNote("broadcast",
+                          std::to_string(result.type->ElemCount()));
+      return true;
+    }
+  }
+
   if (auto ref = n.GetReference()) {
     auto rty = NodeType(*ref);
     if (isa<UnknownType>(rty)) {
@@ -230,6 +327,8 @@ bool EarlySemantics::Visit(AST::Expr& n) {
         assert(false && "reference type is unknown.");
     }
     SetNodeType(n, rty);
+    if (ref->HasNote("vector_pattern"))
+      n.AddNote("vector_pattern", ref->GetNote("vector_pattern"));
     if (diverges.Contains(dyn_cast<AST::Identifier>(ref))) diverges.Add(n);
   } else if (n.op == Op::DataOf || n.op == Op::MDataOf) {
     auto ty = NodeType(*n.GetR());
@@ -323,8 +422,10 @@ bool EarlySemantics::Visit(AST::Expr& n) {
              (n.op == Op::Div) || (n.op == Op::Mod) || (n.op == Op::CeilDiv)) {
     auto lty = NodeType(*n.GetL());
     auto rty = NodeType(*n.GetR());
-    if (!lty || !rty)
-      choreo_unreachable("expect the both types to be not nullptr.");
+    if (!lty || !rty) {
+      SetNodeType(n, MakeUnknownType());
+      return false;
+    }
     bool is_mutable = IsMutable(*lty) || IsMutable(*rty);
     if (isa<NoValueType>(lty)) {
       Error1(n.GetL()->LOC(),
@@ -772,8 +873,12 @@ bool EarlySemantics::Visit(AST::CastExpr& n) {
   auto r_type = n.GetR()->GetType() ? n.GetR()->GetType() : NodeType(*n.GetR());
   if (auto spty = dyn_cast<SpannedType>(r_type))
     r_type = MakeScalarType(spty->ElementType(), true);
-  if (auto sty = dyn_cast<ScalarType>(r_type)) {
-    auto from_type = sty->GetBaseType();
+  BaseType from_type = ScalarOrVectorElementType(r_type);
+  size_t element_count = 1;
+  if (auto vty = dyn_cast<VectorType>(r_type)) {
+    element_count = vty->ElemCount();
+  }
+  if (from_type != BaseType::UNKNOWN) {
     n.SetFrom(from_type);
     if (!supported.empty() && !supported.count(from_type))
       Error1(n.LOC(), "the source type '" + STR(from_type) +
@@ -786,7 +891,13 @@ bool EarlySemantics::Visit(AST::CastExpr& n) {
                           target.Name() + "' (arch: " + arch + ").");
   }
 
-  SetNodeType(n, MakeScalarType(to_type, true));
+  if (element_count > 1) {
+    n.SetFrom(from_type, element_count);
+    n.SetTo(to_type, element_count);
+    SetNodeType(n, MakeVectorType(to_type, element_count));
+  } else {
+    SetNodeType(n, MakeScalarType(to_type, true));
+  }
   return ec == error_count;
 }
 
@@ -1001,6 +1112,30 @@ bool EarlySemantics::CheckInitializerType(const ptr<Type>& ty,
 bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
   TraceEachVisit(n);
 
+  // `shared<group>` (Storage::GROUP_SHARED) is only valid on targets with a
+  // hardware GROUP tier between BLOCK and THREAD. Reject it early so
+  // downstream passes and codegen can treat GROUP_SHARED as unreachable on
+  // unsupported targets.
+  if (auto mem = n.GetMemory();
+      mem && mem->Get() == Storage::GROUP_SHARED &&
+      !CCtx().GetTarget().IsGroupSharedStorageSupported(CCtx().GetArch()))
+    Error1(n.LOC(),
+           "'shared<group>' is not supported by the current target; it "
+           "requires a target with a GROUP storage tier.");
+
+  // `local` (Storage::LOCAL) maps to per-thread private stack. Targets whose
+  // DMA engines cannot source/sink stack reject it here (mirroring the
+  // `shared<group>` gate) so downstream codegen can treat LOCAL as
+  // unreachable on those targets. The opt-in flag relaxes this for
+  // declarations only; DMA involving `local` is still rejected below.
+  if (auto mem = n.GetMemory();
+      mem && mem->Get() == Storage::LOCAL &&
+      !CCtx().GetTarget().IsLocalStorageSupported(CCtx().GetArch()) &&
+      !CCtx().AllowLocal())
+    Error1(n.LOC(),
+           "'local' is not supported by the current target; use stack (no "
+           "storage specifier) or 'shared<group>' for on-chip scratchpad.");
+
   ptr<Type> tty = nullptr; // type from the annotation
   ptr<Type> ety = nullptr; // type from the initialization expression
 
@@ -1097,7 +1232,10 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
 
     // check for type consistency between annotation and init expr.
     if (!isa<UnknownType>(tty) && !tty->ApprxEqual(*ety)) {
-      if (!n.IsMutable())
+      // Mutable numeric scalars can use implicit numeric conversions, but
+      // predicates do not participate in those conversions. Diagnose this
+      // here rather than constructing a bool-to-numeric cast in normalization.
+      if (!n.IsMutable() || isa<BooleanType>(tty) || isa<BooleanType>(ety))
         Error1(n.LOC(), "`" + n.name_str + "' is declared as \"" +
                             PSTR(n.type->GetType()) +
                             "\" but initialized as \"" +
@@ -1114,6 +1252,8 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
       } else if (IsActualBoundedIntegerType(ety)) {
         // decay a bounded integer to be integer when it is mutable
         ety = MakeIntegerType(true);
+      } else if (isa<VectorType>(ety)) {
+        ety = MutateType(ety);
       } else {
         Error1(n.LOC(), "`" + n.name_str + "' with a type of \"" + PSTR(ety) +
                             "\" can not be declared as 'mutable'.");
@@ -1217,6 +1357,10 @@ bool EarlySemantics::Visit(AST::NamedVariableDecl& n) {
     }
   }
 
+  if (n.init_expr && n.init_expr->HasNote("vector_pattern"))
+    vector_patterns[InScopeName(n.name_str)] =
+        n.init_expr->GetNote("vector_pattern");
+
   return true;
 }
 
@@ -1271,7 +1415,12 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
   size_t idx_count = 0;
   for (auto idx : n.GetIndices()) {
     auto ity = NodeType(*idx);
-    if (!CanYieldIndex(ity)) {
+    auto vty = dyn_cast<VectorType>(ity);
+    if (vty && !IsIntegerType(vty->ElemType())) {
+      Error1(idx->LOC(), "vector coordinates must have an integer element "
+                         "type but got " +
+                             PSTR(ity) + ".");
+    } else if (!vty && !CanYieldIndex(ity)) {
       Error1(n.LOC(), "expect '" + PSTR(idx) + "' to yield indices but got " +
                           PSTR(ity) + ".");
     }
@@ -1287,6 +1436,139 @@ bool EarlySemantics::Visit(AST::DataAccess& n) {
   SetNodeType(n, MakeScalarType(sty->ElementType(), true, sty->GetStorage()));
 
   return true;
+}
+
+bool EarlySemantics::Visit(AST::VectorIndex& n) {
+  TraceEachVisit(n);
+  size_t error_count_before = error_count;
+  if (!CCtx().TargetSupportsExplicitVector())
+    Error1(n.LOC(), "explicit vector syntax is not supported by target '" +
+                        CCtx().GetTarget().Name() +
+                        "' (arch: " + CCtx().GetArch() + ").");
+  if (pl_depth == 0)
+    Error1(n.LOC(),
+           "explicit vector operations must be inside a parallel-by scope.");
+  SetNodeType(n, MakeVectorType(BaseType::S32, n.LaneCount()));
+  n.AddNote("vector_pattern", "unit");
+  return error_count_before == error_count;
+}
+
+bool EarlySemantics::Visit(AST::VectorMemory& n) {
+  TraceEachVisit(n);
+  size_t error_count_before = error_count;
+  if (!CCtx().TargetSupportsExplicitVector())
+    Error1(n.LOC(), "explicit vector syntax is not supported by target '" +
+                        CCtx().GetTarget().Name() +
+                        "' (arch: " + CCtx().GetArch() + ").");
+  if (pl_depth == 0)
+    Error1(n.LOC(),
+           "explicit vector operations must be inside a parallel-by scope.");
+
+  size_t lane_count = 0;
+  size_t vector_coordinate_count = 0;
+  size_t vector_coordinate_index = 0;
+  size_t coordinate_index = 0;
+  bool unit_stride_coordinate = false;
+  for (auto& index : n.Address()->GetIndices()) {
+    if (auto vty = dyn_cast<VectorType>(NodeType(*index))) {
+      if (lane_count && lane_count != vty->ElemCount())
+        Error1(index->LOC(), "vector address coordinates have mismatched lane "
+                             "counts (" +
+                                 std::to_string(lane_count) + " vs. " +
+                                 std::to_string(vty->ElemCount()) + ").");
+      lane_count = vty->ElemCount();
+      ++vector_coordinate_count;
+      vector_coordinate_index = coordinate_index;
+      unit_stride_coordinate = index->HasNote("vector_pattern") &&
+                               index->GetNote("vector_pattern") == "unit";
+    }
+    ++coordinate_index;
+  }
+  if (!lane_count) {
+    Error1(n.Address()->LOC(),
+           "explicit vector memory requires at least one vector coordinate.");
+    ptr<Type> result_ty = n.IsLoad() ? ptr<Type>(MakeUnknownType())
+                                     : ptr<Type>(MakeNoValueType());
+    SetNodeType(n, result_ty);
+    return false;
+  }
+
+  auto check_lanes = [&](const ptr<Type>& ty, const location& loc,
+                         const std::string& operand) {
+    if (auto vty = dyn_cast<VectorType>(ty)) {
+      if (vty->ElemCount() != lane_count) {
+        Error1(loc, operand + " has " + std::to_string(vty->ElemCount()) +
+                        " lanes but the address has " +
+                        std::to_string(lane_count) + ".");
+        return false;
+      }
+    }
+    return true;
+  };
+
+  if (n.Mask()) {
+    auto mask_ty = NodeType(*n.Mask());
+    check_lanes(mask_ty, n.Mask()->LOC(), "vector memory mask");
+    auto mask_vty = dyn_cast<VectorType>(mask_ty);
+    if ((!mask_vty && !isa<BooleanType>(mask_ty)) ||
+        (mask_vty && mask_vty->ElemType() != BaseType::BOOL))
+      Error1(n.Mask()->LOC(),
+             "vector memory mask must be bool or vector<bool, " +
+                 std::to_string(lane_count) + "> but got " + PSTR(mask_ty) +
+                 ".");
+  }
+
+  auto address_ty = NodeType(*n.Address());
+  auto address_scalar = dyn_cast<ScalarType>(address_ty);
+  if (!address_scalar) {
+    Error1(n.Address()->LOC(), "vector memory address must name a scalar "
+                               "element but got " +
+                                   PSTR(address_ty) + ".");
+    ptr<Type> result_ty = n.IsLoad() ? ptr<Type>(MakeUnknownType())
+                                     : ptr<Type>(MakeNoValueType());
+    SetNodeType(n, result_ty);
+    return false;
+  }
+
+  bool contiguous = vector_coordinate_count == 1 && unit_stride_coordinate &&
+                    vector_coordinate_index + 1 == coordinate_index;
+  if (contiguous) {
+    n.AddNote("vector_access", "contiguous");
+    n.Address()->AddNote("VLDST");
+  } else {
+    n.AddNote("vector_access", "indirect");
+    n.Address()->AddNote("VGZST");
+  }
+
+  auto check_value_type = [&](const ptr<Type>& ty, const location& loc,
+                              const std::string& operand) {
+    check_lanes(ty, loc, operand);
+    auto actual = ScalarOrVectorElementType(ty);
+    auto expected = address_scalar->GetBaseType();
+    bool compatible = actual == expected;
+    if (!compatible && (IsIntegerType(actual) || IsFloatType(actual)) &&
+        (IsIntegerType(expected) || IsFloatType(expected))) {
+      auto promoted = PromoteType(actual, expected);
+      compatible = promoted.lty == promoted.rty && promoted.lty == expected;
+    }
+    if (!compatible)
+      Error1(loc, operand + " element type '" + STR(actual) +
+                      "' is not convertible to buffer element type '" +
+                      STR(expected) + "'.");
+  };
+
+  if (n.IsLoad()) {
+    if (n.Other())
+      check_value_type(NodeType(*n.Other()), n.Other()->LOC(),
+                       "masked load fallback");
+    SetNodeType(n, MakeVectorType(address_scalar->GetBaseType(), lane_count));
+    n.AddNote("vector_pattern", "unknown");
+  } else {
+    check_value_type(NodeType(*n.Value()), n.Value()->LOC(),
+                     "vector store value");
+    SetNodeType(n, MakeNoValueType());
+  }
+  return error_count_before == error_count;
 }
 
 bool EarlySemantics::Visit(AST::Assignment& n) {
@@ -1382,6 +1664,10 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
 
     if (diverges.Contains(n.value)) diverges.Add(InScopeName(n.GetName()));
 
+    if (n.value->HasNote("vector_pattern"))
+      vector_patterns[InScopeName(n.GetName())] =
+          n.value->GetNote("vector_pattern");
+
     return true;
   }
 
@@ -1424,6 +1710,10 @@ bool EarlySemantics::Visit(AST::Assignment& n) {
     SetNodeType(n, MakeUnknownType());
     return false;
   }
+
+  if (n.value->HasNote("vector_pattern"))
+    vector_patterns[InScopeName(n.GetName())] =
+        n.value->GetNote("vector_pattern");
 
   return true;
 }
@@ -1479,6 +1769,11 @@ bool EarlySemantics::Visit(AST::Identifier& n) {
       SetNodeType(n, MakeIntegerType());
     } else
       ReportErrorWhenUseBeforeDefine(n.LOC(), n.name);
+  }
+  if (SSTab().IsDeclared(n.name)) {
+    auto pattern = vector_patterns.find(InScopeName(n.name));
+    if (pattern != vector_patterns.end())
+      n.AddNote("vector_pattern", pattern->second);
   }
   return true;
 }
@@ -1882,6 +2177,24 @@ bool EarlySemantics::Visit(AST::DMA& n) {
   const auto dst_storage = isa<AST::Memory>(n.to)
                                ? cast<AST::Memory>(n.to)->Get()
                                : tty->GetStorage();
+  const auto dma_kind = n.IsTMA() ? DMAKind::TMA : DMAKind::DMA;
+  // Reject DMA with a `local` source or destination on targets without a
+  // native `local` tier (mirrors the declaration gate in
+  // Visit(NamedVariableDecl)). This is unconditional: even when `--allow-local`
+  // permits a stack-backed `local`, the DTE cannot source/sink stack.
+  if ((src_storage == Storage::LOCAL || dst_storage == Storage::LOCAL) &&
+      !CCtx().GetTarget().IsLocalStorageSupported(CCtx().GetArch()))
+    Error1(n.LOC(),
+           "'local' is not supported by the current target; use stack (no "
+           "storage specifier) or 'shared<group>' for on-chip scratchpad.");
+  // Reject data-movement edges the target's engines cannot route (e.g. TMA
+  // only bridges global <-> shared; a target whose on-chip L1 tier has no
+  // direct path to its L2 tier must stage such moves through global).
+  if (!CCtx().GetTarget().IsDMAStorageSupported(CCtx().GetArch(), dma_kind,
+                                                src_storage, dst_storage))
+    Error1(n.LOC(), "direct " + STR(dma_kind) + " data movement between '" +
+                        STR(src_storage) + "' and '" + STR(dst_storage) +
+                        "' is not supported by the current target.");
   const auto is_global = [](Storage storage) {
     return storage == Storage::GLOBAL || storage == Storage::DEFAULT;
   };
@@ -2022,33 +2335,8 @@ bool EarlySemantics::Visit(AST::DMA& n) {
     }
 
   if (!isa<AST::Memory>(n.to)) {
-    auto getReshapeRank = [](const ptr<AST::SOP::Reshape>& reshape) -> size_t {
-      auto ns = reshape->GetNewSpan();
-      size_t cnt = ns->Count();
-      if (cnt == 1)
-        if (auto e = dyn_cast<AST::Expr>(ns->ValueAt(0)))
-          if (auto mds = dyn_cast<AST::MultiDimSpans>(e->GetReference()))
-            if (mds->HasValidRank()) cnt = mds->Rank();
-      return cnt;
-    };
-    auto getEffectiveRank =
-        [&getReshapeRank](size_t base_dims,
-                          const ptr<AST::Node>& node) -> size_t {
-      if (!isa<AST::ChunkAt>(node)) return base_dims;
-      auto ca = cast<AST::ChunkAt>(node);
-      size_t rank = base_dims;
-      for (auto& sop : ca->AllOperations()) {
-        if (auto sub = dyn_cast<AST::SOP::SubSpan>(sop))
-          rank = sub->subspan->Count();
-        else if (auto view = dyn_cast<AST::SOP::View>(sop))
-          rank = view->subspan->Count();
-        else if (auto reshape = dyn_cast<AST::SOP::Reshape>(sop))
-          rank = getReshapeRank(reshape);
-      }
-      return rank;
-    };
-    size_t src_dims = getEffectiveRank(sty->Dims(), n.from);
-    size_t dst_dims = getEffectiveRank(tty->Dims(), n.to);
+    size_t src_dims = sty->Dims();
+    size_t dst_dims = tty->Dims();
     // For async TMA (event-based), the source rank may differ from the
     // declared type due to sqz()/view() on the definition chain. The TMA
     // codegen validates rank independently via the descriptor setup.
@@ -2148,8 +2436,7 @@ bool EarlySemantics::Visit(AST::BufferMap& n) {
 
   if (!CCtx().GetArch().empty() &&
       !CCtx().HasFeature(ChoreoFeature::BUFFER_MAP, CCtx().GetArch())) {
-    Error1(n.LOC(),
-           "explicit memory mapping is not supported by this target.");
+    Error1(n.LOC(), "explicit memory mapping is not supported by this target.");
     return false;
   }
 
@@ -2170,17 +2457,17 @@ bool EarlySemantics::Visit(AST::BufferMap& n) {
   // This is checked in a later pass once shape information is available.
   if (!CCtx().GetTarget().IsBufferMappingValid(
           CCtx().GetArch(), srcTy->GetStorage(), n.storage)) {
-    Error1(n.source->LOC(),
-           "buffer.map/remap: invalid storage mapping " +
-               STR(srcTy->GetStorage()) + " -> " + STR(n.storage));
+    Error1(n.source->LOC(), "buffer.map/remap: invalid storage mapping " +
+                                STR(srcTy->GetStorage()) + " -> " +
+                                STR(n.storage));
     return false;
   }
 
   // Register result symbol.  Buffer mapping creates new symbols;
   // reassignment is not permitted.
   if (!n.result.empty()) {
-    auto spannedTy = MakeRankedSpannedType(
-        srcTy->GetShape().Rank(), srcTy->ElementType(), n.storage);
+    auto spannedTy = MakeRankedSpannedType(srcTy->GetShape().Rank(),
+                                           srcTy->ElementType(), n.storage);
     SSTab().DefineSymbol(n.result, MakeFutureType(spannedTy, false));
     ReportErrorWhenViolateODR(n.LOC(), n.result + ".data", __FILE__, __LINE__,
                               spannedTy);
@@ -2224,6 +2511,7 @@ bool EarlySemantics::Visit(AST::MMA& n) {
         }
         ReportErrorWhenViolateODR(n.LOC(), fill_sym + ".span", __FILE__,
                                   __LINE__, MakeRankedMDSpanType(2));
+        mma_fragment_symbols.insert(SSTab().InScopeName(fill_sym));
         if (!isa<ScalarType>(op.FillingValue()->GetType()))
           Error1(n.LOC(), "Expect a scalar value for MMA fill.");
       }
@@ -2242,6 +2530,7 @@ bool EarlySemantics::Visit(AST::MMA& n) {
         MakeFutureType(cast<SpannedType>(sty->Clone()), op.IsAsync()));
     ReportErrorWhenViolateODR(n.LOC(), fut_sym + ".span", __FILE__, __LINE__,
                               cast<SpannedType>(sty->Clone()));
+    mma_fragment_symbols.insert(SSTab().InScopeName(fut_sym));
   } break;
   case AST::MMAOperation::LoadR: {
     auto sty = dyn_cast<SpannedType>(op.LoadFrom()->GetType());
@@ -2252,6 +2541,38 @@ bool EarlySemantics::Visit(AST::MMA& n) {
   } break;
   case AST::MMAOperation::Exec: {
     std::string op0_sym = AST::FragName(op.ExecOperand(0));
+    auto op0_ty = op.ExecOperand(0)->GetType();
+    auto op0_sty = dyn_cast<SpannedType>(op0_ty);
+    auto op0_scoped = SSTab().InScopeName(op0_sym);
+    bool fragment_accumulator =
+        mma_fragment_symbols.count(op0_scoped) ||
+        (op0_sty && op0_sty->GetStorage() == Storage::REG);
+    bool buffer_accumulator = op0_sty && !fragment_accumulator;
+
+    if (buffer_accumulator) {
+      auto is_buffer_operand = [](const ptr<AST::Expr>& operand) {
+        if (!isa<SpannedType>(operand->GetType())) return false;
+        auto ref = operand->GetReference();
+        return isa<AST::Identifier>(ref) || isa<AST::ChunkAt>(ref);
+      };
+
+      if (op.IsSparse() || op.HasScale() || op.HasExecFuture() ||
+          op.HasIssueOrder()) {
+        Error1(n.LOC(), "buffer-form MMA does not support async, sparse, "
+                        "scale, or schedule modifiers.");
+      } else if (!is_buffer_operand(op.ExecOperand(0)) ||
+                 !is_buffer_operand(op.ExecOperand(1)) ||
+                 !is_buffer_operand(op.ExecOperand(2))) {
+        Error1(n.LOC(), "buffer-form MMA requires the destination and both "
+                        "inputs to be spanned buffers or views; a buffer "
+                        "destination cannot be combined with fragment "
+                        "inputs.");
+      } else {
+        op.SetBufferForm();
+      }
+      break;
+    }
+
     std::string op1_sym = AST::FragName(op.ExecOperand(1));
     std::string op2_sym = AST::FragName(op.ExecOperand(2));
     ReportErrorWhenUseBeforeDefine(n.LOC(), op0_sym);
@@ -2611,8 +2932,35 @@ bool EarlySemantics::Visit(AST::Call& n) {
                                  "' is not supported for printing.");
       }
     } else if (n.IsArith()) {
-      auto pty = NodeType(*n.arguments->ValueAt(0));
-      SetNodeType(n, pty);
+      auto result_ty = NodeType(*n.arguments->ValueAt(0));
+      size_t lane_count = 0;
+      BaseType element_type = ScalarOrVectorElementType(result_ty);
+      for (auto& argument : n.GetArguments()) {
+        auto argument_ty = NodeType(*argument);
+        if (auto vty = dyn_cast<VectorType>(argument_ty)) {
+          if (lane_count && lane_count != vty->ElemCount())
+            Error1(argument->LOC(),
+                   "arithmetic builtin arguments have mismatched vector lane "
+                   "counts (" +
+                       std::to_string(lane_count) + " vs. " +
+                       std::to_string(vty->ElemCount()) + ").");
+          lane_count = vty->ElemCount();
+        }
+        auto argument_element = ScalarOrVectorElementType(argument_ty);
+        if (argument_element != element_type &&
+            (IsIntegerType(argument_element) ||
+             IsFloatType(argument_element))) {
+          auto promoted = PromoteType(element_type, argument_element);
+          if (promoted.lty == promoted.rty) element_type = promoted.lty;
+        }
+      }
+      if (lane_count) {
+        if (func_name == "__isfinite") element_type = BaseType::BOOL;
+        SetNodeType(n, MakeVectorType(element_type, lane_count));
+        n.AddNote("elementwise_vector", std::to_string(lane_count));
+      } else {
+        SetNodeType(n, result_ty);
+      }
     } else if (func_name == "__alignup" || func_name == "__aligndown") {
       if (n.arguments->Count() != 2)
         Error1(n.LOC(), "expect 2 arguments but got " +
@@ -3224,10 +3572,10 @@ bool EarlySemantics::Visit(AST::Return& n) {
 bool EarlySemantics::Visit(AST::LoopRange& n) {
   TraceEachVisit(n);
 
-  if (n.lbound && !isa<ScalarIntegerType>(NodeType(*n.lbound)))
-    Error1(n.lbound->LOC(), "the lower bound is not an integer.");
-  if (n.ubound && !isa<ScalarIntegerType>(NodeType(*n.ubound)))
-    Error1(n.ubound->LOC(), "the upper bound is not an integer.");
+  if (n.lb_mutator && !isa<ScalarIntegerType>(NodeType(*n.lb_mutator)))
+    Error1(n.lb_mutator->LOC(), "the lower bound is not an integer.");
+  if (n.ub_mutator && !isa<ScalarIntegerType>(NodeType(*n.ub_mutator)))
+    Error1(n.ub_mutator->LOC(), "the upper bound is not an integer.");
 
   return true;
 }

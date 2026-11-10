@@ -1,0 +1,27 @@
+// REQUIRES: TARGET-SM_90A
+// RUN: choreo -es -t cute -arch=sm_90a %s -o - 2>&1 | FileCheck %s --check-prefix=SHARE
+// RUN: choreo -es -t cute -arch=sm_90a -fdma-alloc=false %s -o - 2>&1 | FileCheck %s --check-prefix=NOSHARE
+
+// Two `.any` TMA futures are live-sequential: fA is fully waited before fB is
+// issued, so liveness coloring assigns them the same mbarrier slot.  With
+// -fdma-alloc (default) both futures bind to the same atom; with
+// -fdma-alloc=false the monotonic counter hands out a fresh atom per future.
+__co__ void foo(global f32 [6, 16, 128] input, global f32 [6, 16, 128] output) {
+  parallel p by 32 : block {
+    fA = tma.any;
+    fA = tma.copy.async input.chunkat(_,_,p) => shared;
+    wait fA;
+    tma.copy fA.data => output.chunkat(_,_,p);
+
+    fB = tma.any;
+    fB = tma.copy.async input.chunkat(_,_,p) => shared;
+    wait fB;
+    tma.copy fB.data => output.chunkat(_,_,p);
+  }
+}
+
+// SHARE: fA.set_atom(&choreo_copy_atom_t_0);
+// SHARE: fB.set_atom(&choreo_copy_atom_t_0);
+
+// NOSHARE: fA.set_atom(&choreo_copy_atom_t_0);
+// NOSHARE: fB.set_atom(&choreo_copy_atom_t_2);

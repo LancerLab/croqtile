@@ -22,13 +22,15 @@ bool IsEnabledAtThreshold(AssertionCost cost, AssertionCost threshold) {
 } // namespace
 
 void AssertSite::ResetFunction() {
+  // Reset only per-function, symbol-keyed state. The scope stack (`scopes`)
+  // and the node-keyed maps (`scope_map`, `scope_level`, `block_cost`) mirror
+  // the AST block nesting and must stay balanced across the whole program:
+  // the enclosing `Program` block legitimately sits above every function, so
+  // clearing them here would corrupt the push/pop balance and break the scope
+  // chain that EstimateAssertionCost walks up to `Program`.
   def_map.clear();
-  scope_map.clear();
   barrier_map.clear();
   node_order.clear();
-  scope_level.clear();
-  block_cost.clear();
-  scopes.clear();
   walk_order = 0;
   body_order = 0;
 }
@@ -78,8 +80,8 @@ size_t AssertSite::EstimateLoopTripCount(AST::Node* n) const {
       if (IsActualBoundedIntegerType(sty)) {
         auto ub = GetSingleUpperBound(sty);
         auto lb = sbe::nu(0);
-        auto ub_addend_expr = dyn_cast<AST::Expr>(range->ubound);
-        auto lb_addend_expr = dyn_cast<AST::Expr>(range->lbound);
+        auto ub_addend_expr = dyn_cast<AST::Expr>(range->ub_mutator);
+        auto lb_addend_expr = dyn_cast<AST::Expr>(range->lb_mutator);
         auto ub_addend = sbe::nu(0);
         auto lb_addend = sbe::nu(0);
         if (ub_addend_expr && ub_addend_expr->Opts().HasVal())

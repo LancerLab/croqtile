@@ -7,31 +7,13 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
+
+#include "parallel_level.hpp"
 
 // to avoid definition error
 namespace Choreo {
-enum class Storage {
-  REG, /* register, normally not explicit */
-  LOCAL,
-  SHARED,
-  GLOBAL /*device global*/,
-  NODE /*cluster node*/,
-  DEFAULT,
-  NONE
-};
-enum class ParallelLevel {
-  THREAD,
-  GROUP,
-  GROUPx4,
-  BLOCK,
-  CLUSTER, /* thread block cluster (TBC), above block */
-  DEVICE,
-  TERM /* terminal machine in cluster*/,
-  SEQ,
-  NONE /*bottom*/,
-  UNKNOWN /*top*/
-};
 enum class CompileTarget;
 } // namespace Choreo
 
@@ -319,18 +301,39 @@ inline static BaseType BaseTypeFromString(const std::string& input) {
 // map from common device type string to BaseType
 inline static BaseType DSTR2BT(std::string type_name) {
   static const std::map<std::string, BaseType> known_types = {
-      {"char", BaseType::S8},          {"short", BaseType::S16},
-      {"int", BaseType::S32},          {"long long", BaseType::S64},
-      {"long long", BaseType::S64},    {"bool", BaseType::BOOL},
-      {"unsigned char", BaseType::U8}, {"unsigned short", BaseType::U16},
-      {"unsigned int", BaseType::U32}, {"unsigned long long", BaseType::U64},
-      {"int8_t", BaseType::S16},       {"int16_t", BaseType::S16},
-      {"int32_t", BaseType::S32},      {"int64_t", BaseType::S64},
-      {"uint8_t", BaseType::U16},      {"uint16_t", BaseType::U16},
-      {"uint32_t", BaseType::U32},     {"size_t", BaseType::U32},
-      {"uint64_t", BaseType::U64},     {"float", BaseType::F32},
-      {"double", BaseType::F64},       {"__bf16", BaseType::BF16},
-      {"__fp16", BaseType::F16}};
+      {"char", BaseType::S8},
+      {"short", BaseType::S16},
+      {"int", BaseType::S32},
+      {"long long", BaseType::S64},
+      {"long long", BaseType::S64},
+      {"bool", BaseType::BOOL},
+      {"unsigned char", BaseType::U8},
+      {"unsigned short", BaseType::U16},
+      {"unsigned int", BaseType::U32},
+      {"unsigned long long", BaseType::U64},
+      {"int8_t", BaseType::S16},
+      {"int16_t", BaseType::S16},
+      {"int32_t", BaseType::S32},
+      {"int64_t", BaseType::S64},
+      {"uint8_t", BaseType::U16},
+      {"uint16_t", BaseType::U16},
+      {"uint32_t", BaseType::U32},
+      {"size_t", BaseType::U32},
+      {"uint64_t", BaseType::U64},
+      {"float", BaseType::F32},
+      {"double", BaseType::F64},
+      {"__bf16", BaseType::BF16},
+      {"__fp16", BaseType::F16},
+      {"f16", BaseType::F16},
+      {"half", BaseType::F16},
+      {"choreo::f16", BaseType::F16},
+      {"choreo::half", BaseType::F16},
+      {"bf16", BaseType::BF16},
+      {"bfp16", BaseType::BF16},
+      {"bfloat16", BaseType::BF16},
+      {"choreo::bf16", BaseType::BF16},
+      {"choreo::bfp16", BaseType::BF16},
+      {"choreo::bfloat16", BaseType::BF16}};
 
   if (known_types.find(type_name) != known_types.end()) {
     return known_types.at(type_name);
@@ -401,10 +404,10 @@ inline static std::string GetStringFrom(BaseType dataType) {
 
 inline static std::string GetStringFrom(Storage st) {
   static const std::unordered_map<Storage, std::string> enumToString = {
-      {Storage::REG, "register"},    {Storage::LOCAL, "local"},
-      {Storage::SHARED, "shared"},   {Storage::GLOBAL, "global"},
-      {Storage::NODE, "node"},       {Storage::NONE, "none"},
-      {Storage::DEFAULT, "default"},
+      {Storage::REG, "register"},  {Storage::LOCAL, "local"},
+      {Storage::SHARED, "shared"}, {Storage::GROUP_SHARED, "groupshared"},
+      {Storage::GLOBAL, "global"}, {Storage::NODE, "node"},
+      {Storage::NONE, "none"},     {Storage::DEFAULT, "default"},
   };
 
   auto it = enumToString.find(st);
@@ -424,6 +427,18 @@ inline static std::string GetStringFrom(ParallelLevel st) {
 
   auto it = enumToString.find(st);
   assert(it != enumToString.end() && "unsupported parallel level.");
+
+  return it->second;
+}
+
+inline static std::string GetStringFrom(DMAKind kind) {
+  static const std::unordered_map<DMAKind, std::string> enumToString = {
+      {DMAKind::DMA, "DMA"},
+      {DMAKind::TMA, "TMA"},
+  };
+
+  auto it = enumToString.find(kind);
+  assert(it != enumToString.end() && "unsupported DMA kind.");
 
   return it->second;
 }
@@ -480,6 +495,9 @@ inline static const std::string STR(Storage st) {
 inline static const std::string STR(ParallelLevel pl) {
   return __internal__::GetStringFrom(pl);
 }
+inline static const std::string STR(DMAKind kind) {
+  return __internal__::GetStringFrom(kind);
+}
 
 /// The agent whose memory accesses a fence orders. THREADS is the executing
 /// threads (the generic proxy); DMA and TMA are data-movement engines (a
@@ -528,12 +546,17 @@ inline static const std::string STR(CompletionWaitKind k) {
 /// The ordering a fence establishes. RELEASE publishes the writer's stores
 /// into a space; ACQUIRE orders (and, on cached spaces, invalidates) the
 /// reader's loads out of a space; ACQ_REL is the bidirectional barrier
-/// (release + acquire, i.e. the "full" fence) emitted by a fence with no
-/// direction, e.g. the explicit sync.fence path.
+/// (release + acquire, i.e. the "full" fence); SEQ_CST is the
+/// sequentially-consistent fence (acq_rel plus a single total order over all
+/// such fences). DEFAULT is the parser sentinel for an unspecified order; the
+/// semantic checker resolves it to the target's preferred default (seq_cst on
+/// targets with a sequential fence, acq_rel otherwise) before codegen.
 enum class FenceOrder {
   RELEASE,
   ACQUIRE,
   ACQ_REL,
+  SEQ_CST,
+  DEFAULT,
 };
 
 inline static const std::string STR(FenceOrder o) {
@@ -541,9 +564,23 @@ inline static const std::string STR(FenceOrder o) {
   case FenceOrder::RELEASE: return "RELEASE";
   case FenceOrder::ACQUIRE: return "ACQUIRE";
   case FenceOrder::ACQ_REL: return "ACQ_REL";
+  case FenceOrder::SEQ_CST: return "SEQ_CST";
+  case FenceOrder::DEFAULT: return "DEFAULT";
   }
   choreo_unreachable("unsupported fence order.");
   return "";
+}
+
+/// Derive the natural parallel level for a storage space, the inverse of
+/// `Target::GetDefaultFenceMemory`: local -> thread, shared -> group,
+/// global -> device. Returns NONE for a space without a natural level.
+inline static ParallelLevel DefaultLevelForStorage(Storage s) {
+  switch (s) {
+  case Storage::LOCAL: return ParallelLevel::THREAD;
+  case Storage::SHARED: return ParallelLevel::GROUP;
+  case Storage::GLOBAL: return ParallelLevel::DEVICE;
+  default: return ParallelLevel::NONE;
+  }
 }
 
 /// A single concrete fence requirement. This is the fully general four-fold
@@ -633,6 +670,104 @@ struct FenceSelection {
     return producer == o.producer && consumer == o.consumer;
   }
 };
+
+/// Parse a single fence kind serialized by `FenceKind::Name()` back into a
+/// `FenceKind`. The wire format is `SPACE_ENTITY_ORDER[_SCOPE]`; the order
+/// token may itself contain a separator (`ACQ_REL`), so it is peeled from the
+/// right before the remaining underscore-separated fields are decoded. Returns
+/// a NONE kind for an empty or unrecognized string.
+inline static FenceKind FenceKindFromName(const std::string& name) {
+  FenceKind k;
+  if (name.empty() || name == "NONE") return k;
+
+  std::string rest = name;
+  auto ends_with = [&rest](const std::string& suffix) {
+    return rest.size() >= suffix.size() &&
+           rest.compare(rest.size() - suffix.size(), suffix.size(), suffix) ==
+               0;
+  };
+  auto peel = [&](const std::string& suffix, FenceOrder o) {
+    if (!ends_with(suffix)) return false;
+    k.order = o;
+    rest = rest.substr(0, rest.size() - suffix.size());
+    if (!rest.empty() && rest.back() == '_') rest.pop_back();
+    return true;
+  };
+  // Order first: ACQ_REL embeds an underscore, so match it before the plain
+  // RELEASE / ACQUIRE / SEQ_CST suffixes.
+  peel("ACQ_REL", FenceOrder::ACQ_REL) ||
+      peel("RELEASE", FenceOrder::RELEASE) ||
+      peel("ACQUIRE", FenceOrder::ACQUIRE) ||
+      peel("SEQ_CST", FenceOrder::SEQ_CST);
+
+  // Remaining fields are SPACE_ENTITY[_SCOPE], underscore-separated.
+  const auto parts = SplitStringByDelimiter(rest, "_", /*trim=*/false);
+  if (parts.empty()) return k;
+
+  const std::string& space = parts[0];
+  if (space == "local")
+    k.space = Storage::LOCAL;
+  else if (space == "shared")
+    k.space = Storage::SHARED;
+  else if (space == "groupshared")
+    k.space = Storage::GROUP_SHARED;
+  else if (space == "global")
+    k.space = Storage::GLOBAL;
+  else if (space == "register")
+    k.space = Storage::REG;
+  else if (space == "node")
+    k.space = Storage::NODE;
+  else if (space == "default")
+    k.space = Storage::DEFAULT;
+  else
+    k.space = Storage::NONE;
+
+  if (parts.size() >= 2) {
+    const std::string& entity = parts[1];
+    if (entity == "THREADS")
+      k.entity = FenceEntity::THREADS;
+    else if (entity == "DMA")
+      k.entity = FenceEntity::DMA;
+    else if (entity == "TMA")
+      k.entity = FenceEntity::TMA;
+    else if (entity == "MMA")
+      k.entity = FenceEntity::MMA;
+    else if (entity == "ALL")
+      k.entity = FenceEntity::ALL;
+  }
+
+  // Optional explicit scope (serialized only when HasExplicitScope()).
+  if (parts.size() >= 3) {
+    const std::string& scope = parts[2];
+    if (scope == "thread")
+      k.scope = ParallelLevel::THREAD;
+    else if (scope == "group")
+      k.scope = ParallelLevel::GROUP;
+    else if (scope == "group-4")
+      k.scope = ParallelLevel::GROUPx4;
+    else if (scope == "block")
+      k.scope = ParallelLevel::BLOCK;
+    else if (scope == "cluster")
+      k.scope = ParallelLevel::CLUSTER;
+    else if (scope == "device")
+      k.scope = ParallelLevel::DEVICE;
+  }
+
+  return k;
+}
+
+/// Split a comma-joined fence-kind list (as produced by
+/// `FenceInsertion::JoinKinds`) back into its constituent kinds, skipping
+/// empty entries.
+inline static std::vector<FenceKind>
+ParseFenceKinds(const std::string& joined) {
+  std::vector<FenceKind> out;
+  for (const auto& tok : SplitStringByDelimiter(joined, ",", /*trim=*/true)) {
+    if (tok.empty()) continue;
+    out.push_back(FenceKindFromName(tok));
+  }
+  return out;
+}
 
 inline static std::ostream& operator<<(std::ostream& os, BaseType bt) {
   return os << STR(bt);
@@ -1329,7 +1464,9 @@ struct VectorType final : public Type, public TypeIDProvider<VectorType> {
   }
   const std::string Name() const override { return "vector"; }
   const ptr<Type> CloneImpl() const override {
-    return std::make_shared<VectorType>(e_type, ec);
+    auto ty = std::make_shared<VectorType>(e_type, ec);
+    ty->is_mutable = is_mutable;
+    return ty;
   }
   bool operator==(const Type& ty) const override {
     if (auto vt = dyn_cast<VectorType>(&ty)) {
@@ -2013,6 +2150,7 @@ struct DeviceDataType final : public Type,
 
   const std::string GetTypeStr() { return name; }
   void SetTypeStr(std::string s) { name = s; }
+  void SetPlainName(std::string s) { plain_name = s; }
 
   BaseType GetDataType() { return data_type; }
   void SetDataType(BaseType bt) { data_type = bt; }
@@ -3494,13 +3632,116 @@ inline PromoteResult PromoteType(BaseType lty, BaseType rty) {
   }
 }
 
+// Shared type result for explicit vectors and loop-vectorized expressions.
+// A null type with an empty error means neither operand is an explicit vector.
+struct VectorInferenceResult {
+  ptr<VectorType> type;
+  std::string error;
+
+  bool Applies() const { return type || !error.empty(); }
+};
+
+inline BaseType ScalarOrVectorElementType(const ptr<Type>& ty) {
+  if (auto vty = dyn_cast<VectorType>(ty)) return vty->ElemType();
+  if (auto sty = dyn_cast<ScalarType>(ty)) return sty->GetBaseType();
+  if (IsActualBoundedIntegerType(ty)) return BaseType::S32;
+  return BaseType::UNKNOWN;
+}
+
+inline VectorInferenceResult InferNumericVectorType(const ptr<Type>& lhs,
+                                                    const ptr<Type>& rhs,
+                                                    bool comparison = false) {
+  auto lhs_vty = dyn_cast<VectorType>(lhs);
+  auto rhs_vty = dyn_cast<VectorType>(rhs);
+  if (!lhs_vty && !rhs_vty) return {};
+
+  size_t lanes = lhs_vty ? lhs_vty->ElemCount() : rhs_vty->ElemCount();
+  if (lhs_vty && rhs_vty && lhs_vty->ElemCount() != rhs_vty->ElemCount())
+    return {nullptr, "vector operands have mismatched lane counts (" +
+                         std::to_string(lhs_vty->ElemCount()) + " vs. " +
+                         std::to_string(rhs_vty->ElemCount()) + ")."};
+
+  BaseType lhs_elem = ScalarOrVectorElementType(lhs);
+  BaseType rhs_elem = ScalarOrVectorElementType(rhs);
+  if ((!IsIntegerType(lhs_elem) && !IsFloatType(lhs_elem)) ||
+      (!IsIntegerType(rhs_elem) && !IsFloatType(rhs_elem)))
+    return {nullptr, "vector numeric operands must have scalar numeric "
+                     "element types."};
+
+  auto promoted = PromoteType(lhs_elem, rhs_elem);
+  if (promoted.lty != promoted.rty)
+    return {nullptr, "unable to determine a common vector element type."};
+  return {MakeVectorType(comparison ? BaseType::BOOL : promoted.lty, lanes),
+          {}};
+}
+
+inline VectorInferenceResult InferBooleanVectorType(const ptr<Type>& lhs,
+                                                    const ptr<Type>& rhs) {
+  auto lhs_vty = dyn_cast<VectorType>(lhs);
+  auto rhs_vty = dyn_cast<VectorType>(rhs);
+  if (!lhs_vty && !rhs_vty) return {};
+
+  size_t lanes = lhs_vty ? lhs_vty->ElemCount() : rhs_vty->ElemCount();
+  if (lhs_vty && rhs_vty && lhs_vty->ElemCount() != rhs_vty->ElemCount())
+    return {nullptr, "vector operands have mismatched lane counts (" +
+                         std::to_string(lhs_vty->ElemCount()) + " vs. " +
+                         std::to_string(rhs_vty->ElemCount()) + ")."};
+
+  if (ScalarOrVectorElementType(lhs) != BaseType::BOOL ||
+      ScalarOrVectorElementType(rhs) != BaseType::BOOL)
+    return {nullptr, "vector mask operands must have bool element type."};
+  return {MakeVectorType(BaseType::BOOL, lanes), {}};
+}
+
+inline VectorInferenceResult InferVectorSelectType(const ptr<Type>& condition,
+                                                   const ptr<Type>& lhs,
+                                                   const ptr<Type>& rhs) {
+  auto condition_vty = dyn_cast<VectorType>(condition);
+  auto lhs_vty = dyn_cast<VectorType>(lhs);
+  auto rhs_vty = dyn_cast<VectorType>(rhs);
+  if (!condition_vty && !lhs_vty && !rhs_vty) return {};
+
+  if (condition_vty && condition_vty->ElemType() != BaseType::BOOL)
+    return {nullptr, "vector select condition must have bool element type."};
+  if (!condition_vty && !isa<BooleanType>(condition))
+    return {nullptr, "vector select condition must be bool."};
+
+  size_t lanes = condition_vty
+                     ? condition_vty->ElemCount()
+                     : (lhs_vty ? lhs_vty->ElemCount() : rhs_vty->ElemCount());
+  for (auto vty : {lhs_vty, rhs_vty})
+    if (vty && vty->ElemCount() != lanes)
+      return {nullptr, "vector select operands have mismatched lane counts."};
+
+  BaseType lhs_elem = ScalarOrVectorElementType(lhs);
+  BaseType rhs_elem = ScalarOrVectorElementType(rhs);
+  if (lhs_elem == BaseType::BOOL && rhs_elem == BaseType::BOOL)
+    return {MakeVectorType(BaseType::BOOL, lanes), {}};
+  if ((!IsIntegerType(lhs_elem) && !IsFloatType(lhs_elem)) ||
+      (!IsIntegerType(rhs_elem) && !IsFloatType(rhs_elem)))
+    return {nullptr, "vector select values must have compatible scalar "
+                     "element types."};
+
+  auto promoted = PromoteType(lhs_elem, rhs_elem);
+  if (promoted.lty != promoted.rty)
+    return {nullptr,
+            "unable to determine a common vector select element type."};
+  return {MakeVectorType(promoted.lty, lanes), {}};
+}
+
 inline static ptr<Type> MutateType(const ptr<Type>& ty) {
+  if (auto vty = dyn_cast<VectorType>(ty)) {
+    auto result = CloneP(vty);
+    result->is_mutable = true;
+    return result;
+  }
   auto sty = dyn_cast<ScalarType>(ty);
   if (!sty) return ty->Clone();
   return MakeScalarType(sty->GetBaseType(), true);
 }
 
 inline bool IsMutable(const Type& ty) {
+  if (auto vty = dyn_cast<VectorType>(&ty)) return vty->is_mutable;
   auto sty = dyn_cast<ScalarType>(&ty);
   if (!sty) {
     // spanned are always mutable

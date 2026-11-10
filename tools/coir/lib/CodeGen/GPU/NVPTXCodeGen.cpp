@@ -44,7 +44,7 @@ public:
   // The shared DMA/MMA lowering is not needed here.
 
   int EmitSource(ModuleOp module, llvm::StringRef arch,
-                 llvm::raw_ostream &os) override {
+                 llvm::raw_ostream& os) override {
     std::string a = arch.empty() ? "sm_80" : arch.str();
     std::string ptx = coir::gpu::emitPTXFromCoIR(module, a);
     if (ptx.empty()) {
@@ -56,7 +56,7 @@ public:
   }
 
   int EmitScript(ModuleOp module, llvm::StringRef arch,
-                 llvm::raw_ostream &os) override {
+                 llvm::raw_ostream& os) override {
     std::string a = arch.empty() ? "sm_80" : arch.str();
 
     std::string ptx = coir::gpu::emitPTXFromCoIR(module, a);
@@ -66,7 +66,7 @@ public:
     }
 
     std::string stubs = coir::gpu::emitHostStubs(module);
-    auto &sctx = CoIR::ScriptContext::Get();
+    auto& sctx = CoIR::ScriptContext::Get();
 
     emitScriptPrologue(os, "NVPTX: compile + execute", "_gpu");
 
@@ -85,11 +85,10 @@ public:
     os << "BINFILE=\"$TMPDIR/runner\"\n\n";
     os << "cat > \"$TMPDIR/host.cpp\" << '__COCC_HOST_SOURCE__'\n";
 
-    os << "static const char __coir_ptx_string[] = \""
-       << escapeCString(ptx) << "\";\n\n";
+    os << "static const char __coir_ptx_string[] = \"" << escapeCString(ptx)
+       << "\";\n\n";
 
-    if (sctx.runtime_header)
-      os << "#include \"choreo.h\"\n";
+    if (sctx.runtime_header) os << "#include \"choreo.h\"\n";
     os << "\n";
 
     os << stubs;
@@ -107,12 +106,11 @@ public:
 
     return 0;
   }
-
 };
 
 static bool registered = [] {
-  CoIR::CodeGenRegistry::Register("gpu",
-                                  [] { return std::make_unique<NVPTXCodeGen>(); });
+  CoIR::CodeGenRegistry::Register(
+      "gpu", [] { return std::make_unique<NVPTXCodeGen>(); });
   return true;
 }();
 

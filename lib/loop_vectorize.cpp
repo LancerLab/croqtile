@@ -242,6 +242,26 @@ bool LoopVectorizeSimpleChecker::Visit(AST::Call& n) {
   return true;
 }
 
+bool LoopVectorizeSimpleChecker::Visit(AST::VectorIndex& n) {
+  TraceEachVisit(n);
+  if (!NeedCheck()) return true;
+  if (cur_loop->HasVectorizationHint())
+    Error1(n.LOC(), "a loop containing explicit vector operations cannot be "
+                    "vectorized again.");
+  SetLoopVectorizationFailed();
+  return true;
+}
+
+bool LoopVectorizeSimpleChecker::Visit(AST::VectorMemory& n) {
+  TraceEachVisit(n);
+  if (!NeedCheck()) return true;
+  if (cur_loop->HasVectorizationHint())
+    Error1(n.LOC(), "a loop containing explicit vector operations cannot be "
+                    "vectorized again.");
+  SetLoopVectorizationFailed();
+  return true;
+}
+
 void LoopVectorizeSimpleChecker::AddLoopUse(std::string sym, location loc) {
   if (loop_uses.find(sym) == loop_uses.end()) {
     loop_uses.emplace(sym, std::vector<location>{loc});
@@ -490,11 +510,18 @@ bool LoopVectorizeLegalityChecker::Visit(AST::DataAccess& n) {
 
   // It applies the alignment check unless the target supports unaligned simd
   // memory access
-  if (CCtx().GetTarget().EnforceVectorAlignment(CCtx().GetArch()))
+  if (CCtx().GetTarget().EnforceVectorAlignment(CCtx().GetArch())) {
     if (!CheckDataAccessAlignment(n)) {
       SetLoopVectorizationFailed();
       return true;
     }
+  } else if (CCtx().GetTarget().WarnVectorAlignment(CCtx().GetArch()) &&
+             !CheckDataAccessAlignment(n)) {
+    Warning(n.LOC(),
+            "unaligned vector access may split memory requests and waste "
+            "outstanding bandwidth; align the access to the vector width for "
+            "best performance.");
+  }
 
   DiversityShape offset_shape = DiversityShape(UNIFORM, sbe::nu(0));
   auto indices = n.GetIndices();
@@ -507,8 +534,13 @@ bool LoopVectorizeLegalityChecker::Visit(AST::DataAccess& n) {
 
   if (offset_shape.Varying() && !offset_shape.Stride(1)) {
     // need gather/scatter for vectorized access
-    if (CCtx().GetTarget().EnforceVectorAlignment(CCtx().GetArch()))
+    if (CCtx().GetTarget().EnforceVectorAlignment(CCtx().GetArch())) {
       SetLoopVectorizationFailed();
+    } else if (CCtx().GetTarget().WarnVectorAlignment(CCtx().GetArch())) {
+      Warning(n.LOC(),
+              "vectorized gather/scatter access is not contiguous and may "
+              "degrade memory throughput; prefer unit-stride accesses.");
+    }
     if (debug_visit) {
       dbgs() << indent << "Gather/Scatter is not legal for vectorization"
              << " in " << ToUpper(CCtx().GetArch()) << " target \n";

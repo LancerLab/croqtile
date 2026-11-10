@@ -1,0 +1,17 @@
+// RUN: copp %s -o - | grep -v "\<CHECK\>" | FileCheck %s
+
+template <typename T, bool Enabled>
+__co__ void constrained(T [1] data) {
+  static_assert(__is_same<T, f16>, "only f16 is supported");
+  if constexpr (Enabled) {
+    selected_token
+  } else {
+    static_assert(false, "inactive assertion must not fire");
+  }
+}
+
+template __co__ constrained<f16, true>;
+
+// CHECK: selected_token
+// CHECK-NOT: only f16 is supported
+// CHECK-NOT: inactive assertion

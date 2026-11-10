@@ -1,4 +1,5 @@
-//===- CodeGen.h - CoIR target code generation interface ---------*- C++ -*-===//
+//===- CodeGen.h - CoIR target code generation interface ---------*- C++
+//-*-===//
 //
 // Base class and registry for CoIR target-specific code generation.
 //
@@ -32,17 +33,17 @@ namespace CoIR {
 /// Provides target-independent infrastructure (headers, build env)
 /// so emitters don't depend on Choreo headers directly.
 struct ScriptContext {
-  const char *types_header = nullptr;
-  const char *runtime_header = nullptr;
-  const char *types_cute_header = nullptr;
-  const char *cute_header = nullptr;
+  const char* types_header = nullptr;
+  const char* runtime_header = nullptr;
+  const char* types_cute_header = nullptr;
+  const char* cute_header = nullptr;
   std::string build_env;
   std::string target_setup;
   std::string arch_override;
   std::string cuda_home;
   std::string source_dir;
 
-  static ScriptContext &Get() {
+  static ScriptContext& Get() {
     static ScriptContext ctx;
     return ctx;
   }
@@ -56,10 +57,10 @@ public:
   virtual bool Lower(mlir::ModuleOp /*module*/) { return true; }
 
   virtual int EmitSource(mlir::ModuleOp module, llvm::StringRef arch,
-                         llvm::raw_ostream &os) = 0;
+                         llvm::raw_ostream& os) = 0;
 
   virtual int EmitScript(mlir::ModuleOp module, llvm::StringRef arch,
-                         llvm::raw_ostream &os) {
+                         llvm::raw_ostream& os) {
     return EmitSource(module, arch, os);
   }
 
@@ -74,27 +75,25 @@ public:
   /// Emit the user's explicit-device-code block attached to the module
   /// (e.g. __cok__ / __device__ function definitions for a specific target).
   static void emitExplicitDeviceCode(mlir::ModuleOp module,
-                                     llvm::raw_ostream &os) {
-    auto attr = module->getAttrOfType<mlir::StringAttr>(
-        "coir.explicit_device_code");
+                                     llvm::raw_ostream& os) {
+    auto attr =
+        module->getAttrOfType<mlir::StringAttr>("coir.explicit_device_code");
     if (attr) os << "\n" << attr.getValue() << "\n";
   }
 
   /// Emit the user's C++ code block attached to the module
   /// (host-side __cok__ blocks, main(), helper functions, etc.).
-  static void emitUserCppCode(mlir::ModuleOp module, llvm::raw_ostream &os) {
-    auto attr =
-        module->getAttrOfType<mlir::StringAttr>("coir.user_cpp_code");
+  static void emitUserCppCode(mlir::ModuleOp module, llvm::raw_ostream& os) {
+    auto attr = module->getAttrOfType<mlir::StringAttr>("coir.user_cpp_code");
     if (attr) os << "\n" << attr.getValue() << "\n";
   }
 
   /// Emit common script prologue: shebang, tmpdir, embedded Choreo headers.
-  static void emitScriptPrologue(llvm::raw_ostream &os,
-                                 llvm::StringRef comment,
+  static void emitScriptPrologue(llvm::raw_ostream& os, llvm::StringRef comment,
                                  llvm::StringRef tmpSuffix = "");
 
   /// Emit the --execute block common to all script targets.
-  static void emitScriptExecuteBlock(llvm::raw_ostream &os) {
+  static void emitScriptExecuteBlock(llvm::raw_ostream& os) {
     os << "if [[ \"${1:-}\" == \"--execute\" ]]; then\n";
     os << "  shift\n";
     os << "  \"$BINFILE\" \"$@\"\n";
@@ -106,19 +105,19 @@ public:
 struct CodeGenRegistry {
   using FactoryFn = std::function<std::unique_ptr<CodeGen>()>;
 
-  static void Register(const std::string &name, FactoryFn factory) {
+  static void Register(const std::string& name, FactoryFn factory) {
     GetFactories()[name] = std::move(factory);
   }
 
-  static std::unique_ptr<CodeGen> Create(const std::string &target) {
-    auto &m = GetFactories();
+  static std::unique_ptr<CodeGen> Create(const std::string& target) {
+    auto& m = GetFactories();
     auto it = m.find(target);
     if (it == m.end()) return nullptr;
     return it->second();
   }
 
 private:
-  static std::unordered_map<std::string, FactoryFn> &GetFactories() {
+  static std::unordered_map<std::string, FactoryFn>& GetFactories() {
     static std::unordered_map<std::string, FactoryFn> registry;
     return registry;
   }

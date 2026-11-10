@@ -117,6 +117,24 @@ void DataAccess::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+void VectorIndex::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+  v.Visit(*this);
+  v.AfterVisit(*this);
+}
+
+void VectorMemory::accept(Choreo::Visitor& v) {
+  v.BeforeVisit(*this);
+
+  address->accept(v);
+  if (value) value->accept(v);
+  if (mask) mask->accept(v);
+  if (other) other->accept(v);
+
+  v.Visit(*this);
+  v.AfterVisit(*this);
+}
+
 void Assignment::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
 
@@ -422,8 +440,8 @@ void CompletionWait::accept(Choreo::Visitor& v) {
 }
 
 void LoopRange::accept(Choreo::Visitor& v) {
-  if (lbound) lbound->accept(v);
-  if (ubound) ubound->accept(v);
+  if (lb_mutator) lb_mutator->accept(v);
+  if (ub_mutator) ub_mutator->accept(v);
   if (rv) rv->accept(v);
   if (HasExplicitIV()) iv->accept(v);
   v.Visit(*this);

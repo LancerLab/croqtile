@@ -15,6 +15,7 @@
 #include <string>
 #include <memory>
 #include "ast.hpp"
+#include "choreo_template.hpp"
 #include "symtab.hpp"
 #include "scanner.hpp"
 #include "parser.tab.hh"
@@ -88,14 +89,24 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
 %%
 <INITIAL,KERNEL,CO_FUNC,DEVICE_FUNC>{
     #line[ \t]+([0-9]+)[ \t]+\"([^\"]*)\" {
+      std::string directive(yytext);
       handle_line_directive(yytext);
+      if (YY_START == INITIAL)
+        return Choreo::Parser::make_HOST_CODE(directive, loc);
     }
     #line[ \t]+([0-9]+) {
+      std::string directive(yytext);
       handle_line_directive(yytext);
+      if (YY_START == INITIAL)
+        return Choreo::Parser::make_HOST_CODE(directive, loc);
     }
 }
 
 <INITIAL>{
+  "// __choreo_template_instance "{id} {
+    constexpr size_t marker_size = sizeof("// __choreo_template_instance ") - 1;
+    Choreo::SetActiveChoreoTemplateInstance(std::string(yytext + marker_size));
+  }
   "//".*   {
     if (Choreo::Scanner::KeepComments())
       return Choreo::Parser::make_HOST_CODE(yytext, loc);
@@ -524,6 +535,7 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
   "ituple"   return Choreo::Parser::make_ITUPLE(yytext, loc);
   "stream"   return Choreo::Parser::make_STREAM(yytext, loc);
   "event"    return Choreo::Parser::make_EVENT(yytext, loc);
+  "alignas"  return Choreo::Parser::make_ALIGNAS(yytext, loc);
   {removed_stage} return Choreo::Parser::make_REMOVED_STAGE(yytext, loc);
   "frag"     return Choreo::Parser::make_FRAG(yytext, loc);
   "print"    return Choreo::Parser::make_PRINT(yytext, loc);
@@ -659,6 +671,8 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
   "=>"       return Choreo::Parser::make_TRANS(loc);
   "swap"     return Choreo::Parser::make_SWAP(yytext, loc);
   "rotate"   return Choreo::Parser::make_ROTATE(yytext, loc);
+  "vec"      return Choreo::Parser::make_VEC(yytext, loc);
+  ".index"   return Choreo::Parser::make_INDEX(yytext, loc);
   "mma"      return Choreo::Parser::make_MMA(yytext, loc);
   ".fill"    return Choreo::Parser::make_FILL(yytext, loc);
   ".load"    return Choreo::Parser::make_LOAD(yytext, loc);
@@ -671,6 +685,10 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
   "sync"     return Choreo::Parser::make_SYNC(yytext, loc);
   "barrier"  return Choreo::Parser::make_BARRIER(yytext, loc);
   "fence"    return Choreo::Parser::make_FENCE(yytext, loc);
+  ".acq_rel" return Choreo::Parser::make_ACQ_REL(loc);
+  ".acq"     return Choreo::Parser::make_ACQ(loc);
+  ".rel"     return Choreo::Parser::make_REL(loc);
+  ".seq_cst" return Choreo::Parser::make_SEQ_CST(loc);
   "cooperative" return Choreo::Parser::make_COOPERATIVE(yytext, loc);
   "trigger"  return Choreo::Parser::make_TRIGGER(yytext, loc);
   "if"       return Choreo::Parser::make_IF(yytext, loc);

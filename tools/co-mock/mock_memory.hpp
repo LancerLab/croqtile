@@ -36,9 +36,8 @@ struct FutureInfo {
   size_t bytes = 0;
 
   bool IsReady() const {
-    return handle.valid() &&
-           handle.wait_for(std::chrono::seconds(0)) ==
-               std::future_status::ready;
+    return handle.valid() && handle.wait_for(std::chrono::seconds(0)) ==
+                                 std::future_status::ready;
   }
 };
 

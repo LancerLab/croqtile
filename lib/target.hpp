@@ -2,6 +2,7 @@
 #define __CHOREO_TARGET_HPP__
 
 #include "aux.hpp"
+#include "parallel_level.hpp"
 #include "preprocess.hpp"
 #include <memory>
 #include <set>
@@ -201,6 +202,14 @@ public:
   virtual bool IsEventSupported() const { return false; }
   virtual bool IsMMASupported() const { return false; }
   virtual bool IsAsmSupported(const ArchId& /*arch*/) const { return false; }
+  virtual bool SupportsExplicitVector(const ArchId& /*arch*/) const {
+    return false;
+  }
+  virtual bool SupportsExplicitVectorType(const ArchId& /*arch*/,
+                                          BaseType /*element_type*/,
+                                          size_t /*lane_count*/) const {
+    return false;
+  }
   virtual std::string LowerAsmOperand(const std::string& varName) const {
     return varName;
   }
@@ -228,13 +237,25 @@ public:
   // and cooperative launch are supported for each architecture.
 
   // Whether execution barrier at the given parallel level is supported.
-  virtual bool IsBarrierSupported(const ArchId&, ParallelLevel) const {
-    return IsFeatureSupported(STR(ChoreoFeature::BARRIER));
+  virtual bool IsBarrierSupported(const ArchId& arch, ParallelLevel) const {
+    return IsFeatureSupported(arch, STR(ChoreoFeature::BARRIER));
   }
   // Whether memory fence at the given visibility level is supported.
-  virtual bool IsFenceSupported(const ArchId&, ParallelLevel) const {
-    return IsFeatureSupported(STR(ChoreoFeature::FENCE));
+  virtual bool IsFenceSupported(const ArchId& arch, ParallelLevel) const {
+    return IsFeatureSupported(arch, STR(ChoreoFeature::FENCE));
   }
+  // Whether the target honors the fence order axis with a directional
+  // (release-only / acquire-only) standalone fence. Targets whose fence
+  // instruction only offers a full acq_rel barrier (e.g. CUDA's standalone
+  // `fence`) return false, so the semantic checker can note when a
+  // `sync.fence.rel` / `sync.fence.acq` collapses to the full fence.
+  virtual bool SupportsDirectionalFence(const ArchId&) const { return true; }
+  // Whether the target has a sequentially-consistent standalone fence
+  // (`fence.sc` on CUDA, `memory_order_seq_cst` on CPU, `__ATOMIC_SEQ_CST`
+  // on AMDGPU). Targets without one return false, so the default fence order
+  // degrades to acq_rel and an explicit `sync.fence.seq_cst` is rejected by the
+  // semantic checker.
+  virtual bool SupportsSeqCstFence(const ArchId&) const { return false; }
   // Default memory scope for a fence at the given visibility level.
   // Returns Storage::NONE if the default is target-defined (not specifiable).
   virtual Storage GetDefaultFenceMemory(const ArchId&,
@@ -249,8 +270,8 @@ public:
                                          Storage dst) const;
 
   // Whether the target supports cooperative kernel launches.
-  virtual bool SupportsCooperativeLaunch(const ArchId&) const {
-    return IsFeatureSupported(STR(ChoreoFeature::COOPERATIVE_LAUNCH));
+  virtual bool SupportsCooperativeLaunch(const ArchId& arch) const {
+    return IsFeatureSupported(arch, STR(ChoreoFeature::COOPERATIVE_LAUNCH));
   }
 
   virtual size_t VectorizeLimit(const ArchId& arch) const {
@@ -280,6 +301,11 @@ public:
   }
 
   virtual bool EnforceVectorAlignment(const ArchId&) const { return false; }
+
+  // Whether misaligned vector loads/stores should produce a non-fatal warning
+  // (rather than silently proceeding) on architectures where alignment is not
+  // enforced. Default: no warning.
+  virtual bool WarnVectorAlignment(const ArchId&) const { return false; }
 
   // Atomic operation support -- targets override to declare which atomic ops
   // they support for each data type and storage level on each architecture.
@@ -393,6 +419,79 @@ public:
   virtual size_t GetMaxBufferMapBytes(const ArchId& arch) const {
     (void)arch;
     return 0;
+  }
+
+  // Maximum GROUP dimension for targets with a hardware GROUP tier: the
+  // number of THREADs (SIMT lanes) per GROUP. A THREAD-level `local` buffer is
+  // replicated once per THREAD, so its physical footprint is the declared
+  // per-thread size times max_group_dim times replicas_per_pool. Default 1: no
+  // lane dimension (THREAD == GROUP), e.g. targets without a GROUP tier.
+  virtual size_t GetMaxGroupDim(const ArchId& /*arch*/) const { return 1; }
+
+  // Some targets have no dedicated shared-memory level: SHARED memory aliases
+  // the same physical on-chip scratchpad that backs the per-GROUP
+  // `shared<group>` tier (Storage::GROUP_SHARED). For such targets
+  // shared<group> and SHARED cannot be budgeted independently; the memcheck
+  // pass enforces them jointly as
+  //     group_shared * replicas_per_pool + shared <= pool_bytes
+  // where replicas_per_pool is the number of GROUPs sharing one pool.
+  struct SharedScratchpadPool {
+    bool aliased = false; // whether GROUP_SHARED and SHARED alias one pool
+    size_t replicas_per_pool = 0; // GROUPs sharing one pool
+    size_t pool_bytes =
+        0; // total combined on-chip pool (shared<group> + SHARED)
+  };
+  virtual SharedScratchpadPool
+  GetSharedScratchpadPool(const ArchId& arch) const {
+    (void)arch;
+    return {};
+  }
+
+  // Whether `shared<group>` (Storage::GROUP_SHARED) is a valid storage tier
+  // for the given architecture. Only targets with a hardware GROUP tier
+  // between BLOCK and THREAD support it; the default is false so targets
+  // without a group tier reject it in early semantic analysis.
+  virtual bool IsGroupSharedStorageSupported(const ArchId& /*arch*/) const {
+    return false;
+  }
+
+  // Whether `local` (Storage::LOCAL) is a valid storage tier for the given
+  // architecture. Most targets keep `local` as a per-thread private
+  // (register/stack) tier. Targets whose DMA engines cannot source/sink
+  // per-thread stack (e.g. targets whose on-chip scratchpad is instead
+  // exposed as `shared<group>`) override this to false so `local`
+  // declarations are rejected by default in early semantic analysis (the
+  // `--allow-local` opt-in relaxes this for declarations only).
+  virtual bool IsLocalStorageSupported(const ArchId& /*arch*/) const {
+    return true;
+  }
+
+  // Whether the given (kind, src -> dst) data movement is a valid direct edge
+  // on the given architecture. kind is the data-movement engine class (DMA or
+  // TMA). TMA only moves between the global and shared tiers, so it never
+  // reaches local/group-shared. Targets whose engines only route between
+  // specific tiers (e.g. an on-chip L1 tier with no direct path to the
+  // block-shared L2 tier, which must stage through global) override this to
+  // false for unsupported pairs.
+  // The default accepts every DMA edge and restricts TMA to global <-> shared.
+  virtual bool IsDMAStorageSupported(const ArchId& /*arch*/, DMAKind kind,
+                                     Storage src, Storage dst) const {
+    if (kind == DMAKind::TMA) {
+      const auto is_global = [](Storage s) {
+        return s == Storage::GLOBAL || s == Storage::DEFAULT;
+      };
+      return (is_global(src) && dst == Storage::SHARED) ||
+             (src == Storage::SHARED && is_global(dst));
+    }
+    return true;
+  }
+
+  // Whether static local-memory reuse should expose physically disjoint
+  // ranges as independent target allocation roots. This lets source-emitting
+  // targets preserve alias-analysis boundaries without changing the reuse
+  // layout or dynamic-allocation path.
+  virtual bool UseDistinctLocalAllocationRoots(const ArchId& /*arch*/) const {
+    return false;
   }
 
   // Whether the target's code generation only produces binaries (no text

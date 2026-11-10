@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <set>
+#include <sstream>
 #include <stack>
 #include <string>
 #include <unordered_map>
@@ -33,6 +34,8 @@ public:
       std::unordered_map<std::string, std::tuple<std::string, std::string>>;
 
 protected:
+  std::ostream& final_output;
+  std::ostringstream template_input;
   std::ostream& output;
   DefineMap globalDefines;
   DefineMap localDefines;

@@ -663,8 +663,8 @@ bool SameLoopExtent(const SyncScope& a, const SyncScope& b) {
     const auto text = [](const ptr<AST::Node>& p) {
       return p ? PSTR(p) : std::string();
     };
-    if (text(ra->lbound) != text(rb->lbound) ||
-        text(ra->ubound) != text(rb->ubound))
+    if (text(ra->lb_mutator) != text(rb->lb_mutator) ||
+        text(ra->ub_mutator) != text(rb->ub_mutator))
       return false;
     const bool sa = IsValidStep(ra->step);
     const bool sb = IsValidStep(rb->step);
@@ -1101,7 +1101,8 @@ void SyncRecovery::RunRecovery() {
                 AddInsert(site.stmt,
                           AST::Make<AST::Fence>(
                               site.stmt->LOC(), ParallelLevel::GROUP,
-                              Storage::SHARED, FenceEntity::TMA),
+                              Storage::SHARED, FenceOrder::ACQ_REL,
+                              FenceEntity::TMA),
                           site.after, last_access);
               if (o.cls != "completion") continue;
               // Group-bound completion classes drain on the producing

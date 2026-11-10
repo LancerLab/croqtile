@@ -9,6 +9,17 @@
 | `__co_device__` | Croqtile-style device function |
 | `__device__` | Target-native device function (e.g., CUDA) |
 
+## Choreo Function Templates
+
+| Syntax | Description |
+|--------|-------------|
+| `template <typename T, int N, bool B> __co__ ...` | Primary template |
+| `template __co__ foo<f16, 64, true>;` | Explicit concrete instance |
+| `template <> __co__ ... foo<f16, 64, true>(...)` | Full specialization |
+| `if constexpr (condition) { ... } else { ... }` | Compile-time branch |
+| `__is_same<T, f16>` | Compare Choreo scalar types |
+| `static_assert(condition, "message");` | Reject an invalid instance |
+
 ## Scalar Types
 
 | Type | Description |
@@ -118,6 +129,7 @@
 | `mc = mma.fill 0` | Initialize accumulator |
 | `mma.fill mc, 0.0f` | Re-initialize |
 | `ma = mma.load data.chunkat(...)` | Load operand |
+| `mma.row.row out, a, b` | Buffer overwrite shorthand: out = a * b |
 | `mma.row.row mc, shared_a, shared_b` | Direct WGMMA shared operands |
 | `mma.row.col mc, ma, mb` | D = A * B + C (A row, B col) |
 | `mma.row.row mc, ma, mb` | D = A * B + C (A row, B row) |
@@ -193,5 +205,6 @@
 | `-gs` | Generate work-script |
 | `-t TARGET` | Set target platform |
 | `-arch=ARCH` | Set architecture |
+| `--device-namespace=NS` | Wrap generated device kernels in `namespace NS` (empty = global) |
 | `--runtime-check=LEVEL` | Set assertion level (none/entry/low/medium/high/all) |
 | `--disable-runtime-check` | Disable all runtime assertions |

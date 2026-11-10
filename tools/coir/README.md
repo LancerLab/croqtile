@@ -19,6 +19,10 @@ transformation.
 .co source -> [coir-gen] -> CoIR MLIR -> [coir-opt] -> Lowered MLIR -> [coir-codegen] -> C++ source
 ```
 
+For the AST-to-CoIR dialect split, SSA control-flow joins, loop-carried values,
+and partially initialized async values, see
+[the CoIR lowering strategy](../../Documents/internal/foreach-iterargs-design.md).
+
 ## Build
 
 CoIR requires LLVM/MLIR. CMake downloads it automatically into

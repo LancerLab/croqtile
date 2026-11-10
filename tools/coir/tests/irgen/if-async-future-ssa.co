@@ -1,0 +1,28 @@
+// RUN: co2ir %s -o - | FileCheck %s
+//
+// IRGen test: an optional async future is represented by an explicit
+// async.undef value and merged through scf.if.
+
+// CHECK: coir.async.undef
+// CHECK: scf.if
+// CHECK-SAME: -> (!coir.async)
+// CHECK: coir.dma.copy
+// CHECK: scf.yield
+// CHECK: scf.yield
+// CHECK: coir.wait
+
+__co__ auto test_optional_future(f32 [1, 4] input) {
+  f32 [1, 4] output;
+
+  parallel p by 2 : thread {
+    local f32 [1, 4] tile;
+    store = dma.any;
+    if (p == 0) {
+      dma.copy input => tile;
+      store = dma.copy.async tile => output;
+    }
+    wait store;
+  }
+
+  return output;
+}

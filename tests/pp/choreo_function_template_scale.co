@@ -1,0 +1,39 @@
+// RUN: test "$(copp %s -o - | grep -c '^__co__ void __choreo_template_scale_')" -eq 32
+
+template <int N>
+__co__ void scale(s32 [N] data) {
+  static_assert(N > 0, "N must be positive");
+}
+
+template __co__ scale<1>;
+template __co__ scale<2>;
+template __co__ scale<3>;
+template __co__ scale<4>;
+template __co__ scale<5>;
+template __co__ scale<6>;
+template __co__ scale<7>;
+template __co__ scale<8>;
+template __co__ scale<9>;
+template __co__ scale<10>;
+template __co__ scale<11>;
+template __co__ scale<12>;
+template __co__ scale<13>;
+template __co__ scale<14>;
+template __co__ scale<15>;
+template __co__ scale<16>;
+template __co__ scale<17>;
+template __co__ scale<18>;
+template __co__ scale<19>;
+template __co__ scale<20>;
+template __co__ scale<21>;
+template __co__ scale<22>;
+template __co__ scale<23>;
+template __co__ scale<24>;
+template __co__ scale<25>;
+template __co__ scale<26>;
+template __co__ scale<27>;
+template __co__ scale<28>;
+template __co__ scale<29>;
+template __co__ scale<30>;
+template __co__ scale<31>;
+template __co__ scale<32>;

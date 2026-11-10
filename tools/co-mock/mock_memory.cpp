@@ -177,8 +177,7 @@ std::string Value::ToString() const {
       bool ready = future_info->IsReady();
       oss << "<future: " << (ready ? "completed" : "pending");
       if (!future_info->src_name.empty())
-        oss << " " << future_info->src_name << " -> "
-            << future_info->dst_name;
+        oss << " " << future_info->src_name << " -> " << future_info->dst_name;
       if (future_info->bytes > 0) oss << ", " << future_info->bytes << "B";
       oss << ">";
     } else {
@@ -353,8 +352,7 @@ Value Value::ReadFromAlloc(size_t byte_offset, BaseType ty) const {
 
 // MockMemory implementation
 
-MockMemory::MockMemory()
-    : alloc_mutex_(std::make_unique<std::mutex>()) {
+MockMemory::MockMemory() : alloc_mutex_(std::make_unique<std::mutex>()) {
   scopes.emplace_back();
 }
 

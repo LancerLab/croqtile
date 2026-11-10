@@ -179,7 +179,9 @@ bool HIPCodeGen::AfterVisitImpl(AST::Node& n) {
     levels.pop();
     cooperative_stack_.pop();
     // ds: device kernel. hs: target launch entry (__hetero_* shim for hetero).
-    code_segments.back() += ds.str() + hs.str();
+    code_segments.back() +=
+        WrapDeviceCodeInNamespace(ds.str(), CCtx().GetDeviceNamespace()) +
+        hs.str();
     ds.str("");
     hs.str("");
     return_stream.str("");
@@ -414,8 +416,7 @@ bool HIPCodeGen::Visit(AST::AsmStmt& n) {
       t.op = op;
       t.tempName = SymbolTable::GetAnonName();
       t.isOutput = isOutput;
-      t.isReadWrite =
-          !op->constraint.empty() && op->constraint[0] == '+';
+      t.isReadWrite = !op->constraint.empty() && op->constraint[0] == '+';
       tempOps.push_back(t);
     }
   };
@@ -424,8 +425,7 @@ bool HIPCodeGen::Visit(AST::AsmStmt& n) {
   for (auto& op : n.inputOperands) CollectTemps(op, false);
 
   // Emit compiler barrier before volatile asm
-  if (n.isVolatile)
-    IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
+  if (n.isVolatile) IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
 
   // Emit temp variable declarations with copy-in from the expression.
   for (auto& t : tempOps) {
@@ -459,8 +459,7 @@ bool HIPCodeGen::Visit(AST::AsmStmt& n) {
         first = false;
         if (!op->symbolicName.empty())
           IndStream() << "[" << op->symbolicName << "] ";
-        IndStream() << "\"" << op->constraint << "\"("
-                    << OpName(op) << ")";
+        IndStream() << "\"" << op->constraint << "\"(" << OpName(op) << ")";
       }
     }
   }
@@ -476,8 +475,7 @@ bool HIPCodeGen::Visit(AST::AsmStmt& n) {
         first = false;
         if (!op->symbolicName.empty())
           IndStream() << "[" << op->symbolicName << "] ";
-        IndStream() << "\"" << op->constraint << "\"("
-                    << OpName(op) << ")";
+        IndStream() << "\"" << op->constraint << "\"(" << OpName(op) << ")";
       }
     }
   }
@@ -498,14 +496,13 @@ bool HIPCodeGen::Visit(AST::AsmStmt& n) {
   // Write back temps for output and read-write operands.
   for (auto& t : tempOps) {
     if (t.isOutput) {
-      IndStream() << ExprSTR(t.op->expression, false) << " = "
-                  << t.tempName << ";\n";
+      IndStream() << ExprSTR(t.op->expression, false) << " = " << t.tempName
+                  << ";\n";
     }
   }
 
   // Emit compiler barrier after volatile asm
-  if (n.isVolatile)
-    IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
+  if (n.isVolatile) IndStream() << "asm volatile(\"\" ::: \"memory\");\n";
 
   return true;
 }
@@ -590,21 +587,47 @@ bool HIPCodeGen::Visit(AST::Fence& n) {
   TraceEachVisit(n);
 
   // GPU fences always cover shared+global; visibility distinguishes the scope.
+  bool cta_scope;
   switch (n.GetVisibility()) {
   case ParallelLevel::THREAD:
   case ParallelLevel::GROUP:
   case ParallelLevel::GROUPx4:
     // Fence within CTA: shared + global memory.
-    ds << d_indent << "__threadfence_block();\n";
+    cta_scope = true;
     break;
   case ParallelLevel::BLOCK:
   case ParallelLevel::DEVICE:
     // Fence device-wide: global memory.
-    ds << d_indent << "__threadfence();\n";
+    cta_scope = false;
     break;
   default:
     choreo_unreachable(
         "unsupported fence visibility: " + STR(n.GetVisibility()) + ".");
+  }
+
+  // AMDGPU fences support directional ordering via __builtin_amdgcn_fence:
+  // release publishes prior stores, acquire orders subsequent loads, acq_rel
+  // keeps the historical full __threadfence* forms, and seq_cst (the target
+  // default) is the sequentially-consistent fence.
+  switch (n.GetOrder()) {
+  case FenceOrder::RELEASE:
+    ds << d_indent << "__builtin_amdgcn_fence(__ATOMIC_RELEASE, \""
+       << (cta_scope ? "workgroup" : "agent") << "\");\n";
+    break;
+  case FenceOrder::ACQUIRE:
+    ds << d_indent << "__builtin_amdgcn_fence(__ATOMIC_ACQUIRE, \""
+       << (cta_scope ? "workgroup" : "agent") << "\");\n";
+    break;
+  case FenceOrder::ACQ_REL:
+    ds << d_indent
+       << (cta_scope ? "__threadfence_block();\n" : "__threadfence();\n");
+    break;
+  case FenceOrder::SEQ_CST:
+    ds << d_indent << "__builtin_amdgcn_fence(__ATOMIC_SEQ_CST, \""
+       << (cta_scope ? "workgroup" : "agent") << "\");\n";
+    break;
+  default:
+    choreo_unreachable("unsupported fence order: " + STR(n.GetOrder()) + ".");
   }
 
   return true;
@@ -1012,10 +1035,12 @@ bool HIPCodeGen::Visit(AST::ParallelBy& n) {
     }
     hs << "};\n";
     hs << h_indent << "choreo::abend_true(hipLaunchCooperativeKernel((void*)"
-       << device_fn << ", __grid, __block, __" << fname
+       << QualifyDeviceFn(device_fn, CCtx().GetDeviceNamespace())
+       << ", __grid, __block, __" << fname
        << "_coop_args, 0, 0));\n";
   } else {
-    hs << h_indent << device_fn << "<<<__grid, __block>>>";
+    hs << h_indent << QualifyDeviceFn(device_fn, CCtx().GetDeviceNamespace())
+       << "<<<__grid, __block>>>";
     hs << "(";
     first = true;
     for (auto& item : cgi.GetDeviceAllIns(fname)) {
@@ -1377,9 +1402,7 @@ void HIPCodeGen::EmitDMATranspose(AST::DMA&, const HIPDMALoweringDecision& dec,
   ds << d_indent << "}\n";
 }
 
-bool HIPCodeGen::Visit(AST::BufferMap&) {
-  return true;
-}
+bool HIPCodeGen::Visit(AST::BufferMap&) { return true; }
 
 // ============================================================================
 // Assignment
@@ -1567,15 +1590,22 @@ bool HIPCodeGen::Visit(AST::NamedVariableDecl& n) {
         return true;
       }
       if (sto == Storage::SHARED) {
-        ds << d_indent << "__shared__ " << HIPNameBaseType(sty->ElementType())
-           << " " << sym << "[" << UnScopedSizeExpr(*sty) << " / sizeof("
+        ds << d_indent;
+        if (n.HasNote("alignment"))
+          ds << "alignas(" << n.GetNote("alignment") << ") ";
+        ds << "__shared__ ";
+        ds << HIPNameBaseType(sty->ElementType()) << " " << sym << "["
+           << UnScopedSizeExpr(*sty) << " / sizeof("
            << HIPNameBaseType(sty->ElementType()) << ")];\n";
         ssm.MapDeviceSymbolIfNotExist(sname, sym);
         return true;
       }
       if (sto == Storage::LOCAL || sto == Storage::REG) {
-        ds << d_indent << HIPNameBaseType(sty->ElementType()) << " " << sym
-           << "[" << UnScopedSizeExpr(*sty) << " / sizeof("
+        ds << d_indent;
+        if (n.HasNote("alignment"))
+          ds << "alignas(" << n.GetNote("alignment") << ") ";
+        ds << HIPNameBaseType(sty->ElementType()) << " " << sym << "["
+           << UnScopedSizeExpr(*sty) << " / sizeof("
            << HIPNameBaseType(sty->ElementType()) << ")];\n";
         ssm.MapDeviceSymbolIfNotExist(sname, sym);
         return true;
@@ -1744,12 +1774,14 @@ bool HIPCodeGen::Visit(AST::ForeachBlock& n) {
       assert(IsActualBoundedIntegerType(iv_ty));
       auto iv_bty = cast<BoundedType>(iv_ty);
       IndStream() << "for (" << SSMName(iv_name, IsHost()) << " = "
-                  << (rng->lbound ? ("(" + ExprSTR(rng->lbound, IsHost()) + ")")
-                                  : "0")
+                  << (rng->lb_mutator
+                          ? ("(" + ExprSTR(rng->lb_mutator, IsHost()) + ")")
+                          : "0")
                   << "; " << SSMName(iv_name, IsHost()) << " < "
                   << UnScopedExpr(ValueSTR(iv_bty->GetUpperBound()))
-                  << (rng->ubound ? (" + " + ExprSTR(rng->ubound, IsHost()))
-                                  : "")
+                  << (rng->ub_mutator
+                          ? (" + " + ExprSTR(rng->ub_mutator, IsHost()))
+                          : "")
                   << "; ++" << SSMName(iv_name, IsHost()) << ") {\n";
       IncrIndent();
     }

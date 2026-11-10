@@ -627,7 +627,9 @@ endif()
 # ============================
 # Install rules
 # ============================
+# choreo.h #includes choreo_types.h, so embedder TUs need both headers.
 install(FILES ${CMAKE_SOURCE_DIR}/runtime/choreo.h
+        ${CMAKE_SOURCE_DIR}/runtime/choreo_types.h
   DESTINATION include
   COMPONENT rt_headers
 )

@@ -61,6 +61,17 @@ local f16 [4] thread_scratch;    // per-thread scratch (still supported)
 f32 [100, 100] d0;               // implicit global (default)
 ```
 
+Local and shared buffers may request a stronger byte alignment with the C++
+style `alignas` specifier:
+
+```choreo
+alignas(512) local u8[4096] scratch;
+alignas(1024) shared f16[128, 128] tile;
+```
+
+The argument must be a positive, compile-time power of two. It specifies a
+minimum alignment in bytes and cannot be used on global buffers.
+
 ### Platform-Specific Semantics
 
 Storage qualifier semantics depend on the target platform. For CUDA/CuTe:

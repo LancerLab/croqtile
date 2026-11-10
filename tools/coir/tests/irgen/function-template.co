@@ -1,0 +1,17 @@
+// RUN: co2ir -t cc %s | FileCheck %s
+
+template <typename T, int N = 4>
+__co__ void write_value(T [N] output) {
+  if constexpr (__is_same<T, s32>) {
+    output.at(0) = 7;
+  } else {
+    output.at(0) = 2.5f;
+  }
+}
+
+template __co__ write_value<s32>;
+template __co__ write_value<f32>;
+
+// CHECK-DAG: coir.kernel @__choreo_template_write_value_{{[0-9a-f]+}}(%arg0: !coir.tensor<4xi32, default>)
+// CHECK-DAG: coir.kernel @__choreo_template_write_value_{{[0-9a-f]+}}(%arg0: !coir.tensor<4xf32, default>)
+// CHECK-NOT: coir.kernel @write_value

@@ -2,34 +2,40 @@
 // Test async TMA copy with wait.
 
 __co__ void test_tma_async() {
-  s32[8] src;
-  s32[8] dst;
+  global s32[8] src;
+  global s32[8] dst;
 
   foreach i in 8
     src.at(i) = (i + 1) * 5;
 
-  f = tma.copy.async src => dst;
-  wait f;
+  parallel by 1 : thread {
+    shared s32[8] tmp;
+    f = tma.copy.async src => tmp;
+    wait f;
+    tma.copy tmp => dst;
+  }
 
   println(dst.at(0), dst.at(3), dst.at(7));
 }
 // CHECK: 5 20 40
 
 __co__ void test_tma_pipeline() {
-  s32[4] A;
-  s32[4] B;
-  s32[4] C;
+  global s32[4] A;
+  global s32[4] C;
 
   foreach i in 4
     A.at(i) = i * 100;
 
-  f = tma.copy.async A => B;
-  wait f;
+  parallel by 1 : thread {
+    shared s32[4] B;
+    f = tma.copy.async A => B;
+    wait f;
 
-  foreach i in 4
-    B.at(i) = B.at(i) + 1;
+    foreach i in 4
+      B.at(i) = B.at(i) + 1;
 
-  g = tma.copy B => C;
+    tma.copy B => C;
+  }
 
   println(C.at(0), C.at(1), C.at(2), C.at(3));
 }

@@ -1,6 +1,7 @@
 #ifndef __CHOREO_LIVENESS_ANALYSIS_HPP__
 #define __CHOREO_LIVENESS_ANALYSIS_HPP__
 
+#include "access_tracking.hpp"
 #include "ast.hpp"
 #include "context.hpp"
 #include "loc.hpp"
@@ -161,9 +162,13 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
 
   // ---- Construction ----
 
-  LivenessAnalyzer() : VisitorWithSymTab("liveness") {
+  LivenessAnalyzer()
+      : VisitorWithSymTab("liveness"),
+        tracker_([this](const std::string& n) { return InScopeNameForRef(n); },
+                 [this](const std::string& n) { return InScopeName(n); }) {
     auto_declare_symbols = true;
     if (trace_visit) debug_visit = true; // force debug when tracing
+    tracker_.debug = debug_visit;
   }
   ~LivenessAnalyzer() {}
 
@@ -184,6 +189,31 @@ struct LivenessAnalyzer : public VisitorWithSymTab {
     return var_ranges;
   }
 
+  // Resource classes used by the DMA resource allocator.  BUFFER is handled by
+  // MemReuse; FUTURE and EVENT are the finite completion slots this allocator
+  // colors.
+  enum class ResourceClass { BUFFER, FUTURE, EVENT, ACCUMULATOR };
+
+  // Scoped names of DMA futures and event variables, in declaration order of
+  // their first appearance.
+  const std::set<std::string>& FutureVars() const { return future_vars; }
+  const std::set<std::string>& EventVars() const { return event_vars; }
+
+  // Live ranges filtered to a single resource class.  Keys are scoped names,
+  // matching VarRanges().  FUTURE returns DMA-future handles; EVENT returns
+  // event variables; BUFFER returns scratch buffers.
+  std::unordered_map<std::string, Ranges>
+  ResourceRanges(ResourceClass rc) const;
+
+  // True if `fut` (a scoped DMA-future name) is routed through the DTE pool
+  // rather than a named completion context.  Codegen uses the pool iff the DMA
+  // storage is non-SHARED (EmitFutureClaim: use_pool = use_dte_pool &&
+  // sto != Storage::SHARED, with sto = min(from, to)).  The pool decision is
+  // recorded during Visit(DMA) by resolving each side's storage exactly like
+  // the codegen (future `.data` sources resolve through FutureType), so future
+  // names and inferred `local` destinations are handled correctly.
+  bool IsPoolFuture(const std::string& fut) const;
+
   // ---- Visitor overrides ----
 
 public:
@@ -202,6 +232,7 @@ public:
   bool Visit(AST::NamedTypeDecl&) override;
   bool Visit(AST::NamedVariableDecl&) override;
   bool Visit(AST::Assignment&) override;
+  bool Visit(AST::VectorMemory&) override;
   bool Visit(AST::ParallelBy&) override;
   bool Visit(AST::WithBlock&) override;
   bool Visit(AST::DMA&) override;
@@ -258,6 +289,7 @@ private:
     buffers.insert(sname);
     switch (sto) {
     case Storage::LOCAL: lbuffers.insert(sname); break;
+    case Storage::GROUP_SHARED: lbuffers.insert(sname); break;
     case Storage::SHARED: sbuffers.insert(sname); break;
     case Storage::GLOBAL: [[fallthrough]];
     case Storage::DEFAULT: gbuffers.insert(sname); break;
@@ -267,14 +299,10 @@ private:
   }
 
   // -- Alias and binding tracking --
-  // one to one. Alias of buffer. Could happen in spanas, etc.
-  std::unordered_map<std::string, std::string> alias_;
-  // one to one. Alias that owns no storage of its own (e.g. buffer.map/remap
-  // result). Uses of such an alias are attributed directly to the source
-  // buffer, so the alias itself never gets a live range or local allocation.
-  std::unordered_map<std::string, std::string> no_storage_alias_;
-  // one to many. Bind var to other vars. Could happen in select, dma, etc.
-  std::unordered_map<std::string, VarSet> bindings_;
+  // Alias / binding / no-storage-alias / future-buffer maps and their
+  // resolution helpers live in the shared AccessTracker so that liveness and
+  // buffer-access analyses agree on what "an alias" is.
+  AccessTracker tracker_;
   // record the binding info to do restoration in ComputeLiveInOut().
   std::unordered_map<const Stmt*, std::vector<std::string>>
       stmt2binding_restore;
@@ -293,10 +321,19 @@ private:
 
   // -- Liveness info per statement --
   std::unordered_map<const Stmt*, LivenessInfo> stmt_linfo;
-  std::unordered_map<std::string, std::set<DMABufInfo>> future_buffers;
   using StrUintMap = std::unordered_map<std::string, size_t>;
   VarSet dma_any_futures;
   std::unordered_map<std::string, Ranges> var_ranges;
+
+  // Scoped names of DMA futures and event variables (resource-class handles).
+  std::set<std::string> accumulator_vars;
+  std::set<std::string> future_vars;
+  std::set<std::string> event_vars;
+
+  // Scoped names of DMA futures routed through the DTE pool (non-SHARED
+  // storage). Populated in Visit(DMA) by mirroring the codegen use_pool
+  // condition (sto = min(from,to) != Storage::SHARED).
+  std::set<std::string> pool_futures;
 
   // -- CFG / basic block state --
   inline void ConnectBB(ptr<BB> x, ptr<BB> y) {
@@ -405,6 +442,11 @@ private:
   void StartNewHBPhase(const std::string& signal_in);
   void RecordHBBufferAccess(const std::string& sname,
                             const char* caller = nullptr);
+  // Record a non-buffer resource (e.g. a DMA future) into the current HB
+  // phase membership so the DMA resource allocator can relax interference for
+  // futures that provably cannot overlap. Unlike RecordHBBufferAccess, this
+  // does not filter on the shared-buffer set.
+  void RecordHBResourceAccess(const std::string& sname);
 
   // -- Private helper methods --
   std::string GetFuncNameFromScopedName(const std::string& name) const {
@@ -420,7 +462,9 @@ private:
   static bool IsSyncPoint(const AST::Node& n);
   static bool ShouldIndent(const AST::Node& n);
 
-  VarSet GetAllSymbolicOperands(const AST::Node* n) const;
+  VarSet GetAllSymbolicOperands(const AST::Node* n) const {
+    return tracker_.GetAllSymbolicOperands(n);
+  }
   void DumpStmtBriefly(const Stmt& n, std::ostream& os, bool indent,
                        bool only_else = false);
   void DumpNVD(const AST::NamedVariableDecl& nvd, std::ostream& os);
@@ -433,13 +477,7 @@ private:
   void AddDef(const Stmt* s, const std::string& var,
               bool is_buffer_or_future = false);
   void AddIsAlias(const Stmt* s, const std::string& alias_var);
-  void AddAlias(const std::string& alias_var, const std::string& original_var);
-  void AddNoStorageAlias(const std::string& alias_var,
-                         const std::string& original_var);
   void AddIsBinding(const Stmt* s, const std::string& bind_res);
-  void AddBinding(const std::string& bind_res, const std::string& bind_src);
-  void RemoveBinding(const std::string& bind_res, const std::string& bind_src);
-  void AddFut2Buffers(const std::string& fut, const DMABufInfo& buf_info);
   void AddAsyncInthreadsVar(const std::string& scope_name,
                             const std::string& var);
 
@@ -463,9 +501,6 @@ private:
   ptr<BB> StartChildBB();
   static std::string GetEventName(const AST::Node& node);
   std::string StmtStr(const Stmt* stmt) const;
-
-  template <typename... MapTypes>
-  VarSet TransitiveClosure(const VarSet& vars, const MapTypes&... maps);
 };
 
 } // end namespace Choreo
