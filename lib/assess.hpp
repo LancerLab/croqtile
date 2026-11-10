@@ -85,6 +85,7 @@ inline const std::string STR(const AssessOutcome& o) {
   case AssessOutcome::STATIC_TRUE: return "static-true";
   case AssessOutcome::STATIC_FALSE: return "static-false";
   case AssessOutcome::RUNTIME: return "runtime";
+  case AssessOutcome::UNKNOWN: return "unknown";
   }
   return "?";
 }
