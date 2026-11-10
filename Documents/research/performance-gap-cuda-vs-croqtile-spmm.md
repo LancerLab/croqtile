@@ -477,3 +477,48 @@ just before the timed launch loop.
 
 Note: `clock64` is used only as a relative cycle counter (cycles/wall); the
 absolute SM count of the H800 PCIe cancels out of the comparison.
+
+## 11. 2026-11-11: parity under a controlled protocol; the historical gap was DVFS state
+
+The same CroqTile binary reports very different TFLOPS depending on the GPU's
+DVFS boost budget:
+
+| ours: protocol | TFLOPS |
+| --- | ---: |
+| rested GPU, warmup=1, 3 samples | **1763-1770** |
+| warmup=20, 3 samples | 1478 |
+| warmup=100, 3 samples | 1486 |
+| repeat=600 (sustained) | 1437 (6.12 ms) |
+
+The CUDA reference behaves the same way: its default (1 warmup, 3 samples)
+reports 1766-1799 on a rested GPU, and with 600 back-to-back samples it
+reports 1409 (6.24 ms). NVML sampling at 100 ms shows both kernels under
+sustained load at the same state: ~1.16 GHz, ~344 W (the 350 W card limit),
+100% utilization. So the kernels execute the same cycles and reach the same
+sustained throughput; the difference in any single reported number is the
+DVFS boost budget at measurement time.
+
+Fair A/B (10 s idle before each run, same 1-warmup/3-sample protocol,
+interleaved three times):
+
+| run | CroqTile | CUDA reference |
+| --- | ---: | ---: |
+| 1 | 1770.1 | 1778.3 |
+| 2 | 1763.8 | 1799.1 |
+| 3 | 1763.2 | 1766.1 |
+| median | **1763.8** | **1778.3** |
+
+The gap under this protocol is **0.8%**, and in the sustained regime the
+CroqTile kernel is 2% faster (1437 vs 1409). The historical 1845 vs 1445
+comparison mixed two different DVFS states (the tuning campaigns measured
+under sustained load; the 1845 record was taken on a rested GPU), not two
+different kernel efficiencies.
+
+Methodological rule for this case: every comparison must control the boost
+budget (rest, same warmup/sample counts, interleave), or report both the
+rested and sustained numbers. A single TFLOPS figure without its protocol is
+not comparable.
+
+The CroqTile binary used for the fair comparison (`spmm-bench/best_f1.co`,
+the F1-migrated best kernel) passes `verify.py --verify` on the same shape:
+`VERIFY: PASS`.
