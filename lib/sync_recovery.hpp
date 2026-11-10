@@ -79,9 +79,9 @@ private:
                  bool after, int not_before = -1,
                  const std::string& buffer = {}, bool self_discharge = false);
 
-  // Availability fold over the enclosing statement list: drops insertions
-  // covered by an operation that dominates their anchor (evaluate at splice
-  // time, when the containing list is known).
+  // Structured must-cover fold at splice time: list prefixes, ancestor-list
+  // prefixes, loop summaries, and trigger-bound event waits. Only operations
+  // that execute on every structured path to the anchor are accepted.
   void Eliminate(std::vector<PendingInsert>& inserts, const AST::MultiNodes& n,
                  size_t anchor_idx);
 
