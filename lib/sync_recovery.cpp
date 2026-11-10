@@ -645,8 +645,8 @@ bool SameLoopExtent(const SyncScope& a, const SyncScope& b) {
   const auto& br = b.loop->GetRanges();
   if (ar.empty() || ar.size() != br.size()) return false;
   for (size_t i = 0; i < ar.size(); ++i) {
-    auto* ra = dyn_cast<AST::LoopRange>(ar[i].get());
-    auto* rb = dyn_cast<AST::LoopRange>(br[i].get());
+    auto* ra = dyn_cast<AST::RangeExpr>(ar[i].get());
+    auto* rb = dyn_cast<AST::RangeExpr>(br[i].get());
     if (ra == nullptr || rb == nullptr) return false;
     if (ra->GetIVName() != rb->GetIVName()) return false;
     const AST::WithIn* wa = FindWithIn(a.with, ra->GetIVName());
