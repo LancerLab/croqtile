@@ -368,3 +368,54 @@ would need the physical thread model to express mixed-width roles
 (4x128 consumers + one 32-thread producer, blockDim 544), which the current
 group-4 x group x thread product cannot represent, plus scheduling work
 below the DSL.
+
+## 9. 2026-11-11 localisation pass: where the remaining ~25% is *not*
+
+A second round of A/B experiments on this branch (same H800, 16384^3, the
+best CroqTile kernel at 1445 vs the CUDA winner at 1803-1845). GPU 1 was used
+with a 345 MHz idle clock, so every comparison warm-starts the clock and
+interleaves old/new pairs; single-probe nvidia-smi only.
+
+Measured negative or neutral (do not retry without new evidence):
+
+| experiment | result |
+| --- | --- |
+| metadata LDG one stage ahead (register skew, two forms) | -2.5..-3% |
+| leader-arrive (`empty` 512 -> 4 arrivals) | -0.4% |
+| early empty release (CUDA-style) | -3% |
+| per-atom commit/wait | -3..-5% |
+| in-loop `warpgroup_wait<1>` | -3% (ptxas re-injects a wait) |
+| dual n128 accumulator chains | -6% |
+| 544-thread block (producer last) | neutral at 96 regs; 102-reg build fails launch (17 warps -> 5 on one SMSP; the partition caps ~96-100 regs, not 120) |
+| L2 persisting policy off | +0.2% (noise) |
+| tile-order A pack + four contiguous 8 KiB TMA copies | neutral |
+| 2-deep shared metadata TMA ring in the idle epilogue buffer | neutral |
+| hand-written CUTLASS atom sequence (region 1, second atom pairs) | neutral (VERIFY PASS) |
+| accumulator-fence density 64/16/4/0 | neutral (an earlier +3.3% was a sed artifact that also deleted the `me = ...` assignments) |
+
+Diagnostics:
+
+- The producer alone (waits + TMA fills, no MMA/epilogue) runs in 2.93 ms;
+  the full kernel is 6.07 ms. Doubling the fill or the MMA pushes the time to
+  9.3-15.7 ms / 10.8 ms (bench-only), i.e. fill and MMA are nearly additive
+  and contend instead of overlapping.
+- ncu: 54.8 cycles/issue vs the CUDA kernel's 26.9; our top stall sites are
+  the `full` mbarrier wait (NANOSLEEP, 46.9%) and the wgmma drain
+  (`WARPGROUP.DEPBAR`, 37.3%). The metadata LDG does not appear among the top
+  stall sites. The CUDA kernel executes 507M instructions vs our 230M and has
+  no operand-wait stalls; its waits spin (TRYWAIT+YIELD).
+- Replacing the metadata load by a constant (`me = 0`, bench-only) gives
+  +3.4..4.5%, but that is the inherent 8 KiB/stage metadata traffic every
+  kernel pays; a shared TMA path for it is neutral, so it is not a lever.
+- The epilogue's global TMA store costs +2.9% (1481 vs 1439, interleaved),
+  the upper bound for an epilogue rewrite.
+
+Where that leaves the gap: it is not metadata transport, event arrival
+counts, the register budget, the A pack, the epilogue store path, or atom
+emission (a hand-written CUTLASS atom sequence matches the generated code).
+It is the fill/MMA serialization and the consumer's per-warp issue
+efficiency. A fully hand-written consumer is blocked by the DSL requiring a
+visible `mma` to infer the fragment layout (`the MMA operation of ... cannot
+be executed` when the atoms exist only inside `__cpp__`); breaking past this
+needs a fragment-layout declaration in the language, not another source-level
+knob.
