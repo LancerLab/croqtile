@@ -391,6 +391,14 @@ public:
     std::vector<HBPhase> phases;
     std::vector<std::vector<bool>> reachable;
     std::set<std::string> globally_live_bufs;
+    // Statement-id ranges [first, last] of the loops inside this scope.
+    // Used to tell whether two phases can recur across loop iterations.
+    std::vector<std::pair<int, int>> loop_ranges;
+    // Signal edges dropped to keep the one-iteration graph acyclic. Such an
+    // edge is a real cross-iteration synchronization (the trigger at
+    // iteration t orders the wait at iteration t + 1), so it must be part of
+    // the reuse-safety test when both phases recur in loops.
+    std::vector<std::pair<int, int>> loop_carried_edges;
 
     void AddEdge(int from, int to);
     void ComputeTransitiveClosure();

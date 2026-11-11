@@ -355,10 +355,47 @@ bool LivenessAnalyzer::HBGraph::CanOverlap(const std::string& buf_a,
     return false;
   };
 
+  // A loop body reuses the same phase ids every iteration. The graph above
+  // only orders instances within one iteration; the dropped signal edges are
+  // the cross-iteration synchronizations (trigger at iteration t orders the
+  // wait at t + 1). When both phases recur in loops, the within-iteration
+  // order is not enough unless the event chain also orders the shifted
+  // instances in both directions. Exactly one shifted direction means the
+  // producer of iteration t + 1 can run against the consumer of iteration t:
+  // reuse is unsafe (persistent multi-tile SpMM: the producer refills an
+  // operand stage while another group's epilogue still writes the arena).
+  // No shifted path at all means the phases are not coupled by a back-edge,
+  // so the within-iteration order holds for every iteration.
+  // A phase can start inside a loop and end after its closing brace (the
+  // signal that opened it may be the last statement in the body), so test
+  // intersection with the loop range rather than full containment.
+  auto inLoop = [&](const HBPhase& p, const std::pair<int, int>& range) {
+    return static_cast<int>(p.first_stmt_id) <= range.second &&
+           static_cast<int>(p.last_stmt_id) >= range.first;
+  };
+  // Warp-specialised branches spell their own copy of the same iteration
+  // loop, so the producer's and consumer's loops have different AST ranges.
+  // What matters for iteration shift is that each phase recurs in some loop.
+  auto inAnyLoop = [&](const HBPhase& p) {
+    for (const auto& range : loop_ranges)
+      if (inLoop(p, range)) return true;
+    return false;
+  };
+  auto shiftedReaches = [&](int from, int to) {
+    auto reachesOrSelf = [&](int a, int b) { return a == b || Reaches(a, b); };
+    for (const auto& [trigger, wait] : loop_carried_edges)
+      if (reachesOrSelf(from, trigger) && reachesOrSelf(wait, to))
+        return true;
+    return false;
+  };
+
   for (int pa : phases_a)
     for (int pb : phases_b) {
       if (pa == pb) return false;
       if (!Reaches(pa, pb) && !Reaches(pb, pa)) return false;
+      if (inAnyLoop(phases[pa]) && inAnyLoop(phases[pb]) &&
+          shiftedReaches(pa, pb) != shiftedReaches(pb, pa))
+        return false;
       if (needsCTABarrier(pa, pb) && !hasCTABarrier(pa, pb)) return false;
     }
   return true;
@@ -732,6 +769,18 @@ void LivenessAnalyzer::BuildHBGraph(const std::string& paraby_scope) {
   graph.globally_live_bufs = it->second.globally_live_bufs;
   pending_phases.clear();
 
+  // Loop body ranges of the scopes walked so far. CanOverlap uses them to
+  // detect phase pairs that recur together across loop iterations.
+  for (const auto& se : scope_ends) {
+    if (!se || !se->scope_start) continue;
+    if (!IsLoopBlock(*se->scope_start)) continue;
+    auto start = stmt2id.find(se->scope_start);
+    auto end = stmt2id.find(se.get());
+    if (start == stmt2id.end() || end == stmt2id.end()) continue;
+    graph.loop_ranges.emplace_back(static_cast<int>(start->second),
+                                   static_cast<int>(end->second));
+  }
+
   size_t n = graph.phases.size();
   graph.reachable.assign(n, std::vector<bool>(n, false));
 
@@ -785,6 +834,7 @@ void LivenessAnalyzer::BuildHBGraph(const std::string& paraby_scope) {
       graph.AddEdge(e.trigger_idx, e.wait_idx);
       graph.ComputeTransitiveClosure();
     } else {
+      graph.loop_carried_edges.emplace_back(e.trigger_idx, e.wait_idx);
       VST_DEBUG(dbgs() << "  Skipped back-edge: phase " << e.trigger_idx
                        << " -> phase " << e.wait_idx << " (event '" << e.event
                        << "' would create cycle)\n");
