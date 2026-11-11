@@ -1,0 +1,55 @@
+// REQUIRES: TARGET-GPU
+// RUN: env CHOREO_SYNC_RECOVERY=1 CHOREO_SYNC_RECOVERY_KEEP=1 choreo -n -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>&1 | FileCheck --check-prefix=KEEP %s
+// RUN: env CHOREO_SYNC_RECOVERY=1 choreo -n -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>&1 | FileCheck --check-prefix=ELIDE %s
+//
+// Sync-recovery completion wait: tenant y is engine-read (dma copy out of the
+// slot); tenant x then overwrites the same slot. The coloring merges them, so
+// the handover y -> x carries a WAR completion obligation: the receiving
+// tenant may write only once the engine has drained the reads it issued. The
+// drain is per-thread state of the issuing (producer) threads, so the wait is
+// queued inside the producer tenant, after its last access and before the
+// trigger that hands the slot over.
+//
+// The copy here is synchronous (no future), so its reads have retired before
+// the next statement runs. Synthesis still queues the drain (KEEP), and
+// elimination discharges it against the blocking access itself. The count is
+// reported as self-discharged, not as a cover-based elision.
+
+// KEEP-DAG: [sync-recovery] insert AST::CompletionWait before stmt
+// KEEP-DAG: [sync-recovery] summary: {{.*}}1 completion waits inserted
+// KEEP: cde::cp_async_bulk_wait_group_read<0>();
+// KEEP-NEXT: (void)sig.arrive();
+
+// ELIDE: [sync-recovery] elide AST::CompletionWait (synchronous engine access)
+// ELIDE: [sync-recovery] summary: {{.*}}1 completion waits self-discharged
+// ELIDE-NOT: cde::cp_async_bulk_wait_group_read<0>()
+// ELIDE: (void)sig.arrive();
+
+__co__ s32 [16] reuse_wait(s32 [16] src) {
+  s32 [16] out;
+
+  parallel p by 1 : block {
+    parallel q by 2 : group-4 {
+      shared event sig;
+
+      inthreads.async (q == 1) {
+        shared s32 [16] y;
+        dma.copy y => out;
+        trigger sig;
+      }
+
+      inthreads.async (q == 0) {
+        wait sig;
+        shared s32 [16] x;
+        x.at(0) = src.at(0);
+        out.at(1) = x.at(0);
+      }
+
+      sync.barrier : block;
+    }
+  }
+
+  return out;
+}
+
+int main() { return 0; }

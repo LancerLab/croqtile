@@ -1,0 +1,54 @@
+// REQUIRES: TARGET-GPU
+// RUN: env CHOREO_SYNC_RECOVERY=1 CHOREO_SYNC_RECOVERY_KEEP=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>&1 | FileCheck --check-prefix=KEEP %s
+// RUN: env CHOREO_SYNC_RECOVERY=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>&1 | FileCheck --check-prefix=DISCHARGE %s
+//
+// Event-bound completion: the producer issues an async copy into the slot,
+// waits for it, then triggers the handover event. The receiver's first phase
+// starts at the wait on that same event. Because the producer's source wait
+// has already ordered the engine write before the trigger, the receiver's
+// phase-entry wait discharges the completion obligation in place: no
+// receiver-side wait is synthesized. KEEP shows the raw synthesis (nothing
+// inserted); the normal path records the discharge.
+//
+// KEEP: handover t0 -> t1
+// KEEP: obligations: RAW[EW->GR](completion:engine-wait(P8/P9))
+// KEEP: [sync-recovery] summary: {{.*}} 0 completion waits inserted, {{.*}} 0 completion waits discharged in place
+// KEEP-NOT: [sync-recovery] discharge AST::CompletionWait
+// KEEP-NOT: cde::cp_async_bulk_wait_group_read<0>()
+// KEEP-NOT: cuda::ptx::cp_async_bulk_wait_group
+//
+// DISCHARGE: handover t0 -> t1
+// DISCHARGE: obligations: RAW[EW->GR](completion:engine-wait(P8/P9))
+// DISCHARGE: [sync-recovery] discharge AST::CompletionWait (source event wait)
+// DISCHARGE: [sync-recovery] summary: {{.*}} 0 completion waits inserted, {{.*}} 1 completion waits discharged in place
+// DISCHARGE-NOT: cde::cp_async_bulk_wait_group_read<0>()
+// DISCHARGE-NOT: cuda::ptx::cp_async_bulk_wait_group
+
+__co__ s32 [16] reuse_event(s32 [16] src) {
+  s32 [16] out;
+
+  parallel p by 1 : block {
+    parallel q by 2 : group-4 {
+      shared event sig;
+
+      inthreads.async (q == 0) {
+        shared s32 [16] t0;
+        f = dma.copy.async src => t0;
+        wait f;
+        trigger sig;
+      }
+
+      inthreads.async (q == 1) {
+        wait sig;
+        shared s32 [16] t1;
+        out.at(0) = t1.at(0);
+      }
+
+      sync.barrier : block;
+    }
+  }
+
+  return out;
+}
+
+int main() { return 0; }

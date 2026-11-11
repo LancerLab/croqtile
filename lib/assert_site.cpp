@@ -2,9 +2,6 @@
 #include "context.hpp"
 #include "symvals.hpp"
 
-#include <map>
-#include <tuple>
-
 namespace Choreo {
 
 namespace {
@@ -94,10 +91,6 @@ size_t AssertSite::EstimateLoopTripCount(AST::Node* n) const {
         if (auto cval = VIInt(ub + ub_addend - (lb + lb_addend))) span = *cval;
       }
       auto step = range->step == GetInvalidStep() ? 1 : std::abs(range->step);
-      // Defensive: a zero step is rejected during shape inference, so this
-      // should be unreachable; clamp anyway so the cost model can never divide
-      // by zero on a range that slipped through.
-      if (step == 0) step = 1;
       trip *=
           static_cast<size_t>(std::max<int64_t>(1, (span + step - 1) / step));
     }
@@ -453,32 +446,11 @@ void AssertSite::EstimateAssertions() {
   auto& assertions =
       const_cast<std::vector<Assertion>&>(assessor.GetAssertions());
 
-  using Site = std::tuple<AST::Node*, AssertionEmitPosition, AssessType>;
-  std::map<Site, std::vector<const Assertion*>> checked;
   for (auto& ar : assertions) {
     ar.estimated_cost = EstimateAssertionCost(ar.emit_node);
     ar.cost = CategorizeCost(ar.estimated_cost);
     ar.enabled =
         IsEnabledAtThreshold(ar.cost, CCtx().RuntimeCheckCostThreshold());
-    ar.duplicate = false;
-    ar.duplicate_of = static_cast<size_t>(-1);
-    if (!ar.enabled) continue;
-
-    // Placement is final here. Checks at this exact site execute together,
-    // without intervening assignments or control flow. Keep the first enabled
-    // diagnostic, regardless of which source access requested the check.
-    // Do not merge across sites: equal expressions may observe different
-    // values, loop iterations, or branch participation there.
-    auto& previous = checked[{ar.emit_node, ar.emit_position, ar.type}];
-    for (const auto* other : previous) {
-      if (sbe::ceq(ar.expr, other->expr)) {
-        ar.duplicate = true;
-        ar.duplicate_of = other - assertions.data();
-        ar.enabled = false;
-        break;
-      }
-    }
-    if (!ar.duplicate) previous.push_back(&ar);
   }
 
   if (CCtx().ShowAssess()) PrintAssertionReport();
@@ -499,11 +471,26 @@ void AssertSite::EstimateAssertions() {
       case UsageType::HardwareConstraint: ++stats.hw_constraint_total; break;
       }
       switch (ae.outcome) {
-      case AssessOutcome::UNKNOWN: break;
-      case AssessOutcome::STATIC_TRUE: ++stats.static_true; break;
+      case AssessOutcome::STATIC_TRUE:
+        ++stats.static_true;
+        switch (ae.dependence) {
+        case AssessDependence::STRUCTURAL: ++stats.st_structural; break;
+        case AssessDependence::SCALAR_SYMBOLIC: ++stats.st_scalar; break;
+        case AssessDependence::CONSTANT: ++stats.st_const; break;
+        }
+        switch (ae.mechanism) {
+        case AssessMechanism::CANONICAL: ++stats.st_canonical; break;
+        case AssessMechanism::INTERVAL: ++stats.st_interval; break;
+        }
+        break;
       case AssessOutcome::STATIC_FALSE: ++stats.static_false; break;
       case AssessOutcome::RUNTIME: {
         ++stats.runtime_total;
+        switch (ae.dependence) {
+        case AssessDependence::STRUCTURAL: ++stats.rt_structural; break;
+        case AssessDependence::SCALAR_SYMBOLIC: ++stats.rt_scalar; break;
+        case AssessDependence::CONSTANT: ++stats.rt_const; break;
+        }
         // Per-usage-type runtime
         switch (ae.usage_type) {
         case UsageType::UnClassified: ++stats.unclassified_runtime; break;
@@ -543,16 +530,14 @@ void AssertSite::PrintAssertionReport() const {
   if (log.empty()) return;
 
   // Count outcomes for the header.
-  size_t n_strue = 0, n_sfalse = 0, n_runtime = 0, n_unknown = 0;
+  size_t n_strue = 0, n_sfalse = 0, n_runtime = 0;
   for (const auto& ae : log) {
     if (ae.outcome == AssessOutcome::STATIC_TRUE)
       ++n_strue;
     else if (ae.outcome == AssessOutcome::STATIC_FALSE)
       ++n_sfalse;
-    else if (ae.outcome == AssessOutcome::RUNTIME)
-      ++n_runtime;
     else
-      ++n_unknown;
+      ++n_runtime;
   }
 
   auto type_str = [](AssessType t) -> const char* {
@@ -579,9 +564,8 @@ void AssertSite::PrintAssertionReport() const {
   };
 
   errs() << "\n[assertions] function: " << fname << "  (" << log.size()
-         << " assessed:";
-  if (n_unknown) errs() << "  " << n_unknown << " unknown,";
-  errs() << "  " << n_strue << " static-true,"
+         << " assessed:"
+         << "  " << n_strue << " static-true,"
          << "  " << n_sfalse << " static-false,"
          << "  " << n_runtime << " runtime)\n";
   errs() << "  " << std::string(75, '-') << "\n";
@@ -602,9 +586,6 @@ void AssertSite::PrintAssertionReport() const {
                 "error/warning)\n";
       errs() << "       message : " << ae.message << "\n";
       errs() << "       loc     : " << ae.loc << "\n";
-    } else if (ae.outcome == AssessOutcome::UNKNOWN) {
-      errs() << "  [" << idx++ << "] unknown (warning-only assessment)\n"
-             << "       message : " << ae.message << "\n";
     } else {
       // RUNTIME: look up the matching Assertion for hoist/cost info.
       const Assertion* ar =
@@ -614,9 +595,7 @@ void AssertSite::PrintAssertionReport() const {
         errs() << "  [" << idx++ << "] " << type_str(ar->type)
                << "  enabled=" << (ar->enabled ? "yes" : "no ")
                << "  cost=" << cost_str(ar->cost)
-               << "  estimated=" << ar->estimated_cost;
-        if (ar->duplicate) errs() << "  duplicate=yes";
-        errs() << "\n";
+               << "  estimated=" << ar->estimated_cost << "\n";
         errs() << "       assess  : runtime " << STR(ar->expr) << "\n";
         errs() << "       message : " << ae.message << "\n";
         errs() << "       loc     : " << ae.loc << "\n";

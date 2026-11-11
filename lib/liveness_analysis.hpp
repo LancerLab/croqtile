@@ -322,6 +322,11 @@ private:
   std::unordered_map<std::string, VarSet> async_inthreads_vars;
   bool visiting_synchronize = false;
   bool adding_synthetic_uses = false;
+  // When set, AddUse records this tag into the HB phase's access-kind map
+  // instead of "AddUse" (used to distinguish element writes and
+  // completion-observing waits from genuine data reads). Liveness-uses are
+  // unaffected; only the sync-recovery typing tag changes.
+  const char* hb_access_tag_override_ = nullptr;
 
   // -- Liveness info per statement --
   std::unordered_map<const Stmt*, LivenessInfo> stmt_linfo;
@@ -381,6 +386,9 @@ public:
     std::string signal_in;
     std::string signal_out;
     std::set<std::string> buffers_accessed;
+    // Access-domain tags per buffer ("use", "def", "dma-from", "dma-to");
+    // recorded alongside buffers_accessed for the sync-recovery pass.
+    std::map<std::string, std::set<std::string>> buffer_access_kinds;
     bool is_async = false;
     bool multi_instance = false;
     int multi_instance_count = 0;
@@ -403,6 +411,11 @@ public:
   };
 
   const std::map<std::string, HBGraph>& HBGraphs() const { return hb_graphs; }
+  // stmt id -> AST node, in the liveness preorder (the id space used by
+  // HBPhase first/last_stmt_id). Read-only seam for the sync-recovery pass.
+  const std::vector<const Stmt*>& PreorderStmts() const {
+    return preorder_stmts;
+  }
 
 private:
   std::map<std::string, HBGraph> hb_graphs;

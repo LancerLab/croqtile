@@ -170,7 +170,8 @@ void LivenessAnalyzer::AddUse(const Stmt* s, const std::string& var,
   stmt_linfo[s].use.insert(svar);
   var_events[svar].push_back({EventKind::Use, SSTab().ScopeName()});
   if (cur_hb_phase && !adding_synthetic_uses)
-    RecordHBBufferAccess(svar, "AddUse");
+    RecordHBBufferAccess(svar, hb_access_tag_override_ ? hb_access_tag_override_
+                                                       : "AddUse");
   if (inthreads_async_level && !visiting_synchronize)
     AddAsyncInthreadsVar(SSTab().ScopeName(), svar);
   // when using a var, its binding should also be treated as used.
@@ -250,6 +251,9 @@ void LivenessAnalyzer::AddDef(const Stmt* s, const std::string& var,
   VST_DEBUG(dbgs() << "DEF: " << svar << "\n");
   stmt_linfo[s].def.insert(svar);
   var_events[svar].push_back({EventKind::Def, SSTab().ScopeName()});
+  // TODO(sync-recovery): declaration-time defs are recorded as generic
+  // writes; conservative for obligation derivation, refine later.
+  if (cur_hb_phase) RecordHBBufferAccess(svar, "def");
   if (is_buffer_or_future) {
     std::string svar_span = svar + ".span";
     VST_DEBUG(dbgs() << "\tand .span: " << svar_span << "\n");
@@ -686,12 +690,15 @@ void LivenessAnalyzer::FinalizeHBPhase() {
 
 void LivenessAnalyzer::RecordHBBufferAccess(const std::string& sname,
                                             const char* caller) {
-  (void)caller;
   if (!cur_hb_state || !sbuffers.count(sname)) return;
-  if (cur_hb_phase)
+  bool skip = caller && std::string(caller) == "skip";
+  if (cur_hb_phase) {
     cur_hb_phase->buffers_accessed.insert(sname);
-  else
+    if (caller && !skip)
+      cur_hb_phase->buffer_access_kinds[sname].insert(caller);
+  } else {
     cur_hb_state->globally_live_bufs.insert(sname);
+  }
 }
 
 void LivenessAnalyzer::RecordHBResourceAccess(const std::string& sname) {
@@ -1565,6 +1572,11 @@ void LivenessAnalyzer::HandleStmtInAfter(AST::Node& n) {
 // ---------- Visitor framework callbacks ----------
 
 bool LivenessAnalyzer::BeforeVisitImpl(AST::Node& n) {
+  // DMA children (ChunkAt etc.) are direction-blind; the DMA visit records
+  // direction-typed engine tags itself. Suppress HB tags for the subtree.
+  // (DMA::accept visits children before Visit(DMA), so this must happen in
+  // BeforeVisit.)
+  if (isa<AST::DMA>(&n)) hb_access_tag_override_ = "skip";
   // skip the BeforeVisitImpl of Call node in pattern: v = Call x(...)
   if (auto c = dyn_cast<AST::Call>(&n); c && c->IsExpr()) return true;
 
@@ -1681,6 +1693,9 @@ __attribute__((unused)) void DumpCfgToDot(
 
 bool LivenessAnalyzer::AfterVisitImpl(AST::Node& n) {
   HandleStmtInAfter(n);
+  if (isa<AST::DMA>(&n) && hb_access_tag_override_ &&
+      std::string(hb_access_tag_override_) == "skip")
+    hb_access_tag_override_ = nullptr;
 
   if (isa<AST::Program>(&n)) {
     VST_DEBUG(dbgs() << "\n" << stmts_with_indent.str() << "\n");
@@ -1823,7 +1838,11 @@ bool LivenessAnalyzer::Visit(AST::Assignment& n) {
   } else {
     VST_DEBUG(dbgs() << "The assignment is not sel or sa: " << STR(n) << ".\n");
     if (n.AssignToDataElement()) {
+      // An element write writes the buffer: tag it as a def for the HB
+      // access typing (liveness still records a use, deliberately).
+      hb_access_tag_override_ = "def";
       AddUse(current_stmt, n.GetDataArrayName());
+      hb_access_tag_override_ = nullptr;
     } else if (PrefixedWith(n.GetName(), "anon_")) {
       AddDef(current_stmt, n.GetName());
     } else {
@@ -1921,6 +1940,8 @@ bool LivenessAnalyzer::Visit(AST::WithBlock& n) {
 bool LivenessAnalyzer::Visit(AST::DMA& n) {
   TraceEachVisit(n);
   stmt_linfo[current_stmt].buffer_related = true;
+  // Direction-typed engine tags for this DMA are recorded below; the generic
+  // operand visits are suppressed by BeforeVisitImpl (children-first order).
   /*
   If the dma is of sync, then only the dst buffer is alias to the future.
   The src buffer can be reused immediately after the dma stmt.
@@ -1991,11 +2012,11 @@ bool LivenessAnalyzer::Visit(AST::DMA& n) {
     AddUse(current_stmt, GetAllSymbolicOperands(pc->GetPadValue().get()));
   }
 
-  if (!n.future.empty()) {
-    RecordHBBufferAccess(InScopeName(n.ToSymbol()), "DMA-to");
-    RecordHBBufferAccess(InScopeName(n.FromSymbol()), "DMA-from");
-    RecordHBResourceAccess(InScopeName(n.future));
-  }
+  // The engine reads/writes the buffers regardless of whether completion is
+  // tracked through a future; record the domains unconditionally.
+  RecordHBBufferAccess(InScopeName(n.ToSymbol()), "DMA-to");
+  RecordHBBufferAccess(InScopeName(n.FromSymbol()), "DMA-from");
+  if (!n.future.empty()) RecordHBResourceAccess(InScopeName(n.future));
 
   return true;
 }
@@ -2096,6 +2117,10 @@ bool LivenessAnalyzer::Visit(AST::Wait& n) {
       stmt_linfo[current_stmt].buffer_related = true;
       auto id = AST::GetIdentifier(*item);
       assert(id && "expecting an identifier in Wait.");
+      // Waiting observes completion; neither the future nor its bound buffers
+      // are data-read. Tag the whole subtree (incl. the binding/future
+      // closures inside AddUse) as observation, not reads.
+      hb_access_tag_override_ = "observe";
       AddUse(current_stmt, id->name);
       const std::string sname = InScopeName(id->name);
       if (!tracker_.future_buffers.count(sname))
@@ -2106,6 +2131,7 @@ bool LivenessAnalyzer::Visit(AST::Wait& n) {
         AddUse(current_stmt, src);
         AddUse(current_stmt, dst);
       }
+      hb_access_tag_override_ = nullptr;
     } else {
       AddUse(current_stmt, GetEventName(*item));
 

@@ -95,6 +95,7 @@ public:
   bool Visit(AST::Synchronize&) override;
   bool Visit(AST::Barrier&) override;
   bool Visit(AST::Fence&) override;
+  bool Visit(AST::CompletionWait&) override;
   bool Visit(AST::Call&) override;
   bool Visit(AST::NamedVariableDecl&) override;
   bool Visit(AST::NamedTypeDecl&) override;

@@ -47,34 +47,13 @@ inline const std::string STR(const AssessRelation& ar) {
   return "";
 }
 
-inline const std::string STR(const AssessOutcome& o) {
-  switch (o) {
-  case AssessOutcome::STATIC_TRUE: return "static-true";
-  case AssessOutcome::STATIC_FALSE: return "static-false";
-  case AssessOutcome::RUNTIME: return "runtime";
-  case AssessOutcome::UNKNOWN: return "unknown";
-  }
-  return "?";
-}
-
-inline const std::string STR(const UsageType& ut) {
-  switch (ut) {
-  case UsageType::UnClassified: return "unclassified";
-  case UsageType::ShapeCompatibility: return "shape-compat";
-  case UsageType::ElementAccess: return "elem-access";
-  case UsageType::LoopBound: return "loop-bound";
-  case UsageType::HardwareConstraint: return "hw-constraint";
-  }
-  choreo_unreachable("unsupported usage type.");
-  return "";
-}
 } // namespace Choreo
 
 void Assessor::LogAssessment(const std::string& msg, const location& l,
                              AssessOutcome outcome, UsageType uty,
-                             size_t assertion_idx) {
-  assessment_log.push_back({msg, l, outcome, uty, assertion_idx,
-                            current_predicate_, current_guard_});
+                             AssessDependence dep, size_t assertion_idx,
+                             AssessMechanism mech) {
+  assessment_log.push_back({msg, l, outcome, uty, dep, mech, assertion_idx});
 }
 
 void Assessor::AddAssertion(const ptr<sbe::SymbolicExpression>& ar,
@@ -116,9 +95,8 @@ AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
   assert(visitor && "Visitor not bound. Call Bind() before Assess.");
   auto pred =
       (rel == AssessRelation::EQ) ? sbe::oc_eq(lhs, rhs) : sbe::oc_ne(lhs, rhs);
-  current_predicate_ = STR(pred);
-  current_guard_.clear();
   const auto warning_msg = warn_message.empty() ? error_message : warn_message;
+  const auto dep = ClassifyDependence({&lhs, &rhs});
 
   if (auto b = VIBool(pred)) {
     if (b.value() == false) {
@@ -126,15 +104,15 @@ AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
       case AssessPolicy::Error:
       case AssessPolicy::ErrWarn:
         visitor->Error1(l, error_message);
-        LogAssessment(error_message, l, AssessOutcome::STATIC_FALSE, uty);
+        LogAssessment(error_message, l, AssessOutcome::STATIC_FALSE, uty, dep);
         return {false, false, false};
       case AssessPolicy::Warn:
         visitor->Warning(l, warning_msg);
-        LogAssessment(warning_msg, l, AssessOutcome::STATIC_FALSE, uty);
+        LogAssessment(warning_msg, l, AssessOutcome::STATIC_FALSE, uty, dep);
         return {true, true, false};
       }
     }
-    LogAssessment(error_message, l, AssessOutcome::STATIC_TRUE, uty);
+    LogAssessment(error_message, l, AssessOutcome::STATIC_TRUE, uty, dep);
     return {true, false, false};
   }
 
@@ -152,7 +130,7 @@ AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
   case AssessPolicy::Error:
     if (strict_fail) {
       visitor->Error1(l, error_message);
-      LogAssessment(error_message, l, AssessOutcome::STATIC_FALSE, uty);
+      LogAssessment(error_message, l, AssessOutcome::STATIC_FALSE, uty, dep);
       return {false, false, false};
     }
     break;
@@ -160,24 +138,23 @@ AssessResult Assessor::Assess(AssessPolicy ap, AssessRelation rel,
     if (strict_fail || may_fail) visitor->Warning(l, warning_msg);
     // Warn-policy never adds a runtime assertion; report the compile-time
     // outcome: a provable failure is STATIC_FALSE (only warned), an uncertain
-    // result is UNKNOWN. Only a discharged predicate is STATIC_TRUE.
+    // or definitely-safe result is STATIC_TRUE.
     LogAssessment(error_message, l,
                   strict_fail ? AssessOutcome::STATIC_FALSE
-                  : may_fail  ? AssessOutcome::UNKNOWN
                               : AssessOutcome::STATIC_TRUE,
-                  uty);
+                  uty, dep);
     return {true, strict_fail || may_fail, false};
   case AssessPolicy::ErrWarn:
     if (strict_fail) {
       visitor->Error1(l, error_message);
-      LogAssessment(error_message, l, AssessOutcome::STATIC_FALSE, uty);
+      LogAssessment(error_message, l, AssessOutcome::STATIC_FALSE, uty, dep);
       return {false, false, false};
     }
     if (may_fail) visitor->Warning(l, warning_msg);
     break;
   }
 
-  LogAssessment(error_message, l, AssessOutcome::RUNTIME, uty,
+  LogAssessment(error_message, l, AssessOutcome::RUNTIME, uty, dep,
                 assertions.size());
   AddAssertion(pred, l, error_message, aty, uty, node);
   return {true, may_fail, true};
@@ -195,7 +172,9 @@ AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
                               const std::string& message, UsageType uty,
                               AssessType aty, const location& l,
                               AST::Node* node, AST::Node* emit_node,
-                              const ValueItem& guard) {
+                              const ValueItem& guard,
+                              std::optional<AssessDependence> dep_override,
+                              AssessMechanism mech) {
   if (DebugOn())
     dbgs() << "[Assess] " << STR(bo) << ", type: " << STR(aty)
            << ", usage: " << STR(uty) << ", policy: " << STR(ap)
@@ -210,9 +189,8 @@ AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
 
   auto pred = bo;
   if (pred) pred = pred->Normalize();
+  const auto dep = dep_override.value_or(ClassifyDependence({&bo}));
 
-  current_predicate_ = STR(pred);
-  current_guard_ = IsValidValueItem(guard) ? STR(guard) : "";
   auto norm_guard = guard;
   if (norm_guard) norm_guard = norm_guard->Normalize();
   if (auto gb = VIBool(norm_guard)) {
@@ -225,12 +203,9 @@ AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
     if (b.value() == false) {
       if (IsValidValueItem(norm_guard)) {
         // Statically false but only reachable under a guard; keep as runtime.
-        if (ap == AssessPolicy::Warn) {
-          LogAssessment(message, l, AssessOutcome::UNKNOWN, uty);
-          return {true, false, false};
-        }
-        LogAssessment(message, l, AssessOutcome::RUNTIME, uty,
-                      assertions.size());
+        if (ap == AssessPolicy::Warn) return {true, false, false};
+        LogAssessment(message, l, AssessOutcome::RUNTIME, uty, dep,
+                      assertions.size(), mech);
         AddAssertion(pred, l, message, aty, uty, node, emit_node);
         return {true, false, true};
       }
@@ -238,19 +213,19 @@ AssessResult Assessor::Assess(AssessPolicy ap, const ValueItem& bo,
         visitor->Error1(l, message);
       else
         visitor->Warning(l, message);
-      LogAssessment(message, l, AssessOutcome::STATIC_FALSE, uty);
+      LogAssessment(message, l, AssessOutcome::STATIC_FALSE, uty, dep,
+                    static_cast<size_t>(-1), mech);
       return {ap == AssessPolicy::Warn, ap == AssessPolicy::Warn, false};
     }
-    LogAssessment(message, l, AssessOutcome::STATIC_TRUE, uty);
+    LogAssessment(message, l, AssessOutcome::STATIC_TRUE, uty, dep,
+                  static_cast<size_t>(-1), mech);
     return {true, false, false};
   }
 
-  if (ap == AssessPolicy::Warn) {
-    LogAssessment(message, l, AssessOutcome::UNKNOWN, uty);
-    return {true, false, false};
-  }
+  if (ap == AssessPolicy::Warn) return {true, false, false};
 
-  LogAssessment(message, l, AssessOutcome::RUNTIME, uty, assertions.size());
+  LogAssessment(message, l, AssessOutcome::RUNTIME, uty, dep,
+                assertions.size(), mech);
   AddAssertion(pred, l, message, aty, uty, node, emit_node);
   return {true, false, true};
 }

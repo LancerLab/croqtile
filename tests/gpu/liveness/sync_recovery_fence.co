@@ -1,0 +1,42 @@
+// REQUIRES: TARGET-GPU
+// RUN: env CHOREO_SYNC_RECOVERY=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>/dev/null | FileCheck %s
+//
+// Sync-recovery C6: tenant y is generic-written (element store), tenant x is
+// engine-read (dma copy out); the coloring merges them into one slot. The
+// handover y -> x carries a visibility obligation (the generic write must be
+// published to the engine's path), so a proxy fence is inserted inside the
+// producer tenant: after its write, before the trigger that hands the slot
+// over (the fence is per-thread; it must run on the writing threads).
+//
+// CHECK: *((int*)y) = 1;
+// CHECK: cde::fence_proxy_async_shared_cta();
+// CHECK-NEXT: (void)sig.arrive();
+
+__co__ s32 [16] reuse_fence(s32 [16] src) {
+  s32 [16] out;
+
+  parallel p by 1 : block {
+    parallel q by 2 : group-4 {
+      shared event sig;
+
+      inthreads.async (q == 1) {
+        shared s32 [16] y;
+        y.at(0) = 1;
+        trigger sig;
+      }
+
+      inthreads.async (q == 0) {
+        wait sig;
+        shared s32 [16] x;
+        x.at(0) = 2;
+        dma.copy x => out;
+      }
+
+      sync.barrier : block;
+    }
+  }
+
+  return out;
+}
+
+int main() { return 0; }

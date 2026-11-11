@@ -4050,18 +4050,24 @@ struct Barrier : public Node, public TypeIDProvider<Barrier> {
 struct Fence : public Node, public TypeIDProvider<Fence> {
   ParallelLevel visibility;
   Storage memory;
-  FenceOrder order;
+  // Which engine path the fence publishes to: THREADS = plain threadfence;
+  // DMA/TMA = publish generic-proxy writes to the async engine path
+  // (fence.proxy.async). MARA sync-recovery insertion sets this.
+  FenceEntity entity = FenceEntity::THREADS;
+  FenceOrder order = FenceOrder::ACQ_REL;
 
   Fence(const location& loc, ParallelLevel v, Storage m = Storage::NONE,
-        FenceOrder o = FenceOrder::ACQ_REL)
-      : Node(loc), visibility(v), memory(m), order(o) {}
+        FenceOrder o = FenceOrder::ACQ_REL,
+        FenceEntity e = FenceEntity::THREADS)
+      : Node(loc), visibility(v), memory(m), entity(e), order(o) {}
 
   ptr<Node> CloneImpl() const override {
-    return Make<Fence>(LOC(), visibility, memory, order);
+    return Make<Fence>(LOC(), visibility, memory, order, entity);
   }
 
   ParallelLevel GetVisibility() const { return visibility; }
   Storage GetMemory() const { return memory; }
+  FenceEntity GetEntity() const { return entity; }
   FenceOrder GetOrder() const { return order; }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -4070,11 +4076,49 @@ struct Fence : public Node, public TypeIDProvider<Fence> {
        << prefix << "`- "
        << "Fence: " << STR(visibility);
     if (memory != Storage::NONE) os << "<" << STR(memory) << ">";
+    if (entity != FenceEntity::THREADS) os << " [" << STR(entity) << "]";
     os << " " << STR(order);
   }
   void accept(Visitor&) override;
 
   __UDT_TYPE_INFO__(Node, Fence)
+};
+
+// Completion wait on an async engine's outstanding copy groups, inserted at a
+// reuse handover frontier. The wait applies to the executing thread's own
+// bulk async-group, so -- like a proxy fence -- it must run on the threads
+// that issued the copy: after the engine's last access to the slot and before
+// the handover signal, never on the receiving tenant.
+struct CompletionWait : public Node, public TypeIDProvider<CompletionWait> {
+  FenceEntity engine;
+  CompletionWaitKind kind;
+  // Copy groups still allowed to be outstanding when the wait returns
+  // (0 = drain everything committed so far).
+  int pending = 0;
+
+  CompletionWait(const location& loc, FenceEntity e,
+                 CompletionWaitKind k = CompletionWaitKind::READ_DRAIN,
+                 int p = 0)
+      : Node(loc), engine(e), kind(k), pending(p) {}
+
+  ptr<Node> CloneImpl() const override {
+    return Make<CompletionWait>(LOC(), engine, kind, pending);
+  }
+
+  FenceEntity GetEngine() const { return engine; }
+  CompletionWaitKind GetKind() const { return kind; }
+  int GetPending() const { return pending; }
+
+  void Print(std::ostream& os, const std::string& prefix = {},
+             bool = false) const override {
+    os << "\n"
+       << prefix << "`- "
+       << "CompletionWait: " << STR(kind) << "<" << pending << "> ["
+       << STR(engine) << "]";
+  }
+  void accept(Visitor&) override;
+
+  __UDT_TYPE_INFO__(Node, CompletionWait)
 };
 
 struct RangeExpr : public Node, public TypeIDProvider<RangeExpr> {
@@ -4550,7 +4594,7 @@ struct DeviceFunctionDecl final : public Node,
     DeviceTemplateParam(const std::string& name = "", Kind k = UNKNOWN,
                         const std::string& type = "",
                         const std::string& def = "")
-        : kind(k), param_name(name), type_name(type), default_value(def) {};
+        : kind(k), param_name(name), type_name(type), default_value(def){};
   };
   std::vector<DeviceTemplateParam> template_params;
   bool IsTemplated() const { return !template_params.empty(); }

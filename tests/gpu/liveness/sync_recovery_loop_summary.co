@@ -1,0 +1,48 @@
+// REQUIRES: TARGET-GPU
+// RUN: env CHOREO_SYNC_RECOVERY=1 CHOREO_SYNC_RECOVERY_KEEP=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>&1 | FileCheck --check-prefix=KEEP %s
+// RUN: env CHOREO_SYNC_RECOVERY=1 choreo -n -es -t cute -arch=sm_90a --mem-reuse %s -o - 2>&1 | FileCheck --check-prefix=ELIDE %s
+//
+// A producer loop that waits each copy in the same iteration leaves no async
+// access outstanding at loop exit. The full drain queued after the loop is
+// therefore a loop-summary cover, even though the individual waits are not
+// prefix siblings of the insertion anchor.
+//
+// KEEP: f0.wait();
+// KEEP: cuda::ptx::cp_async_bulk_wait_group(cuda::ptx::n32_t<0>{});
+// KEEP-NEXT: (void)sig0.arrive();
+//
+// ELIDE: [sync-recovery] elide AST::CompletionWait (loop-summary source wait)
+// ELIDE: f0.wait();
+// ELIDE-NOT: cuda::ptx::cp_async_bulk_wait_group(
+// ELIDE: (void)sig0.arrive();
+
+__co__ s32 [16] reuse_loop_summary(s32 [16] src) {
+  s32 [16] out;
+
+  parallel p by 1 : block {
+    parallel q by 2 : group-4 {
+      shared event sig0;
+
+      inthreads.async (q == 0) {
+        shared s32 [16] t0;
+        with k in 2 {
+          f0 = dma.copy.async src => t0;
+          wait f0;
+        }
+        trigger sig0;
+      }
+
+      inthreads.async (q == 1) {
+        wait sig0;
+        shared s32 [16] t1;
+        f1 = dma.copy.async src => t1;
+        wait f1;
+      }
+
+      sync.barrier : block;
+    }
+  }
+
+  return out;
+}
+int main() { return 0; }

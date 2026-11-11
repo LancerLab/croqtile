@@ -1,0 +1,43 @@
+// REQUIRES: TARGET-GPU
+// RUN: env CHOREO_SYNC_RECOVERY=1 choreo -es -t cute -arch=sm_90a --mem-reuse %s -o /dev/null 2>&1 | FileCheck %s
+//
+// Sync-recovery scaffold: two shared buffers in signal-separated
+// inthreads warpgroups get coloring-merged into one slot (HB override).
+// Tenant y is engine-written (dma-to); tenant x is generic-written. The
+// handover y -> x must be reported with a completion obligation hint.
+//
+// CHECK: [sync-recovery] device function:
+// CHECK: slot @0
+// CHECK-DAG: tenant {{.*}}y{{.*}} phases
+// CHECK-DAG: tenant {{.*}}x{{.*}} phases
+// CHECK: handover {{.*}}y{{.*}} -> {{.*}}x{{.*}} [hb-merged]{{.*}}witness:{{.*}}sig{{.*}}obligations: {{.*}}WAW{{.*}}EW->GW{{.*}}completion:engine-wait
+
+__co__ s32 [16] reuse_dma(s32 [16] src) {
+  s32 [16] out;
+
+  parallel p by 1 : block {
+    parallel q by 2 : group-4 {
+      shared event sig;
+
+      inthreads.async (q == 1) {
+        shared s32 [16] y;
+        f = dma.copy.async src => y;
+        wait f;
+        trigger sig;
+      }
+
+      inthreads.async (q == 0) {
+        wait sig;
+        shared s32 [16] x;
+        x.at(0) = 1;
+        dma.copy x => out;
+      }
+
+      sync.barrier : block;
+    }
+  }
+
+  return out;
+}
+
+int main() { return 0; }

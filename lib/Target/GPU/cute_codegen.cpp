@@ -3803,8 +3803,9 @@ bool CuteCodeGen::Visit(AST::ParallelBy& n) {
         auto oname = UnScopedName(item.name);
         if (item.attr != ParamAttr::GLOBAL_INPUT && item.IsReference())
           hs << h_indent << "choreo::abend_true(cudaMemcpy(" << oname
-             << ".data(), " << oname + "__device" << ", "
-             << UnScopedSizeExpr(*item.type) << ", cudaMemcpyDeviceToHost));\n";
+             << ".data(), " << oname + "__device"
+             << ", " << UnScopedSizeExpr(*item.type)
+             << ", cudaMemcpyDeviceToHost));\n";
       }
     }
 
@@ -7592,6 +7593,15 @@ bool CuteCodeGen::Visit(AST::Barrier& n) {
 bool CuteCodeGen::Visit(AST::Fence& n) {
   TraceEachVisit(n);
 
+  // Proxy fences publish the generic path to an async engine path; the
+  // memory space selects the scope (shared -> shared::cta).
+  if (n.GetEntity() == FenceEntity::DMA || n.GetEntity() == FenceEntity::TMA) {
+    if (n.GetMemory() != Storage::SHARED)
+      choreo_unreachable("only shared-memory proxy fences are emitted so far.");
+    ds << d_indent << "cde::fence_proxy_async_shared_cta();\n";
+    return true;
+  }
+
   // GPU fences always cover shared+global; visibility distinguishes the scope.
   //
   // The order axis selects between the two standalone fence forms CUDA
@@ -7625,6 +7635,31 @@ bool CuteCodeGen::Visit(AST::Fence& n) {
     // Full (acq_rel) fence, covering release / acquire / acq_rel.
     ds << d_indent
        << (cta_scope ? "__threadfence_block();\n" : "__threadfence();\n");
+  }
+
+  return true;
+}
+
+bool CuteCodeGen::Visit(AST::CompletionWait& n) {
+  TraceEachVisit(n);
+
+  // Bulk-group drains are the only completion primitive emitted so far. They
+  // refer to the executing thread's own committed copies, which is why the
+  // recovery pass places them on the issuing (producer) threads.
+  if (n.GetEngine() != FenceEntity::TMA && n.GetEngine() != FenceEntity::DMA)
+    choreo_unreachable(
+        "unsupported completion-wait engine: " + STR(n.GetEngine()) + ".");
+  switch (n.GetKind()) {
+  case CompletionWaitKind::READ_DRAIN:
+    ds << d_indent << "cde::cp_async_bulk_wait_group_read<" << n.GetPending()
+       << ">();\n";
+    break;
+  case CompletionWaitKind::FULL_DRAIN:
+    // libcu++ only exposes the read variant in cuda::device::experimental;
+    // the full-group drain lives in the PTX wrapper namespace.
+    ds << d_indent << "cuda::ptx::cp_async_bulk_wait_group(cuda::ptx::n32_t<"
+       << n.GetPending() << ">{});\n";
+    break;
   }
 
   return true;
@@ -10111,17 +10146,26 @@ void CuteCodeGen::EmitHostRuntimeCheck() {
     for (size_t i = 1; i < entries.size(); ++i) {
       auto& entry0 = entries[i - 1];
       auto& entry1 = entries[i];
+      std::string msg = "The shapes of the " + Ordinal(entry0.para_ordinal) +
+                        " parameter (dim: " + std::to_string(entry0.dim) +
+                        ") and the " + Ordinal(entry1.para_ordinal) +
+                        " parameter (dim: " + std::to_string(entry1.dim) +
+                        ") are inconsistent.";
       hs << h_indent << "choreo::runtime_check(" << entry0.elem_name
          << " == " << entry1.elem_name;
-      hs << ", \"The shapes of the " << Ordinal(entry0.para_ordinal)
-         << " parameter (dim: " << entry0.dim << ") and the "
-         << Ordinal(entry1.para_ordinal) << " parameter (dim: " << entry1.dim
-         << ") are inconsistent.\");\n";
+      hs << ", \"" << msg << "\");\n";
       ++stats.total;
       ++stats.shape_compat_total;
       ++stats.runtime_total;
       ++stats.shape_compat_runtime;
       ++stats.runtime_entry;
+      // Record in the safety ledger: these obligations are generated and
+      // materialized directly at codegen; parameter dims are host-visible
+      // scalars, hence scalar-symbolic dependence. Stats aggregation already
+      // happened (assert-site pass), so this does not double-count.
+      FCtx(fname).GetAssessor().RecordExternalObligation(
+          msg, location(), AssessOutcome::RUNTIME,
+          UsageType::ShapeCompatibility, AssessDependence::SCALAR_SYMBOLIC);
     }
   }
 
