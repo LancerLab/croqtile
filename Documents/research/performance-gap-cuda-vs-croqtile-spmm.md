@@ -666,3 +666,41 @@ regression tests pass on the new kernel (`gemm_sp_full_output_small`: full
 16384^3 rows 384-511). The 3%/1800 performance target remains open; the
 shipping decision was based on correctness plus the strict improvement over
 the one-tile kernel, not on the target.
+
+## 14. 2026-11-11: loop-carried interference in shared-buffer reuse (compiler)
+
+The compiler defect behind the four-tile SpMM corruption is fixed
+(croqtile `8be4299a`). The HB graph is a one-iteration DAG: signal edges that
+would close a cycle are dropped, and those dropped edges are precisely the
+real cross-iteration synchronizations (a consumer's `empty` trigger at
+iteration t orders the producer's wait at t + 1; the per-tile epilogue-ring
+wrap does the same). `CanOverlap` nevertheless treated the within-iteration
+reachability as valid for every iteration, so a branch-local buffer could
+alias an arena that a producer refills in the next iteration.
+
+The fix records each scope's loop statement ranges and the dropped edges.
+When both phases of a buffer pair recur in loops, reuse is rejected unless
+the shifted reachability holds in both directions:
+
+- exactly one direction: the back-edge orders only one of the two shifted
+  instance pairs, so the producer of iteration t + 1 can race the consumer
+  of iteration t (the four-tile SpMM case);
+- both directions: the ping-pong orders every instance pair (the epilogue
+  ring's four output buffers keep sharing one region);
+- neither direction: the phases are not coupled by a back-edge, so the
+  within-iteration order holds for all iterations (the one-tile F5 arena
+  reuse stays legal).
+
+Test: `tests/gpu/codegen/cute/loop_carried_buffer_interference.co` pins the
+unsafe looped form (the buffer must not land on the operand offset) while
+`trigger_dependency_buffer_reuse.co` remains the no-loop positive control.
+With the unmodified branch-local four-tile SpMM kernel, the compiler now
+places all four `output_s` at 196608 and the kernel passes 16384^3 rows
+384-511, full 512x512x1024 output, and the croqtile-ops regressions; the
+shipped CTA-scope kernel's layout is unchanged. Non-end-to-end lit suites
+pass (670 tested, the known `hoist_with_foreach` XFAIL unchanged). The
+end-to-end suite is 64 passed / 1 skipped with one failure,
+`tiled_dma.co` (six DMA size-mismatch compile errors), which fails
+identically with this change stashed and is therefore pre-existing on HEAD.
+Performance was not re-measured this round: GPU 1 was occupied by an
+external inference benchmark, so the 3%/1800 target stays open.
