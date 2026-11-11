@@ -561,3 +561,20 @@ Consequences and fixes:
 - Kernel shape contract: M and N multiples of 256, K a multiple of 1024, and
   (M/256)*(N/256) a multiple of 4. Full-output verification, not a corner, is
   required for acceptance.
+
+### 12.1 Fix and shipped state
+
+The shared-to-global TMA store fix landed as commit `41474df0`: after a
+non-event S2G store the compiler now emits a group-scoped named barrier, so
+every participant waits for the issuing thread's
+`cp_async_bulk_wait_group_read<0>` before a following trigger can release the
+shared source. With the fix, the one-tile-per-CTA kernel passes a full
+512x512x1024 output check (zero mismatches) and the 16384^3 windows rows
+0-127, 384-511 and 512-639. That correct kernel is shipped to `croqtile-ops`
+as commit `734d614` (kernel + wrapper + CMake; the kernel TU is built
+explicitly for sm_90a because CMake 3.22 cannot express that architecture).
+The four-tile variant remains disabled: its failure is deterministic and
+independent of the S2G race (a variant that always computes tile 1 still
+fails, while one iteration passes), so a multi-iteration state bug in the
+tile loop is still open. The 1800-class target therefore remains tied to
+fixing that loop; the one-tile kernel is the correct baseline meanwhile.
