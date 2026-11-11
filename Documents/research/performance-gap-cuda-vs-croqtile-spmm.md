@@ -522,3 +522,42 @@ not comparable.
 The CroqTile binary used for the fair comparison (`spmm-bench/best_f1.co`,
 the F1-migrated best kernel) passes `verify.py --verify` on the same shape:
 `VERIFY: PASS`.
+
+## 12. 2026-11-11: the four-tile kernel is incorrect outside the verified corner
+
+Before shipping the tuned kernel to `croqtile-ops`, a full-output check found
+that the four-tile persistent loop computes wrong results outside the
+128x256 corner that every campaign round verified:
+
+- At 16384^3, moving the verify window to rows 384-511 aborts deterministically
+  (3/3 runs): `mismatch at (384, 0) gpu=350.25 ref=-34.693 diff=384.9`.
+- At 512x512x1024 (the smallest shape with four 256-row tiles; K must be a
+  multiple of 1024, K=512 faults because the four-stage unroll outruns the
+  producer), a full-output check shows consumer groups 2-3 (rows 384-511) of
+  the second tile ~74% wrong, with run-to-run varying counts (a race).
+- Rebuilding the same shape with `SPMM_TILES_PER_CTA=1` (one tile per CTA)
+  passes the failing rows: the defect is in the four-tile persistent loop,
+  not in the per-tile compute, the prepacked metadata, or the A layout.
+
+Mechanism: in the epilogue, the shared-to-global TMA store's
+`cp.async.bulk.wait_group.read<0>` is executed only by the issuing thread.
+The other 127 threads pass the two named barriers and execute
+`trigger epiY` (128 arrivals) before the TMA has finished reading the shared
+output buffer, so the next group in the ring may `mma.store` over it while
+the TMA still reads it. The corner verify never checked the affected rows, so
+100 campaign rounds promoted a kernel that is wrong for large parts of the
+matrix; the 1445 and 1763 TFLOPS figures are time-only measurements of a
+kernel that does not compute the right answer.
+
+Consequences and fixes:
+
+- Do not ship the tuned kernel. The `croqtile-ops` ship commit was reverted
+  (`9f46cc1`) and its wrapper/CMake wiring removed.
+- A correct fix is a group-scoped barrier after the TMA store's read-wait,
+  before the epilogue trigger is emitted (codegen change in the shared-to-
+  global store lowering), or an epilogue trigger that only the issuing thread
+  performs after the read-wait. Until then, `SPMM_TILES_PER_CTA=1` is the
+  correct variant (about 3.7% slower by the campaign's own measurement).
+- Kernel shape contract: M and N multiples of 256, K a multiple of 1024, and
+  (M/256)*(N/256) a multiple of 4. Full-output verification, not a corner, is
+  required for acceptance.
