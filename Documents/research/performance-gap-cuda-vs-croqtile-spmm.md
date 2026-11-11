@@ -578,3 +578,69 @@ independent of the S2G race (a variant that always computes tile 1 still
 fails, while one iteration passes), so a multi-iteration state bug in the
 tile loop is still open. The 1800-class target therefore remains tied to
 fixing that loop; the one-tile kernel is the correct baseline meanwhile.
+
+## 13. 2026-11-11: the four-tile bug is a shared-buffer alias, not the tile loop
+
+The deterministic four-tile failure is fixed. Its cause is not event-phase or
+tile-loop state but `mem_reuse`: the fourth consumer group's branch-local
+`output_s` epilogue buffer is placed at shared offset 0, aliasing
+`rhs_load_s` (the B operand arena), while the first three groups' buffers are
+at 196608. The producer refills B for the next tile concurrently with that
+group's epilogue `mma.store`/TMA store, so the epilogue overwrites the B stage
+the next tile is about to consume. The first tile of every CTA is unaffected,
+which is why the campaign's 128x256 corner (tile 0 only) verified for 100
+rounds.
+
+Evidence (all on GPU 1, serial):
+
+- Generated CUDA of the failing kernel: `rhs_load_s = anon_8 + 0`,
+  `lhs_load_s = anon_8 + 131072`, groups 1-3 `output_s = anon_8 + 196608`,
+  group 4 `output_s = anon_8 + 0`. The same layout appears in the 2-tile, the
+  same-tile-twice, the block_n-only and the campaign 4-tile builds.
+- Full 512x512x1024 output, two tiles per CTA, verify rows 384-511:
+  branch-local buffer aborts at `(384, 0) gpu=574 ref=-5.66821`; the same
+  source with one CTA-scope `shared f16 [64, 256] output_s` declared beside
+  the operand buffers (all four groups use it; the epilogue ring already
+  serialises them) passes.
+- 16384^3, four tiles per CTA, verify rows 384-511: the branch-local control
+  reproduces the historical deterministic abort `(384, 0) gpu=350.25
+  ref=-34.693 diff=384.943`; the CTA-scope variant passes. The control was
+  rebuilt with the committed S2G barrier (`41474df0`), so the two defects are
+  independent.
+
+Correctness matrix for the CTA-scope four-tile kernel:
+
+| shape | tiles/CTA | window | result |
+| --- | ---: | --- | --- |
+| 16384^3 | 4 | rows 0-127 | PASS |
+| 16384^3 | 4 | rows 384-511 | PASS |
+| 512x512x1024 | 2 | full 512x512 | PASS (zero mismatches) |
+| 512x512x1024 | 4 (grid 1) | full 512x512 | PASS (zero mismatches) |
+
+The fixed kernel is kept as `spmm-bench/best_f1_fix.co` (defaults 16384^3,
+four tiles per CTA, default corner window). The compiler-side defect remains
+open: a loop-carried producer refill is not ordered against a branch-local
+epilogue buffer when `mem_reuse` decides the operand arena is dead, so a
+general fix needs loop-carried interference in the HB model; the CTA-scope
+declaration is the safe kernel form meanwhile.
+
+Rested interleaved benchmark of the fixed kernel (10 s idle, warmup=1,
+3 samples, GPU 0 verified idle; an external `instinct-cli` inference
+benchmark on GPU 1 spoiled two other windows, whose absolute numbers are
+discarded):
+
+| run | CroqTile fixed | CUDA reference |
+| --- | ---: | ---: |
+| 1 | 1733.95 (5.073 ms) | 1805.46 (4.872 ms) |
+| 2 | 1730.31 (5.084 ms) | 1809.94 (4.860 ms) |
+| 3 | 1727.36 (5.092 ms) | 1806.26 (4.870 ms) |
+| median | **1730.3** | **1806.3** |
+
+The gap in this window is 4.2% (the ninth-pass window measured 0.8%). The
+derived clock is 1.007 GHz for ours (median T = 164,974 cycles/tile,
+4 x T x 1024 / 132 = 5.119M cycles/SM over 5.084 ms), in the same range as
+the CUDA reference's 1.00-1.04 GHz; the window-to-window spread is the DVFS
+boost budget, as in sections 10-11. The fixed kernel is performance-neutral
+against the pre-fix binary (same-window A/B 1717.1 vs 1730.4, 0.8%). The
+1800 / 3% bar was not met in this window, so the four-tile kernel was not
+shipped this round; the correct one-tile kernel remains the shipped artifact.
