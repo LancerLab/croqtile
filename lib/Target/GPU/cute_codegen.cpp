@@ -5733,6 +5733,13 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
         ds << d_indent << "  (void)" << ExprSTR(n.Event(), IsHost())
            << ".arrive();\n";
       ds << d_indent << "}\n";
+      // The bulk read-wait above runs on the issuing thread only. A following
+      // statement may release this shared source to other warpgroups (the
+      // epilogue ring trigger does exactly that), so every participant must
+      // wait until the TMA has finished reading it. Event-managed stores
+      // already signal the release from the issuing thread after the wait.
+      if (!async_s2g_event && NeedWarpSpecGroupX4SyncForCurrentScope())
+        EmitGroupX4Sync(ds, d_indent);
       // DO not check or wait beyond bulk wait (matches tuned CUDA kernels).
     }
   };
