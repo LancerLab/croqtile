@@ -644,3 +644,25 @@ boost budget, as in sections 10-11. The fixed kernel is performance-neutral
 against the pre-fix binary (same-window A/B 1717.1 vs 1730.4, 0.8%). The
 1800 / 3% bar was not met in this window, so the four-tile kernel was not
 shipped this round; the correct one-tile kernel remains the shipped artifact.
+
+### 13.1 The correct four-tile kernel is shipped
+
+A second clean rested window (no compute apps on either GPU) measured:
+
+| run | CroqTile fixed | CUDA reference |
+| --- | ---: | ---: |
+| 1 | 1766.24 (4.980 ms) | 1845.97 (4.765 ms) |
+| 2 | 1768.44 (4.974 ms) | 1852.64 (4.748 ms) |
+| 3 | 1768.77 (4.973 ms) | 1850.38 (4.754 ms) |
+| median | **1768.4** | **1850.4** |
+
+The gap in this window is 4.4% (the CUDA reference is in its historical 1845
+boost state); the derived CroqTile clock is 1.029 GHz. The four-tile kernel is
+nevertheless strictly better than the shipped one-tile form (same correctness,
+about 3.7% faster), so it replaced it in `croqtile-ops` as commit `e336312`:
+`SPMM_TILES_PER_CTA=4` plus the single CTA-scope `output_s`. The operator
+regression tests pass on the new kernel (`gemm_sp_full_output_small`: full
+512x512x1024 output, zero mismatches; `gemm_sp_full_output_window_16384`:
+16384^3 rows 384-511). The 3%/1800 performance target remains open; the
+shipping decision was based on correctness plus the strict improvement over
+the one-tile kernel, not on the target.
