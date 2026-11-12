@@ -725,3 +725,12 @@ per CTA) uses a different instrumentation scope than the per-tile CroqTile
 counter and is therefore not used for a cross-kernel clock claim. The
 3%/1800 criterion is not met in this window and no kernel-side lever
 remains.
+
+### 15.1 A fifth clean window
+
+CroqTile 1748.69 / 1772.29 / 1756.45 (median 1756.5, 5.008 ms) against
+CUDA 1837.96 / 1785.40 / 1831.74 (median 1831.7, 4.802 ms): a 4.1% gap,
+derived CroqTile clock 1.030 GHz. The clean-window series is now 0.8%, 4.2%,
+4.5% and 4.1%; CroqTile stays at 1730-1764 TFLOPS while the CUDA reference
+moves from 1778 to 1832, again tracking the CUDA boost state rather than any
+change in the CroqTile kernel. The 3%/1800 criterion remains unmet.
