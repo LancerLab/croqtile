@@ -1,0 +1,7 @@
+// RUN: not choreo -t cc -es %s 2>&1 | FileCheck %s
+
+// The CPU target has no finite per-level device capacity, so the runtime
+// query is rejected during semantic analysis rather than at runtime.
+__co__ auto cpu_dim() { return __max_parallel_by<block>(); }
+
+// CHECK: error: 'croq::max_block_parallel_by' is not supported by the current target 'cc'.

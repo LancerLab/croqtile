@@ -3007,6 +3007,20 @@ bool EarlySemantics::Visit(AST::Yield& n) {
   return true;
 }
 
+// Returns the level encoded in a `max_<level>_parallel_by` query call, or
+// ParallelLevel::NONE if the name is not such a query. Both the unqualified
+// parser name and the runtime-qualified name are accepted.
+static ParallelLevel MaxParallelByQueryLevel(const std::string& name) {
+  for (auto lvl :
+       {ParallelLevel::BLOCK, ParallelLevel::THREAD, ParallelLevel::GROUP,
+        ParallelLevel::GROUPx4, ParallelLevel::CLUSTER, ParallelLevel::DEVICE,
+        ParallelLevel::TERM}) {
+    const std::string fn = MaxParallelByFunc(lvl);
+    if (name == fn || name == "croq::" + fn) return lvl;
+  }
+  return ParallelLevel::NONE;
+}
+
 bool EarlySemantics::Visit(AST::Call& n) {
   TraceEachVisit(n);
 
@@ -3250,8 +3264,29 @@ bool EarlySemantics::Visit(AST::Call& n) {
                               std::to_string(max_a) + " arguments, but got " +
                               std::to_string(argc) + ".");
       }
-    } else
-      choreo_unreachable("unsupported bif '" + func_name + "'.");
+    } else if (auto lvl = MaxParallelByQueryLevel(func_name);
+               lvl != ParallelLevel::NONE) {
+      // `croq` aliases the runtime `choreo` namespace; qualify the name here
+      // rather than baking the namespace into the parsed built-in.
+      const bool qualified = func_name.rfind("croq::", 0) == 0;
+      const std::string runtime_name =
+          qualified ? func_name : "croq::" + func_name;
+      // Validate the query against the target, then demote it to a regular
+      // runtime call so code generation emits it directly.
+      if (!CCtx().SupportsMaxParallelByQuery(lvl))
+        Error1(n.LOC(), "'" + runtime_name +
+                            "' is not supported by the current target '" +
+                            CCtx().TargetName() + "'.");
+      else {
+        n.function->name = runtime_name;
+        n.ClearBIF();
+      }
+    } else {
+      // Default for built-ins without a compiler hook: demote to a regular
+      // call so code generation emits it directly. Expression uses must
+      // already carry a result type (set by the parser).
+      n.ClearBIF();
+    }
 
     return ec == error_count;
   }

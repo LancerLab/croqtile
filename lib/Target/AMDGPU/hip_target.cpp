@@ -165,6 +165,12 @@ public:
             ParallelLevel::THREAD};
   }
 
+  bool SupportsMaxParallelByQuery(ParallelLevel pl,
+                                  const ArchId&) const override {
+    return pl == ParallelLevel::BLOCK || pl == ParallelLevel::GROUP ||
+           pl == ParallelLevel::THREAD;
+  }
+
   const std::unordered_map<std::string, std::string>
   ChoreoMacros(const ArchId& arch) const override {
     return {

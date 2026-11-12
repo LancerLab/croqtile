@@ -602,6 +602,7 @@ removed_stage "stage"[ \t]*<[ \t]*[0-9]+[ \t]*>[ \t]*\(
   "__bar_arrive" return Choreo::Parser::make_BAR_ARRIVE(yytext, loc);
   "__bar_sync"   return Choreo::Parser::make_BAR_SYNC(yytext, loc);
   "__to"       return Choreo::Parser::make_TOCAST(yytext, loc);
+  "__max_parallel_by" return Choreo::Parser::make_MAX_PARALLEL_BY(yytext, loc);
   "__lib_"{id}   return Choreo::Parser::make_LIB_CALL(yytext, loc);
   "local"    return Choreo::Parser::make_STORAGE(Storage::LOCAL, loc);
   "shared"   return Choreo::Parser::make_STORAGE(Storage::SHARED, loc);

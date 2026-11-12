@@ -225,7 +225,7 @@ extern int yylex();
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN SCALE MASK
 %token <std::string> UNROLL
-%token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXP2F EXPM1 FABS FMAF FRCP_RN FLOOR GELU ISFINITE FMAX FMIN ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA TOCAST
+%token <std::string> ACOS ASIN ATAN ATAN2 CEIL COS COSH EXP EXP2F EXPM1 FABS FMAF FRCP_RN FLOOR GELU ISFINITE FMAX FMIN ROUND RSQRT SIGMOID SINH SOFTPLUS SQRT TAN LOG1P LOG POW SIGN SIN TANH ALIGNUP ALIGNDOWN BIF_MMA TOCAST MAX_PARALLEL_BY
 %token <std::string> ATOMIC_ADD ATOMIC_SUB ATOMIC_EXCH ATOMIC_MIN ATOMIC_MAX ATOMIC_AND ATOMIC_OR ATOMIC_XOR ATOMIC_CAS
 %token <std::string> BAR_ARRIVE BAR_SYNC
 %token <std::string> LIB_CALL
@@ -3097,6 +3097,18 @@ call_expr
         ce->SetForeignType($3);
         ce->SetExplicit(true);
         $$ = ce;
+      }
+    | MAX_PARALLEL_BY LT PBLEVEL GT LPAREN RPAREN {
+        // `__max_parallel_by<level>()` is a compiler built-in. Early semantic
+        // analysis validates it and qualifies the name with the runtime
+        // namespace (`croq::`), so the parser stays target-agnostic here.
+        auto args = AST::Make<AST::MultiValues>(@1);
+        auto name = MaxParallelByFunc($3);
+        auto call = AST::Make<AST::Call>(
+            @1, AST::Make<AST::Identifier>(@1, name), args,
+            AST::Call::BIF | AST::Call::EXPR);
+        call->SetType(MakeIntegerType(/*m=*/true));
+        $$ = AST::Make<AST::Expr>(@1, call);
       }
     ;
 

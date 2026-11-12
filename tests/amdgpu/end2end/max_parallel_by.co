@@ -1,0 +1,19 @@
+// REQUIRES: TARGET-AMDGPU
+// RUN: choreo -gs %target %amdgpu_arch %s | bash -s -- --execute | FileCheck --match-full-lines %s
+
+// The per-level capacity queries read the active device's runtime attributes.
+// AMDGPU supports BLOCK, GROUP and THREAD; all are non-zero.
+#include <iostream>
+
+int main() {
+  int blocks = choreo::max_block_parallel_by();
+  int threads = choreo::max_thread_parallel_by();
+  int groups = choreo::max_group_parallel_by();
+  std::cout << "block=" << blocks << " thread=" << threads
+            << " group=" << groups << std::endl;
+  bool pass = blocks > 0 && threads > 0 && groups > 0;
+  std::cout << (pass ? "PASS" : "FAIL") << ": max parallel-by queries\n";
+  return pass ? 0 : 1;
+}
+
+// CHECK: PASS: max parallel-by queries

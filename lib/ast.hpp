@@ -1785,6 +1785,7 @@ public:
   bool IsIntrinsic() const { return (bool)(attr & INTRINSIC); }
 
   void SetBIF() { attr = attr | BIF; }
+  void ClearBIF() { attr = static_cast<CallAttr>(attr & ~BIF); }
   void SetCompileTimeEval() { attr = attr | COMPTIME; }
   void SetArith() { attr = attr | ARITH; }
   void SetExpr() { attr = attr | EXPR; }

@@ -1,0 +1,30 @@
+// RUN: choreo -t cute -arch=sm_90a -es %s -o - | FileCheck %s
+// RUN: choreo -t cute -arch=sm_90a -i %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=TYPE
+
+// `__max_parallel_by<level>()` is a Choreo builtin that reports the target's
+// per-level parallel-by cap. The parser lowers it to a normal runtime call
+// named after the level; early semantic analysis validates the level against
+// the target and then demotes it to a regular call. Note `group-4` is not a
+// valid C++ identifier and becomes `group4`.
+__co__ auto dim() {
+  int blk = __max_parallel_by<block>();
+  int thr = __max_parallel_by<thread>();
+  int grp = __max_parallel_by<group>();
+  int g4 = __max_parallel_by<group-4>();
+  int clu = __max_parallel_by<cluster>();
+  return blk + thr + grp + g4 + clu;
+}
+
+// CHECK: int blk = croq::max_block_parallel_by();
+// CHECK: int thr = croq::max_thread_parallel_by();
+// CHECK: int grp = croq::max_group_parallel_by();
+// CHECK: int g4 = croq::max_group4_parallel_by();
+// CHECK: int clu = croq::max_cluster_parallel_by();
+// CHECK: return (
+
+// The result is a mutable int so it connects with the existing type system.
+// TYPE: Symbol:    ::dim::blk, Type: mutable s32
+// TYPE: Symbol:    ::dim::thr, Type: mutable s32
+// TYPE: Symbol:    ::dim::grp, Type: mutable s32
+// TYPE: Symbol:    ::dim::g4, Type: mutable s32
+// TYPE: Symbol:    ::dim::clu, Type: mutable s32

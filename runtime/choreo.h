@@ -2418,6 +2418,177 @@ __device__ inline void rotate(Futures&... f) {
 }
 #endif
 
+// --- per-level parallel-by capacity queries ------------------------------
+// Runtime counterpart of the compiler's Target::GetMaxParallelByCount. The
+// values come from the active device's runtime attributes, so they follow the
+// actual hardware rather than the compiler's compile-time assumptions. Levels
+// the target does not support abort. Choreo lowers
+// `__max_parallel_by<level>()` to the matching function, e.g.
+// `__max_parallel_by<block>()` becomes `croq::max_block_parallel_by()`.
+namespace detail {
+
+// Current device id for device-attribute queries.
+inline int MaxParallelByDeviceId() {
+#if defined(__CHOREO_TARGET_CUTE__)
+  int dev = 0;
+  abend_true((int)cudaGetDevice(&dev));
+  return dev;
+#elif defined(__CHOREO_TARGET_AMDGPU__)
+  int dev = 0;
+  abend_true((int)hipGetDevice(&dev));
+  return dev;
+#elif defined(__CHOREO_PRIVATE_TGT0__)
+  int dev = 0;
+  abend_true((int)tgt0GetDevice(&dev));
+  return dev;
+#else
+  return 0;
+#endif
+}
+
+#if defined(__CHOREO_TARGET_CUTE__)
+inline int MaxParallelByThreadsPerBlock() {
+  int value = 0;
+  abend_true((int)cudaDeviceGetAttribute(&value, cudaDevAttrMaxThreadsPerBlock,
+                                         MaxParallelByDeviceId()));
+  return value;
+}
+inline int MaxParallelByWarpSize() {
+  int value = 0;
+  abend_true((int)cudaDeviceGetAttribute(&value, cudaDevAttrWarpSize,
+                                         MaxParallelByDeviceId()));
+  return value;
+}
+#elif defined(__CHOREO_TARGET_AMDGPU__)
+inline int MaxParallelByThreadsPerBlock() {
+  int value = 0;
+  abend_true((int)hipDeviceGetAttribute(
+      &value, hipDeviceAttributeMaxThreadsPerBlock, MaxParallelByDeviceId()));
+  return value;
+}
+inline int MaxParallelByWarpSize() {
+  int value = 0;
+  abend_true((int)hipDeviceGetAttribute(&value, hipDeviceAttributeWarpSize,
+                                        MaxParallelByDeviceId()));
+  return value;
+}
+#endif
+
+} // namespace detail
+
+__co_host__ inline int max_block_parallel_by() {
+#if defined(__CHOREO_PRIVATE_TGT0__)
+  int value = 0;
+  abend_true((int)tgt0DeviceGetAttribute(&value, tgt0DeviceAttributeMaxGridDimX,
+                                         detail::MaxParallelByDeviceId()));
+  return value;
+#elif defined(__CHOREO_TARGET_CUTE__)
+  int value = 0;
+  abend_true((int)cudaDeviceGetAttribute(&value, cudaDevAttrMaxGridDimX,
+                                         detail::MaxParallelByDeviceId()));
+  return value;
+#elif defined(__CHOREO_TARGET_AMDGPU__)
+  int value = 0;
+  abend_true((int)hipDeviceGetAttribute(&value, hipDeviceAttributeMaxGridDimX,
+                                        detail::MaxParallelByDeviceId()));
+  return value;
+#elif defined(__CHOREO_TARGET_CC__) || defined(__CHOREO_TARGET_CPU__)
+  // The CPU target has no finite per-level device capacity.
+  choreo_assert(false,
+                "max_block_parallel_by is not supported by the CPU target");
+  return 0;
+#else
+  choreo_assert(false, "max_block_parallel_by is not supported by this target");
+  return 0;
+#endif
+}
+
+__co_host__ inline int max_thread_parallel_by() {
+#if defined(__CHOREO_PRIVATE_TGT0__)
+  int value = 0;
+  #if __CHOREO_TGT0_ARCH__ >= 400
+  abend_true((int)tgt0DeviceGetAttribute(
+      &value, tgt0DeviceAttributeMaxSubThreadsPerBlock,
+      detail::MaxParallelByDeviceId()));
+  #else
+  abend_true((int)tgt0DeviceGetAttribute(&value,
+                                         tgt0DeviceAttributeMaxThreadsPerBlock,
+                                         detail::MaxParallelByDeviceId()));
+  #endif
+  return value;
+#elif defined(__CHOREO_TARGET_CUTE__) || defined(__CHOREO_TARGET_AMDGPU__)
+  return detail::MaxParallelByWarpSize();
+#elif defined(__CHOREO_TARGET_CC__) || defined(__CHOREO_TARGET_CPU__)
+  // The CPU target has no finite per-level device capacity.
+  choreo_assert(false,
+                "max_thread_parallel_by is not supported by the CPU target");
+  return 0;
+#else
+  choreo_assert(false,
+                "max_thread_parallel_by is not supported by this target");
+  return 0;
+#endif
+}
+
+__co_host__ inline int max_group_parallel_by() {
+#if defined(__CHOREO_PRIVATE_TGT0__)
+  #if __CHOREO_TGT0_ARCH__ >= 400
+  int value = 0;
+  abend_true((int)tgt0DeviceGetAttribute(&value,
+                                         tgt0DeviceAttributeMaxThreadsPerBlock,
+                                         detail::MaxParallelByDeviceId()));
+  return value;
+  #else
+  choreo_assert(false, "max_group_parallel_by is not supported by this target");
+  return 0;
+  #endif
+#elif defined(__CHOREO_TARGET_CUTE__) || defined(__CHOREO_TARGET_AMDGPU__)
+  return detail::MaxParallelByThreadsPerBlock() /
+         detail::MaxParallelByWarpSize();
+#else
+  choreo_assert(false, "max_group_parallel_by is not supported by this target");
+  return 0;
+#endif
+}
+
+__co_host__ inline int max_group4_parallel_by() {
+#if defined(__CHOREO_TARGET_CUTE__)
+  return detail::MaxParallelByThreadsPerBlock() /
+         (detail::MaxParallelByWarpSize() * 4);
+#else
+  choreo_assert(false,
+                "max_group4_parallel_by is not supported by this target");
+  return 0;
+#endif
+}
+
+__co_host__ inline int max_cluster_parallel_by() {
+#if defined(__CHOREO_TARGET_CUTE__)
+  return 0; // CUDA exposes no simple max-cluster-size attribute.
+#else
+  choreo_assert(false,
+                "max_cluster_parallel_by is not supported by this target");
+  return 0;
+#endif
+}
+
+__co_host__ inline int max_device_parallel_by() {
+#if defined(__CHOREO_PRIVATE_TGT0__)
+  int count = 0;
+  abend_true((int)tgt0GetDeviceCount(&count));
+  return count;
+#else
+  choreo_assert(false,
+                "max_device_parallel_by is not supported by this target");
+  return 0;
+#endif
+}
+
+__co_host__ inline int max_none_parallel_by() {
+  choreo_assert(false, "max_none_parallel_by is not supported by this target");
+  return 0;
+}
+
 } // end namespace choreo
 
 namespace croq = choreo;

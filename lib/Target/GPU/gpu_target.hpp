@@ -221,6 +221,16 @@ public:
     return {};
   }
 
+  // Runtime capacity queries are available for every GPU parallel level
+  // except SEQ (no per-level query) and DEVICE (not a GPU level).
+  bool SupportsMaxParallelByQuery(ParallelLevel pl,
+                                  const ArchId& arch) const override {
+    if (pl == ParallelLevel::SEQ) return false;
+    for (auto level : GetParallelLevels(arch))
+      if (level == pl) return true;
+    return false;
+  }
+
   // CUDA's standalone `fence` instruction has no release-only / acquire-only
   // form (only .acq_rel and .sc), so a directional fence order collapses to
   // the full __threadfence*() barrier.

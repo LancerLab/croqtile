@@ -784,6 +784,10 @@ public:
     return GetTarget().GetMaxParallelByCount(pl, GetArch());
   }
 
+  bool SupportsMaxParallelByQuery(ParallelLevel pl) const {
+    return GetTarget().SupportsMaxParallelByQuery(pl, GetArch());
+  }
+
   size_t GetMaxBufferMapBytes() const {
     return GetTarget().GetMaxBufferMapBytes(GetArch());
   }

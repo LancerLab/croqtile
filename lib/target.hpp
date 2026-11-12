@@ -238,6 +238,14 @@ public:
                                        const ArchId& /*arch*/) const {
     return 0;
   }
+  // Whether this target provides the runtime `max_<level>_parallel_by`
+  // capacity query. Targets without a finite per-level capacity (or without a
+  // device-attribute query) return false so the compiler can reject the query
+  // at semantic-analysis time.
+  virtual bool SupportsMaxParallelByQuery(ParallelLevel /*pl*/,
+                                          const ArchId& /*arch*/) const {
+    return false;
+  }
   // Max physical threads per block for GPU targets.  Returns 0 if
   // unconstrained.  For GPU, the real thread count is thread x group x
   // group-4 dims; this value bounds that product.
