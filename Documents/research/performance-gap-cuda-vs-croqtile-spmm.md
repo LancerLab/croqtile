@@ -743,3 +743,12 @@ derived CroqTile clock 1.024 GHz. The clean-window series is now 0.8%, 4.2%,
 4.5%, 4.1% and 3.2%; the CroqTile median stays at 1730-1764 while the CUDA
 reference moves with its boost state (1778-1832). The 3%/1800 criterion is
 still not met in a measured window.
+
+### 15.3 A seventh clean window
+
+CroqTile 1746.54 / 1746.56 / 1745.29 (median 1746.5, 5.036 ms) against
+CUDA 1829.08 / 1834.69 / 1826.64 (median 1829.1, 4.809 ms): a 4.5% gap,
+derived CroqTile clock 1.024 GHz. The clean-window series is now 0.8%, 4.2%,
+4.5%, 4.1%, 3.2% and 4.5%; CroqTile is pinned at 1730-1764 while the CUDA
+reference moves with its boost state (1778-1835). The 3%/1800 criterion
+remains unmet.
