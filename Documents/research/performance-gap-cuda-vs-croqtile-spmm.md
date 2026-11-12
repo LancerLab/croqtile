@@ -952,6 +952,7 @@ the result.
 | 17 | 1748.4 | 1823.7 | 4.1% | 1.025 GHz |
 | 18 | 1754.2 | 1825.4 | 3.9% | 1.029 GHz |
 | 19 | 1743.0 | 1823.0 | 4.4% | 1.022 GHz |
+| 20 | 1745.5 | 1824.2 | 4.3% | 1.023 GHz |
 
 CroqTile remains in its 1730-1764 band and the CUDA reference in
 1778-1835; the 3%/1800 criterion remains unmet.
