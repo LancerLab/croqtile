@@ -704,3 +704,24 @@ end-to-end suite is 64 passed / 1 skipped with one failure,
 identically with this change stashed and is therefore pre-existing on HEAD.
 Performance was not re-measured this round: GPU 1 was occupied by an
 external inference benchmark, so the 3%/1800 target stays open.
+
+## 15. 2026-11-12: another clean window; the gap tracks the CUDA boost state
+
+A fourth clean rested window (no compute apps on either GPU, 10 s idle,
+warmup=1, 3 samples, interleaved) measured CroqTile 1735.71 / 1740.49 /
+1744.81 TFLOPS (median 1740.5, 5.054 ms) against the CUDA reference
+1823.41 / 1819.23 / 1822.63 (median 1822.6, 4.826 ms): a 4.5% gap. The
+derived CroqTile clock is 1.021 GHz (median T 166,210 cycles/tile, i.e.
+5.158M cycles/SM over the wall).
+
+Across the clean windows the CroqTile kernel stays in a narrow band
+(1730-1764 TFLOPS) while the CUDA reference moves from 1778 to 1823 and the
+reported gap moves from 0.8% to 4.5%. The moving part is the CUDA side's
+boost state, not a change in the CroqTile kernel; the whole-run cycle
+comparison of section 10 (both kernels ~5.1M cycles per SM) remains the
+evidence of per-cycle parity. A full-kernel `clock64` probe on the CUDA
+reference (CT about 234-255k against the main-loop CM about 150-158k cycles
+per CTA) uses a different instrumentation scope than the per-tile CroqTile
+counter and is therefore not used for a cross-kernel clock claim. The
+3%/1800 criterion is not met in this window and no kernel-side lever
+remains.
