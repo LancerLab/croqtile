@@ -827,3 +827,115 @@ CroqTile 1741.42 / 1740.64 / 1740.95 (median 1741.0, 5.052 ms) against
 CUDA 1821.29 / 1820.32 / 1817.41 (median 1820.3, 4.832 ms): a 4.4% gap,
 derived CroqTile clock 1.021 GHz. Sixteen clean windows span 0.8-4.7% with
 CroqTile pinned at 1730-1764; the 3%/1800 criterion remains unmet.
+
+## 16. Generated kernel vs CUDA reference: construct-level comparison
+
+This section compares the shipped CroqTile-generated kernel
+(`croqtile-ops/build/ops/gemm_sp_kk_e4m3_fp16/dyn_dyn_dyn.cu`, source
+`ops/gemm_sp_kk_e4m3_fp16/kernels/dyn_dyn_dyn.co`) with the campaign's CUDA
+reference (`current-best.cu`) at the construct level, and separates real
+source-language gaps from tuning choices already measured.
+
+Both compute the same 16384^3 2:4-sparse e4m3 GEMM with a 256x256 CTA tile,
+two K256 operand stages, 128-byte swizzle, and 224 KiB of dynamic shared
+memory. The allocations differ: the reference spends it on
+2 x 96 KiB operands + 4 x 8 KiB metadata ring; the generated kernel spends it
+on 2 x 96 KiB operands + one 32 KiB epilogue buffer.
+
+| construct | CUDA reference | CroqTile generated |
+| --- | --- | --- |
+| launch | 544 = 512 consumers + 32-thread producer warp (thread 512) | 640 = 4 x 128 consumers + 128-thread producer group (1 active thread) |
+| CTA work | 1 tile/CTA, 4096 CTAs, 16x8 2D raster | 4 tiles/CTA persistent, 1024 CTAs, 1D `group_m=32` |
+| ptxas | 94 regs, 2 barriers | 96 regs, 13 barriers |
+| metadata | 4-deep TMA ring in shared; LDS `e0..e3` + register double buffer `f0..f3` one stage ahead | host-prepacked thread-major global LDG (16 B/thread/stage), issued before `wait full` |
+| operand fill | 1 x 3D A box (32 KiB, all four wg slices) + 2 x 2D B, 3 TMA/stage | 1 x 2D A (32 KiB) + 2 x 2D B, 3 TMA/stage |
+| MMA | 4 atoms/stage, `wgmma.commit`+`wait_group 0` per atom; release stage k-1 before the current atoms | 4 atoms/stage, one commit+wait per stage; release the current stage after its atoms |
+| epilogue | register -> shared transpose (132-word padded stride), `bar.sync 1,512`, coalesced uint4 `STG` by all 512 consumers; reuses the dead operand arena | `mma.store` (stmatrix) -> 32 KiB shared, 3 x `named_barrier_sync(128, 9..12)`, one-thread TMA S2G + read-wait, epilogue ring |
+| output descriptors | none (direct stores) | 4 identical `CUtensorMap`s (one per consumer branch) + 3 input maps |
+| static SASS | 643 instrs, 4 QGMMA (loop), 64 STS, 24 LDS, 16 STG, 6 WARPGROUP, 20 SYNCS, 6 UTMALDG, 12 UBLKCP | 2271 instrs, 64 QGMMA, 64 STSM, 32 LDG, 32 WARPGROUP, 78 SYNCS, 21 UTMALDG |
+
+The static SASS counts are not a dynamic measure: the generated consumer body
+is unrolled over the four stages of the `iv_k4` step and duplicated per
+consumer group, while the reference keeps one stage in a loop. Both execute
+256 atoms per consumer group per tile.
+
+### 16.1 True syntax gaps (not expressible today)
+
+1. **Epilogue synthesis.** The reference's epilogue is hand-scheduled:
+   register-to-shared transpose with a custom 132-word (bank-conflict-free)
+   stride, a 512-thread named barrier, then per-thread `uint4` global stores.
+   The DSL offers `mma.store` (stmatrix to a compiler-chosen shared layout)
+   plus TMA S2G; there is no syntax for a user-defined fragment->shared
+   layout or a coalesced vector global store from fragments. A `__cpp__`
+   block cannot substitute because the accumulator fragment layout is
+   compiler-owned.
+   This gap has a direct shared-memory consequence: the reference's direct
+   stores let it reuse the dead operand arena after `bar.sync 1,512`, freeing
+   32 KiB for the metadata ring. The generated kernel needs a dedicated
+   32 KiB epilogue buffer, which is exactly why it cannot fit the ring (and
+   why the persistent four-tile loop made that reuse unsafe until `8be4299a`
+   enforced the interference). The epilogue gap is therefore coupled to the
+   metadata-transport gap.
+2. **Mixed-width warp specialization.** 4 x 128-thread consumer groups plus a
+   32-thread producer warp is not expressible: with `group-4` the total
+   thread dimension must be a multiple of 128, so the producer becomes a
+   full 128-thread group with one active thread. F7b (per-role widths) is the
+   missing construct. Measured effect on this kernel is neutral (the
+   544-thread experiment re-benched at 1448/1440 vs 1441 baseline), and the
+   reference itself uses only 94 registers, so this is not a register-budget
+   gap; it is a launch-shape/code-size gap.
+3. **A named barrier over an arbitrary participant subset.** The reference
+   joins the four consumer warpgroups with `bar.sync 1, 512`. F4.1 gives
+   per-warpgroup barrier ids (8+group) and whole-scope id 15; a 512-thread
+   consumer-only barrier needs an event join instead. The generated epilogue
+   uses three per-group `named_barrier_sync(128, id)` calls around the TMA
+   store plus the epilogue ring.
+4. **Per-atom commit/wait and decoupled release.** The reference commits and
+   waits every atom and releases stage k-1 at the top of stage k. The DSL
+   fixes the commit granularity at the source `mma.commit` site and the wait
+   insertion at codegen; per-atom commit was measured on this kernel and is
+   slower (1373-1400 vs 1439), and early release is slower (1402-1405), so
+   exposing them is not a priority.
+5. **A block-index/raster intrinsic computed once per CTA and shared across
+   warp-specialised branches.** The reference computes `block_row`/`block_col`
+   once from `blockIdx`. The generated source recomputes `tile`, `group_id`,
+   `in_group`, `group_rows`, `block_m`, `block_n` in every branch and every
+   tile iteration, including runtime `div`/`mod` by `group_rows`. This is a
+   code-quality/CSE gap, not a measured performance lever (the computation is
+   amortised over 64 K stages).
+6. **TMA descriptor deduplication.** Four byte-identical output tensor maps
+   are passed (one per store site). The reference passes two maps and stores
+   directly. Minor host-side and kernel-parameter overhead.
+
+### 16.2 Expressible but measured neutral or negative
+
+- Metadata TMA ring (F2): 2-deep 1343.8 and 4-deep decoupled 1331.3 vs
+  1362.35 for the same one-tile structure without the ring; the host
+  prepacked coalesced LDG wins because the ring adds a TMA copy and moves the
+  metadata read onto the post-wait critical path.
+- 2D 16x8 block raster: 1402.5 vs 1436.6 for the 1D group_m=32 raster.
+- Per-atom commit, early release, 544-thread block: all neutral or negative
+  (section 9).
+- Direct global epilogue with the DSL's own lowering: -14.6% (1120 vs 1311);
+  the reference's hand-written version is a different construct (gap 1).
+
+### 16.3 Not a gap
+
+- WGMMA atom emission: CUTLASS `GMMA_64x256x64_F16E4M3E4M3_SS_TN::fma` vs
+  inline `wgmma.mma_async.sp` is neutral (1434.2 vs 1433.9, section 5 of the
+  memory notes).
+- TMA G2S/S2G instruction selection: both lower to the same
+  `cp.async.bulk.tensor` family.
+- Register pressure: 96 vs 94 registers, zero spills; the "544 threads would
+  unlock 120 registers" hypothesis is not what the finished reference uses.
+- Per-cycle work: both kernels execute about 5.1M cycles per SM (section 10);
+  the single-window wall gap is the DVFS clock (sections 11, 15).
+
+### 16.4 What compiler work would matter
+
+The epilogue is the only gap with a plausible cycle/power effect, and it
+matters mainly because it frees the 32 KiB that the reference spends on the
+metadata ring. The other gaps are either measured-neutral (mixed-width
+producer, per-atom commit) or code quality (raster CSE, descriptor dedup).
+Given the measured per-cycle parity, closing them would be expected to
+change the power/clock profile more than the instruction count.
