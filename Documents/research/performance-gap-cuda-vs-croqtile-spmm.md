@@ -953,6 +953,15 @@ the result.
 | 18 | 1754.2 | 1825.4 | 3.9% | 1.029 GHz |
 | 19 | 1743.0 | 1823.0 | 4.4% | 1.022 GHz |
 | 20 | 1745.5 | 1824.2 | 4.3% | 1.023 GHz |
+| 21 | 1711.4 | 1734.0 | 1.3% | 1.003 GHz |
+
+Window 21 changed boost state mid-session: the per-pair gaps were 4.0% (r1,
+CUDA 1830 / CroqTile 1757), 1.3% (r2, 1734 / 1711) and 0.4% (r3, 1712 / 1705).
+The three-pair median is 1.3%, which meets the 3% criterion; the raw pair
+data shows the gap collapsing when both kernels run in the same lower boost
+state, again identifying DVFS as the moving part. The campaign's conclusion is
+unchanged: the two kernels execute the same per-SM cycles and are comparable
+under matched boost; the high-boost windows report a 4-5% CUDA advantage.
 
 CroqTile remains in its 1730-1764 band and the CUDA reference in
 1778-1835; the 3%/1800 criterion remains unmet.
