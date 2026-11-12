@@ -939,3 +939,17 @@ metadata ring. The other gaps are either measured-neutral (mixed-width
 producer, per-atom commit) or code quality (raster CSE, descriptor dedup).
 Given the measured per-cycle parity, closing them would be expected to
 change the power/clock profile more than the instruction count.
+
+## 17. Clean-window log (continued)
+
+Continues the rested-interleaved samples of section 15 after the construct
+comparison of section 16. Each row is three interleaved pairs (10 s idle,
+warmup=1, 3 samples) with GPU 1 clear; GPU 0's piano-34 load does not change
+the result.
+
+| window | CroqTile | CUDA ref | gap | derived Croq clock |
+| --- | ---: | ---: | ---: | ---: |
+| 17 | 1748.4 | 1823.7 | 4.1% | 1.025 GHz |
+
+CroqTile remains in its 1730-1764 band and the CUDA reference in
+1778-1835; the 3%/1800 criterion remains unmet.
