@@ -4269,9 +4269,14 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       // become visible across threads) or when it was guarded to run on a
       // subset of threads (block/group level): the other threads must wait
       // before consuming the result. It stays outside the guard so every
-      // thread reaches it.
-      if (to_or_from_shared || !guard.empty())
-        ds << d_indent << "__syncthreads();\n";
+      // thread reaches it. Group-scoped inside divergent group-4 branches:
+      // a CTA-scope barrier there deadlocks.
+      if (to_or_from_shared || !guard.empty()) {
+        if (NeedWarpSpecGroupX4SyncForCurrentScope())
+          EmitGroupX4Sync(ds, d_indent);
+        else
+          ds << d_indent << "__syncthreads();\n";
+      }
     };
 
     auto emit_tiled_copy = [&](const TiledCopyParams& params,
