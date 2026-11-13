@@ -857,7 +857,18 @@ private:
   // because __syncthreads() requires all threads in the block, which would
   // deadlock when only a subset (one warpgroup) is in scope.
   bool NeedWarpSpecGroupX4SyncForCurrentScope() {
-    return IsWarpSpecActive() && bdim_level == ParallelLevel::GROUPx4;
+    // A CTA-scope barrier inside a divergent inthreads.async(q==..) branch
+    // deadlocks: disjoint thread sets arrive at different CTA barriers.
+    // Use the group-scoped named barrier exactly for such partial-block
+    // scopes (warpspec is divergent by construction); convergent scopes
+    // keep __syncthreads, since a group barrier would under-synchronize.
+    if (bdim_level != ParallelLevel::GROUPx4) return false;
+    if (IsWarpSpecActive()) return true;
+    if (!current_inthreads || !current_inthreads->HasActiveThreads() ||
+        !current_inthreads->HasScopeThreadMask())
+      return false;
+    auto& mask = current_inthreads->GetScopeThreadMask();
+    return CurrentScopeThreadIndices().size() < mask.size();
   }
 };
 

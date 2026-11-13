@@ -4211,11 +4211,10 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
           RemoveSuffix(f_buf_name, ".data()"), f_buf.second,
           f_sty->GetStorage(), f_sty->ElementType(), f_mds_shape, false,
           f_mds_offset, ValueSTR(f_stride, false, true), {}, false);
-      const auto t_mds =
-          GenTensorDecl(RemoveSuffix(t_buf_name, ".data()"), t_buf.second,
-                        t_sty->GetStorage(), t_sty->ElementType(), t_mds_shape,
-                        false, t_mds_offset, t_mds_stride_str, {},
-                        use_wgmma_layout_t, swizzle_mode);
+      const auto t_mds = GenTensorDecl(
+          RemoveSuffix(t_buf_name, ".data()"), t_buf.second,
+          t_sty->GetStorage(), t_sty->ElementType(), t_mds_shape, false,
+          t_mds_offset, t_mds_stride_str, {}, use_wgmma_layout_t, swizzle_mode);
       f_mds_name = f_mds.first;
       t_mds_name = t_mds.first;
       ds << f_mds.second;
@@ -4247,15 +4246,12 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       ParallelLevel lvl = n.GetLevel();
       std::string guard;
       switch (lvl) {
-      case ParallelLevel::BLOCK:
-        guard = "if (__CHOREO_BLOCK_SINGLE__) ";
-        break;
+      case ParallelLevel::BLOCK: guard = "if (__CHOREO_BLOCK_SINGLE__) "; break;
       case ParallelLevel::GROUP:
       case ParallelLevel::GROUPx4:
         guard = "if (__CHOREO_GROUP_SINGLE__) ";
         break;
-      default:
-        break; // THREAD: every lane copies its own slice.
+      default: break; // THREAD: every lane copies its own slice.
       }
       if (!guard.empty()) {
         ds << d_indent << guard << "{\n";
@@ -4269,9 +4265,14 @@ bool CuteCodeGen::Visit(AST::DMA& n) {
       // become visible across threads) or when it was guarded to run on a
       // subset of threads (block/group level): the other threads must wait
       // before consuming the result. It stays outside the guard so every
-      // thread reaches it.
-      if (to_or_from_shared || !guard.empty())
-        ds << d_indent << "__syncthreads();\n";
+      // thread reaches it. Group-scoped inside divergent group-4 branches:
+      // a CTA-scope barrier there deadlocks.
+      if (to_or_from_shared || !guard.empty()) {
+        if (NeedWarpSpecGroupX4SyncForCurrentScope())
+          EmitGroupX4Sync(ds, d_indent);
+        else
+          ds << d_indent << "__syncthreads();\n";
+      }
     };
 
     auto emit_tiled_copy = [&](const TiledCopyParams& params,
@@ -8658,9 +8659,8 @@ bool CuteCodeGen::Visit(AST::WithIn& n) {
     auto m1 = cast<AST::Identifier>(n.GetMatchers()[0]);
     const std::string elem_prefix = n.with->name + "__elem__";
     const std::string iv_suffix =
-        m1->name.compare(0, elem_prefix.size(), elem_prefix) == 0
-            ? n.with->name
-            : m1->name;
+        m1->name.compare(0, elem_prefix.size(), elem_prefix) == 0 ? n.with->name
+                                                                  : m1->name;
     ssm.RemapDeviceSymbol(InScopeName(m1->name), "__iv_" + iv_suffix);
     ssm.RemapHostSymbol(InScopeName(m1->name), "__iv_" + iv_suffix);
     ssm.RemapDeviceSymbol(InScopeName(n.with->name), "__iv_" + iv_suffix);
@@ -11386,7 +11386,8 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
               if (frag_apply_iv_map_.count(id->name)) {
                 AppendLinear(sbe::sym(frag_apply_iv_map_.at(id->name)));
               } else if (within_map.count(InScopeNameForRef(id->name)) &&
-                         within_map.at(InScopeNameForRef(id->name)).size() > 1) {
+                         within_map.at(InScopeNameForRef(id->name)).size() >
+                             1) {
                 auto ivs = within_map.at(InScopeNameForRef(id->name));
                 for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
                   AppendLinear(sbe::sym(*iv_itr));
@@ -11438,7 +11439,8 @@ const std::string CuteCodeGen::OpExprSTR(AST::ptr<AST::Node> e,
               if (frag_apply_iv_map_.count(id->name)) {
                 AppendOffset(sbe::sym(frag_apply_iv_map_.at(id->name)));
               } else if (within_map.count(InScopeNameForRef(id->name)) &&
-                         within_map.at(InScopeNameForRef(id->name)).size() > 1) {
+                         within_map.at(InScopeNameForRef(id->name)).size() >
+                             1) {
                 auto ivs = within_map.at(InScopeNameForRef(id->name));
                 for (auto iv_itr = ivs.begin(); iv_itr != ivs.end(); ++iv_itr)
                   AppendOffset(sbe::sym(*iv_itr));
