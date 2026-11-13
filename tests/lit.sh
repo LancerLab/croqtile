@@ -139,12 +139,45 @@ set_print() {
     printf '\n'
 }
 
+# Return (echo) the detected native arch that satisfies the current
+# REQ_TARGETS. Target lit.cfg files may expose a list of detected archs via
+# NATIVE_ARCHS (e.g. a host with devices from multiple generations); when it
+# is unset (GPU/CPU targets) fall back to the single `mach` value.
+native_match_arch() {
+  local arch
+  if [ ${#NATIVE_ARCHS[@]} -gt 0 ]; then
+    for arch in "${NATIVE_ARCHS[@]}"; do
+      if set_contains REQ_TARGETS "$arch"; then
+        printf '%s\n' "$arch"
+        return 0
+      fi
+    done
+    return 1
+  fi
+  if set_contains REQ_TARGETS "$mach"; then
+    printf '%s\n' "$mach"
+    return 0
+  fi
+  return 1
+}
+
 # Whether the machine's real device arch matches one of the required targets.
 # Simulator targets are NOT matched here: a simulator only runs a test when the
 # file explicitly grants it permission via ALLOW-SIM-* (see sim_allowed below).
 native_arch_matches() {
-  set_contains REQ_TARGETS "$mach" && return 0
-  return 1
+  native_match_arch >/dev/null
+}
+
+# Whether an XFAIL directive names one of the detected native archs.
+native_xfail_matches() {
+  local directive="$1" arch
+  if [ ${#NATIVE_ARCHS[@]} -gt 0 ]; then
+    for arch in "${NATIVE_ARCHS[@]}"; do
+      [[ "$(toupper "$directive")" == *"$(toupper "$arch")"* ]] && return 0
+    done
+    return 1
+  fi
+  [[ "$(toupper "$directive")" == *"$(toupper "$mach")"* ]]
 }
 
 # Whether the available simulator is granted permission to run this file,
@@ -406,6 +439,26 @@ target_specs_match_candidate() {
     fi
   done
 
+  return 1
+}
+
+# Return (echo) the detected native arch that a RUN-<target> spec resolves to.
+# Honours the multi-arch NATIVE_ARCHS list, falling back to `mach`.
+native_target_match_arch() {
+  local candidate="$1" arch
+  if [ ${#NATIVE_ARCHS[@]} -gt 0 ]; then
+    for arch in "${NATIVE_ARCHS[@]}"; do
+      if target_specs_match_candidate "$arch" "$candidate"; then
+        printf '%s\n' "$arch"
+        return 0
+      fi
+    done
+    return 1
+  fi
+  if target_specs_match_candidate "$mach" "$candidate"; then
+    printf '%s\n' "$mach"
+    return 0
+  fi
   return 1
 }
 
@@ -713,6 +766,8 @@ fi
 # Note: consider the machine only installed a single target
 device_type="none"
 mach=
+# Optional list of every detected native arch (populated by target lit.cfg).
+NATIVE_ARCHS=()
 simulator="none"
 
 # Cache hardware detection results per sourced cfg chain.
@@ -766,14 +821,16 @@ make_cfg_cache_key() {
 
 save_hw_detect_cache() {
   local key="$1"
-  HW_DETECT_CACHE["$key"]="${device_type}|${mach}|${simulator}"
+  HW_DETECT_CACHE["$key"]="${device_type}|${mach}|${simulator}|${NATIVE_ARCHS[*]}"
 }
 
 restore_hw_detect_cache() {
   local key="$1"
   local cached="${HW_DETECT_CACHE["$key"]}"
+  local native_joined
 
-  IFS='|' read -r device_type mach simulator <<< "$cached"
+  IFS='|' read -r device_type mach simulator native_joined <<< "$cached"
+  read -r -a NATIVE_ARCHS <<< "$native_joined"
 }
 
 # Function to fill the target-specific variables
@@ -844,6 +901,8 @@ prepare() {
   if [[ -n "${HW_DETECT_CACHE["$cfg_cache_key"]+x}" ]]; then
     restore_hw_detect_cache "$cfg_cache_key"
   else
+    # Target cfg hooks repopulate this during detection.
+    NATIVE_ARCHS=()
     run_hooks "hw_detect"
 
     # target-specific preparation
@@ -1097,8 +1156,7 @@ execute_command() {
       increment_counter num_uepass 1
       append_reproduce_command "$command"
       print_timed_status_line "UNEXPECTED PASS" "$file" "$count" "$total" "$elapsed_time"
-    elif [[ ! -z "${expect_fail}" ]] &&
-         [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${mach})"* ]]; then
+    elif [[ ! -z "${expect_fail}" ]] && native_xfail_matches "${expect_fail}"; then
       increment_counter num_uepass 1
       append_reproduce_command "$command"
       print_timed_status_line "UNEXPECTED PASS" "$file" "$count" "$total" "$elapsed_time"
@@ -1110,8 +1168,7 @@ execute_command() {
     if [[ "${expect_fail}" == "*"* ]]; then
       increment_counter num_xfails 1
       print_timed_status_line "XFAIL" "$file" "$count" "$total" "$elapsed_time"
-    elif [[ ! -z "${expect_fail}" ]] &&
-         [[ "$(toupper ${expect_fail})" ==  *"$(toupper ${mach})"* ]]; then
+    elif [[ ! -z "${expect_fail}" ]] && native_xfail_matches "${expect_fail}"; then
       increment_counter num_xfails 1
       print_timed_status_line "XFAIL" "$file" "$count" "$total" "$elapsed_time"
     else
@@ -1281,8 +1338,13 @@ retrieve_run_config() {
     run_environ="shell"
     # Resolve the executing arch: prefer real hardware when it satisfies the
     # file's TARGET-* requirement, otherwise fall back to an allowed simulator.
-    if native_arch_matches; then
-      run_arch="$mach"
+    # In --sim=only mode the simulator is preferred so hardware-resolved lines
+    # do not get dropped below.
+    if [[ "$sim_mode" == "only" ]] && sim_allowed; then
+      run_arch="$simulator"
+      run_sim=1
+    elif native_arch_matches; then
+      run_arch="$(native_match_arch)"
     elif [[ "$sim_mode" != "off" ]] && sim_allowed; then
       run_arch="$simulator"
       run_sim=1
@@ -1292,12 +1354,19 @@ retrieve_run_config() {
   elif [[ $line =~ [[:blank:]]*RUN-([^-]+):[[:blank:]]*(.+) ]]; then
     run_target=$(echo "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
     local matched_command="${BASH_REMATCH[2]}"
+    local native_arch
     # Resolution ladder: real hardware first, then the simulator when the file
     # grants permission (ALLOW-SIM-*) and a matching simulator is available.
-    if target_specs_match_candidate "$mach" "$run_target"; then
+    # In --sim=only mode the simulator is preferred over real hardware.
+    if [[ "$sim_mode" == "only" ]] && sim_target_matches "$run_target"; then
       run_command="${matched_command}"
       run_environ="shell"
-      run_arch="$mach"
+      run_sim=1
+      run_arch="$simulator"
+    elif native_arch="$(native_target_match_arch "$run_target")"; then
+      run_command="${matched_command}"
+      run_environ="shell"
+      run_arch="$native_arch"
     elif [[ "$sim_mode" != "off" ]] && sim_target_matches "$run_target"; then
       run_command="${matched_command}"
       run_environ="shell"
@@ -1558,6 +1627,8 @@ for _entry in "${files_array[@]}"; do
     unset_env=
     if [[ $run_sim -eq 1 ]]; then
       run_hooks "target_sim_env"
+    else
+      run_hooks "target_hw_env" "$run_arch"
     fi
 
     # Arch Matches: Execute the command with replacements
