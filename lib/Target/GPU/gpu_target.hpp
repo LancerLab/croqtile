@@ -215,9 +215,15 @@ public:
       return {ParallelLevel::SEQ,   ParallelLevel::CLUSTER,
               ParallelLevel::BLOCK, ParallelLevel::GROUPx4,
               ParallelLevel::GROUP, ParallelLevel::THREAD};
-    else
-      return {ParallelLevel::SEQ, ParallelLevel::BLOCK, ParallelLevel::GROUP,
+    // group-4 is a virtual 128-thread grouping, not a WGMMA-only feature.
+    // Consumer Blackwell (sm_120) has TMA and events but no WGMMA/tcgen05
+    // path here; TMA-only warp-specialized kernels still need group-4.
+    if (arch == "sm_120")
+      return {ParallelLevel::SEQ, ParallelLevel::BLOCK,
+              ParallelLevel::GROUPx4, ParallelLevel::GROUP,
               ParallelLevel::THREAD};
+    return {ParallelLevel::SEQ, ParallelLevel::BLOCK, ParallelLevel::GROUP,
+            ParallelLevel::THREAD};
     return {};
   }
 

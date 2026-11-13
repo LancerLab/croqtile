@@ -1,0 +1,33 @@
+// Consumer Blackwell (sm_120) has TMA and events but no WGMMA/tcgen05 path
+// here. group-4 is a virtual 128-thread grouping used by TMA warp-specialized
+// kernels; it must be accepted on sm_120 even though WGMMA is absent.
+
+// RUN: env CHOREO_SYNC_RECOVERY=1 choreo -es -t cute -arch=sm_120 --mem-reuse %s -o - 2>&1 | FileCheck %s
+
+__co__ s32 [16] sm120_group4_tma(s32 [16] src) {
+  s32 [16] out;
+  parallel p by 1 : block {
+    parallel q by 2 : group-4 {
+      shared event sig0;
+      inthreads.async (q == 0) {
+        shared s32 [16] t0;
+        foreach k in 2 {
+          f0 = dma.copy.async src => t0;
+          wait f0;
+        }
+        trigger sig0;
+      }
+      inthreads.async (q == 1) {
+        wait sig0;
+        shared s32 [16] t1;
+        f1 = dma.copy.async src => t1;
+        wait f1;
+      }
+      sync.barrier : block;
+    }
+  }
+  return out;
+}
+int main() { return 0; }
+
+// CHECK: __choreo_vg4id_x = threadIdx.x / 128;
