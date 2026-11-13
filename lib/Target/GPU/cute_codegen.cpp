@@ -2537,7 +2537,6 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
   // the device or host side is determined
 
   if (auto s = dyn_cast<AST::Select>(n.init_expr)) {
-    assert(!IsHost() && "select should be on device side.");
     assert(!s->inDMA);
     size_t val_count = s->expr_list->Count();
     assert(val_count >= 2);
@@ -2551,6 +2550,22 @@ bool CuteCodeGen::Visit(AST::NamedVariableDecl& n) {
       ds << "};\n";
       // make symbol a reference
       ds << d_indent << "future & " << sym << " = *" << array_sym << "["
+         << ExprSTR(s->select_factor, false) << "];\n";
+    } else if (auto sty = dyn_cast<SpannedType>(NodeType(*s))) {
+      // select over spanned buffers (non-DMA): an array of the buffers'
+      // element pointers, dereferenced through the factor. Mirrors the
+      // FutureType case above and the n.value site below. Emitted on BOTH
+      // sides: a decl at global scope is visited host-side too, and a select
+      // there is legal DSL (probe M1.16).
+      auto bts = NameBaseType(sty->ElementType());
+      ds << d_indent << bts << " * " << array_sym << "[] = {";
+      for (size_t i = 0; i < val_count; i++) {
+        if (i > 0) ds << ", ";
+        ds << "&" << ExprSTR(s->expr_list->ValueAt(i), false) << "[0]";
+      }
+      ds << "};\n";
+      // make symbol a reference
+      ds << d_indent << bts << " & " << sym << " = *" << array_sym << "["
          << ExprSTR(s->select_factor, false) << "];\n";
     } else
       choreo_unreachable("select of " + PSTR(NodeType(*s)) +
@@ -3328,7 +3343,7 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
       ds << d_indent << bts << " * " << array_sym << "[] = {";
       for (size_t i = 0; i < val_count; i++) {
         if (i > 0) ds << ", ";
-        ds << ExprSTR(s->expr_list->ValueAt(i), false);
+        ds << "&" << ExprSTR(s->expr_list->ValueAt(i), false) << "[0]";
       }
       ds << "};\n";
       // make symbol a reference
@@ -3379,6 +3394,18 @@ bool CuteCodeGen::Visit(AST::Assignment& n) {
   }
 
   if (n.AssignToDataElement()) {
+    auto nty_v = NodeType(*n.value);
+    if (isa<SpannedType>(nty_v) || isa<FutureType>(nty_v) ||
+        isa<FutureLikeType>(nty_v)) {
+      // An assignment whose value is a whole spanned buffer or future (e.g.
+      // through a select over spanned data) is a buffer-to-buffer copy, not
+      // an element store. Emitting `da = value` would produce a type error,
+      // and the host-side unreachable below would abort on a legal construct
+      // (probe M1.16).
+      choreo_unreachable(
+          "error: buffer-to-buffer assignment through select is not yet "
+          "supported; copy element-wise instead.");
+    }
     if (!IsHost())
       ds << d_indent << ExprSTR(n.da, false) << " = " << ExprSTR(n.value, false)
          << ";\n";

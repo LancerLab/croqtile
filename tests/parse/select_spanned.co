@@ -1,0 +1,20 @@
+// RUN: choreo -gs -t cute %s -o /dev/null
+
+// Regression: select over spanned buffers (non-DMA) hit
+// `choreo_unreachable("select of ... is yet to implement")` in cute_codegen
+// and aborted the front-end. It must now emit an element-pointer array
+// selected by the factor, mirroring the FutureType case. (The buffers are
+// `local`, the only storage a select may bind inside a parallel block.)
+__co__ auto select_spanned(f32 [4, 4] a, f32 [4, 4] b) {
+  f32 [4, 4] out;
+  parallel p by 1 : block
+    parallel q by 1 : thread {
+      local f32 [4, 4] a0, a1;
+      foreach {i} in [3] {
+        c = select(i, a0, a1);
+        foreach {x, y} in [4, 4]
+          out.at(x, y) = c.at(x, y);
+      }
+    }
+  return out;
+}
