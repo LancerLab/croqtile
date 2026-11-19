@@ -222,6 +222,19 @@ For the complete reference, see the [Developer Guide -- Build and Test](./Docume
 | **Tuner** | [AI-agent-driven kernel autotuning harness](https://github.com/LancerLab/croqtile-tuner) |
 | **Playground** | [Browser-based IDE (WASM compiler)](https://github.com/SyntaxArchmage/croqtile-playground) |
 
+## Papers
+
+### Croqtile Design
+
+- **A Novel AI-Native GPU Kernel Programming Language for Autonomous Kernel Tuning.** Heng Shi et al. ATC 2026. [DOI: 10.1145/3828523.3857041](https://doi.org/10.1145/3828523.3857041).
+- **Signal-Aware Liveness Analysis for Shared Memory Optimization in Warp-Specialized GPU Kernels.** Sijie Wu et al. CGO 2027. [Artifact DOI: 10.5281/zenodo.23254218](https://doi.org/10.5281/zenodo.23254218).
+
+### Built on Croqtile
+
+- **Pushing the Limits of Structured Sparse GEMM on Hopper GPUs via Analytical Modeling.** Heng Shi et al. SC 2026.
+- **Do We Need Tensor Cores for Stencil Computations?** Qiqi Gu et al. SC 2026. Best Paper Nomination. [arXiv: 2603.00477](https://arxiv.org/abs/2603.00477).
+- **SptcAttn: Accelerating Long-Context Attention with Diagonal Stripes using Sparse Tensor Core.** Chenpeng Wu et al. ATC 2026. [DOI: 10.1145/3828523.3857028](https://doi.org/10.1145/3828523.3857028).
+
 ## License
 
 Apache License 2.0.
