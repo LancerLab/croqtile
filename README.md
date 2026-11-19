@@ -222,18 +222,41 @@ For the complete reference, see the [Developer Guide -- Build and Test](./Docume
 | **Tuner** | [AI-agent-driven kernel autotuning harness](https://github.com/LancerLab/croqtile-tuner) |
 | **Playground** | [Browser-based IDE (WASM compiler)](https://github.com/SyntaxArchmage/croqtile-playground) |
 
-## Papers
+## Research and Citation
+
+If you use Croqtile in your research, please cite the language paper:
+
+Heng Shi, Xiaofeng Guan, Sijie Wu, Enming Fan, Chenpeng Wu, Qiqi Gu, Jiahang Xie, Guoqing Bao, and Jianguo Yao. **A Novel AI-Native GPU Kernel Programming Language for Autonomous Kernel Tuning.** In *Proceedings of the 2026 ACM SIGOPS Annual Technical Conference*, pp. 1275–1289. ACM, 2026. [doi:10.1145/3828523.3857041](https://doi.org/10.1145/3828523.3857041).
+
+```bibtex
+@inproceedings{shi2026croqtile,
+  author    = {Shi, Heng and Guan, Xiaofeng and Wu, Sijie and Fan, Enming and Wu, Chenpeng and Gu, Qiqi and Xie, Jiahang and Bao, Guoqing and Yao, Jianguo},
+  title     = {{A Novel AI-Native GPU Kernel Programming Language for Autonomous Kernel Tuning}},
+  booktitle = {Proceedings of the 2026 ACM SIGOPS Annual Technical Conference},
+  year      = {2026},
+  pages     = {1275--1289},
+  publisher = {ACM},
+  doi       = {10.1145/3828523.3857041},
+  url       = {https://doi.org/10.1145/3828523.3857041}
+}
+```
+
+Download [BibTeX references](docs/papers.bib) for the work below, or use GitHub's **Cite this repository** button to export the recommended citation in BibTeX or APA format.
 
 ### Croqtile Design
 
-- **A Novel AI-Native GPU Kernel Programming Language for Autonomous Kernel Tuning.** Heng Shi et al. ATC 2026. [DOI: 10.1145/3828523.3857041](https://doi.org/10.1145/3828523.3857041).
-- **Signal-Aware Liveness Analysis for Shared Memory Optimization in Warp-Specialized GPU Kernels.** Sijie Wu et al. CGO 2027. [Artifact DOI: 10.5281/zenodo.23254218](https://doi.org/10.5281/zenodo.23254218).
+| Paper | Venue | Links |
+|-------|-------|-------|
+| **A Novel AI-Native GPU Kernel Programming Language for Autonomous Kernel Tuning** — Heng Shi et al. | ATC 2026 | [Paper / DOI](https://doi.org/10.1145/3828523.3857041) · BibTeX above |
+| **Signal-Aware Liveness Analysis for Shared Memory Optimization in Warp-Specialized GPU Kernels** — Sijie Wu et al. | CGO 2027 | [Artifact / DOI](https://doi.org/10.5281/zenodo.23254218) · [Artifact BibTeX](docs/papers.bib) |
 
 ### Built on Croqtile
 
-- **Pushing the Limits of Structured Sparse GEMM on Hopper GPUs via Analytical Modeling.** Heng Shi et al. SC 2026.
-- **Do We Need Tensor Cores for Stencil Computations?** Qiqi Gu et al. SC 2026. Best Paper Nomination. [arXiv: 2603.00477](https://arxiv.org/abs/2603.00477).
-- **SptcAttn: Accelerating Long-Context Attention with Diagonal Stripes using Sparse Tensor Core.** Chenpeng Wu et al. ATC 2026. [DOI: 10.1145/3828523.3857028](https://doi.org/10.1145/3828523.3857028).
+| Paper | Venue | Links |
+|-------|-------|-------|
+| **Pushing the Limits of Structured Sparse GEMM on Hopper GPUs via Analytical Modeling** — Heng Shi et al. | SC 2026 | [BibTeX](docs/papers.bib) |
+| **Do We Need Tensor Cores for Stencil Computations?** — Qiqi Gu et al. | SC 2026 · Best Paper Nomination | [Preprint](https://arxiv.org/abs/2603.00477) · [BibTeX](docs/papers.bib) |
+| **SptcAttn: Accelerating Long-Context Attention with Diagonal Stripes using Sparse Tensor Core** — Chenpeng Wu et al. | ATC 2026 | [Paper / DOI](https://doi.org/10.1145/3828523.3857028) · [BibTeX](docs/papers.bib) |
 
 ## License
 

@@ -1,0 +1,49 @@
+cff-version: 1.2.0
+message: If you use Croqtile in your research, please cite the paper in preferred-citation.
+title: Croqtile
+type: software
+authors:
+- family-names: Shi
+  given-names: Heng
+  orcid: https://orcid.org/0000-0002-1779-9221
+repository-code: https://github.com/LancerLab/croqtile
+license: Apache-2.0
+preferred-citation:
+  type: conference-paper
+  title: A Novel AI-Native GPU Kernel Programming Language for Autonomous Kernel Tuning
+  authors:
+  - family-names: Shi
+    given-names: Heng
+    orcid: https://orcid.org/0000-0002-1779-9221
+  - family-names: Guan
+    given-names: Xiaofeng
+    orcid: https://orcid.org/0000-0003-1120-8889
+  - family-names: Wu
+    given-names: Sijie
+    orcid: https://orcid.org/0009-0004-8239-2788
+  - family-names: Fan
+    given-names: Enming
+    orcid: https://orcid.org/0009-0007-1736-7676
+  - family-names: Wu
+    given-names: Chenpeng
+    orcid: https://orcid.org/0009-0006-9059-2776
+  - family-names: Gu
+    given-names: Qiqi
+    orcid: https://orcid.org/0009-0008-6605-8615
+  - family-names: Xie
+    given-names: Jiahang
+    orcid: https://orcid.org/0009-0006-7292-9339
+  - family-names: Bao
+    given-names: Guoqing
+    orcid: https://orcid.org/0000-0002-0669-6358
+  - family-names: Yao
+    given-names: Jianguo
+    orcid: https://orcid.org/0000-0002-1142-4496
+  collection-title: Proceedings of the 2026 ACM SIGOPS Annual Technical Conference
+  year: 2026
+  start: '1275'
+  end: '1289'
+  publisher:
+    name: Association for Computing Machinery
+  doi: 10.1145/3828523.3857041
+  url: https://doi.org/10.1145/3828523.3857041
