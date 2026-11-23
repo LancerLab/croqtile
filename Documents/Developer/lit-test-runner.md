@@ -62,8 +62,8 @@ controlled by the `--sim` flag:
 
 | Value | Meaning |
 |-------|---------|
-| `--sim=off` (default) | Run only on real hardware. Files that require the simulator are skipped. |
-| `--sim=on` | Run on real hardware when present, and also allow simulator execution. |
+| `--sim=on` (default) | Run on real hardware when present, otherwise fall back to an allowed simulator. |
+| `--sim=off` | Run only on real hardware. Files that require the simulator are skipped. |
 | `--sim=only` | Run only on the simulator; real-hardware lines are skipped. |
 
 ### `ALLOW-SIM-*` markers

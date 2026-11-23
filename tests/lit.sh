@@ -745,7 +745,9 @@ declare -A FEATURE_CACHE=()
 max_jobs=1
 dry_run=0
 
-sim_mode="off"
+# Default: use real hardware when present, otherwise fall back to an
+# allowed simulator. Force a mode with --sim=off or --sim=only.
+sim_mode="on"
 run_only=""
 target_only=""
 only_target=""
