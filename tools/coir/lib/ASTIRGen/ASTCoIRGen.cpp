@@ -504,6 +504,8 @@ bool ASTCoIRGen::InMidVisitImpl(AST::Node& n) {
         thenBlock.back().hasTrait<mlir::OpTrait::IsTerminator>())
       thenBlock.back().erase();
     builder.setInsertionPointToEnd(&thenBlock);
+    emitPendingBufferUnmaps();
+    pendingBufferUnmaps_.emplace_back();
     builder.create<mlir::scf::YieldOp>(builder.getUnknownLoc(), yieldVals);
 
     builder.setInsertionPointToStart(&ifOp.getElseRegion().front());
@@ -632,6 +634,8 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node& n) {
         elseBlock.back().hasTrait<mlir::OpTrait::IsTerminator>())
       elseBlock.back().erase();
     builder.setInsertionPointToEnd(&elseBlock);
+    emitPendingBufferUnmaps();
+    if (!pendingBufferUnmaps_.empty()) pendingBufferUnmaps_.pop_back();
     builder.create<mlir::scf::YieldOp>(builder.getUnknownLoc(), yieldVals);
 
     builder.setInsertionPointAfter(ifOp);
@@ -646,9 +650,17 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node& n) {
       auto& bodyBlock = coirWhile.getBodyRegion().front();
       builder.setInsertionPointToEnd(&bodyBlock);
 
+      // Unmap mappings declared in the body before its terminator so the
+      // coir.buffer.unmap still dominates the closing continue/break.
+      mlir::Operation* terminator = nullptr;
+      if (!bodyBlock.empty() &&
+          bodyBlock.back().hasTrait<mlir::OpTrait::IsTerminator>())
+        terminator = &bodyBlock.back();
+      if (terminator) builder.setInsertionPoint(terminator);
+      emitPendingBufferUnmaps();
+
       // If body doesn't end with a terminator, add coir.continue
-      if (bodyBlock.empty() ||
-          !bodyBlock.back().hasTrait<mlir::OpTrait::IsTerminator>()) {
+      if (!terminator) {
         llvm::SmallVector<mlir::Value> yieldVals;
         for (auto& name : info.iterNames) {
           auto val = LookupValue(name);
@@ -676,6 +688,8 @@ bool ASTCoIRGen::AfterVisitImpl(AST::Node& n) {
       if (!afterBlock.empty() &&
           afterBlock.back().hasTrait<mlir::OpTrait::IsTerminator>())
         afterBlock.back().erase();
+      builder.setInsertionPointToEnd(&afterBlock);
+      emitPendingBufferUnmaps();
       builder.create<mlir::scf::YieldOp>(builder.getUnknownLoc(), yieldVals);
 
       PopScope();
@@ -5026,6 +5040,11 @@ bool ASTCoIRGen::Visit(AST::IfElseBlock& ifelse) {
   info.modifiedNames = std::move(validNames);
   info.preIfValues = std::move(preIfValues);
   ifMergeStack.push_back(std::move(info));
+
+  // A buffer.map/remap inside the then or else body must be unmapped inside
+  // that region, before the scf.yield, so the unmap keeps its mapped value in
+  // scope. Track the branches in separate pending scopes.
+  pendingBufferUnmaps_.emplace_back();
 
   builder.setInsertionPointToStart(&ifOp.getThenRegion().front());
   return true;
