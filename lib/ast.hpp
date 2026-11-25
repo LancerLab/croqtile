@@ -1383,12 +1383,16 @@ public:
   __UDT_TYPE_INFO__(Node, DataAccess)
 };
 
-// A logical lane index [0, 1, ..., lane_count - 1]. The source spelling is
-// `vec.index<N>`; N is a compile-time value and is not a runtime operand.
+// A logical vector constructor. `vec.index<N>` / `vec.iota<N>` produce the
+// lane index [0, 1, ..., lane_count - 1]; the parenthesized form
+// `vec.iota<N>(start, stride)` produces start + i*stride. A literal zero
+// stride is the splat/fill form.
 struct VectorIndex : public Node, public TypeIDProvider<VectorIndex> {
 private:
   size_t lane_count = 0;
   ptr<Expr> lane_count_expr;
+  ptr<Expr> start;
+  ptr<Expr> stride;
 
 public:
   VectorIndex(const location& l, size_t n) : Node(l), lane_count(n) {
@@ -1398,27 +1402,50 @@ public:
   VectorIndex(const location& l, const ptr<Expr>& width)
       : Node(l), lane_count_expr(width) {}
 
+  VectorIndex(const location& l, const ptr<Expr>& width, const ptr<Expr>& start,
+              const ptr<Expr>& stride)
+      : Node(l), lane_count_expr(width), start(start), stride(stride) {}
+
+  bool IsSplat() const;
+  bool HasAffineArgs() const { return start || stride; }
+
   size_t LaneCount() const { return lane_count; }
   const ptr<Expr>& LaneCountExpr() const { return lane_count_expr; }
+  const ptr<Expr>& Start() const { return start; }
+  const ptr<Expr>& Stride() const { return stride; }
   void SetLaneCount(size_t n) { lane_count = n; }
 
   ptr<Node> CloneImpl() const override {
-    if (lane_count_expr) {
-      auto copy = Make<VectorIndex>(LOC(), CloneP(lane_count_expr));
-      copy->SetLaneCount(lane_count);
-      return copy;
-    }
-    return Make<VectorIndex>(LOC(), lane_count);
+    auto copy = Make<VectorIndex>(LOC(), CloneP(lane_count_expr), CloneP(start),
+                                  CloneP(stride));
+    copy->SetLaneCount(lane_count);
+    return copy;
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
              bool with_type = false) const override {
-    os << prefix << "VEC.INDEX<";
+    if (IsSplat())
+      os << prefix << "VEC.FILL<";
+    else if (HasAffineArgs())
+      os << prefix << "VEC.IOTA<";
+    else
+      os << prefix << "VEC.INDEX<";
     if (lane_count)
       os << lane_count;
     else
       os << PSTR(lane_count_expr);
     os << ">";
+    if (IsSplat()) {
+      os << "(";
+      start->Print(os, "", with_type);
+      os << ")";
+    } else if (HasAffineArgs()) {
+      os << "(";
+      start->Print(os, "", with_type);
+      os << ", ";
+      stride->Print(os, "", with_type);
+      os << ")";
+    }
     if (with_type) os << "<{" << PSTR(GetType()) << "}>";
   }
 

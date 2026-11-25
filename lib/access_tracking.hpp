@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <functional>
+#include <memory>
 #include <queue>
 #include <set>
 #include <string>
@@ -60,6 +61,11 @@ struct AccessTracker {
   // through sub-expressions, indices, spans, and chunk-ats), each resolved to
   // its scoped name.
   VarSet GetAllSymbolicOperands(const AST::Node* n) const;
+
+  template <typename T>
+  VarSet GetAllSymbolicOperands(const std::shared_ptr<T>& n) const {
+    return n ? GetAllSymbolicOperands(n.get()) : VarSet{};
+  }
 
   // Resolve a var through the no-storage-alias chain.
   std::string ResolveNoStorageAlias(const std::string& var) const;

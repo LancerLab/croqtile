@@ -13,7 +13,7 @@
 
   // Add custom keywords
   choreo.keywords = {
-    keyword: 'chunkat mdspan with parallel ituple by in foreach shared local global where after call wait inthreads',
+    keyword: 'chunkat mdspan with parallel ituple by in foreach shared local global where after call wait inthreads vec',
     literal: 'true false null'
   };
 
@@ -31,7 +31,7 @@
     },
     {
       className: 'operation',
-      begin: /\b(call|dma.copy|dma.copy|=>|select|trigger|wait|sync)\b/,
+      begin: /\b(call|dma.copy|dma.copy|=>|select|trigger|wait|sync|vec\.(iota|index|fill|load|store))\b/,
       relevance: 10
     },
   );

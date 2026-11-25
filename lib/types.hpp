@@ -151,6 +151,10 @@ inline static bool IsNumericType(BaseType bt) {
   return IsIntegerType(bt) || IsFloatType(bt);
 }
 
+inline static bool IsNumericOrBooleanType(BaseType bt) {
+  return IsNumericType(bt) || bt == BaseType::BOOL;
+}
+
 inline static bool IsScalarType(BaseType bt) {
   return IsNumericType(bt) || bt == BaseType::BOOL || bt == BaseType::UNKSCALAR;
 }
@@ -3047,6 +3051,11 @@ inline bool CanYieldIndex(const ptr<Type>& ty) {
 
 inline bool IntegersOnly(const ptr<Type>& ty) {
   return isa<ScalarIntegerType>(ty) || (isa<ITupleType>(ty));
+}
+
+inline bool ConvertibleToBoolean(const ptr<Type>& ty) {
+  return isa<BooleanType>(ty) || isa<ScalarIntegerType>(ty) ||
+         IsActualBoundedIntegerType(ty);
 }
 
 inline bool ConvertibleToInt(const ptr<Type>& ty) {

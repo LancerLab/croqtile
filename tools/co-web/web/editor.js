@@ -65,7 +65,7 @@ function initMonaco() {
         '__co__', '__cok__', 'dma', 'tma', 'mma', 'exec',
         'shared', 'local', 'global', 'inthreads', 'ingroups', 'inblocks',
         'foreach', 'pipeline', 'event', 'signal', 'wait', 'arrive',
-        'println', 'print', 'assert_true'
+        'println', 'print', 'assert_true', 'vec'
       ],
       typeKeywords: [
         'f16', 'f32', 'f64', 'bf16', 'i8', 'i16', 'i32', 'i64',

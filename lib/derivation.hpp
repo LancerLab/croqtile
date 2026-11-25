@@ -58,10 +58,15 @@ public:
       return nodes.count(mds->indices.get());
     else if (auto sl = dyn_cast<AST::Select>(n))
       return nodes.count(sl.get());
-    else if (AST::IsLiteral(*n) || isa<AST::IntIndex>(n) ||
-             isa<AST::VectorIndex>(n) || isa<AST::SpanAs>(n) ||
-             isa<AST::ChunkAt>(n) || isa<AST::NoValue>(n) ||
-             isa<AST::DataType>(n) || isa<AST::MMA>(n))
+    else if (auto vi = dyn_cast<AST::VectorIndex>(n)) {
+      bool result = Contains(vi->LaneCountExpr());
+      result |= Contains(vi->Start());
+      result |= Contains(vi->Stride());
+      return result;
+    } else if (AST::IsLiteral(*n) || isa<AST::IntIndex>(n) ||
+               isa<AST::SpanAs>(n) || isa<AST::ChunkAt>(n) ||
+               isa<AST::NoValue>(n) || isa<AST::DataType>(n) ||
+               isa<AST::MMA>(n))
       return false;
     else if (auto vm = dyn_cast<AST::VectorMemory>(n)) {
       bool result = Contains(vm->Address());

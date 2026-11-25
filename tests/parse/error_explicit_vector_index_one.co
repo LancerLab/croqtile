@@ -1,0 +1,9 @@
+// RUN: not choreo -e %s 2>&1 | FileCheck %s
+
+__co__ void explicit_vector_index_one() {
+  parallel p by 1 {
+    lane = vec.index<1>;
+  }
+}
+
+// CHECK: error: vector lane count must be at least 2

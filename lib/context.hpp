@@ -587,6 +587,7 @@ private:
   std::string debug_file_dir;  // directory for compiler debug artifacts
   std::string api_mode = "cffi"; // API mode for generated code
   std::string device_namespace;  // namespace wrapping generated device kernels
+  bool legacy_vec_syntax = true; // accept pre-parenthesis vec.load/store forms
   DebugLinePathMode debug_line_path_mode = DebugLinePathMode::WorkspaceRelative;
 
 private:
@@ -879,6 +880,8 @@ public:
   void SetApiMode(const std::string& mode) { api_mode = mode; }
   const std::string& GetDeviceNamespace() const { return device_namespace; }
   void SetDeviceNamespace(const std::string& ns) { device_namespace = ns; }
+  bool LegacyVecSyntax() const { return legacy_vec_syntax; }
+  void SetLegacyVecSyntax(bool value) { legacy_vec_syntax = value; }
 
   // Setters of compiler configurations
   void SetDumpAst(bool value) { dump_ast = value; }

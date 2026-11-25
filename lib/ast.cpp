@@ -118,9 +118,19 @@ void DataAccess::accept(Choreo::Visitor& v) {
   v.AfterVisit(*this);
 }
 
+bool VectorIndex::IsSplat() const {
+  if (!stride) return false;
+  if (auto literal = GetIntLiteral(*stride)) return literal->Val() == 0;
+  if (!stride->Opts().HasVal()) return false;
+  auto value = VIInt(stride->Opts().GetVal()->Normalize());
+  return value && *value == 0;
+}
+
 void VectorIndex::accept(Choreo::Visitor& v) {
   v.BeforeVisit(*this);
   if (lane_count_expr) lane_count_expr->accept(v);
+  if (start) start->accept(v);
+  if (stride) stride->accept(v);
   v.Visit(*this);
   v.AfterVisit(*this);
 }

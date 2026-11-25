@@ -1191,6 +1191,9 @@ private:
   bool Visit(AST::Program&) final { return true; }
 }; // VisitorGroup
 
+inline std::set<std::string> ReferredSymbols(const AST::ptr<AST::Node>& n,
+                                             const VisitorWithScope* v);
+
 inline const std::set<std::string>
 ReferredSymbols(AST::Node* n, const VisitorWithScope* v = nullptr) {
   std::set<std::string> res;
@@ -1241,16 +1244,23 @@ ReferredSymbols(AST::Node* n, const VisitorWithScope* v = nullptr) {
     res.insert(rd.begin(), rd.end());
     auto ri = ReferredSymbols(da->indices.get(), v);
     res.insert(ri.begin(), ri.end());
-  } else if (isa<AST::VectorIndex>(n)) {
-    return res;
-  } else if (auto vm = dyn_cast<AST::VectorMemory>(n)) {
-    for (auto* operand : {static_cast<AST::Node*>(vm->Address().get()),
-                          static_cast<AST::Node*>(vm->Value().get()),
-                          static_cast<AST::Node*>(vm->Mask().get()),
-                          static_cast<AST::Node*>(vm->Other().get())}) {
+  } else if (auto vi = dyn_cast<AST::VectorIndex>(n)) {
+    auto collect = [&](const auto& operand) {
       auto refs = ReferredSymbols(operand, v);
       res.insert(refs.begin(), refs.end());
-    }
+    };
+    collect(vi->LaneCountExpr());
+    collect(vi->Start());
+    collect(vi->Stride());
+  } else if (auto vm = dyn_cast<AST::VectorMemory>(n)) {
+    auto collect = [&](const auto& operand) {
+      auto refs = ReferredSymbols(operand, v);
+      res.insert(refs.begin(), refs.end());
+    };
+    collect(vm->Address());
+    collect(vm->Value());
+    collect(vm->Mask());
+    collect(vm->Other());
   } else if (auto ii = dyn_cast<AST::IntIndex>(n)) {
     auto rv = ReferredSymbols(ii->Val().get(), v);
     res.insert(rv.begin(), rv.end());
@@ -1269,6 +1279,11 @@ ReferredSymbols(AST::Node* n, const VisitorWithScope* v = nullptr) {
   }
 
   return res;
+}
+
+inline std::set<std::string> ReferredSymbols(const AST::ptr<AST::Node>& n,
+                                             const VisitorWithScope* v) {
+  return ReferredSymbols(n.get(), v);
 }
 
 } // end namespace Choreo

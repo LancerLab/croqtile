@@ -524,7 +524,12 @@ bool TypeInference::Visit(AST::DataAccess& n) {
 
 bool TypeInference::Visit(AST::VectorIndex& n) {
   TraceEachVisit(n);
-  SetNodeType(n, MakeVectorType(BaseType::S32, n.LaneCount()));
+  if (n.IsSplat()) {
+    auto elem = ScalarOrVectorElementType(NodeType(*n.Start()));
+    SetNodeType(n, MakeVectorType(elem, n.LaneCount()));
+  } else {
+    SetNodeType(n, MakeVectorType(BaseType::S32, n.LaneCount()));
+  }
   cur_type = n.GetType();
   return true;
 }

@@ -33,9 +33,19 @@ AccessTracker::GetAllSymbolicOperands(const AST::Node* n) const {
       }
     return res;
   }
+  if (auto vi = dyn_cast<AST::VectorIndex>(n)) {
+    VarSet res;
+    auto collect = [&](const auto& operand) {
+      VarSet sub = GetAllSymbolicOperands(operand);
+      res.insert(sub.begin(), sub.end());
+    };
+    collect(vi->LaneCountExpr());
+    collect(vi->Start());
+    collect(vi->Stride());
+    return res;
+  }
   if (isa<AST::IntLiteral>(n) || isa<AST::FloatLiteral>(n) ||
-      isa<AST::StringLiteral>(n) || isa<AST::BoolLiteral>(n) ||
-      isa<AST::VectorIndex>(n))
+      isa<AST::StringLiteral>(n) || isa<AST::BoolLiteral>(n))
     return {};
   if (auto ii = dyn_cast<AST::IntIndex>(n))
     return GetAllSymbolicOperands(ii->value.get());

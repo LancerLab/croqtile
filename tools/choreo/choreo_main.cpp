@@ -265,6 +265,7 @@ static int CompileInput() {
   report_stage = "parse";
   Scanner s;
   PContext pctx;
+  pctx.SetLegacyVecSyntax(CCtx().LegacyVecSyntax());
   Parser p(pctx, s);
   Parser cok_p(pctx, s);
 

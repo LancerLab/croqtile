@@ -1,0 +1,25 @@
+// RUN: choreo -e %s | FileCheck %s
+// RUN: choreo -e -fvec-syntax=call %s | FileCheck %s
+
+__co__ void explicit_vector_iota_fill(s32 start, s32 stride,
+                                      f32[64] input, f32[64] output) {
+  parallel p by 1 {
+    lane = vec.iota<64>;
+    affine = vec.iota<64>(start, stride);
+    affine_default = vec.iota<64>(start);
+    folded_fill = vec.iota<64>(1.0f, 3 - 3);
+    filled = vec.fill<64>(1.0f);
+    values = vec.load(input.at(lane));
+    nested = __to<f32>(vec.load(input.at(lane)));
+    vec.store(output.at(lane), values);
+  }
+}
+
+// CHECK: lane =  VEC.INDEX<64>
+// CHECK: affine =  VEC.IOTA<64>(start, stride)
+// CHECK: affine_default =  VEC.IOTA<64>(start, 1)
+// CHECK: folded_fill =  VEC.IOTA<64>(1.000000f,  (3 - 3) )
+// CHECK: filled =  VEC.FILL<64>(1.000000f)
+// CHECK: values =  VEC.LOAD input[lane]
+// CHECK: nested =  EXPLICIT_CAST(unknown=>f32: 'VEC.LOAD input[lane]')
+// CHECK: `- VEC.STORE output[lane], values

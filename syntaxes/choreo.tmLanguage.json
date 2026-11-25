@@ -89,11 +89,11 @@
       "name": "keyword.control.choreo"
     },
     {
-      "match": "\\b(dma|tma|mma|sync|trigger|assert|swap|rotate|print|println|frag)\\b",
+      "match": "\\b(dma|tma|mma|sync|trigger|assert|swap|rotate|print|println|frag|vec)\\b",
       "name": "keyword.other.choreo"
     },
     {
-      "match": "\\.(copy|transp|pad|swizzle|swiz|sp|zfill|any|async|span|span_as|mdata|data|view|from|chunkat|chunk|subspan|modspan|step|stride|at|fill|load|store|row|col|scale|commit)\\b",
+      "match": "\\.(copy|transp|pad|swizzle|swiz|sp|zfill|any|async|span|span_as|mdata|data|view|from|chunkat|chunk|subspan|modspan|step|stride|at|fill|load|store|row|col|scale|commit|iota|index)\\b",
       "name": "support.function.choreo"
     },
     {

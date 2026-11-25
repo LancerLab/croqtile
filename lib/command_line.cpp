@@ -34,6 +34,10 @@ Option<std::string> device_namespace(
     "Wrap generated device kernels in <namespace>. An empty value (default) "
     "emits kernels in the global namespace.",
     "--device-namespace=<namespace>", true);
+Option<std::string>
+    vec_syntax(OptionKind::User, "-fvec-syntax", "", "legacy",
+               "Select explicit vector load/store syntax mode (legacy|call).",
+               "-fvec-syntax=<legacy|call>");
 
 Option<std::string>
     debug_file_dir(OptionKind::User, "-ddir", "", "./build/",
@@ -488,6 +492,17 @@ bool CommandLine::Parse(int argc, char** argv) {
       exit(1);
     }
     CCtx().SetApiMode(api);
+  }
+
+  // set vector syntax compatibility mode
+  {
+    auto mode = ToLower(vec_syntax.GetValue());
+    if (mode != "legacy" && mode != "call") {
+      errs() << "Invalid -fvec-syntax value: '" << vec_syntax.GetValue()
+             << "'. Supported values: legacy, call.\n";
+      exit(1);
+    }
+    CCtx().SetLegacyVecSyntax(mode == "legacy");
   }
 
   {

@@ -1,0 +1,16 @@
+// RUN: choreo -e %s | FileCheck %s --check-prefix=LEGACY
+// RUN: not choreo -e -fvec-syntax=call %s 2>&1 | FileCheck %s --check-prefix=CALL_ERR
+
+__co__ void vector_syntax_modes(f32[64] input, f32[64] output) {
+  parallel p by 1 {
+    lane = vec.iota<64>;
+    old = vec.load input.at(lane);
+    new = vec.load(input.at(lane));
+    vec.store output.at(lane), old;
+    vec.store(output.at(lane), new);
+  }
+}
+
+// LEGACY: old =  VEC.LOAD input[lane]
+// LEGACY: new =  VEC.LOAD input[lane]
+// CALL_ERR: error: vec.load without parentheses requires -fvec-syntax=legacy; use vec.load(...)

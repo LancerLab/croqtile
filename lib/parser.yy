@@ -33,11 +33,14 @@ struct SymbolWithInitVal {
 class PContext {
 private:
   size_t error_count = 0;
+  bool legacy_vec_syntax = true;
 
 public:
   size_t GetErrorCount() { return error_count; }
   bool HasError() { return error_count > 0; }
   void recordError() { error_count++; }
+  bool LegacyVecSyntax() const { return legacy_vec_syntax; }
+  void SetLegacyVecSyntax(bool value) { legacy_vec_syntax = value; }
 };
 
 namespace Choreo {
@@ -221,7 +224,7 @@ extern int yylex();
 %token DLBRAKT
 %token ACQ REL ACQ_REL SEQ_CST
 // explicit vector operations
-%token <std::string> VEC INDEX
+%token <std::string> VEC INDEX IOTA
 // MMA related builtin operations
 %token <std::string> MMA FILL LOAD STORE ROW COLUMN SCALE MASK
 %token <std::string> UNROLL
@@ -265,7 +268,8 @@ extern int yylex();
 %nterm <AST::ptr<AST::MultiNodes>> statements declarations assignments withins where_binds where_clause multi_decls named_spanned_decls named_fragment_decls spanned_decls named_scalar_decls scalar_decls named_event_decls event_decls stmts_block
 %nterm <AST::ptr<AST::MultiValues>> value_list g_value_list template_value_list param_mdspan_list range_exprs iv_list id_list with_matchers device_passables template_params ids_list subscriptions data_indices suffix_exprs optional_array_dims step_list opt_step_list opt_stride_list at_list opt_at_list opt_from_list
 %nterm <std::pair<AST::ptr<AST::MultiValues>, AST::ptr<AST::MultiValues>>> shape_stride
-%nterm <AST::ptr<AST::Expr>> reduce_dst_expr s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr vec_index_expr vec_load_expr ituple_derivation internal_sizeof_expr sizeof_expr frag_expr mma_exec_operand_expr opt_stream_bind vector_width_expr
+%nterm <AST::ptr<AST::Expr>> reduce_dst_expr s_expr g_expr template_value_expr mdspan_expr mdspan_operator mdspan_val_expr ids_expr bound_expr subscript_like_expr dataid_expr call_expr vec_index_expr vec_load_expr vec_fill_expr legacy_vec_load_expr ituple_derivation internal_sizeof_expr sizeof_expr frag_expr mma_exec_operand_expr opt_stream_bind vector_width_expr
+%nterm <std::string> vec_index_keyword
 %nterm <AST::ptr<AST::AttributeExpr>> suffix_expr
 %nterm <AST::ptr<AST::DataType>> scalar_type void_type auto_type param_type return_type mdspan_as_type
 %nterm <AST::ptr<AST::DataAccess>> data_element
@@ -1773,6 +1777,8 @@ s_expr
     | s_expr LE s_expr { $$ = AST::Make<AST::Expr>(@1, "<=", $1, $3); }
     | s_expr GE s_expr { $$ = AST::Make<AST::Expr>(@1, ">=", $1, $3); }
     | vec_index_expr   { $$ = $1; }
+    | vec_fill_expr    { $$ = $1; }
+    | vec_load_expr    { $$ = $1; }
     | simple_val       { $$ = AST::Make<AST::Expr>(@1, $1); }
     | ituple_list      { $$ = AST::Make<AST::Expr>(@1, $1); }
     | mdspan_list      { $$ = AST::Make<AST::Expr>(@1, $1); }
@@ -2669,22 +2675,81 @@ vector_width_expr
     ;
 
 vec_index_expr
-    : VEC INDEX LT vector_width_expr GT {
-        if (auto literal = AST::GetIntLiteral($4); literal && literal->Val() <= 0) {
-          error(@4, "vector lane count must be a positive compile-time integer");
+    : VEC vec_index_keyword LT vector_width_expr GT {
+        if (auto literal = AST::GetIntLiteral($4); literal && literal->Val() <= 1) {
+          error(@4, "vector lane count must be at least 2");
           YYERROR;
         }
         $$ = AST::Make<AST::Expr>(@1, AST::Make<AST::VectorIndex>(@1, $4));
       }
+    | VEC vec_index_keyword LT vector_width_expr GT LPAREN s_expr RPAREN {
+        if (auto literal = AST::GetIntLiteral($4); literal && literal->Val() <= 1) {
+          error(@4, "vector lane count must be at least 2");
+          YYERROR;
+        }
+        auto one = AST::Make<AST::Expr>(
+            @1, AST::Make<AST::IntLiteral>(@1, static_cast<int>(1)));
+        $$ = AST::Make<AST::Expr>(
+            @1, AST::Make<AST::VectorIndex>(@1, $4, $7, one));
+      }
+    | VEC vec_index_keyword LT vector_width_expr GT LPAREN s_expr COMMA s_expr RPAREN {
+        if (auto literal = AST::GetIntLiteral($4); literal && literal->Val() <= 1) {
+          error(@4, "vector lane count must be at least 2");
+          YYERROR;
+        }
+        $$ = AST::Make<AST::Expr>(
+            @1, AST::Make<AST::VectorIndex>(@1, $4, $7, $9));
+      }
+    ;
+
+vec_index_keyword
+    : INDEX { $$ = $1; }
+    | IOTA  { $$ = $1; }
+    ;
+
+vec_fill_expr
+    : VEC FILL LT vector_width_expr GT LPAREN s_expr RPAREN {
+        if (auto literal = AST::GetIntLiteral($4); literal && literal->Val() <= 1) {
+          error(@4, "vector lane count must be at least 2");
+          YYERROR;
+        }
+        auto zero = AST::Make<AST::Expr>(
+            @1, AST::Make<AST::IntLiteral>(@1, static_cast<int>(0)));
+        $$ = AST::Make<AST::Expr>(
+            @1, AST::Make<AST::VectorIndex>(@1, $4, $7, zero));
+      }
     ;
 
 vec_load_expr
+    : VEC LOAD LPAREN data_element RPAREN {
+        auto load = AST::Make<AST::VectorMemory>(
+            @1, AST::VectorMemory::Kind::Load, $4);
+        $$ = AST::Make<AST::Expr>(@1, load);
+      }
+    | VEC LOAD LPAREN data_element COMMA s_expr COMMA s_expr RPAREN {
+        auto load = AST::Make<AST::VectorMemory>(
+            @1, AST::VectorMemory::Kind::Load, $4, nullptr, $6, $8);
+        $$ = AST::Make<AST::Expr>(@1, load);
+      }
+    ;
+
+legacy_vec_load_expr
     : VEC LOAD data_element {
+        if (!pctx.LegacyVecSyntax()) {
+          error(@1, "vec.load without parentheses requires "
+                    "-fvec-syntax=legacy; use vec.load(...)");
+          YYERROR;
+        }
         auto load = AST::Make<AST::VectorMemory>(
             @1, AST::VectorMemory::Kind::Load, $3);
         $$ = AST::Make<AST::Expr>(@1, load);
       }
     | VEC LOAD data_element COMMA s_expr COMMA s_expr {
+        if (!pctx.LegacyVecSyntax()) {
+          error(@1, "vec.load without parentheses requires "
+                    "-fvec-syntax=legacy; use vec.load(...)");
+          YYERROR;
+        }
         auto load = AST::Make<AST::VectorMemory>(
             @1, AST::VectorMemory::Kind::Load, $3, nullptr, $5, $7);
         $$ = AST::Make<AST::Expr>(@1, load);
@@ -2692,7 +2757,7 @@ vec_load_expr
     ;
 
 vec_load_assignment
-    : IDENTIFIER ASSIGN vec_load_expr {
+    : IDENTIFIER ASSIGN legacy_vec_load_expr {
         if (!symtab.Exists($1)) {
           symtab.AddSymbol($1, MakeUnknownType());
           $$ = AST::Make<AST::NamedVariableDecl>(
@@ -2705,11 +2770,29 @@ vec_load_assignment
     ;
 
 vec_store_stmt
-    : VEC STORE data_element COMMA s_expr {
+    : VEC STORE LPAREN data_element COMMA s_expr RPAREN {
+        $$ = AST::Make<AST::VectorMemory>(
+            @1, AST::VectorMemory::Kind::Store, $4, $6);
+      }
+    | VEC STORE LPAREN data_element COMMA s_expr COMMA s_expr RPAREN {
+        $$ = AST::Make<AST::VectorMemory>(
+            @1, AST::VectorMemory::Kind::Store, $4, $6, $8);
+      }
+    | VEC STORE data_element COMMA s_expr {
+        if (!pctx.LegacyVecSyntax()) {
+          error(@1, "vec.store without parentheses requires "
+                    "-fvec-syntax=legacy; use vec.store(...)");
+          YYERROR;
+        }
         $$ = AST::Make<AST::VectorMemory>(
             @1, AST::VectorMemory::Kind::Store, $3, $5);
       }
     | VEC STORE data_element COMMA s_expr COMMA s_expr {
+        if (!pctx.LegacyVecSyntax()) {
+          error(@1, "vec.store without parentheses requires "
+                    "-fvec-syntax=legacy; use vec.store(...)");
+          YYERROR;
+        }
         $$ = AST::Make<AST::VectorMemory>(
             @1, AST::VectorMemory::Kind::Store, $3, $5, $7);
       }

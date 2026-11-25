@@ -383,6 +383,11 @@ bool EarlySemantics::Visit(AST::Expr& n) {
                       "semantics; use '&' and '|' for vector masks.");
       SetNodeType(n, MakeUnknownType());
       return false;
+    } else if (n.op == "^" &&
+               (isa<VectorType>(lhs_ty) || isa<VectorType>(rhs_ty))) {
+      Error1(n.LOC(), "operator '^' is not supported on explicit vectors.");
+      SetNodeType(n, MakeUnknownType());
+      return false;
     }
   } else if (n.IsUnary()) {
     auto rhs_ty = NodeType(*n.GetR());
@@ -1578,9 +1583,8 @@ bool EarlySemantics::Visit(AST::VectorIndex& n) {
            "explicit vector operations must be inside a parallel-by scope.");
   if (n.LaneCountExpr()) {
     auto width = IntegerConstant(n.LaneCountExpr());
-    if (!width || *width <= 0 || *width > INT32_MAX) {
-      Error1(n.LOC(),
-             "vector lane count must be a positive compile-time integer");
+    if (!width || *width <= 1 || *width > INT32_MAX) {
+      Error1(n.LOC(), "vector lane count must be at least 2");
       // Keep later uses well-typed during error recovery. No code is emitted
       // after a failed semantic pass.
       n.SetLaneCount(1);
@@ -1589,6 +1593,66 @@ bool EarlySemantics::Visit(AST::VectorIndex& n) {
     }
     n.SetLaneCount(static_cast<size_t>(*width));
   }
+
+  // Early sema runs before valno, so IsSplat() may not see the attached
+  // constant yet. IntegerConstant() covers the early foldable cases.
+  const bool is_splat =
+      n.IsSplat() || IntegerConstant(n.Stride()).value_or(1) == 0;
+  if (is_splat) {
+    auto value_ty = NodeType(*n.Start());
+    if (isa<VectorType>(value_ty)) {
+      Error1(n.Start()->LOC(),
+             "vec.fill value must be scalar; vector values are not supported.");
+      SetNodeType(n, MakeVectorType(BaseType::S32, n.LaneCount()));
+      return false;
+    }
+    auto elem = ScalarOrVectorElementType(value_ty);
+    if (isa<UnknownType>(value_ty)) {
+      // The value type is not resolved yet; type inference and the deferred
+      // semacheck validation will finish this check.
+      SetNodeType(n, MakeVectorType(BaseType::S32, n.LaneCount()));
+      return error_count_before == error_count;
+    }
+    if (!IsNumericOrBooleanType(elem)) {
+      Error1(n.Start()->LOC(),
+             "vec.fill value must have a numeric or bool scalar type.");
+      SetNodeType(n, MakeVectorType(BaseType::S32, n.LaneCount()));
+      return false;
+    }
+    SetNodeType(n, MakeVectorType(elem, n.LaneCount()));
+    return error_count_before == error_count;
+  }
+
+  if (n.HasAffineArgs()) {
+    auto check_scalar_integer = [&](const ptr<AST::Expr>& expr,
+                                    const char* name) -> bool {
+      auto ty = NodeType(*expr);
+      if (isa<UnknownType>(ty)) return true; // deferred to semacheck
+      auto elem = ScalarOrVectorElementType(ty);
+      if (isa<VectorType>(ty) || !IsIntegerType(elem) ||
+          elem != BaseType::S32) {
+        Error1(expr->LOC(), std::string("vec.iota ") + name +
+                                " must be an s32 scalar integer value.");
+        return false;
+      }
+      return true;
+    };
+    bool ok = check_scalar_integer(n.Start(), "start");
+    ok = check_scalar_integer(n.Stride(), "stride") && ok;
+    if (!ok) {
+      SetNodeType(n, MakeVectorType(BaseType::S32, n.LaneCount()));
+      return false;
+    }
+    if (auto stride = IntegerConstant(n.Stride()); stride && *stride == 0) {
+      Error1(n.Stride()->LOC(),
+             "vec.iota stride must be non-zero; use vec.fill for splats.");
+      SetNodeType(n, MakeVectorType(BaseType::S32, n.LaneCount()));
+      return false;
+    }
+    SetNodeType(n, MakeVectorType(BaseType::S32, n.LaneCount()));
+    return error_count_before == error_count;
+  }
+
   SetNodeType(n, MakeVectorType(BaseType::S32, n.LaneCount()));
   n.AddNote("vector_pattern", "unit");
   return error_count_before == error_count;
@@ -3890,14 +3954,17 @@ bool EarlySemantics::Visit(AST::WhileBlock& n) {
 bool EarlySemantics::Visit(AST::IfElseBlock& n) {
   TraceEachVisit(n);
   if (auto ref = n.pred->GetReference(); ref) {
-    if (auto c = dyn_cast<AST::Call>(ref); c && isa<UnknownType>(c->GetType()))
+    if (auto c = dyn_cast<AST::Call>(ref);
+        c && isa<UnknownType>(c->GetType())) {
       n.pred->SetType(MakeBooleanType()); // assume it derives boolean
-    return true;
+      return true;
+    }
   }
 
-  if (!isa<BooleanType>(NodeType(*n.pred))) {
+  auto pred_ty = NodeType(*n.pred);
+  if (!ConvertibleToBoolean(pred_ty)) {
     Error1(n.pred->LOC(), "requires a predication expression but got '" +
-                              PSTR(NodeType(*n.pred)) + "'.");
+                              PSTR(pred_ty) + "'.");
   }
 
   return true;

@@ -313,10 +313,14 @@ bool SemaChecker::CheckExplicitVectorType(
 
 bool SemaChecker::IsLogicalAddressIndex(const ptr<AST::Node>& node) const {
   if (!node || !isa<VectorType>(NodeType(*node))) return false;
-  if (isa<AST::VectorIndex>(node)) return true;
+  if (auto vi = dyn_cast<AST::VectorIndex>(node)) {
+    if (vi->IsSplat()) return false;
+    if (!vi->HasAffineArgs()) return true;
+    return node->HasNote("vector_pattern") &&
+           node->GetNote("vector_pattern") == "unit";
+  }
   if (auto expr = dyn_cast<AST::Expr>(node)) {
-    if (auto ref = expr->GetReference(); ref && isa<AST::VectorIndex>(ref))
-      return true;
+    if (auto ref = expr->GetReference()) return IsLogicalAddressIndex(ref);
   }
   return node->HasNote("vector_pattern") &&
          node->GetNote("vector_pattern") == "unit";
@@ -391,8 +395,7 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
     pv_levels_[InScopeName(pb->BPV()->name)] = pb->GetLevel();
     pb->BPV()->SetLevel(pb->GetLevel());
     for (auto id : pb->AllSubPVs()) {
-      pv_levels_[InScopeName(cast<AST::Identifier>(id)->name)] =
-          pb->GetLevel();
+      pv_levels_[InScopeName(cast<AST::Identifier>(id)->name)] = pb->GetLevel();
       cast<AST::Identifier>(id)->SetLevel(pb->GetLevel());
     }
 
@@ -567,16 +570,38 @@ bool SemaChecker::VisitNode(AST::FloatLiteral& n) {
 
 bool SemaChecker::VisitNode(AST::VectorIndex& n) {
   if (!ReportUnknown(n, __FILE__, __LINE__)) return false;
-  n.AddNote("explicit_vector_index", "true");
-  n.AddNote("explicit_vector_index_element_type", STR(BaseType::S32));
-  n.AddNote("explicit_vector_index_lanes", std::to_string(n.LaneCount()));
-  n.AddNote("explicit_vector_index_pattern", "iota");
-  n.AddNote("explicit_vector_index_stride", "1");
-  n.AddNote("explicit_vector_index_lower_bound", "0");
-  n.AddNote("explicit_vector_index_upper_bound", std::to_string(n.LaneCount()));
-  // A direct memory coordinate may be a logical index whose dtype and
-  // chunking are selected by the payload at its VectorMemory use site.
-  return true;
+
+  if (n.IsSplat()) {
+    if (!ReportUnknown(*n.Start(), __FILE__, __LINE__)) return false;
+    auto value_ty = NodeType(*n.Start());
+    if (isa<VectorType>(value_ty)) {
+      Error1(n.Start()->LOC(),
+             "vec.fill value must be scalar; vector values are not supported.");
+      return false;
+    }
+    if (!IsNumericOrBooleanType(ScalarOrVectorElementType(value_ty))) {
+      Error1(n.Start()->LOC(),
+             "vec.fill value must have a numeric or bool scalar type.");
+      return false;
+    }
+    return true;
+  }
+
+  if (!n.HasAffineArgs()) return true;
+  auto check_operand = [&](const ptr<AST::Expr>& expr,
+                           const char* name) -> bool {
+    if (!ReportUnknown(*expr, __FILE__, __LINE__)) return false;
+    auto ty = NodeType(*expr);
+    auto elem = ScalarOrVectorElementType(ty);
+    if (isa<VectorType>(ty) || !IsIntegerType(elem) || elem != BaseType::S32) {
+      Error1(expr->LOC(), std::string("vec.iota ") + name +
+                              " must be an s32 scalar integer value.");
+      return false;
+    }
+    return true;
+  };
+  return check_operand(n.Start(), "start") &&
+         check_operand(n.Stride(), "stride");
 }
 
 bool SemaChecker::VisitNode(AST::VectorMemory& n) {
@@ -700,7 +725,8 @@ bool SemaChecker::VisitNode(AST::Expr& n) {
   if (auto vty = dyn_cast<VectorType>(NodeType(n));
       vty && CCtx().TargetSupportsExplicitVector()) {
     const bool direct_index =
-        n.GetReference() && isa<AST::VectorIndex>(n.GetReference());
+        n.GetReference() && isa<AST::VectorIndex>(n.GetReference()) &&
+        !cast<AST::VectorIndex>(n.GetReference())->IsSplat();
     if (!direct_index &&
         !CheckExplicitVectorType(n, ExplicitVectorRole::OrdinaryValue,
                                  vty->ElemType(), vty->ElemCount()))
@@ -862,11 +888,16 @@ bool SemaChecker::VisitNode(AST::NamedVariableDecl& n) {
   if (n.init_expr) {
     if (auto vty = dyn_cast<VectorType>(NodeType(*n.init_expr));
         vty && CCtx().TargetSupportsExplicitVector()) {
-      const bool direct_index =
-          isa<AST::VectorIndex>(n.init_expr) ||
-          (isa<AST::Expr>(n.init_expr) &&
-           cast<AST::Expr>(n.init_expr)->GetReference() &&
-           isa<AST::VectorIndex>(cast<AST::Expr>(n.init_expr)->GetReference()));
+      const auto is_index = [](const ptr<AST::Node>& node) {
+        if (auto vi = dyn_cast<AST::VectorIndex>(node)) return !vi->IsSplat();
+        if (auto expr = dyn_cast<AST::Expr>(node)) {
+          if (auto ref = expr->GetReference())
+            return isa<AST::VectorIndex>(ref) &&
+                   !cast<AST::VectorIndex>(ref)->IsSplat();
+        }
+        return false;
+      };
+      const bool direct_index = is_index(n.init_expr);
       const auto role = direct_index ? ExplicitVectorRole::IndexValue
                                      : ExplicitVectorRole::OrdinaryValue;
       if (!CheckExplicitVectorType(*n.init_expr, role, vty->ElemType(),
@@ -1016,11 +1047,16 @@ bool SemaChecker::VisitNode(AST::Assignment& n) {
   if (n.value) {
     if (auto vty = dyn_cast<VectorType>(NodeType(*n.value));
         vty && CCtx().TargetSupportsExplicitVector()) {
-      const bool direct_index =
-          isa<AST::VectorIndex>(n.value) ||
-          (isa<AST::Expr>(n.value) &&
-           cast<AST::Expr>(n.value)->GetReference() &&
-           isa<AST::VectorIndex>(cast<AST::Expr>(n.value)->GetReference()));
+      const auto is_index = [](const ptr<AST::Node>& node) {
+        if (auto vi = dyn_cast<AST::VectorIndex>(node)) return !vi->IsSplat();
+        if (auto expr = dyn_cast<AST::Expr>(node)) {
+          if (auto ref = expr->GetReference())
+            return isa<AST::VectorIndex>(ref) &&
+                   !cast<AST::VectorIndex>(ref)->IsSplat();
+        }
+        return false;
+      };
+      const bool direct_index = is_index(n.value);
       const auto role = direct_index ? ExplicitVectorRole::IndexValue
                                      : ExplicitVectorRole::OrdinaryValue;
       if (!CheckExplicitVectorType(*n.value, role, vty->ElemType(),
@@ -1410,9 +1446,8 @@ bool SemaChecker::VisitNode(AST::DMA& n) {
     // instead of rejecting.
     if (lvl == ParallelLevel::THREAD) {
       auto tty = GetSpannedType(NodeType(*n.to));
-      bool shared_dest =
-          tty && (tty->GetStorage() == Storage::SHARED ||
-                  tty->GetStorage() == Storage::GROUP_SHARED);
+      bool shared_dest = tty && (tty->GetStorage() == Storage::SHARED ||
+                                 tty->GetStorage() == Storage::GROUP_SHARED);
       if (shared_dest && !is_thread_indexed(to_ca)) {
         if (tty->GetStorage() == Storage::SHARED && is_thread_indexed(from_ca))
           Error1(n.LOC(),
