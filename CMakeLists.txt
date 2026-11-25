@@ -616,12 +616,31 @@ if(CHOREO_BUILD_CHOREO)
     ${EXTERN_LIBS} Threads::Threads
   )
 
-  # Release packages ship self-contained, stripped executables so they run on
-  # hosts whose system libstdc++ is older than the GCC used to build them.
+  # Release packages ship fully self-contained, stripped executables so they
+  # run on hosts whose system libc/libstdc++ is older than the ones used to
+  # build them. Fully static linking is what sets the floor: with a dynamic
+  # libc the binaries inherit every symbol version the build host's glibc
+  # exposes (e.g. __cxa_thread_atexit_impl pinning GLIBC_2.18 and pow@2.29),
+  # which is far newer than the hosts these packages must support.
   # Normal builds keep the default dynamic linking and unstripped binaries.
+  #
+  # The pthread bits below are required, not cosmetic. libstdc++ reaches the
+  # pthread entry points through __attribute__((__weakref__)) wrappers. In a
+  # static link a weak reference does not drag its archive member in, so the
+  # call lands on address zero. Two separate archives are involved, so both
+  # have to be handled: the bulk of the entry points live weak in libpthread.a
+  # and are only linked when the whole archive is pulled in, while pthread_self
+  # lives in libc.a and needs -u to become an undefined reference. Without the
+  # whole archive, __gthread_active_p() still reports "no threads" and
+  # std::call_once faults; with it, a missing pthread_self makes
+  # std::this_thread::get_id() fault instead.
   if(PUBLIC_PACKAGE)
-    target_link_options(choreo PRIVATE -static-libstdc++ -static-libgcc -s)
-    target_link_options(copp PRIVATE -static-libstdc++ -static-libgcc -s)
+    target_link_options(choreo PRIVATE -static -s -Wl,-u,pthread_self)
+    target_link_options(copp PRIVATE -static -s -Wl,-u,pthread_self)
+    target_link_libraries(choreo PRIVATE
+      -Wl,--whole-archive pthread -Wl,--no-whole-archive)
+    target_link_libraries(copp PRIVATE
+      -Wl,--whole-archive pthread -Wl,--no-whole-archive)
   endif()
 endif()
 
