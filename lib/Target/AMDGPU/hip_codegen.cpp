@@ -8,6 +8,7 @@
 
 #include "choreo_header.inc"
 #include "choreo_types_header.inc"
+#include "choreo_vec_header.inc"
 
 #include <cassert>
 #include <filesystem>
@@ -2405,6 +2406,8 @@ HIPCC=${ROCM_HOME}/bin/hipcc
   os << __choreo_header_as_string << "\nEOF\n\n";
   os << "cat <<'EOF' > " << build_path << "/choreo_types.h\n";
   os << __choreo_types_header_as_string << "\nEOF\n\n";
+  os << "cat <<'EOF' > " << build_path << "/choreo_vec.h\n";
+  os << __choreo_vec_header_as_string << "\nEOF\n\n";
 
   os << "cat <<'EOF' > " << cc_file << "\n";
   for (auto& code : code_segments) {

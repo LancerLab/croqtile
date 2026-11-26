@@ -2599,4 +2599,8 @@ inline void __co_any__ croq_assert(bool p, const char* msg,
   choreo::choreo_assert(p, msg, file, line);
 }
 
+#if __has_include("choreo_vec.h")
+#include "choreo_vec.h"
+#endif
+
 #endif // __CHOREO_H__

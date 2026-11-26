@@ -17,6 +17,7 @@
 #include "choreo_precompiled_cu.inc"
 #include "choreo_types_cute_header.inc"
 #include "choreo_types_header.inc"
+#include "choreo_vec_header.inc"
 #include "codegen.hpp"
 #include "dma_plan.hpp"
 #include "operator_info.hpp"
@@ -10682,6 +10683,7 @@ uint32_t CuteCodeGen::ContentFingerprint() {
   feed(__choreo_types_header_as_string);
   feed(__choreo_types_cute_header_as_string);
   feed(__choreo_cute_header_as_string);
+  feed(__choreo_vec_header_as_string);
   return h;
 }
 
@@ -10806,6 +10808,8 @@ NVCC_LIB=${CUDA_LIB}/lib
   os << __choreo_types_cute_header_as_string << "\nEOF\n\n";
   os << "cat <<'EOF' > " << build_path << "/choreo_cute.h\n";
   os << __choreo_cute_header_as_string << "\nEOF\n\n";
+  os << "cat <<'EOF' > " << build_path << "/choreo_vec.h\n";
+  os << __choreo_vec_header_as_string << "\nEOF\n\n";
 
   os << "cat <<'EOF' > " << cc_file << "\n";
   for (auto& code : code_segments) {

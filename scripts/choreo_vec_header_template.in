@@ -1,0 +1,6 @@
+#ifndef __CHOREO_VEC_RUNTIME_HEADER_INC_H__
+#define __CHOREO_VEC_RUNTIME_HEADER_INC_H__
+
+static const char* __choreo_vec_header_as_string = R"(@CHOREO_VEC_HEADER_CONTENT@)";
+
+#endif // __CHOREO_VEC_RUNTIME_HEADER_INC_H__
