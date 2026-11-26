@@ -148,9 +148,9 @@ public:
     return {Storage::SHARED, Storage::GLOBAL};
   }
 
-  size_t GetVectorLength(const ArchId&) const override { return 4; }
+  size_t GetVectorRegisterBytes(const ArchId&) const override { return 4; }
 
-  size_t VectorizeLimit(const ArchId&) const override { return 128; }
+  size_t GetMaxVectorizationFactor(const ArchId&) const override { return 128; }
 
   const std::set<BaseType> VectorizableTypes(const ArchId&) const override {
     return {BaseType::F32, BaseType::F16, BaseType::BF16, BaseType::S32,

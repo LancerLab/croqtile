@@ -35,14 +35,17 @@ struct ExplicitVectorTypeSupport {
   bool is_partial = false;
   size_t element_bytes = 0;
   size_t logical_bytes = 0;
-  size_t physical_lanes = 0;
-  size_t registers = 0;
+  // Total element slots across the target's vector registers, including
+  // padding.
+  size_t physical_elements = 0;
+  // Number of vector registers occupied by the logical vector.
+  size_t vector_register_count = 0;
   size_t max_offset_lanes = 0;
   size_t offset_chunks = 0;
   size_t payload_element_bytes = 0;
   size_t payload_logical_bytes = 0;
-  size_t payload_physical_lanes = 0;
-  size_t payload_registers = 0;
+  size_t payload_physical_elements = 0;
+  size_t payload_vector_register_count = 0;
   std::string width_class;
   std::string payload_width_class;
   std::string reason;
@@ -180,7 +183,7 @@ struct TargetInfo {
 
 class Target {
 public:
-  virtual ~Target() {};
+  virtual ~Target(){};
 
   // Target hooks -- keep these abstract
   virtual const std::string Name() const = 0;
@@ -256,9 +259,21 @@ public:
   // Returns 0 if not applicable. Used to derive per-thread budgets from
   // per-SM resources (e.g. the `local` budget from the register file).
   virtual size_t GetMaxThreadsPerSM(const ArchId& /*arch*/) const { return 0; }
-  virtual size_t GetVectorLength(const ArchId& arch) const {
+  // Bytes in one vector register for this target/architecture.
+  // A logical vector that occupies multiple vector registers still reports
+  // the base register width here; see VectorRegisterLayout for the mapping.
+  virtual size_t GetVectorRegisterBytes(const ArchId& arch) const {
     choreo_unreachable("unsupported target '" + Name() + "(" + arch + ")'.");
     return 0;
+  }
+  // Number of elements of `element_bytes` that fit exactly in one vector
+  // register. Returns 0 when the register width is not a multiple of the
+  // element size.
+  size_t GetElementsPerRegister(const ArchId& arch,
+                                size_t element_bytes) const {
+    const size_t register_bytes = GetVectorRegisterBytes(arch);
+    if (!element_bytes || register_bytes % element_bytes) return 0;
+    return register_bytes / element_bytes;
   }
   virtual bool IsEventSupported() const { return false; }
   virtual bool IsMMASupported() const { return false; }
@@ -358,7 +373,8 @@ public:
     return IsFeatureSupported(arch, STR(ChoreoFeature::COOPERATIVE_LAUNCH));
   }
 
-  virtual size_t VectorizeLimit(const ArchId& arch) const {
+  // Maximum automatic-vectorization factor, in lanes/elements.
+  virtual size_t GetMaxVectorizationFactor(const ArchId& arch) const {
     choreo_unreachable("unexpected architecture: " + arch + ".");
   }
 

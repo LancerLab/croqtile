@@ -261,9 +261,10 @@ void EmitTargetInfoJson(std::ostream& os) {
   os << "],\n";
 
   os << "  \"limits\":{\n"
-     << "    \"vector_register_bytes\":" << target.GetVectorLength(arch)
+     << "    \"vector_register_bytes\":" << target.GetVectorRegisterBytes(arch)
      << ",\n"
-     << "    \"vectorize_limit\":" << target.VectorizeLimit(arch) << ",\n"
+     << "    \"vectorize_limit\":" << target.GetMaxVectorizationFactor(arch)
+     << ",\n"
      << "    \"explicit_vector\":"
      << (target.SupportsExplicitVector(arch) ? "true" : "false") << ",\n"
      << "    \"local_mem_budget_bytes\":" << target.GetLocalMemBudget(arch)
@@ -296,33 +297,36 @@ void EmitTargetInfoJson(std::ostream& os) {
   bool first_type = true;
   for (auto type : types) {
     const auto element_bytes = type == BaseType::BOOL ? 4 : SizeOf(type);
-    const auto physical_lanes =
-        element_bytes ? target.GetVectorLength(arch) / element_bytes : 0;
+    const auto physical_elements =
+        element_bytes ? target.GetVectorRegisterBytes(arch) / element_bytes : 0;
     if (!first_type) os << ',';
     first_type = false;
     os << "{\"element_type\":";
     String(os, STR(type));
     os << ",\"element_bytes\":" << element_bytes
-       << ",\"physical_lanes\":" << physical_lanes
-       << ",\"legal_lane_ranges\":[[1," << physical_lanes << ']';
-    if (physical_lanes) {
-      os << ",[" << 2 * physical_lanes << ',' << 2 * physical_lanes << "],["
-         << 4 * physical_lanes << ',' << 4 * physical_lanes << ']';
+       << ",\"physical_lanes\":" << physical_elements
+       << ",\"legal_lane_ranges\":[[1," << physical_elements << ']';
+    if (physical_elements) {
+      os << ",[" << 2 * physical_elements << ',' << 2 * physical_elements
+         << "],[" << 4 * physical_elements << ',' << 4 * physical_elements
+         << ']';
     }
     os << "] ,\"probe\":{";
     os << "\"one\":"
        << (target.SupportsExplicitVectorType(arch, type, 1) ? "true" : "false");
-    if (physical_lanes) {
+    if (physical_elements) {
       os << ",\"physical\":"
-         << (target.SupportsExplicitVectorType(arch, type, physical_lanes)
+         << (target.SupportsExplicitVectorType(arch, type, physical_elements)
                  ? "true"
                  : "false")
          << ",\"double\":"
-         << (target.SupportsExplicitVectorType(arch, type, 2 * physical_lanes)
+         << (target.SupportsExplicitVectorType(arch, type,
+                                               2 * physical_elements)
                  ? "true"
                  : "false")
          << ",\"quad\":"
-         << (target.SupportsExplicitVectorType(arch, type, 4 * physical_lanes)
+         << (target.SupportsExplicitVectorType(arch, type,
+                                               4 * physical_elements)
                  ? "true"
                  : "false");
     }

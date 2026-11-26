@@ -463,11 +463,11 @@ bool LoopVectorizeLegalityChecker::Visit(AST::ForeachBlock& n) {
   TraceEachVisit(n);
 
   auto vector_factor = cur_loop->GetVectorFactor();
-  if (static_cast<size_t>(vector_factor) > CCtx().TargetVectorizeLimit()) {
+  if (static_cast<size_t>(vector_factor) > CCtx().MaxVectorizationFactor()) {
     if (debug_visit)
       dbgs() << "[plan] vector factor " << cur_loop->GetVectorFactor()
-             << " exceeds architecture limit " << CCtx().TargetVectorizeLimit()
-             << ", skip this plan.\n";
+             << " exceeds architecture limit "
+             << CCtx().MaxVectorizationFactor() << ", skip this plan.\n";
     SetLoopVectorizationFailed();
     return false;
   }
@@ -495,7 +495,7 @@ bool LoopVectorizeLegalityChecker::Visit(AST::DataAccess& n) {
   auto elem_ty = GetBaseType(*n.GetType());
   auto vector_factor = cur_loop->GetVectorFactor();
   auto vector_size = SizeOf(elem_ty) * vector_factor;
-  auto single_vector_size = CCtx().GetVectorLength();
+  auto single_vector_size = CCtx().GetVectorRegisterBytes();
 
   if (vector_size != single_vector_size &&
       vector_size != 2 * single_vector_size &&
@@ -1048,7 +1048,7 @@ public:
       : LoopVisitor(s_tab, "loop_vectorization_planner"), li(l), sea(s),
         lvc(lc) {
     vector_register_widths = {};
-    auto vector1 = CCtx().GetVectorLength();
+    auto vector1 = CCtx().GetVectorRegisterBytes();
     if (CCtx().TargetSupportVectorize()) {
       vector_register_widths.push_back(vector1);
       vector_register_widths.push_back(vector1 * 2);

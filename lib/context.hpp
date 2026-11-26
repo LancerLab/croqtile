@@ -805,8 +805,8 @@ public:
     return GetTarget().GetMaxThreadsPerBlock(GetArch());
   }
 
-  size_t GetVectorLength() const {
-    return GetTarget().GetVectorLength(GetArch());
+  size_t GetVectorRegisterBytes() const {
+    return GetTarget().GetVectorRegisterBytes(GetArch());
   }
 
   int TargetDefaultOptLevel() const {
@@ -1019,8 +1019,8 @@ public:
     return HasFeature(ChoreoFeature::ASYNC_DMA, GetArch());
   }
 
-  size_t TargetVectorizeLimit() const {
-    return GetTarget().VectorizeLimit(GetArch());
+  size_t MaxVectorizationFactor() const {
+    return GetTarget().GetMaxVectorizationFactor(GetArch());
   }
   auto TargetVectorizeTypes() const {
     return GetTarget().VectorizableTypes(GetArch());

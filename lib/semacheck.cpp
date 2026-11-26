@@ -249,9 +249,9 @@ bool SemaChecker::CheckExplicitVectorType(
     node.AddNote("explicit_vector_logical_bytes",
                  std::to_string(support.logical_bytes));
     node.AddNote("explicit_vector_physical_lanes",
-                 std::to_string(support.physical_lanes));
+                 std::to_string(support.physical_elements));
     node.AddNote("explicit_vector_registers",
-                 std::to_string(support.registers));
+                 std::to_string(support.vector_register_count));
     if (support.offset_chunks)
       node.AddNote("explicit_vector_offset_chunks",
                    std::to_string(support.offset_chunks));
@@ -640,8 +640,8 @@ bool SemaChecker::VisitNode(AST::VectorMemory& n) {
     n.AddNote(key("materializable"),
               support.materializable_as_one_vector ? "true" : "false");
     n.AddNote(key("logical_bytes"), std::to_string(support.logical_bytes));
-    n.AddNote(key("physical_lanes"), std::to_string(support.physical_lanes));
-    n.AddNote(key("registers"), std::to_string(support.registers));
+    n.AddNote(key("physical_lanes"), std::to_string(support.physical_elements));
+    n.AddNote(key("registers"), std::to_string(support.vector_register_count));
     n.AddNote(key("width_class"), support.width_class);
     n.AddNote(key("reason"), support.reason);
     n.AddNote(key("offset_chunks"), std::to_string(support.offset_chunks));

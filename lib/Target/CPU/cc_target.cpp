@@ -62,8 +62,8 @@ public:
     };
   }
 
-  size_t GetVectorLength(const ArchId&) const override { return 8; }
-  size_t VectorizeLimit(const ArchId&) const override { return 8; }
+  size_t GetVectorRegisterBytes(const ArchId&) const override { return 8; }
+  size_t GetMaxVectorizationFactor(const ArchId&) const override { return 8; }
 
   const std::set<BaseType> VectorizableTypes(const ArchId&) const override {
     return {BaseType::F32, BaseType::F64, BaseType::S32, BaseType::S64};
