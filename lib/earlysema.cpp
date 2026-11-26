@@ -1737,13 +1737,8 @@ bool EarlySemantics::Visit(AST::VectorMemory& n) {
 
   bool contiguous = vector_coordinate_count == 1 && unit_stride_coordinate &&
                     vector_coordinate_index + 1 == coordinate_index;
-  if (contiguous) {
-    n.AddNote("vector_access", "contiguous");
-    n.Address()->AddNote("VLDST");
-  } else {
-    n.AddNote("vector_access", "indirect");
-    n.Address()->AddNote("VGZST");
-  }
+  n.SetAccessKind(contiguous ? VectorAddressKind::Contiguous
+                             : VectorAddressKind::Indirect);
 
   auto check_value_type = [&](const ptr<Type>& ty, const location& loc,
                               const std::string& operand) {

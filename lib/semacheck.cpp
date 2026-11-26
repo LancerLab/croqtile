@@ -216,18 +216,6 @@ bool SemaChecker::ExpressionIsConstrained(const ValueItem& expr) const {
   return false;
 }
 
-static const char* ExplicitVectorRoleName(ExplicitVectorRole role) {
-  switch (role) {
-  case ExplicitVectorRole::OrdinaryValue: return "ordinary";
-  case ExplicitVectorRole::IndexValue: return "index";
-  case ExplicitVectorRole::LogicalAddressIndex: return "logical_address_index";
-  case ExplicitVectorRole::AddressOffset: return "address_offset";
-  case ExplicitVectorRole::DataValue: return "data";
-  case ExplicitVectorRole::Predicate: return "predicate";
-  }
-  return "unknown";
-}
-
 bool SemaChecker::CheckExplicitVectorType(
     AST::Node& node, ExplicitVectorRole role, BaseType element_type,
     size_t lane_count, BaseType payload_element_type,
@@ -708,6 +696,31 @@ bool SemaChecker::VisitNode(AST::VectorMemory& n) {
     ok = check_data(n.Other()) && ok;
   else
     ok = check_data(n.Value()) && ok;
+
+  if (CCtx().TargetSupportsExplicitVector()) {
+    if (!n.HasAccessKind()) {
+      Error1(n.LOC(), "internal error: explicit-vector memory access kind was "
+                      "not analyzed.");
+      ok = false;
+    } else {
+      const auto address_kind = n.GetAccessKind();
+      ExplicitVectorMaskMode mask_mode = ExplicitVectorMaskMode::Unmasked;
+      if (n.Mask())
+        mask_mode = isa<VectorType>(NodeType(*n.Mask()))
+                        ? ExplicitVectorMaskMode::Vector
+                        : ExplicitVectorMaskMode::Scalar;
+      if (!CCtx().GetTarget().SupportsExplicitVectorMemory(
+              CCtx().GetArch(), address_kind, mask_mode)) {
+        Error1(n.LOC(),
+               "target '" + CCtx().GetTarget().Name() +
+                   "' (arch: " + CCtx().GetArch() + ") does not support " +
+                   VectorAddressKindName(address_kind) +
+                   " explicit-vector memory with " +
+                   ExplicitVectorMaskModeName(mask_mode) + " mask mode.");
+        ok = false;
+      }
+    }
+  }
 
   n.AddNote("explicit_vector_lanes", std::to_string(lane_count));
   n.AddNote("explicit_vector_payload_element", STR(payload_element_type));

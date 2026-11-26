@@ -4,6 +4,7 @@
 #include "aux.hpp"
 #include "parallel_level.hpp"
 #include "preprocess.hpp"
+#include "vector_access.hpp"
 #include <cstddef>
 #include <iosfwd>
 #include <memory>
@@ -28,6 +29,34 @@ enum class ExplicitVectorRole {
   DataValue,
   Predicate,
 };
+
+// Masking mode of an explicit-vector memory access.
+enum class ExplicitVectorMaskMode {
+  Unmasked,
+  Scalar,
+  Vector,
+};
+
+inline const char* ExplicitVectorRoleName(ExplicitVectorRole role) {
+  switch (role) {
+  case ExplicitVectorRole::OrdinaryValue: return "ordinary";
+  case ExplicitVectorRole::IndexValue: return "index";
+  case ExplicitVectorRole::LogicalAddressIndex: return "logical_address_index";
+  case ExplicitVectorRole::AddressOffset: return "address_offset";
+  case ExplicitVectorRole::DataValue: return "data";
+  case ExplicitVectorRole::Predicate: return "predicate";
+  }
+  return "unknown";
+}
+
+inline const char* ExplicitVectorMaskModeName(ExplicitVectorMaskMode mode) {
+  switch (mode) {
+  case ExplicitVectorMaskMode::Unmasked: return "unmasked";
+  case ExplicitVectorMaskMode::Scalar: return "scalar";
+  case ExplicitVectorMaskMode::Vector: return "vector";
+  }
+  return "unknown";
+}
 
 struct ExplicitVectorTypeSupport {
   bool legal = false;
@@ -284,6 +313,14 @@ public:
   virtual bool SupportsExplicitVectorType(const ArchId& /*arch*/,
                                           BaseType /*element_type*/,
                                           size_t /*lane_count*/) const {
+    return false;
+  }
+  // Whether the target can lower an explicit-vector memory access with the
+  // given address pattern and mask mode.
+  virtual bool
+  SupportsExplicitVectorMemory(const ArchId& /*arch*/,
+                               VectorAddressKind /*kind*/,
+                               ExplicitVectorMaskMode /*mask_mode*/) const {
     return false;
   }
   // Role-aware explicit-vector validation. The default preserves the legacy

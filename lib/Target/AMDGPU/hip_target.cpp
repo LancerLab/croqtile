@@ -148,7 +148,8 @@ public:
     return {Storage::SHARED, Storage::GLOBAL};
   }
 
-  size_t GetVectorRegisterBytes(const ArchId&) const override { return 4; }
+  // One native vector transaction is 16 bytes (dwordx4).
+  size_t GetVectorRegisterBytes(const ArchId&) const override { return 16; }
 
   size_t GetMaxVectorizationFactor(const ArchId&) const override { return 128; }
 

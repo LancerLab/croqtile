@@ -33,6 +33,9 @@ public:
 
   const ArchId DefaultArch() const override { return "sm_86"; }
 
+  // One native vector transaction is 16 bytes (float4/int4/double2).
+  size_t GetVectorRegisterBytes(const ArchId&) const override { return 16; }
+
   // Max resident threads per streaming multiprocessor. Drives the per-thread
   // `local` budget derived from the per-SM register file below.
   size_t GetMaxThreadsPerSM(const ArchId& arch) const override {

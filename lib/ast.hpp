@@ -7,6 +7,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -19,6 +20,7 @@
 #include "opcode.hpp"
 #include "symtab.hpp"
 #include "symvals.hpp"
+#include "vector_access.hpp"
 
 extern Choreo::SymbolTable symtab;
 
@@ -1467,6 +1469,7 @@ private:
   ptr<Node> value = nullptr;
   ptr<Expr> mask = nullptr;
   ptr<Expr> other = nullptr;
+  std::optional<VectorAddressKind> access_kind;
 
 public:
   VectorMemory(const location& l, Kind k, const ptr<DataAccess>& a,
@@ -1491,13 +1494,21 @@ public:
   const ptr<Node>& Value() const { return value; }
   const ptr<Expr>& Mask() const { return mask; }
   const ptr<Expr>& Other() const { return other; }
+  bool HasAccessKind() const { return access_kind.has_value(); }
+  VectorAddressKind GetAccessKind() const {
+    assert(access_kind && "vector memory access kind is not analyzed.");
+    return *access_kind;
+  }
+  void SetAccessKind(VectorAddressKind k) { access_kind = k; }
   void SetValue(const ptr<Node>& v) { value = v; }
   void SetOther(const ptr<Expr>& o) { other = o; }
   bool IsMasked() const { return mask != nullptr; }
 
   ptr<Node> CloneImpl() const override {
-    return Make<VectorMemory>(LOC(), kind, CloneP(address), CloneP(value),
-                              CloneP(mask), CloneP(other));
+    auto copy = Make<VectorMemory>(LOC(), kind, CloneP(address), CloneP(value),
+                                   CloneP(mask), CloneP(other));
+    if (access_kind) copy->SetAccessKind(*access_kind);
+    return copy;
   }
 
   void Print(std::ostream& os, const std::string& prefix = {},
@@ -4605,7 +4616,7 @@ struct DeviceFunctionDecl final : public Node,
     DeviceTemplateParam(const std::string& name = "", Kind k = UNKNOWN,
                         const std::string& type = "",
                         const std::string& def = "")
-        : kind(k), param_name(name), type_name(type), default_value(def) {};
+        : kind(k), param_name(name), type_name(type), default_value(def){};
   };
   std::vector<DeviceTemplateParam> template_params;
   bool IsTemplated() const { return !template_params.empty(); }
