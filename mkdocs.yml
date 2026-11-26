@@ -52,6 +52,7 @@ nav:
   - "Part E -- Compute Primitives":
     - MMA: mma.md
     - Numerics: numerics.md
+    - Explicit Vectors: vector-dsl.md
   - "Part F -- Synchronization and Async":
     - Events: events.md
     - Futures and Async: futures-and-async.md
@@ -70,6 +71,7 @@ nav:
     - Tileflow Optimization Patterns: tileflow-opt.md
     - Async DMA Patterns: async-dma-patterns.md
     - Elementwise Add Sample: elementwise-add-sample.md
+    - Release Notes: release-notes.md
   - "Target-Specific":
     - Calling Conventions: target/calls.md
     - Environment Setup: target/env_setting_up.md

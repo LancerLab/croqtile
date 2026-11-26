@@ -27,48 +27,19 @@ Multi-dimensional indices require selecting a component first.
 
 ## Explicit Vector Widths
 
-On targets supporting explicit vectors, `vec.index<N>` accepts positive
-compile-time integer constants and immutable aliases:
+On targets supporting explicit vectors, `vec.iota<N>` and `vec.index<N>` accept
+positive compile-time integer constants and immutable aliases:
 
 ```choreo
 width = 128;
-lane = vec.index<width / 2>;
+lane = vec.iota<width / 2>;
 ```
 
 Width expressions support `+`, `-`, `*`, `/`, `%`, parentheses, and native type
 sizes such as `|f32|`. Mutable scalars and runtime parameters are rejected.
 
-Vector values can be created with:
-
-```choreo
-lane = vec.iota<64>;                   // [0, 1, ..., 63]
-shifted = vec.iota<64>(start, stride); // start + i*stride
-stepped = vec.iota<64>(start);         // stride defaults to 1
-filled = vec.fill<64>(0.0f);           // every lane is 0.0f
-```
-
-`vec.index<N>` remains an alias for the zero-argument `vec.iota<N>` form.
-`start`, `stride`, and the fill value may be mutable scalar values and are
-evaluated when the vector value is created. A zero `stride` produces a splat;
-`vec.fill<N>(value)` is the readable shorthand for `vec.iota<N>(value, 0)`.
-
-Vector memory access uses explicit expressions and optional masks:
-
-```choreo
-values = vec.load(buffer.at(lane));
-masked = vec.load(buffer.at(lane), mask, 0.0f);
-vec.store(buffer.at(lane), values);
-vec.store(buffer.at(lane), values, mask);
-```
-
-Masked loads require the fallback value for inactive lanes. Inactive lanes do
-not access memory.
-
-For the transition period, the compiler accepts the older unparenthesized forms
-`vec.load buffer.at(...)` and `vec.store buffer.at(...), ...` in complete
-assignment/statement positions. Prefer the parenthesized form. The
-`-fvec-syntax=legacy|call` option selects the compatibility mode; the default
-mode will change in a future release.
+See [Explicit Vectors](vector-dsl.md) for constructors, memory access, masks,
+mutability, target limits, and compatibility.
 
 ## Built-in Numeric Functions
 

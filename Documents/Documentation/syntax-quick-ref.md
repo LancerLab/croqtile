@@ -96,6 +96,23 @@
 | `foreach y(1::) { ... }` | Range expression |
 | `foreach y(1:-1:2) { ... }` | Full range: start:end:stride |
 
+## Explicit Vector Operations
+
+| Syntax | Description |
+|--------|-------------|
+| `vec.iota<N>` | Lane sequence `[0, N-1]` |
+| `vec.index<N>` | Alias for `vec.iota<N>` |
+| `vec.iota<N>(start)` | Affine sequence with stride 1 |
+| `vec.iota<N>(start, stride)` | Affine sequence |
+| `vec.fill<N>(value)` | Splat value to all lanes |
+| `vec.load(buffer.at(coords))` | Vector load |
+| `vec.load(buffer.at(coords), mask, other)` | Masked vector load |
+| `vec.store(buffer.at(coords), value)` | Vector store |
+| `vec.store(buffer.at(coords), value, mask)` | Masked vector store |
+
+See [Explicit Vectors](vector-dsl.md) for address, mask, mutability, and
+compatibility details.
+
 ## DMA Operations
 
 | Syntax | Description |

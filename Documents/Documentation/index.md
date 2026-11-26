@@ -44,28 +44,30 @@ This reference (level-2) is for readers who want to understand the language in d
 
 17. [MMA](mma.md) -- Matrix multiply-accumulate: `fill`, `load`, `row.col`, `op`, `store`
 18. [Numerics](numerics.md) -- Builtin functions, transcendentals, type promotion, float variants
-19. [Atomic Operations](atomic-operations.md) -- `__atomic_add`, `__atomic_cas`, etc., per-arch type support
+19. [Explicit Vectors](vector-dsl.md) -- Vector values, memory access, masks, constructors, and compatibility
+20. [Atomic Operations](atomic-operations.md) -- `__atomic_add`, `__atomic_cas`, etc., per-arch type support
 
 ### Part F -- Synchronization and Async
 
-20. [Events](events.md) -- Generations, `ready`, staged access, and completion publication
-21. [Futures and Async](futures-and-async.md) -- Data/operation futures, event generations, and native completion bindings
-22. [Cooperative Kernel Launch](cooperative-launch.md) -- Grid-level synchronization, `block<cooperative>`, `sync.barrier : block` (target-specific)
+21. [Events](events.md) -- Generations, `ready`, staged access, and completion publication
+22. [Futures and Async](futures-and-async.md) -- Data/operation futures, event generations, and native completion bindings
+23. [Cooperative Kernel Launch](cooperative-launch.md) -- Grid-level synchronization, `block<cooperative>`, `sync.barrier : block` (target-specific)
 
 ### Part G -- C++ Interop
 
-23. [Calling Device Code](call-and-device.md) -- `call`, `__co_device__`, template calls, intrinsic passthrough
-24. [Inline Assembly](inline-asm.md) -- `__asm__`/`asm`, `volatile`, template string, operands, clobbers
-25. [Choreo Function Templates](function-templates.md) -- Type/value parameters, explicit instantiation, full specialization, `if constexpr`
-26. [I/O and Linking](io-and-linking.md) -- Parameters, `make_spanned`, return values, streams, linking
-27. [Macros](macros.md) -- `#define`, conditional compilation, preprocessing order
+24. [Calling Device Code](call-and-device.md) -- `call`, `__co_device__`, template calls, intrinsic passthrough
+25. [Inline Assembly](inline-asm.md) -- `__asm__`/`asm`, `volatile`, template string, operands, clobbers
+26. [Choreo Function Templates](function-templates.md) -- Type/value parameters, explicit instantiation, full specialization, `if constexpr`
+27. [I/O and Linking](io-and-linking.md) -- Parameters, `make_spanned`, return values, streams, linking
+28. [Macros](macros.md) -- `#define`, conditional compilation, preprocessing order
 
 ### Part H -- Advanced Topics
 
-28. [Assertions](assertions.md) -- `assert`, compile-time vs runtime evaluation, hoisting, `--runtime-check`
+29. [Assertions](assertions.md) -- `assert`, compile-time vs runtime evaluation, hoisting, `--runtime-check`
 
 ### Appendix
 
-29. [Syntax Quick Reference](syntax-quick-ref.md) -- Lookup tables for all constructs
-30. [Operator Gallery](operator-gallery.md) -- Curated index of example `.co` files
-31. [Tileflow Optimization Patterns](tileflow-opt.md) -- Matmul and optimization case studies
+30. [Syntax Quick Reference](syntax-quick-ref.md) -- Lookup tables for all constructs
+31. [Operator Gallery](operator-gallery.md) -- Curated index of example `.co` files
+32. [Tileflow Optimization Patterns](tileflow-opt.md) -- Matmul and optimization case studies
+33. [Release Notes](release-notes.md) -- Language-facing syntax and compatibility updates
