@@ -11,12 +11,11 @@ syntax clear
 runtime! syntax/cpp.vim
 
 " Define custom syntax elements
-syntax keyword coKeyword mdspan with parallel ituple by in foreach shared local global where after inthreads event vec
+syntax keyword coKeyword mdspan with parallel ituple by in foreach shared local global where after inthreads event
 syntax match coType "\<\(f32\|f16\|bf16\|f8\|u64\|s64\|u32\|s32\|u16\|s16\|u8\|s8\|half8\|half\|bfp16\)\>"
 syntax match coAttribute "\(__co__\|__cok__\)"
 syntax match coOperator "\(=>\|#\|cdiv\)"
-syntax match coFunction "\<vec\.\(iota\|index\|fill\|load\|store\)\>"
-syntax match coFunction "\(\<wait\>\|\<trigger\>\|\<call\>\|\<select\>\|\<swap\>\|\<rotate\>\|\<sync\.\(shared\|global\|local\)\>\|\.\<async\>\|\.span_as\|\.chunkat\|\.chunk\|\.subspan\|\.modspan\|\.stride\|\.at\|\<\(dma\|tma\)\.\(any\|copy\|transp\|pad\)\>\(\.async\)\?\|\<mma\.\(fill\|load\|store\|row\.col\|row\.row\|col\.row\|col\.col\)\>\(\.async\)\?\)"
+syntax match coFunction "\(\<wait\>\|\<trigger\>\|\<call\>\|\<select\>\|\<swap\>\|\<rotate\>\|\<sync\.\(shared\|global\|local\)\>\|\.\<async\>\|\.span_as\|\.chunkat\|\.chunk\|\.subspan\|\.modspan\|\.stride\|\.at\|\<\(dma\|tma\)\.\(any\|copy\|transp\|pad\)\>\(\.async\)\?\|\<vec\.\(iota\|index\|fill\|load\|store\)\>\|\<mma\.\(fill\|load\|store\|row\.col\|row\.row\|col\.row\|col\.col\)\>\(\.async\)\?\)"
 
 highlight coOperator guifg=cyan ctermfg=cyan gui=bold
 
