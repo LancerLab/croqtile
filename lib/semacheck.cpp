@@ -15,9 +15,14 @@ bool ScopeContainsPredicate(const ValueItem& scope_pred,
   auto scope = scope_pred->Normalize();
   auto target = target_pred->Normalize();
   if (*scope == *target) return true;
-  if (auto eq = VIBool(sbe::oc_eq(scope, target)->Normalize());
-      eq && eq.value())
-    return true;
+  // Both operands are boolean predicates and both are already normalized, so
+  // a predicate that folds to a constant is a BooleanValue. Folding the EQ
+  // cannot decide anything else for boolean operands, so compare the
+  // constants directly instead of normalizing a fresh EQ node over the whole
+  // scope guard (which is superlinear in the guard size).
+  if (auto sb = VIBool(scope)) {
+    if (auto tb = VIBool(target); tb && *sb == *tb) return true;
+  }
   if (auto b = VIBool(scope); b && b.value()) return true;
 
   if (auto bop = dyn_cast<sbe::BinaryOperation>(scope)) {
@@ -199,11 +204,14 @@ std::optional<bool> TryProveWithIntervals(SemaChecker* sc,
 } // namespace
 
 ValueItem SemaChecker::ActiveScopePredicate() const {
+  if (active_scope_pred_cache_valid) return active_scope_pred_cache;
   ValueItem pred = sbe::bl(true);
   for (const auto& p : scope_pred_stack) {
     assert(IsValidValueItem(p));
     pred = sbe::bl_and(pred, p);
   }
+  active_scope_pred_cache = pred;
+  active_scope_pred_cache_valid = true;
   return pred;
 }
 
@@ -338,6 +346,7 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
     data_future_scopes.clear();
     next_data_future_id = 1;
     scope_pred_stack.clear();
+    InvalidateActiveScopePredicate();
     parallel_level_stack.clear();
     pv_levels_.clear();
     cooperative_stack.clear();
@@ -354,10 +363,12 @@ bool SemaChecker::BeforeVisitImpl(AST::Node& n) {
       isa<AST::WithBlock>(&n) || isa<AST::ApplyBlock>(&n))
     waited_data_futures.clear();
 
-  if (auto block = dyn_cast<AST::PredBlock>(&n))
+  if (auto block = dyn_cast<AST::PredBlock>(&n)) {
     scope_pred_stack.push_back(block->GetScopePredicate());
-  else if (auto fe = dyn_cast<AST::ForeachBlock>(&n)) {
+    InvalidateActiveScopePredicate();
+  } else if (auto fe = dyn_cast<AST::ForeachBlock>(&n)) {
     scope_pred_stack.push_back(fe->GetScopePredicate());
+    InvalidateActiveScopePredicate();
     int unroll_factor = 0;
     if (AST::HasUnrollHint(*fe, unroll_factor) && unroll_factor > 0) {
       int64_t extent = GetForeachStaticExtent(*fe);
@@ -504,8 +515,10 @@ bool SemaChecker::ConsumeAsyncFuture(const std::string& name,
 }
 
 bool SemaChecker::AfterVisitImpl(AST::Node& n) {
-  if (isa<AST::PredBlock>(&n) || isa<AST::ForeachBlock>(&n))
+  if (isa<AST::PredBlock>(&n) || isa<AST::ForeachBlock>(&n)) {
     scope_pred_stack.pop_back();
+    InvalidateActiveScopePredicate();
+  }
   if (isa<AST::ParallelBy>(&n)) {
     parallel_level_stack.pop_back();
     cooperative_stack.pop_back();
@@ -535,6 +548,7 @@ bool SemaChecker::InMidVisitImpl(AST::Node& n) {
     if (block->HasElse()) {
       scope_pred_stack.pop_back();
       scope_pred_stack.push_back(block->GetElseScopePredicate());
+      InvalidateActiveScopePredicate();
 
       // The else branch starts from the state at the if entry, not from the
       // state accumulated while visiting the then branch.

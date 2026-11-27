@@ -259,3 +259,106 @@ TEST_F(ExpressionTest, BooleanEqualityProbes) {
   EXPECT_TRUE(must_eq(tru, tru));
   EXPECT_FALSE(must_eq(tru, fls));
 }
+
+TEST_F(ExpressionTest, BinaryFoldAfterNumericMutation) {
+  auto value = std::make_shared<NumericValue>(1);
+  auto expr = bop(OpCode::ADD, value, two);
+  auto folded = expr->Fold();
+  EXPECT_EQ(folded->ToString(), "3");
+  EXPECT_EQ(expr->Fold(), folded);
+
+  // Assigning the same value must not discard otherwise valid caches.
+  value->SetValue(1);
+  EXPECT_EQ(expr->Fold(), folded);
+
+  value->SetValue(5);
+  EXPECT_EQ(expr->Fold()->ToString(), "7");
+  EXPECT_EQ(folded->ToString(), "3");
+  EXPECT_EQ(expr->Fold()->ToString(), expr->Clone()->Fold()->ToString());
+}
+
+TEST_F(ExpressionTest, NestedFoldAfterNumericMutation) {
+  auto value = std::make_shared<NumericValue>(1);
+  auto inner = bop(OpCode::ADD, value, two);
+  auto expr = bop(OpCode::MULTIPLY, inner, three);
+  EXPECT_EQ(expr->Fold()->ToString(), "9");
+
+  value->SetValue(5);
+  EXPECT_EQ(inner->Fold()->ToString(), "7");
+  EXPECT_EQ(expr->Fold()->ToString(), "21");
+}
+
+TEST_F(ExpressionTest, TernaryFoldAfterNumericMutation) {
+  auto value = std::make_shared<NumericValue>(1);
+  auto expr = sel(tru, value, two);
+  auto folded = expr->Fold();
+  EXPECT_EQ(folded->ToString(), "1");
+  EXPECT_EQ(expr->Fold(), folded);
+
+  value->SetValue(5);
+  EXPECT_EQ(expr->Fold()->ToString(), "5");
+  EXPECT_EQ(folded->ToString(), "1");
+}
+
+TEST_F(ExpressionTest, TernaryFoldAfterPredicateMutation) {
+  auto value = std::make_shared<NumericValue>(1);
+  auto pred = bop(OpCode::GT, value, nu(0));
+  auto expr = sel(pred, two, three);
+  EXPECT_EQ(expr->Fold()->ToString(), "2");
+
+  value->SetValue(-1);
+  EXPECT_EQ(pred->Fold()->ToString(), "false");
+  EXPECT_EQ(expr->Fold()->ToString(), "3");
+}
+
+TEST_F(ExpressionTest, FoldAfterCachedResultMutation) {
+  auto expr = bop(OpCode::ADD, two, three);
+  auto folded = cast<NumericValue>(expr->Fold());
+  folded->SetValue(99);
+
+  EXPECT_EQ(expr->Fold()->ToString(), "5");
+  EXPECT_EQ(folded->Value(), 99);
+}
+
+TEST_F(ExpressionTest, NormalizeAfterNumericMutation) {
+  auto value = std::make_shared<NumericValue>(1);
+  auto expr = bop(OpCode::ADD, a, value);
+  EXPECT_EQ(expr->Normalize()->ToString(), "(a + 1)");
+
+  value->SetValue(5);
+  EXPECT_EQ(expr->Normalize()->ToString(), "(a + 5)");
+  EXPECT_EQ(expr->Normalize()->ToString(),
+            expr->Clone()->Normalize()->ToString());
+}
+
+TEST_F(ExpressionTest, HashAfterNumericMutation) {
+  auto value = std::make_shared<NumericValue>(1);
+  auto unary = uop(OpCode::BIT_INV, value);
+  auto binary = bop(OpCode::ADD, unary, a);
+  auto ternary = sel(tru, binary, two);
+  unary->Hash();
+  binary->Hash();
+  ternary->Hash();
+
+  value->SetValue(5);
+  EXPECT_EQ(unary->Hash(), unary->Clone()->Hash());
+  EXPECT_EQ(binary->Hash(), binary->Clone()->Hash());
+  EXPECT_EQ(ternary->Hash(), ternary->Clone()->Hash());
+}
+
+TEST_F(ExpressionTest, HighRankStringAfterNumericMutation) {
+  auto value = std::make_shared<NumericValue>(1);
+  auto pred = bop(OpCode::GT, value, nu(0));
+  auto choice =
+      sel(pred, bop(OpCode::ADD, sym("z"), two), bop(OpCode::ADD, a, two));
+  auto binary =
+      std::make_shared<BinaryOperation>(OpCode::ADD, choice, sym("m"));
+  auto ternary =
+      std::make_shared<TernaryOperation>(OpCode::SELECT, x, choice, sym("m"));
+  EXPECT_EQ(GetHighRankString(*binary), "z");
+  EXPECT_EQ(GetHighRankString(*ternary), "z");
+
+  value->SetValue(-1);
+  EXPECT_EQ(GetHighRankString(*binary), "m");
+  EXPECT_EQ(GetHighRankString(*ternary), "m");
+}

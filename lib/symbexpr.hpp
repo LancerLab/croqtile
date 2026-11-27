@@ -384,15 +384,37 @@ public:
   virtual Operand Normalize() const = 0;
   virtual Operand Reassociate() const = 0;
 
+protected:
+  static uint64_t getMutationEpoch() { return mutation_epoch; }
+  static void recordMutation() { ++mutation_epoch; }
+
+private:
+  // Numeric leaves can be shared by unrelated expression trees. A global
+  // epoch invalidates their caches in O(1) without walking the subtree or
+  // maintaining parent links. Normal compiler queries do not mutate leaves.
+  inline static uint64_t mutation_epoch = 0;
+
 public:
   // for runtime type disambiguation
   __UDT_TYPE_INFO_BASE__(notype)
 };
 
 class HashedExpression : public SymbolicExpression {
+public:
+  void refreshCaches() const {
+    auto epoch = getMutationEpoch();
+    if (cache_epoch == epoch) return;
+    hash_cached = false;
+    invalidateDerivedCaches();
+    cache_epoch = epoch;
+  }
+
 protected:
+  virtual void invalidateDerivedCaches() const {}
+
   template <typename Fn>
   size_t GetOrComputeHash(Fn&& fn) const {
+    refreshCaches();
     if (hash_cached) return hash_value;
     hash_value = fn();
     hash_cached = true;
@@ -400,6 +422,7 @@ protected:
   }
 
 private:
+  mutable uint64_t cache_epoch = getMutationEpoch();
   mutable bool hash_cached = false;
   mutable size_t hash_value = 0;
 };
@@ -457,7 +480,11 @@ public:
     return std::to_string(value) + suffix;
   }
   int64_t Value() const { return value; }
-  void SetValue(int64_t v) { value = v; }
+  void SetValue(int64_t v) {
+    if (value == v) return;
+    value = v;
+    recordMutation();
+  }
   size_t Hash() const override { return std::hash<int64_t>{}(Value()); }
 
   bool IsNumeric() const override { return true; }
@@ -648,6 +675,15 @@ private:
   Operand left;
   Operand right;
   mutable Operand normalized_cache = nullptr;
+  // Memoize Fold() between numeric mutations to avoid repeatedly rebuilding
+  // the same folded tree from Compare()/GetHighRankString().
+  mutable Operand fold_cache = nullptr;
+
+  void invalidateDerivedCaches() const override {
+    normalized_cache.reset();
+    fold_cache.reset();
+    high_rank_cache_valid = false;
+  }
 
 public:
   BinaryOperation(OpCode o, const Operand& l, const Operand& r)
@@ -712,11 +748,22 @@ public:
   const Operand GetRight() const { return right; }
   OpCode GetOpCode() const { return op; }
 
+  // Memoized GetHighRankString() result, invalidated on numeric mutations.
+  mutable std::string high_rank_cache;
+  mutable bool high_rank_cache_valid = false;
+
   Operand Clone() const override {
     return std::make_shared<BinaryOperation>(op, left->Clone(), right->Clone());
   }
 
   Operand Fold() const override {
+    refreshCaches();
+    if (!fold_cache) fold_cache = FoldImpl();
+    return fold_cache;
+  }
+
+private:
+  Operand FoldImpl() const {
     // handle comparison
     if (IsCompare(op)) {
       // Boolean equality is logical; booleans have no arithmetic.
@@ -872,8 +919,10 @@ public:
                                              simplifiedRight);
   }
 
+public:
   Operand Normalize() const override {
     CHOREO_SBE_STATS_INC(normalize_calls);
+    refreshCaches();
     if (normalized_cache) return normalized_cache;
 
     Operand expr = std::make_shared<BinaryOperation>(op, left, right);
@@ -1048,6 +1097,14 @@ private:
   Operand pred;
   Operand left;
   Operand right;
+  // Memoize Fold() between numeric mutations to avoid repeatedly rebuilding
+  // the same folded tree from Compare()/GetHighRankString().
+  mutable Operand fold_cache = nullptr;
+
+  void invalidateDerivedCaches() const override {
+    fold_cache.reset();
+    high_rank_cache_valid = false;
+  }
 
 public:
   TernaryOperation(OpCode op, const Operand& p, const Operand& l,
@@ -1102,12 +1159,23 @@ public:
   const Operand GetRight() const { return right; }
   OpCode GetOpCode() const { return op; }
 
+  // Memoized GetHighRankString() result, invalidated on numeric mutations.
+  mutable std::string high_rank_cache;
+  mutable bool high_rank_cache_valid = false;
+
   Operand Clone() const override {
     return std::make_shared<TernaryOperation>(op, pred->Clone(), left->Clone(),
                                               right->Clone());
   }
 
   Operand Fold() const override {
+    refreshCaches();
+    if (!fold_cache) fold_cache = FoldImpl();
+    return fold_cache;
+  }
+
+private:
+  Operand FoldImpl() const {
     auto npred = pred->Fold();
     auto nl = left->Fold();
     auto nr = right->Fold();
@@ -1145,6 +1213,7 @@ public:
     return sel(npred, nl, nr);
   }
 
+public:
   Operand Normalize() const override {
     auto npred = pred->Normalize();
     auto nleft = left->Normalize();
@@ -1194,25 +1263,41 @@ namespace {
 
 inline std::string GetHighRankString(const TernaryOperation& t);
 inline std::string GetHighRankString(const BinaryOperation& b) {
+  b.refreshCaches();
+  if (b.high_rank_cache_valid) return b.high_rank_cache;
   std::string hrs;
   if (auto sv = dyn_cast<SymbolicValue>(b.GetLeft()))
     hrs = ((hrs > sv->Value()) ? hrs : sv->Value());
   if (auto sv = dyn_cast<SymbolicValue>(b.GetRight()))
     hrs = ((hrs > sv->Value()) ? hrs : sv->Value());
 
-  if (auto sv = dyn_cast<BinaryOperation>(b.GetLeft()->Fold()))
-    hrs = ((hrs > GetHighRankString(*sv)) ? hrs : GetHighRankString(*sv));
-  if (auto sv = dyn_cast<BinaryOperation>(b.GetRight()->Fold()))
-    hrs = ((hrs > GetHighRankString(*sv)) ? hrs : GetHighRankString(*sv));
+  const Operand lf = b.GetLeft()->Fold();
+  const Operand rf = b.GetRight()->Fold();
+  if (auto sv = dyn_cast<BinaryOperation>(lf)) {
+    auto s = GetHighRankString(*sv);
+    hrs = ((hrs > s) ? hrs : s);
+  }
+  if (auto sv = dyn_cast<BinaryOperation>(rf)) {
+    auto s = GetHighRankString(*sv);
+    hrs = ((hrs > s) ? hrs : s);
+  }
 
-  if (auto sv = dyn_cast<TernaryOperation>(b.GetLeft()->Fold()))
-    hrs = ((hrs > GetHighRankString(*sv)) ? hrs : GetHighRankString(*sv));
-  if (auto sv = dyn_cast<TernaryOperation>(b.GetRight()->Fold()))
-    hrs = ((hrs > GetHighRankString(*sv)) ? hrs : GetHighRankString(*sv));
+  if (auto sv = dyn_cast<TernaryOperation>(lf)) {
+    auto s = GetHighRankString(*sv);
+    hrs = ((hrs > s) ? hrs : s);
+  }
+  if (auto sv = dyn_cast<TernaryOperation>(rf)) {
+    auto s = GetHighRankString(*sv);
+    hrs = ((hrs > s) ? hrs : s);
+  }
+  b.high_rank_cache = hrs;
+  b.high_rank_cache_valid = true;
   return hrs;
 }
 
 inline std::string GetHighRankString(const TernaryOperation& t) {
+  t.refreshCaches();
+  if (t.high_rank_cache_valid) return t.high_rank_cache;
   std::string hrs;
   // ternary: use the rank string of operands
   if (auto sv = dyn_cast<SymbolicValue>(t.GetLeft()))
@@ -1220,15 +1305,27 @@ inline std::string GetHighRankString(const TernaryOperation& t) {
   if (auto sv = dyn_cast<SymbolicValue>(t.GetRight()))
     hrs = ((hrs > sv->Value()) ? hrs : sv->Value());
 
-  if (auto sv = dyn_cast<BinaryOperation>(t.GetLeft()->Fold()))
-    hrs = ((hrs > GetHighRankString(*sv)) ? hrs : GetHighRankString(*sv));
-  if (auto sv = dyn_cast<BinaryOperation>(t.GetRight()->Fold()))
-    hrs = ((hrs > GetHighRankString(*sv)) ? hrs : GetHighRankString(*sv));
+  const Operand lf = t.GetLeft()->Fold();
+  const Operand rf = t.GetRight()->Fold();
+  if (auto sv = dyn_cast<BinaryOperation>(lf)) {
+    auto s = GetHighRankString(*sv);
+    hrs = ((hrs > s) ? hrs : s);
+  }
+  if (auto sv = dyn_cast<BinaryOperation>(rf)) {
+    auto s = GetHighRankString(*sv);
+    hrs = ((hrs > s) ? hrs : s);
+  }
 
-  if (auto sv = dyn_cast<TernaryOperation>(t.GetLeft()->Fold()))
-    hrs = ((hrs > GetHighRankString(*sv)) ? hrs : GetHighRankString(*sv));
-  if (auto sv = dyn_cast<TernaryOperation>(t.GetRight()->Fold()))
-    hrs = ((hrs > GetHighRankString(*sv)) ? hrs : GetHighRankString(*sv));
+  if (auto sv = dyn_cast<TernaryOperation>(lf)) {
+    auto s = GetHighRankString(*sv);
+    hrs = ((hrs > s) ? hrs : s);
+  }
+  if (auto sv = dyn_cast<TernaryOperation>(rf)) {
+    auto s = GetHighRankString(*sv);
+    hrs = ((hrs > s) ? hrs : s);
+  }
+  t.high_rank_cache = hrs;
+  t.high_rank_cache_valid = true;
   return hrs;
 }
 

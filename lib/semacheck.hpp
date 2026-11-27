@@ -42,6 +42,12 @@ private:
   AttributeDeriver input_deps{this, "input-deps", false};
   AttributeDeriver local_deps{this, "local-deps", false};
   std::vector<ValueItem> scope_pred_stack;
+  // Memoized ActiveScopePredicate() for the current scope stack. The stack
+  // only changes at scope entry/exit, so the conjunction is built once and
+  // reused; reusing the same expression instances also lets
+  // sbe::Normalize() hit its per-node normalized cache.
+  mutable ValueItem active_scope_pred_cache;
+  mutable bool active_scope_pred_cache_valid = false;
   std::vector<ParallelLevel> parallel_level_stack;
   // parallel variable -> its level (the scope it is declared in); the level of
   // a chunk index is the level of the variable it refers to.
@@ -54,6 +60,11 @@ private:
   bool BeforeVisitImpl(AST::Node&) override;
   bool AfterVisitImpl(AST::Node&) override;
   bool InMidVisitImpl(AST::Node&) override;
+
+  // Must be called at every mutation of scope_pred_stack.
+  void InvalidateActiveScopePredicate() const {
+    active_scope_pred_cache_valid = false;
+  }
 
   bool ReportUnknown(AST::Node&, const char*, int, bool = false);
   bool ReportUnknownSymbol(const std::string&, const location&, const char*,
