@@ -1631,6 +1631,11 @@ for _entry in "${files_array[@]}"; do
       run_hooks "target_sim_env"
     else
       run_hooks "target_hw_env" "$run_arch"
+      # Publish the resolved native target so target backends can query it
+      # directly instead of probing the device themselves.
+      if [[ -n "$run_arch" && "$run_arch" != sim-* ]]; then
+        exe_env="${exe_env} export CHOREO_NATIVE_ARCH=${run_arch};"
+      fi
     fi
 
     # Arch Matches: Execute the command with replacements

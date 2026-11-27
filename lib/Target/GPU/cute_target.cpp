@@ -13,11 +13,16 @@
 #include "sys_utils.hpp"
 #include "target_registry.hpp"
 #include "types.hpp"
+#include <cstdlib>
 
 using namespace Choreo;
 
 // Shared native-arch detection for all NVIDIA GPU targets.
 ArchId NVGPUTarget::ResolveNativeArch() const {
+  if (auto* env_arch = std::getenv("CHOREO_NATIVE_ARCH")) {
+    std::string resolved = env_arch;
+    if (IsArchSupported(resolved)) return resolved;
+  }
   std::string cfg_dir;
 #ifdef __CHOREO_CUDA_DIR__
   cfg_dir = STRINGIZE(__CHOREO_CUDA_DIR__);
